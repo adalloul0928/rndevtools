@@ -1,0 +1,308 @@
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { createRef } from 'react';
+import { Alert } from 'react-native';
+import type {
+	DevToolsPlugin,
+	InternalToolsHandle,
+	InternalToolsProps,
+} from '../types';
+import { InternalTools } from './internal-tools';
+
+jest.mock('./floating-launcher', () => {
+	const { Pressable } = jest.requireActual('react-native');
+	return {
+		FloatingLauncher: ({ onOpen }: { onOpen: () => void }) => (
+			<Pressable onPress={onOpen} testID="launcher" />
+		),
+	};
+});
+
+jest.mock('./tools-sheet', () => {
+	const { Pressable, Text, View } = jest.requireActual('react-native');
+	return {
+		ToolsSheet: ({
+			selectedPlugin,
+			onPresentationModeChange,
+		}: {
+			selectedPlugin?: DevToolsPlugin;
+			onPresentationModeChange: InternalToolsProps['onPresentationModeChange'];
+		}) => (
+			<View testID="sheet">
+				<Text>{selectedPlugin?.id ?? 'list'}</Text>
+				<Pressable
+					onPress={() => onPresentationModeChange?.('window')}
+					testID="to-window"
+				/>
+			</View>
+		),
+	};
+});
+
+jest.mock('./floating-window', () => {
+	const { Pressable, Text, View } = jest.requireActual('react-native');
+	return {
+		FloatingWindow: ({
+			selectedPlugin,
+			onPresentationModeChange,
+		}: {
+			selectedPlugin?: DevToolsPlugin;
+			onPresentationModeChange: InternalToolsProps['onPresentationModeChange'];
+		}) => (
+			<View testID="window">
+				<Text>{selectedPlugin?.id ?? 'list'}</Text>
+				<Pressable
+					onPress={() => onPresentationModeChange?.('pill')}
+					testID="to-pill"
+				/>
+			</View>
+		),
+	};
+});
+
+jest.mock('./mini-pill', () => {
+	const { Pressable } = jest.requireActual('react-native');
+	return {
+		MiniPill: ({ onRestore }: { onRestore: () => void }) => (
+			<Pressable onPress={onRestore} testID="pill" />
+		),
+	};
+});
+
+const Panel = () => null;
+const plugin: DevToolsPlugin = {
+	id: 'example',
+	title: 'Example',
+	description: 'Example panel',
+	systemImage: 'wrench',
+	Panel,
+};
+
+describe('InternalTools', () => {
+	afterEach(() => {
+		jest.restoreAllMocks();
+	});
+
+	it('opens plugins imperatively and preserves selection across presentations', async () => {
+		const ref = createRef<InternalToolsHandle>();
+		render(<InternalTools enabled plugins={[plugin]} ref={ref} />);
+
+		act(() => ref.current?.openPlugin('example'));
+		expect(screen.getByTestId('sheet')).toBeOnTheScreen();
+		expect(screen.getByText('example')).toBeOnTheScreen();
+
+		fireEvent.press(screen.getByTestId('to-window'));
+		expect(screen.getByTestId('window')).toBeOnTheScreen();
+		expect(screen.getByText('example')).toBeOnTheScreen();
+
+		fireEvent.press(screen.getByTestId('to-pill'));
+		expect(screen.getByTestId('pill')).toBeOnTheScreen();
+
+		fireEvent.press(screen.getByTestId('pill'));
+		expect(screen.getByTestId('window')).toBeOnTheScreen();
+
+		act(() => ref.current?.close());
+		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
+	});
+
+	it('hydrates and persists runtime presentation state', async () => {
+		const setItem = jest.fn();
+		const storage = {
+			getItem: jest.fn(() =>
+				JSON.stringify({
+					version: 1,
+					presentationMode: 'window',
+					restoreMode: 'window',
+				}),
+			),
+			setItem,
+		};
+		const ref = createRef<InternalToolsHandle>();
+		render(
+			<InternalTools
+				enabled
+				persistence={{ storage, key: 'test-tools' }}
+				plugins={[plugin]}
+				ref={ref}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+
+		act(() => ref.current?.open());
+		expect(screen.getByTestId('window')).toBeOnTheScreen();
+		act(() => ref.current?.setPresentationMode('pill'));
+		await act(async () => Promise.resolve());
+
+		expect(setItem).toHaveBeenLastCalledWith(
+			'test-tools',
+			expect.stringContaining('"presentationMode":"pill"'),
+		);
+	});
+
+	it('reports rejected custom actions without crashing the host', async () => {
+		const error = new Error('action failed');
+		const onError = jest.fn();
+		const actionPlugin: DevToolsPlugin = {
+			id: 'failing-action',
+			title: 'Failing action',
+			description: 'Rejects for testing',
+			systemImage: 'exclamationmark.triangle',
+			kind: 'action',
+			onPress: async () => {
+				throw error;
+			},
+		};
+		const ref = createRef<InternalToolsHandle>();
+		render(
+			<InternalTools
+				enabled
+				onError={onError}
+				plugins={[actionPlugin]}
+				ref={ref}
+			/>,
+		);
+
+		await act(async () => {
+			ref.current?.openPlugin('failing-action');
+			await Promise.resolve();
+		});
+
+		expect(onError).toHaveBeenCalledWith(error, {
+			kind: 'action',
+			pluginId: 'failing-action',
+		});
+	});
+
+	it('honors declarative confirmation for custom action plugins', async () => {
+		const action = jest.fn();
+		const onAuditEvent = jest.fn();
+		jest
+			.spyOn(Alert, 'alert')
+			.mockImplementation((_title, _message, buttons) => {
+				buttons?.[0]?.onPress?.();
+			});
+		const actionPlugin: DevToolsPlugin = {
+			id: 'confirmed-action',
+			title: 'Confirmed action',
+			description: 'Requires confirmation',
+			systemImage: 'exclamationmark.triangle',
+			kind: 'action',
+			confirmation: { title: 'Continue?' },
+			onPress: action,
+		};
+		const ref = createRef<InternalToolsHandle>();
+		render(
+			<InternalTools
+				enabled
+				onAuditEvent={onAuditEvent}
+				plugins={[actionPlugin]}
+				ref={ref}
+			/>,
+		);
+
+		await act(async () => {
+			ref.current?.openPlugin('confirmed-action');
+			await Promise.resolve();
+		});
+
+		expect(action).not.toHaveBeenCalled();
+		expect(onAuditEvent).toHaveBeenCalledWith(
+			expect.objectContaining({ status: 'cancelled' }),
+		);
+	});
+
+	it('keeps collectors installed while the launcher is hidden', () => {
+		const dispose = jest.fn();
+		const install = jest.fn(() => dispose);
+		const hiddenPlugin: DevToolsPlugin = { ...plugin, install };
+		const view = render(
+			<InternalTools enabled plugins={[hiddenPlugin]} visible={false} />,
+		);
+
+		expect(install).toHaveBeenCalledTimes(1);
+		expect(screen.queryByTestId('launcher')).toBeNull();
+		view.rerender(<InternalTools enabled plugins={[hiddenPlugin]} visible />);
+		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
+		expect(install).toHaveBeenCalledTimes(1);
+
+		view.unmount();
+		expect(dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not let late hydration overwrite a user presentation change', async () => {
+		let resolveHydration: ((value: string) => void) | undefined;
+		const storage = {
+			getItem: jest.fn(
+				() =>
+					new Promise<string>((resolve) => {
+						resolveHydration = resolve;
+					}),
+			),
+			setItem: jest.fn(),
+		};
+		const ref = createRef<InternalToolsHandle>();
+		render(
+			<InternalTools
+				enabled
+				persistence={{ storage }}
+				plugins={[plugin]}
+				ref={ref}
+			/>,
+		);
+
+		act(() => ref.current?.setPresentationMode('window'));
+		await act(async () => {
+			resolveHydration?.(
+				JSON.stringify({
+					version: 1,
+					presentationMode: 'sheet',
+					restoreMode: 'sheet',
+				}),
+			);
+			await Promise.resolve();
+		});
+		act(() => ref.current?.open());
+
+		expect(screen.getByTestId('window')).toBeOnTheScreen();
+	});
+
+	it('does not write to a replacement storage before hydrating it', async () => {
+		const firstStorage = {
+			getItem: jest.fn(() => null),
+			setItem: jest.fn(),
+		};
+		let resolveSecondHydration: ((value: string | null) => void) | undefined;
+		const secondStorage = {
+			getItem: jest.fn(
+				() =>
+					new Promise<string | null>((resolve) => {
+						resolveSecondHydration = resolve;
+					}),
+			),
+			setItem: jest.fn(),
+		};
+		const view = render(
+			<InternalTools
+				enabled
+				persistence={{ storage: firstStorage, key: 'same-key' }}
+				plugins={[plugin]}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+
+		view.rerender(
+			<InternalTools
+				enabled
+				persistence={{ storage: secondStorage, key: 'same-key' }}
+				plugins={[plugin]}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+		expect(secondStorage.setItem).not.toHaveBeenCalled();
+
+		await act(async () => {
+			resolveSecondHydration?.(null);
+			await Promise.resolve();
+		});
+		expect(secondStorage.setItem).toHaveBeenCalledTimes(1);
+	});
+});

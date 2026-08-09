@@ -1,0 +1,200 @@
+# @pumpd/devtools
+
+Private, reusable on-device diagnostics for Expo and React Native. The first
+release is intentionally iOS-only and uses Expo UI for native SwiftUI chrome.
+
+The package is a greenfield implementation. It does not contain code or visual
+assets from React Buoy or the current `@buoy-gg/*` packages.
+
+## Usage
+
+```tsx
+import { InternalTools } from '@pumpd/devtools';
+import {
+	createEnvironmentPlugin,
+	createNetworkPlugin,
+	createQueryPlugin,
+} from '@pumpd/devtools/plugins';
+
+const network = createNetworkPlugin({
+	captureBody: true,
+	// Use only in trusted internal builds; unknown-size bodies must be read
+	// before their size can be known.
+	captureUnknownLengthBodies: true,
+});
+
+const plugins = [
+	network.plugin,
+	createQueryPlugin({ queryClient, captureData: true }),
+	createEnvironmentPlugin({
+		values: {
+			API_URL: process.env.EXPO_PUBLIC_API_URL,
+			RELEASE_CHANNEL: process.env.EXPO_PUBLIC_RELEASE_CHANNEL,
+		},
+	}),
+];
+
+export const instrumentedFetch = network.instrumentFetch(fetch);
+
+<InternalTools enabled={isInternalBuild} plugins={plugins} />;
+```
+
+The root entry point exposes the runtime, shared panel UI, event stores, and
+public types. Reusable built-in diagnostics and plugin factories are also
+available from the dedicated `@pumpd/devtools/plugins` entry point. Keeping the
+entry points separate prevents hosts that only need the shell from traversing
+optional diagnostic dependencies.
+
+Collectors install when `InternalTools` is enabled and remain active while its
+panel is closed. The runtime reconciles collectors by plugin ID and installer,
+so adding an application action does not restart unrelated collectors. Network
+collection wraps explicit fetch implementations by default. Broad global fetch
+capture is opt-in with `patchGlobalFetch: true`, and disposal only restores the
+global when the plugin still owns the installed wrapper.
+
+Captured events are bounded by count and estimated UTF-8 byte size. Known-large
+and binary response bodies are omitted, and unknown-length bodies are omitted
+unless `captureUnknownLengthBodies` is explicitly enabled. Header, URL, and
+body redaction runs before an event enters the store.
+
+The reusable diagnostics included in the first release are Network, TanStack
+Query, registered storage adapters, a deliberate environment manifest, and a
+public navigation adapter. None of them imports application code.
+
+## Custom tools
+
+Applications can contribute full React Native panels without changing this
+package:
+
+```tsx
+import { createCustomPlugin } from '@pumpd/devtools/plugins';
+
+const fixturesPlugin = createCustomPlugin({
+	id: 'fixtures',
+	title: 'Fixtures',
+	description: 'Load deterministic application states',
+	systemImage: 'shippingbox.fill',
+	section: 'My App',
+	render: (controls) => (
+		<FixturesPanel
+			onBack={controls.onBack}
+			onClose={controls.onClose}
+		/>
+	),
+});
+```
+
+One-tap application actions use the same registry:
+
+```tsx
+import { createActionPlugin } from '@pumpd/devtools/plugins';
+
+const clearOnboardingPlugin = createActionPlugin({
+	id: 'clear-onboarding',
+	title: 'Clear Onboarding',
+	description: 'Return this account to the first-run state',
+	systemImage: 'arrow.counterclockwise',
+	section: 'My App',
+	confirmation: {
+		title: 'Clear onboarding?',
+		confirmLabel: 'Clear',
+		destructive: true,
+	},
+	action: ({ close }) => {
+		close();
+		clearOnboarding();
+	},
+});
+```
+
+Large application panels can stay out of the initial module graph:
+
+```tsx
+const livePreviewPlugin = createLazyCustomPlugin({
+	id: 'live-preview',
+	title: 'Live Preview',
+	description: 'Preview application-specific native states',
+	systemImage: 'timer',
+	section: 'My App',
+	load: () => import('./live-preview-panel').then((module) => module.Panel),
+});
+```
+
+`PanelScaffold`, disclosure cards, code blocks, empty states, colors, and shared
+panel styles are exported for custom tools that should visually match built-in
+diagnostics. Custom panels also receive the current presentation mode, can
+switch modes themselves, and receive `actions.run(...)` for consistent
+confirmation, error routing, and audit events.
+
+## Presentation modes
+
+The runtime supports three interchangeable presentations:
+
+- `sheet`: native Expo UI / SwiftUI bottom sheet and tool browser.
+- `window`: draggable floating window that leaves the application interactive.
+- `pill`: draggable minimized status pill that restores the previous expanded
+  presentation.
+
+```tsx
+<InternalTools
+	enabled={isInternalBuild}
+	visible={showLauncherAndPanels}
+	plugins={plugins}
+	defaultPresentationMode="sheet"
+	pillLabel="My App Tools"
+	bottomObstructionInset={tabBarHeight}
+	onAuditEvent={(event) => audit(event)}
+/>
+```
+
+`enabled` owns collector lifecycle; `visible` only hides or shows the interface.
+This allows collectors to remain active while a feedback flow, screenshot, or
+other temporary overlay suppresses the launcher.
+
+Use the optional controlled `presentationMode` and
+`onPresentationModeChange` props when the host application should own this
+state. Switching presentation never reinstalls collectors or clears the active
+plugin.
+
+Launcher, window, pill, and presentation state can be persisted through any
+small key/value storage implementation:
+
+```tsx
+<InternalTools
+	enabled={isInternalBuild}
+	plugins={plugins}
+	persistence={{ storage: myStringStorage }}
+/>
+```
+
+The host can also keep a ref and call `open()`, `close()`,
+`openPlugin(pluginId)`, or `setPresentationMode(mode)`. This lets application
+screens expose contextual shortcuts without coupling those screens to panel
+implementations.
+
+Host applications must provide `GestureHandlerRootView` and
+`SafeAreaProvider` above `InternalTools`.
+
+## Package boundary
+
+Keep generic runtime and diagnostic behavior in `packages/devtools`. Host-app
+adapters, feature flags, account actions, fixture scenarios, and product-specific
+panels belong in the consuming application. This keeps the package reusable
+without introducing application dependencies into its graph.
+
+The package remains private while the API evolves. Individual diagnostics
+should stay together until a tool needs native code, materially changes bundle
+size, or requires independent release/versioning.
+
+## PUMPD build behavior
+
+PUMPD mounts the package in development and preview/TestFlight variants. The
+existing in-app developer-mode preference controls normal visibility. For
+unsigned or onboarding QA, set
+`EXPO_PUBLIC_INTERNAL_TOOLS_ENABLED=true`; the build-time kill switch
+`EXPO_PUBLIC_DISABLE_INTERNAL_TOOLS=true` always wins.
+
+Production Metro builds resolve both the lazy PUMPD host and the package import
+to typed no-op shims, so the tool runtime and custom panels are not included in
+the public production bundle. Do not weaken those aliases when adding a new
+PUMPD plugin.

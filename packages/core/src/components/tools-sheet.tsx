@@ -1,0 +1,137 @@
+import {
+	BottomSheet,
+	Button,
+	Group,
+	Host,
+	Label,
+	List,
+	Picker,
+	RNHostView,
+	Section,
+	Text as SwiftUIText,
+} from '@expo/ui/swift-ui';
+import {
+	buttonStyle,
+	pickerStyle,
+	presentationDetents,
+	presentationDragIndicator,
+	tag,
+} from '@expo/ui/swift-ui/modifiers';
+import { StyleSheet, View } from 'react-native';
+import { groupPlugins } from '../core/plugins';
+import type {
+	DevToolsActionServices,
+	DevToolsPanelPlugin,
+	DevToolsPlugin,
+	DevToolsPresentationMode,
+} from '../types';
+import { PluginPanelRenderer } from './plugin-panel-renderer';
+
+type ToolsSheetProps = {
+	isPresented: boolean;
+	plugins: readonly DevToolsPlugin[];
+	selectedPlugin?: DevToolsPanelPlugin;
+	onSelectPlugin: (plugin: DevToolsPlugin) => void;
+	onBack: () => void;
+	onClose: () => void;
+	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
+	title: string;
+	onPluginError?: (error: unknown, pluginId: string) => void;
+	actions: DevToolsActionServices;
+};
+
+export function ToolsSheet({
+	isPresented,
+	plugins,
+	selectedPlugin,
+	onSelectPlugin,
+	onBack,
+	onClose,
+	onPresentationModeChange,
+	title,
+	onPluginError,
+	actions,
+}: ToolsSheetProps) {
+	const sections = groupPlugins(plugins);
+	const panelProps = {
+		onBack,
+		onClose,
+		presentationMode: 'sheet' as const,
+		onPresentationModeChange,
+		actions,
+	};
+
+	return (
+		<Host matchContents style={styles.host}>
+			<BottomSheet
+				isPresented={isPresented}
+				onIsPresentedChange={(next) => {
+					if (!next) onClose();
+				}}
+			>
+				<Group
+					modifiers={[
+						presentationDetents(['medium', 'large']),
+						presentationDragIndicator('visible'),
+					]}
+				>
+					{selectedPlugin ? (
+						<RNHostView>
+							<View style={styles.panel}>
+								<PluginPanelRenderer
+									plugin={selectedPlugin}
+									panelProps={panelProps}
+									onError={onPluginError}
+								/>
+							</View>
+						</RNHostView>
+					) : (
+						<List>
+							<Section title={title}>
+								<Picker<DevToolsPresentationMode>
+									label="Presentation"
+									selection="sheet"
+									onSelectionChange={onPresentationModeChange}
+									modifiers={[pickerStyle('segmented')]}
+								>
+									<SwiftUIText modifiers={[tag('sheet')]}>Sheet</SwiftUIText>
+									<SwiftUIText modifiers={[tag('window')]}>Window</SwiftUIText>
+									<SwiftUIText modifiers={[tag('pill')]}>Pill</SwiftUIText>
+								</Picker>
+							</Section>
+							{sections.map((section) => (
+								<Section key={section.title} title={section.title}>
+									{section.plugins.map((plugin) => (
+										<Button
+											key={plugin.id}
+											label={plugin.title}
+											modifiers={[buttonStyle('plain')]}
+											onPress={() => onSelectPlugin(plugin)}
+											systemImage={plugin.systemImage}
+										/>
+									))}
+								</Section>
+							))}
+							<Section title="Collection">
+								<Label
+									title="Collectors stay active while this sheet is closed"
+									systemImage="checkmark.circle.fill"
+								/>
+							</Section>
+						</List>
+					)}
+				</Group>
+			</BottomSheet>
+		</Host>
+	);
+}
+
+const styles = StyleSheet.create({
+	host: {
+		height: 1,
+		width: 1,
+	},
+	panel: {
+		flex: 1,
+	},
+});

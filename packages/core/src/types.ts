@@ -1,0 +1,114 @@
+import type { Image } from '@expo/ui/swift-ui';
+import type { ComponentProps, ComponentType } from 'react';
+
+export type DevToolsPresentationMode = 'sheet' | 'window' | 'pill';
+
+export type DevToolsPosition = {
+	x: number;
+	y: number;
+};
+
+export type DevToolsPersistenceStorage = {
+	getItem: (key: string) => string | null | Promise<string | null>;
+	setItem: (key: string, value: string) => void | Promise<void>;
+};
+
+export type DevToolsPersistenceOptions = {
+	storage: DevToolsPersistenceStorage;
+	key?: string;
+};
+
+export type DevToolsRuntimeErrorContext =
+	| { kind: 'collector'; pluginId: string }
+	| { kind: 'panel'; pluginId: string }
+	| { kind: 'action'; pluginId: string }
+	| { kind: 'persistence' };
+
+export type DevToolsSystemImage = NonNullable<
+	ComponentProps<typeof Image>['systemName']
+>;
+
+export type DevToolsActionConfirmation = {
+	title: string;
+	message?: string;
+	confirmLabel?: string;
+	destructive?: boolean;
+};
+
+export type DevToolsActionRequest = {
+	pluginId: string;
+	label: string;
+	confirmation?: DevToolsActionConfirmation;
+	action: () => unknown | Promise<unknown>;
+};
+
+export type DevToolsAuditEvent = {
+	at: number;
+	pluginId: string;
+	label: string;
+	status: 'cancelled' | 'failed' | 'started' | 'succeeded';
+	error?: string;
+};
+
+export type DevToolsActionServices = {
+	run: (request: DevToolsActionRequest) => Promise<boolean>;
+};
+
+export type DevToolsPanelProps = {
+	onBack: () => void;
+	onClose: () => void;
+	presentationMode: DevToolsPresentationMode;
+	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
+	actions: DevToolsActionServices;
+};
+
+export type DevToolsPluginMetadata = {
+	id: string;
+	title: string;
+	description: string;
+	systemImage: DevToolsSystemImage;
+	section?: string;
+	install?: () => () => void;
+};
+
+export type DevToolsPanelPlugin = DevToolsPluginMetadata & {
+	kind?: 'panel';
+	Panel: ComponentType<DevToolsPanelProps>;
+};
+
+export type DevToolsActionContext = {
+	close: () => void;
+	presentationMode: DevToolsPresentationMode;
+	setPresentationMode: (mode: DevToolsPresentationMode) => void;
+};
+
+export type DevToolsActionPlugin = DevToolsPluginMetadata & {
+	kind: 'action';
+	confirmation?: DevToolsActionConfirmation;
+	onPress: (context: DevToolsActionContext) => void | Promise<void>;
+};
+
+export type DevToolsPlugin = DevToolsPanelPlugin | DevToolsActionPlugin;
+
+export type InternalToolsProps = {
+	enabled: boolean;
+	visible?: boolean;
+	plugins: readonly DevToolsPlugin[];
+	title?: string;
+	launcherLabel?: string;
+	pillLabel?: string;
+	defaultPresentationMode?: DevToolsPresentationMode;
+	presentationMode?: DevToolsPresentationMode;
+	onPresentationModeChange?: (mode: DevToolsPresentationMode) => void;
+	persistence?: DevToolsPersistenceOptions;
+	bottomObstructionInset?: number;
+	onError?: (error: unknown, context: DevToolsRuntimeErrorContext) => void;
+	onAuditEvent?: (event: DevToolsAuditEvent) => void;
+};
+
+export type InternalToolsHandle = {
+	open: () => void;
+	close: () => void;
+	openPlugin: (pluginId: string) => void;
+	setPresentationMode: (mode: DevToolsPresentationMode) => void;
+};
