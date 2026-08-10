@@ -1,6 +1,6 @@
+import { Icon, ListItem } from '@expo/ui';
 import {
 	BottomSheet,
-	Button,
 	Group,
 	Host,
 	Label,
@@ -11,13 +11,13 @@ import {
 	Text as SwiftUIText,
 } from '@expo/ui/swift-ui';
 import {
-	buttonStyle,
+	padding,
 	pickerStyle,
 	presentationDetents,
 	presentationDragIndicator,
 	tag,
 } from '@expo/ui/swift-ui/modifiers';
-import { StyleSheet, View } from 'react-native';
+import { PlatformColor, StyleSheet, View } from 'react-native';
 import { groupPlugins } from '../core/plugins';
 import type {
 	DevToolsActionServices,
@@ -86,7 +86,7 @@ export function ToolsSheet({
 							</View>
 						</RNHostView>
 					) : (
-						<List>
+						<List modifiers={[padding({ top: 10 })]}>
 							<Section title={title}>
 								<Picker<DevToolsPresentationMode>
 									label="Presentation"
@@ -102,13 +102,28 @@ export function ToolsSheet({
 							{sections.map((section) => (
 								<Section key={section.title} title={section.title}>
 									{section.plugins.map((plugin) => (
-										<Button
+										<ListItem
 											key={plugin.id}
-											label={plugin.title}
-											modifiers={[buttonStyle('plain')]}
+											leading={
+												<Icon
+													color={PlatformColor('systemBlueColor')}
+													name={plugin.systemImage}
+													size={20}
+												/>
+											}
 											onPress={() => onSelectPlugin(plugin)}
-											systemImage={plugin.systemImage}
-										/>
+											supportingText={plugin.description}
+											testID={`devtools-tool-row-${plugin.id}`}
+											trailing={
+												<Icon
+													color={PlatformColor('secondaryLabelColor')}
+													name="chevron.right"
+													size={12}
+												/>
+											}
+										>
+											{plugin.title}
+										</ListItem>
 									))}
 								</Section>
 							))}

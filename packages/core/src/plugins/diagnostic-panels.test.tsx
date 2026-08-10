@@ -76,7 +76,7 @@ describe('built-in diagnostic panels', () => {
 
 		renderPanel(diagnostics.plugin);
 		expect(screen.getByText('Network')).toBeOnTheScreen();
-		fireEvent.press(screen.getByText('GET 200'));
+		fireEvent.press(screen.getByText('GET · workouts'));
 		expect(screen.getByText('Query parameters')).toBeOnTheScreen();
 		expect(screen.getByText(/"ok": true/)).toBeOnTheScreen();
 		dispose?.();
@@ -137,7 +137,7 @@ describe('built-in diagnostic panels', () => {
 		renderPanel(plugin);
 		expect(screen.getByText('Environment')).toBeOnTheScreen();
 		expect(screen.getByText('API_URL')).toBeOnTheScreen();
-		expect(screen.getByText('"https://example.test"')).toBeOnTheScreen();
+		expect(screen.getByText('https://example.test')).toBeOnTheScreen();
 	});
 
 	it('renders navigation history, routes, and live stack tabs', () => {
@@ -164,9 +164,9 @@ describe('built-in diagnostic panels', () => {
 		renderPanel(diagnostics.plugin);
 		expect(screen.getByText('Navigation')).toBeOnTheScreen();
 		expect(screen.getAllByText('/workouts/123')[0]).toBeOnTheScreen();
-		fireEvent.press(screen.getByRole('button', { name: 'Routes' }));
+		fireEvent.press(screen.getByRole('tab', { name: 'Routes' }));
 		expect(screen.getByText('/workouts/[id]')).toBeOnTheScreen();
-		fireEvent.press(screen.getByRole('button', { name: 'Stack' }));
+		fireEvent.press(screen.getByRole('tab', { name: 'Stack' }));
 		expect(screen.getByText('Workout')).toBeOnTheScreen();
 	});
 });

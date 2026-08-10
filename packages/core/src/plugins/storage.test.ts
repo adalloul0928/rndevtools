@@ -1,4 +1,5 @@
 import {
+	createStorageKeyPresentation,
 	createStoragePlugin,
 	isStorageEntryEditable,
 	parseStorageDraft,
@@ -6,6 +7,23 @@ import {
 } from './storage';
 
 describe('createStoragePlugin', () => {
+	it('formats machine storage keys for fast scanning', () => {
+		expect(
+			createStorageKeyPresentation(
+				'catalog-media:thumbhash:v1:https://cdn.example.test/media/item-1',
+			),
+		).toEqual({
+			title: 'Thumbhash · V1',
+			context: 'Catalog media · cdn.example.test/media/item-1',
+		});
+		expect(
+			createStorageKeyPresentation('@pumpd/internal-tools/runtime-state'),
+		).toEqual({
+			title: 'Runtime state',
+			context: '@pumpd › Internal tools',
+		});
+	});
+
 	it('loads registered values but never reads protected adapter values', async () => {
 		const readStandard = jest.fn(() => 'value');
 		const readSecure = jest.fn(() => 'secret');

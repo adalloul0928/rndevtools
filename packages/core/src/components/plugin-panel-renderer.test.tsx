@@ -55,9 +55,7 @@ describe('PluginPanelRenderer', () => {
 			/>,
 		);
 
-		expect(
-			screen.getByText('This tool encountered an error.'),
-		).toBeOnTheScreen();
+		expect(screen.getByText('This tool could not render')).toBeOnTheScreen();
 		expect(screen.getByText('panel exploded')).toBeOnTheScreen();
 		expect(onError).toHaveBeenCalledWith(expect.any(Error), 'broken');
 		fireEvent.press(screen.getByText('Return to tools'));

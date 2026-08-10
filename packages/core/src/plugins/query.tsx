@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
 	PanelButton,
 	PanelSearchField,
+	PanelSegmentedControl,
 	PanelToolbar,
 } from '../components/panel-controls';
 import {
@@ -11,7 +12,10 @@ import {
 	colors,
 	DisclosureCard,
 	EmptyState,
+	PanelMetricStrip,
 	PanelScaffold,
+	PanelSignalCard,
+	PanelStatusBadge,
 	panelStyles,
 } from '../components/panel-ui';
 import { ExternalStore } from '../core/external-store';
@@ -69,21 +73,23 @@ type RunQueryAction = (
 	confirmation?: DevToolsActionConfirmation,
 ) => void;
 
-function Metric({
-	label,
-	value,
-	tone = colors.label,
-}: {
-	label: string;
-	value: number;
-	tone?: typeof colors.label;
-}) {
-	return (
-		<View style={styles.metric}>
-			<Text style={[styles.metricValue, { color: tone }]}>{value}</Text>
-			<Text style={styles.metricLabel}>{label}</Text>
-		</View>
-	);
+export function formatQueryKey(
+	queryKey: readonly unknown[] | undefined,
+): string {
+	if (!queryKey?.length) return 'Anonymous mutation';
+	return queryKey
+		.map((part) => {
+			if (typeof part === 'string') return part;
+			if (
+				typeof part === 'number' ||
+				typeof part === 'boolean' ||
+				typeof part === 'bigint'
+			) {
+				return String(part);
+			}
+			return serializeValue(part, 256).text.replace(/\s+/g, ' ');
+		})
+		.join(' › ');
 }
 
 export function createQueryPlugin({
@@ -158,17 +164,21 @@ export function createQueryPlugin({
 		query: QuerySnapshot;
 		runAction: RunQueryAction;
 	}) {
+		const presentation = queryStatusPresentation(
+			query.status,
+			query.fetchStatus,
+			query.isStale,
+		);
 		return (
 			<DisclosureCard
 				leading={
-					<StatusDot
-						status={query.status}
-						fetchStatus={query.fetchStatus}
-						stale={query.isStale}
+					<PanelStatusBadge
+						label={presentation.label}
+						tone={presentation.tone}
 					/>
 				}
-				title={query.key.replace(/\s+/g, ' ')}
-				subtitle={`${query.status} · ${query.fetchStatus} · ${query.observerCount} observers${query.isStale ? ' · stale' : ''}`}
+				title={formatQueryKey(query.queryKey)}
+				subtitle={`${query.observerCount} observer${query.observerCount === 1 ? '' : 's'} · ${query.fetchStatus === 'idle' ? 'Not fetching' : query.fetchStatus}`}
 				renderDetails={() => {
 					const liveQuery = queryClient.getQueryCache().get(query.hash);
 					const data =
@@ -253,11 +263,17 @@ export function createQueryPlugin({
 	}
 
 	function MutationRow({ mutation }: { mutation: MutationSnapshot }) {
+		const presentation = queryStatusPresentation(mutation.status);
 		return (
 			<DisclosureCard
-				leading={<StatusDot status={mutation.status} />}
-				title={mutation.key.replace(/\s+/g, ' ')}
-				subtitle={`${mutation.status} · ${mutation.failureCount} failures${mutation.isPaused ? ' · paused' : ''}`}
+				leading={
+					<PanelStatusBadge
+						label={presentation.label}
+						tone={presentation.tone}
+					/>
+				}
+				title={formatQueryKey(mutation.mutationKey)}
+				subtitle={`${mutation.failureCount} failure${mutation.failureCount === 1 ? '' : 's'}${mutation.isPaused ? ' · Paused' : ''}`}
 				renderDetails={() => {
 					const liveMutation = queryClient
 						.getMutationCache()
@@ -349,52 +365,76 @@ export function createQueryPlugin({
 				title={title}
 				subtitle={`${snapshot.queries.length} queries · ${snapshot.mutations.length} mutations`}
 			>
-				<View style={styles.metrics}>
-					<Metric label="Cached" value={snapshot.queries.length} />
-					<Metric label="Fetching" value={fetching} tone={colors.blue} />
-					<Metric label="Stale" value={stale} tone={colors.orange} />
-					<Metric label="Errors" value={errors} tone={colors.red} />
-				</View>
-				<PanelToolbar>
-					<PanelButton
-						label="Queries"
-						onPress={() => setTab('queries')}
-						selected={tab === 'queries'}
-					/>
-					<PanelButton
-						label="Mutations"
-						onPress={() => setTab('mutations')}
-						selected={tab === 'mutations'}
-					/>
-				</PanelToolbar>
+				<PanelSignalCard
+					description={`${fetching} fetching · ${stale} stale · ${snapshot.mutations.length} recent mutations`}
+					eyebrow="Cache signal"
+					systemImage={
+						errors > 0
+							? 'exclamationmark.triangle.fill'
+							: fetching > 0
+								? 'arrow.triangle.2.circlepath'
+								: 'checkmark.circle.fill'
+					}
+					title={
+						errors > 0
+							? `${errors} quer${errors === 1 ? 'y' : 'ies'} need attention`
+							: fetching > 0
+								? `${fetching} quer${fetching === 1 ? 'y is' : 'ies are'} fetching`
+								: snapshot.queries.length > 0
+									? 'Query cache is settled'
+									: 'Waiting for query activity'
+					}
+					tone={errors > 0 ? 'danger' : fetching > 0 ? 'info' : 'success'}
+				/>
+				<PanelMetricStrip
+					metrics={[
+						{ label: 'Cached', value: snapshot.queries.length },
+						{ label: 'Fetching', value: fetching, tone: colors.blue },
+						{ label: 'Stale', value: stale, tone: colors.orange },
+						{ label: 'Errors', value: errors, tone: colors.red },
+					]}
+				/>
+				<PanelSegmentedControl
+					accessibilityLabel="Query inspector"
+					onChange={setTab}
+					options={[
+						{ id: 'queries', label: 'Queries' },
+						{ id: 'mutations', label: 'Mutations' },
+					]}
+					selected={tab}
+				/>
 				<PanelSearchField
 					onChangeText={setSearch}
 					placeholder={`Search ${tab}`}
 					value={search}
 				/>
 				{tab === 'queries' ? (
-					<PanelToolbar>
-						{(['all', 'active', 'fetching', 'stale', 'error'] as const).map(
-							(value) => (
-								<PanelButton
-									key={value}
-									label={value.charAt(0).toUpperCase() + value.slice(1)}
-									onPress={() => setFilter(value)}
-									selected={filter === value}
-								/>
-							),
-						)}
-					</PanelToolbar>
+					<PanelSegmentedControl
+						accessibilityLabel="Query filter"
+						onChange={setFilter}
+						options={(
+							['all', 'active', 'fetching', 'stale', 'error'] as const
+						).map((value) => ({
+							id: value,
+							label: value.charAt(0).toUpperCase() + value.slice(1),
+						}))}
+						selected={filter}
+					/>
 				) : null}
 				{tab === 'queries' && visibleQueries.length === 0 ? (
-					<EmptyState>
+					<EmptyState
+						systemImage="square.stack.3d.up"
+						title="No queries to show"
+					>
 						{snapshot.queries.length === 0
 							? 'Query cache activity will appear here.'
 							: 'No queries match the current filters.'}
 					</EmptyState>
 				) : null}
 				{tab === 'mutations' && visibleMutations.length === 0 ? (
-					<EmptyState>Mutation activity will appear here.</EmptyState>
+					<EmptyState systemImage="bolt.horizontal" title="No mutations yet">
+						Mutation activity will appear here.
+					</EmptyState>
 				) : null}
 				{tab === 'queries'
 					? visibleQueries.map((query) => (
@@ -443,24 +483,17 @@ export function createQueryPlugin({
 	);
 }
 
-function StatusDot({
-	status,
-	fetchStatus,
-	stale,
-}: {
-	status: string;
-	fetchStatus?: string;
-	stale?: boolean;
-}) {
-	const backgroundColor =
-		status === 'error'
-			? colors.red
-			: fetchStatus === 'fetching' || status === 'pending'
-				? colors.blue
-				: stale
-					? colors.orange
-					: colors.green;
-	return <View style={[styles.statusDot, { backgroundColor }]} />;
+function queryStatusPresentation(
+	status: string,
+	fetchStatus?: string,
+	stale?: boolean,
+): { label: string; tone: 'danger' | 'info' | 'warning' | 'success' } {
+	if (status === 'error') return { label: 'ERROR', tone: 'danger' };
+	if (fetchStatus === 'fetching' || status === 'pending') {
+		return { label: 'ACTIVE', tone: 'info' };
+	}
+	if (stale) return { label: 'STALE', tone: 'warning' };
+	return { label: 'READY', tone: 'success' };
 }
 
 function SnapshotMetadata({
@@ -497,17 +530,6 @@ function SnapshotValue({
 }
 
 const styles = StyleSheet.create({
-	metrics: { flexDirection: 'row', gap: 7 },
-	metric: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		flex: 1,
-		paddingVertical: 10,
-	},
-	metricValue: { fontSize: 19, fontWeight: '700' },
-	metricLabel: { color: colors.secondaryLabel, fontSize: 10, marginTop: 2 },
-	statusDot: { borderRadius: 5, height: 10, marginRight: 12, width: 10 },
 	metadata: { gap: 8 },
 	detailSection: {
 		borderTopColor: colors.separator,

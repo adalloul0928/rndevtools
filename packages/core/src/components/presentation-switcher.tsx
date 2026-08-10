@@ -46,7 +46,7 @@ export function PresentationSwitcher({
 
 const styles = StyleSheet.create({
 	container: {
-		backgroundColor: colors.background,
+		backgroundColor: colors.separator,
 		borderRadius: 10,
 		flexDirection: 'row',
 		gap: 2,
@@ -61,7 +61,11 @@ const styles = StyleSheet.create({
 		paddingHorizontal: 8,
 	},
 	buttonSelected: {
-		backgroundColor: colors.blue,
+		backgroundColor: colors.card,
+		shadowColor: colors.shadow,
+		shadowOffset: { width: 0, height: 1 },
+		shadowOpacity: 0.12,
+		shadowRadius: 2,
 	},
 	label: {
 		color: colors.secondaryLabel,
@@ -69,6 +73,6 @@ const styles = StyleSheet.create({
 		fontWeight: '600',
 	},
 	labelSelected: {
-		color: colors.onAccent,
+		color: colors.label,
 	},
 });

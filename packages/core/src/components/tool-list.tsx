@@ -30,6 +30,7 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 								accessibilityRole="button"
 								onPress={() => onSelect(plugin)}
 								style={styles.row}
+								testID={`devtools-tool-row-${plugin.id}`}
 							>
 								<View style={styles.iconSurface}>
 									<SystemIcon systemName={plugin.systemImage} size={20} />
@@ -42,7 +43,7 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 								>
 									<View style={styles.copy}>
 										<Text style={styles.title}>{plugin.title}</Text>
-										<Text numberOfLines={1} style={styles.description}>
+										<Text numberOfLines={2} style={styles.description}>
 											{plugin.description}
 										</Text>
 									</View>
@@ -93,9 +94,11 @@ const styles = StyleSheet.create({
 	},
 	row: {
 		alignItems: 'center',
+		alignSelf: 'stretch',
 		flexDirection: 'row',
-		minHeight: 66,
+		minHeight: 72,
 		paddingLeft: 12,
+		width: '100%',
 	},
 	iconSurface: {
 		alignItems: 'center',
@@ -110,7 +113,8 @@ const styles = StyleSheet.create({
 		flex: 1,
 		flexDirection: 'row',
 		marginLeft: 11,
-		minHeight: 66,
+		minHeight: 72,
+		paddingVertical: 9,
 		paddingRight: 14,
 	},
 	separator: {
@@ -129,6 +133,7 @@ const styles = StyleSheet.create({
 	description: {
 		color: colors.secondaryLabel,
 		fontSize: 12,
+		lineHeight: 16,
 	},
 	footer: {
 		color: colors.secondaryLabel,

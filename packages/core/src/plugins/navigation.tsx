@@ -1,8 +1,9 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import {
 	PanelButton,
 	PanelSearchField,
+	PanelSegmentedControl,
 	PanelToolbar,
 } from '../components/panel-controls';
 import {
@@ -10,7 +11,10 @@ import {
 	colors,
 	DisclosureCard,
 	EmptyState,
+	PanelMetricStrip,
 	PanelScaffold,
+	PanelSignalCard,
+	PanelStatusBadge,
 } from '../components/panel-ui';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { serializeValue } from '../core/serialize';
@@ -82,6 +86,15 @@ export type NavigationPlugin = {
 };
 
 type NavigationTab = 'history' | 'routes' | 'stack';
+
+function formatRelativeTime(at: number): string {
+	const elapsedSeconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+	if (elapsedSeconds < 2) return 'Now';
+	if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+	const elapsedMinutes = Math.round(elapsedSeconds / 60);
+	if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+	return new Date(at).toLocaleTimeString();
+}
 
 export function inferNavigationRouteKind(
 	path: string,
@@ -175,36 +188,25 @@ export function createNavigationPlugin(
 				title={title}
 				subtitle={current?.route ?? 'No route recorded'}
 			>
-				{current ? (
-					<View style={styles.currentRoute}>
-						<Text style={styles.currentLabel}>Current route</Text>
-						<Text selectable style={styles.currentValue}>
-							{current.route}
-						</Text>
-					</View>
-				) : null}
-				<View style={styles.metrics}>
-					<View style={styles.metric}>
-						<Text style={styles.metricValue}>{events.length}</Text>
-						<Text style={styles.metricLabel}>History</Text>
-					</View>
-					<View style={styles.metric}>
-						<Text style={styles.metricValue}>{routes.length}</Text>
-						<Text style={styles.metricLabel}>Routes</Text>
-					</View>
-					<View style={styles.metric}>
-						<Text style={[styles.metricValue, { color: colors.orange }]}>
-							{dynamicCount}
-						</Text>
-						<Text style={styles.metricLabel}>Dynamic</Text>
-					</View>
-					<View style={styles.metric}>
-						<Text style={[styles.metricValue, { color: colors.blue }]}>
-							{stack.length}
-						</Text>
-						<Text style={styles.metricLabel}>Stack</Text>
-					</View>
-				</View>
+				<PanelSignalCard
+					description={
+						current
+							? `${stack.length} mounted stack entries · changed ${formatRelativeTime(current.at).toLowerCase()}`
+							: 'Route transitions will appear as the app navigates.'
+					}
+					eyebrow="Current route"
+					systemImage={current ? 'location.fill' : 'location.slash.fill'}
+					title={current?.route ?? 'No route recorded'}
+					tone={current ? 'info' : 'neutral'}
+				/>
+				<PanelMetricStrip
+					metrics={[
+						{ label: 'History', value: events.length },
+						{ label: 'Routes', value: routes.length },
+						{ label: 'Dynamic', value: dynamicCount, tone: colors.orange },
+						{ label: 'Stack', value: stack.length, tone: colors.blue },
+					]}
+				/>
 				{options.actions?.length ? (
 					<PanelToolbar>
 						{options.actions.map((action) => (
@@ -222,23 +224,16 @@ export function createNavigationPlugin(
 						))}
 					</PanelToolbar>
 				) : null}
-				<PanelToolbar>
-					<PanelButton
-						label="History"
-						onPress={() => setTab('history')}
-						selected={tab === 'history'}
-					/>
-					<PanelButton
-						label="Routes"
-						onPress={() => setTab('routes')}
-						selected={tab === 'routes'}
-					/>
-					<PanelButton
-						label="Stack"
-						onPress={() => setTab('stack')}
-						selected={tab === 'stack'}
-					/>
-				</PanelToolbar>
+				<PanelSegmentedControl
+					accessibilityLabel="Navigation inspector"
+					onChange={setTab}
+					options={[
+						{ id: 'history', label: 'History' },
+						{ id: 'routes', label: 'Routes' },
+						{ id: 'stack', label: 'Stack' },
+					]}
+					selected={tab}
+				/>
 				<PanelSearchField
 					onChangeText={setSearch}
 					placeholder={`Search ${tab}`}
@@ -254,7 +249,10 @@ export function createNavigationPlugin(
 							/>
 						</PanelToolbar>
 						{visibleEvents.length === 0 ? (
-							<EmptyState>
+							<EmptyState
+								systemImage="arrow.triangle.turn.up.right.diamond"
+								title="No route history"
+							>
 								{events.length === 0
 									? 'Route transitions will appear here.'
 									: 'No routes match the current search.'}
@@ -264,18 +262,17 @@ export function createNavigationPlugin(
 								<DisclosureCard
 									key={event.id}
 									leading={
-										<View
-											style={[
-												styles.routeDot,
-												{
-													backgroundColor:
-														index === 0 ? colors.blue : colors.green,
-												},
-											]}
+										<PanelStatusBadge
+											label={index === 0 ? 'NOW' : formatRelativeTime(event.at)}
+											tone={index === 0 ? 'info' : 'neutral'}
 										/>
 									}
 									title={event.route}
-									subtitle={new Date(event.at).toLocaleTimeString()}
+									subtitle={
+										event.segments?.length
+											? event.segments.join(' › ')
+											: 'Route transition'
+									}
 								>
 									<CodeBlock>
 										{serializeValue(event, 128 * 1024).text}
@@ -286,7 +283,7 @@ export function createNavigationPlugin(
 					</>
 				) : tab === 'routes' ? (
 					visibleRoutes.length === 0 ? (
-						<EmptyState>
+						<EmptyState systemImage="map" title="No route inventory">
 							The public router route inventory will appear here.
 						</EmptyState>
 					) : (
@@ -301,7 +298,7 @@ export function createNavigationPlugin(
 						))
 					)
 				) : visibleStack.length === 0 ? (
-					<EmptyState>
+					<EmptyState systemImage="square.stack.3d.up" title="No live stack">
 						The live public navigation stack will appear here.
 					</EmptyState>
 				) : (
@@ -373,28 +370,5 @@ export function createNavigationPlugin(
 }
 
 const styles = StyleSheet.create({
-	currentRoute: {
-		backgroundColor: colors.card,
-		borderRadius: 16,
-		gap: 5,
-		padding: 14,
-	},
-	currentLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		fontWeight: '600',
-	},
-	currentValue: { color: colors.label, fontFamily: 'Menlo', fontSize: 13 },
-	metrics: { flexDirection: 'row', gap: 7 },
-	metric: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		flex: 1,
-		paddingVertical: 10,
-	},
-	metricValue: { color: colors.label, fontSize: 19, fontWeight: '700' },
-	metricLabel: { color: colors.secondaryLabel, fontSize: 10, marginTop: 2 },
-	routeDot: { borderRadius: 5, height: 10, marginRight: 12, width: 10 },
 	stackBar: { borderRadius: 2, height: 32, marginRight: 10, width: 3 },
 });

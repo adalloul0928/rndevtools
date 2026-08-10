@@ -3,15 +3,20 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
 	PanelButton,
 	PanelSearchField,
+	PanelSegmentedControl,
 	PanelToolbar,
 } from '../components/panel-controls';
 import {
+	CodeBlock,
 	colors,
 	DisclosureCard,
 	EmptyState,
 	PanelList,
 	PanelScaffold,
+	PanelSignalCard,
+	PanelStatusBadge,
 } from '../components/panel-ui';
+import { SystemIcon } from '../components/system-icon';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite } from '../core/options';
 import { serializeValue } from '../core/serialize';
@@ -84,6 +89,52 @@ type StoragePanelRow =
 	| { kind: 'empty'; id: string; message: string }
 	| { kind: 'validationHeader' }
 	| { kind: 'validation'; result: StorageValidationResult };
+
+export type StorageKeyPresentation = {
+	title: string;
+	context: string;
+};
+
+function humanizeKeyPart(value: string): string {
+	if (value.startsWith('@')) return value;
+	if (/^v\d+$/i.test(value)) return value.toUpperCase();
+	const spaced = value.replace(/[._-]+/g, ' ').trim();
+	return spaced ? `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}` : value;
+}
+
+function describeStorageUrl(value: string): string {
+	try {
+		const url = new URL(value);
+		const path = url.pathname.split('/').filter(Boolean).slice(-2).join('/');
+		return `${url.hostname}${path ? `/${path}` : ''}`;
+	} catch {
+		return value;
+	}
+}
+
+export function createStorageKeyPresentation(
+	key: string,
+): StorageKeyPresentation {
+	const urlStart = key.search(/https?:\/\//i);
+	const prefix = urlStart >= 0 ? key.slice(0, urlStart) : key;
+	const url = urlStart >= 0 ? key.slice(urlStart) : undefined;
+	const parts = prefix.replace(/[:/]$/, '').split(/[:/]+/).filter(Boolean);
+	const titleParts = url ? parts.slice(-2) : parts.slice(-1);
+	const contextParts = url ? parts.slice(0, -2) : parts.slice(0, -1);
+
+	return {
+		title:
+			titleParts.map(humanizeKeyPart).join(' · ') ||
+			(url ? 'Stored URL value' : key),
+		context:
+			[
+				contextParts.map(humanizeKeyPart).join(' › '),
+				url ? describeStorageUrl(url) : '',
+			]
+				.filter(Boolean)
+				.join(' · ') || 'Application key',
+	};
+}
 
 export function createStoragePlugin({
 	adapters,
@@ -232,15 +283,31 @@ export function createStoragePlugin({
 			setDraft(entry.value ?? '');
 		}, [entry.value]);
 		const canEdit = isStorageEntryEditable(adapter, entry);
-		const subtitle = entry.valueHidden
+		const valueSummary = entry.valueHidden
 			? 'Value protected'
 			: entry.readError
 				? `Read failed · ${entry.readError}`
 				: entry.binary
 					? 'Binary value · editing disabled'
-					: `${entry.value?.length ?? 0} displayed characters${entry.truncated ? ' · truncated · editing disabled' : ''}`;
+					: `${humanizeKeyPart(entry.valueType ?? 'unknown')} · ${entry.value?.length ?? 0} chars${entry.truncated ? ' · truncated' : ''}`;
+		const presentation = createStorageKeyPresentation(entry.key);
 		return (
-			<DisclosureCard title={entry.key} subtitle={subtitle}>
+			<DisclosureCard
+				leading={
+					<View style={styles.keyIcon}>
+						<SystemIcon
+							systemName={entry.valueHidden ? 'lock.fill' : 'doc.text.fill'}
+							size={16}
+						/>
+					</View>
+				}
+				title={presentation.title}
+				subtitle={`${presentation.context} · ${valueSummary}`}
+			>
+				<View style={styles.keyDetails}>
+					<Text style={styles.detailLabel}>Full key</Text>
+					<CodeBlock>{entry.key}</CodeBlock>
+				</View>
 				{entry.valueHidden ? (
 					<Text style={styles.protectedText}>
 						This adapter exposes key metadata only. Its values are never read.
@@ -334,9 +401,15 @@ export function createStoragePlugin({
 			() =>
 				snapshot.adapters.map((adapter) => ({
 					...adapter,
-					entries: adapter.entries.filter((entry) =>
-						entry.key.toLowerCase().includes(needle),
-					),
+					entries: adapter.entries.filter((entry) => {
+						const presentation = createStorageKeyPresentation(entry.key);
+						return (
+							!needle ||
+							entry.key.toLowerCase().includes(needle) ||
+							presentation.title.toLowerCase().includes(needle) ||
+							presentation.context.toLowerCase().includes(needle)
+						);
+					}),
 				})),
 			[needle, snapshot.adapters],
 		);
@@ -344,14 +417,16 @@ export function createStoragePlugin({
 			() => validateStorageSnapshot(snapshot, rules),
 			[snapshot],
 		);
-		const validCount = validation.filter(
-			(result) => result.status === 'valid' || result.status === 'protected',
+		const issueCount = validation.filter(
+			(result) => result.status !== 'valid' && result.status !== 'protected',
 		).length;
-		const issueCount = validation.length - validCount;
 		const keyCount = snapshot.adapters.reduce(
 			(sum, adapter) => sum + adapter.entries.length,
 			0,
 		);
+		const adapterErrorCount = snapshot.adapters.filter(
+			(adapter) => adapter.error,
+		).length;
 		const rows = useMemo<readonly StoragePanelRow[]>(() => {
 			if (tab === 'events') {
 				const filteredEvents = [...events]
@@ -424,42 +499,44 @@ export function createStoragePlugin({
 					data={rows}
 					header={
 						<View style={styles.panelHeader}>
-							<View style={styles.metrics}>
-								<View style={styles.metric}>
-									<Text style={styles.metricValue}>
-										{snapshot.adapters.length}
-									</Text>
-									<Text style={styles.metricLabel}>Adapters</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={styles.metricValue}>{keyCount}</Text>
-									<Text style={styles.metricLabel}>Keys</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={[styles.metricValue, { color: colors.green }]}>
-										{validCount}
-									</Text>
-									<Text style={styles.metricLabel}>Checks</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={[styles.metricValue, { color: colors.red }]}>
-										{issueCount}
-									</Text>
-									<Text style={styles.metricLabel}>Issues</Text>
-								</View>
-							</View>
-							<PanelToolbar>
-								<PanelButton
-									label="Browser"
-									onPress={() => setTab('browser')}
-									selected={tab === 'browser'}
-								/>
-								<PanelButton
-									label="Events"
-									onPress={() => setTab('events')}
-									selected={tab === 'events'}
-								/>
-							</PanelToolbar>
+							<PanelSignalCard
+								description={
+									snapshot.loading
+										? 'Registered adapters are being read now.'
+										: `${snapshot.adapters.length} adapters expose ${keyCount} keys and ${events.length} recent changes.`
+								}
+								eyebrow="Storage signal"
+								systemImage={
+									snapshot.loading
+										? 'arrow.triangle.2.circlepath'
+										: issueCount + adapterErrorCount > 0
+											? 'exclamationmark.triangle.fill'
+											: 'checkmark.circle.fill'
+								}
+								title={
+									snapshot.loading
+										? 'Refreshing storage'
+										: issueCount + adapterErrorCount > 0
+											? `${issueCount + adapterErrorCount} storage issue${issueCount + adapterErrorCount === 1 ? '' : 's'}`
+											: 'Registered storage looks healthy'
+								}
+								tone={
+									snapshot.loading
+										? 'info'
+										: issueCount + adapterErrorCount > 0
+											? 'warning'
+											: 'success'
+								}
+							/>
+							<PanelSegmentedControl
+								accessibilityLabel="Storage inspector"
+								onChange={setTab}
+								options={[
+									{ id: 'browser', label: 'Browser' },
+									{ id: 'events', label: 'Events' },
+								]}
+								selected={tab}
+							/>
 							<PanelSearchField
 								onChangeText={setSearch}
 								placeholder="Search storage keys"
@@ -496,10 +573,28 @@ export function createStoragePlugin({
 					renderItem={({ item: row }) => {
 						switch (row.kind) {
 							case 'empty':
-								return <EmptyState>{row.message}</EmptyState>;
+								return (
+									<EmptyState
+										systemImage={
+											tab === 'events'
+												? 'clock.arrow.circlepath'
+												: 'externaldrive'
+										}
+										title={
+											tab === 'events'
+												? 'No storage events'
+												: 'No matching keys'
+										}
+									>
+										{row.message}
+									</EmptyState>
+								);
 							case 'adapter':
 								return (
 									<View style={styles.adapterHeader}>
+										<View style={styles.adapterIcon}>
+											<SystemIcon systemName="externaldrive.fill" size={17} />
+										</View>
 										<View style={styles.adapterCopy}>
 											<Text style={styles.adapterTitle}>
 												{row.adapter.title}
@@ -538,26 +633,32 @@ export function createStoragePlugin({
 										runMutation={runMutation}
 									/>
 								);
-							case 'event':
+							case 'event': {
+								const presentation = createStorageKeyPresentation(
+									row.event.key,
+								);
 								return (
 									<DisclosureCard
 										leading={
-											<View
-												style={[
-													styles.eventDot,
-													{
-														backgroundColor:
-															row.event.type === 'removed'
-																? colors.red
-																: row.event.type === 'added'
-																	? colors.green
-																	: colors.blue,
-													},
-												]}
+											<PanelStatusBadge
+												label={
+													row.event.type === 'removed'
+														? 'DEL'
+														: row.event.type === 'added'
+															? 'ADD'
+															: 'EDIT'
+												}
+												tone={
+													row.event.type === 'removed'
+														? 'danger'
+														: row.event.type === 'added'
+															? 'success'
+															: 'info'
+												}
 											/>
 										}
-										title={row.event.key}
-										subtitle={`${row.event.type} · ${row.event.adapterTitle} · ${new Date(row.event.at).toLocaleTimeString()}`}
+										title={presentation.title}
+										subtitle={`${row.event.type} · ${row.event.adapterTitle} · ${presentation.context} · ${new Date(row.event.at).toLocaleTimeString()}`}
 									>
 										<Text style={styles.protectedText}>
 											{row.event.valueHidden
@@ -576,23 +677,26 @@ export function createStoragePlugin({
 										) : null}
 									</DisclosureCard>
 								);
+							}
 							case 'validationHeader':
 								return <Text style={styles.adapterTitle}>Expected keys</Text>;
 							case 'validation':
 								return (
 									<DisclosureCard
 										leading={
-											<View
-												style={[
-													styles.eventDot,
-													{
-														backgroundColor:
-															row.result.status === 'valid' ||
-															row.result.status === 'protected'
-																? colors.green
-																: colors.red,
-													},
-												]}
+											<PanelStatusBadge
+												label={
+													row.result.status === 'valid' ||
+													row.result.status === 'protected'
+														? 'PASS'
+														: 'ISSUE'
+												}
+												tone={
+													row.result.status === 'valid' ||
+													row.result.status === 'protected'
+														? 'success'
+														: 'danger'
+												}
 											/>
 										}
 										title={row.result.key}
@@ -680,17 +784,25 @@ export function createStoragePlugin({
 
 const styles = StyleSheet.create({
 	panelHeader: { gap: 10 },
-	metrics: { flexDirection: 'row', gap: 7 },
-	metric: {
+	keyIcon: {
 		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		flex: 1,
-		paddingVertical: 10,
+		backgroundColor: colors.background,
+		borderRadius: 9,
+		height: 34,
+		justifyContent: 'center',
+		marginRight: 11,
+		width: 34,
 	},
-	metricValue: { color: colors.label, fontSize: 19, fontWeight: '700' },
-	metricLabel: { color: colors.secondaryLabel, fontSize: 10, marginTop: 2 },
-	eventDot: { borderRadius: 5, height: 10, marginRight: 12, width: 10 },
+	keyDetails: {
+		gap: 7,
+		marginBottom: 10,
+	},
+	detailLabel: {
+		color: colors.secondaryLabel,
+		fontSize: 11,
+		fontWeight: '600',
+		textTransform: 'uppercase',
+	},
 	eventValue: {
 		color: colors.label,
 		fontFamily: 'Menlo',
@@ -700,9 +812,19 @@ const styles = StyleSheet.create({
 	},
 	adapterHeader: {
 		alignItems: 'center',
+		backgroundColor: colors.card,
+		borderRadius: 14,
 		flexDirection: 'row',
 		gap: 10,
-		paddingHorizontal: 4,
+		padding: 12,
+	},
+	adapterIcon: {
+		alignItems: 'center',
+		backgroundColor: colors.background,
+		borderRadius: 10,
+		height: 36,
+		justifyContent: 'center',
+		width: 36,
 	},
 	adapterCopy: {
 		flex: 1,

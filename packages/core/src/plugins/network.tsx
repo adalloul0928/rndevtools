@@ -3,6 +3,7 @@ import { Share, StyleSheet, Text, View } from 'react-native';
 import {
 	PanelButton,
 	PanelSearchField,
+	PanelSegmentedControl,
 	PanelToolbar,
 } from '../components/panel-controls';
 import {
@@ -11,7 +12,10 @@ import {
 	DisclosureCard,
 	EmptyState,
 	PanelList,
+	PanelMetricStrip,
 	PanelScaffold,
+	PanelSignalCard,
+	PanelStatusBadge,
 } from '../components/panel-ui';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite } from '../core/options';
@@ -76,27 +80,24 @@ export type NetworkPlugin = {
 
 function NetworkEventCard({ event }: { event: NetworkEvent }) {
 	const parsedUrl = parseNetworkUrl(event.url);
+	const endpoint =
+		parsedUrl.pathname.split('/').filter(Boolean).at(-1) ||
+		parsedUrl.host ||
+		parsedUrl.path;
+	const status = event.status ?? event.state.toUpperCase();
+	const statusTone =
+		event.state === 'pending'
+			? 'info'
+			: event.state !== 'success'
+				? 'danger'
+				: (event.status ?? 0) >= 400
+					? 'warning'
+					: 'success';
 	return (
 		<DisclosureCard
-			leading={
-				<View
-					style={[
-						styles.statusDot,
-						{
-							backgroundColor:
-								event.state === 'pending'
-									? colors.blue
-									: event.state !== 'success'
-										? colors.red
-										: (event.status ?? 0) >= 400
-											? colors.orange
-											: colors.green,
-						},
-					]}
-				/>
-			}
-			title={`${event.method} ${event.status ?? event.state.toUpperCase()}`}
-			subtitle={`${parsedUrl.path} · ${Math.round(event.durationMs)} ms`}
+			leading={<PanelStatusBadge label={String(status)} tone={statusTone} />}
+			title={`${event.method} · ${endpoint}`}
+			subtitle={`${parsedUrl.host || parsedUrl.path} · ${Math.round(event.durationMs)} ms · ${event.source}`}
 			renderDetails={() => (
 				<>
 					<PanelToolbar>
@@ -405,46 +406,60 @@ export function createNetworkPlugin(
 					}
 					header={
 						<>
-							<View style={styles.metrics}>
-								<View style={styles.metric}>
-									<Text style={styles.metricValue}>{events.length}</Text>
-									<Text style={styles.metricLabel}>Total</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={[styles.metricValue, { color: colors.blue }]}>
-										{pendingCount}
-									</Text>
-									<Text style={styles.metricLabel}>Pending</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={[styles.metricValue, { color: colors.green }]}>
-										{successCount}
-									</Text>
-									<Text style={styles.metricLabel}>Success</Text>
-								</View>
-								<View style={styles.metric}>
-									<Text style={[styles.metricValue, { color: colors.red }]}>
-										{errorCount}
-									</Text>
-									<Text style={styles.metricLabel}>Errors</Text>
-								</View>
-							</View>
+							<PanelSignalCard
+								description={
+									paused
+										? `${events.length} requests remain available while new traffic is ignored.`
+										: `${visibleEvents.length} of ${events.length} captured requests are visible.`
+								}
+								eyebrow="Capture status"
+								systemImage={
+									paused
+										? 'pause.circle.fill'
+										: errorCount > 0
+											? 'exclamationmark.triangle.fill'
+											: events.length > 0
+												? 'checkmark.circle.fill'
+												: 'network'
+								}
+								title={
+									paused
+										? 'Capture is paused'
+										: errorCount > 0
+											? `${errorCount} request${errorCount === 1 ? '' : 's'} need attention`
+											: events.length > 0
+												? 'Traffic looks healthy'
+												: 'Waiting for app traffic'
+								}
+								tone={
+									paused ? 'warning' : errorCount > 0 ? 'danger' : 'success'
+								}
+							/>
+							<PanelMetricStrip
+								metrics={[
+									{ label: 'Total', value: events.length },
+									{ label: 'Pending', value: pendingCount, tone: colors.blue },
+									{ label: 'Success', value: successCount, tone: colors.green },
+									{ label: 'Errors', value: errorCount, tone: colors.red },
+								]}
+							/>
 							<PanelSearchField
 								onChangeText={setSearch}
 								placeholder="Search URL, method, or status"
 								value={search}
 							/>
-							<PanelToolbar>
-								{(['all', 'pending', 'errors', 'success'] as const).map(
-									(value) => (
-										<PanelButton
-											key={value}
-											label={value.charAt(0).toUpperCase() + value.slice(1)}
-											onPress={() => setFilter(value)}
-											selected={filter === value}
-										/>
-									),
+							<PanelSegmentedControl
+								accessibilityLabel="Network request filter"
+								onChange={setFilter}
+								options={(['all', 'pending', 'errors', 'success'] as const).map(
+									(value) => ({
+										id: value,
+										label: value.charAt(0).toUpperCase() + value.slice(1),
+									}),
 								)}
+								selected={filter}
+							/>
+							<PanelToolbar>
 								<PanelButton
 									label={paused ? 'Resume' : 'Pause'}
 									onPress={() => pausedStore.set(!paused)}
@@ -514,22 +529,6 @@ export function createNetworkPlugin(
 }
 
 const styles = StyleSheet.create({
-	metrics: { flexDirection: 'row', gap: 7 },
-	metric: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		flex: 1,
-		paddingVertical: 10,
-	},
-	metricValue: { color: colors.label, fontSize: 19, fontWeight: '700' },
-	metricLabel: { color: colors.secondaryLabel, fontSize: 10, marginTop: 2 },
-	statusDot: {
-		borderRadius: 5,
-		height: 10,
-		marginRight: 12,
-		width: 10,
-	},
 	detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
 	detailMetric: {
 		backgroundColor: colors.background,

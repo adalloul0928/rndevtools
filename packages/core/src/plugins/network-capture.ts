@@ -148,7 +148,10 @@ export function parseContentLength(value: string | null): number | undefined {
 }
 
 export function parseNetworkUrl(rawUrl: string): {
+	host: string;
+	origin: string;
 	path: string;
+	pathname: string;
 	query: Readonly<Record<string, string | readonly string[]>>;
 } {
 	try {
@@ -163,9 +166,21 @@ export function parseNetworkUrl(rawUrl: string): {
 						? [...current, value]
 						: [current, value];
 		}
-		return { path: `${url.origin}${url.pathname}`, query };
+		return {
+			host: url.host,
+			origin: url.origin,
+			path: `${url.origin}${url.pathname}`,
+			pathname: url.pathname,
+			query,
+		};
 	} catch {
-		return { path: rawUrl, query: {} };
+		return {
+			host: '',
+			origin: '',
+			path: rawUrl,
+			pathname: rawUrl,
+			query: {},
+		};
 	}
 }
 

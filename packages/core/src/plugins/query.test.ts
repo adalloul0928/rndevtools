@@ -3,9 +3,17 @@ import {
 	createMutationSnapshot,
 	createQueryPlugin,
 	createQuerySnapshot,
+	formatQueryKey,
 } from './query';
 
 describe('createQuerySnapshot', () => {
+	it('formats query keys as readable breadcrumbs', () => {
+		expect(formatQueryKey(['workouts', 'today', { userId: 42 }])).toBe(
+			'workouts › today › { "userId": 42 }',
+		);
+		expect(formatQueryKey(undefined)).toBe('Anonymous mutation');
+	});
+
 	it('captures public query state and optional data', () => {
 		const queryClient = new QueryClient({
 			defaultOptions: { mutations: { gcTime: Number.POSITIVE_INFINITY } },

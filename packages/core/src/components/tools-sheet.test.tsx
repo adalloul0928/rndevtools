@@ -3,6 +3,33 @@ import { Text } from 'react-native';
 import type { DevToolsPanelPlugin } from '../types';
 import { ToolsSheet } from './tools-sheet';
 
+jest.mock('@expo/ui', () => {
+	const ReactRuntime = jest.requireActual('react');
+	const Native = jest.requireActual('react-native');
+	return {
+		Icon: () => ReactRuntime.createElement(Native.View),
+		ListItem: ({
+			children,
+			onPress,
+			supportingText,
+			testID,
+		}: {
+			children?: React.ReactNode;
+			onPress: () => void;
+			supportingText?: React.ReactNode;
+			testID?: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.Pressable,
+				{ onPress, testID },
+				ReactRuntime.createElement(Native.Text, null, children),
+				supportingText
+					? ReactRuntime.createElement(Native.Text, null, supportingText)
+					: null,
+			),
+	};
+});
+
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
@@ -46,14 +73,32 @@ jest.mock('@expo/ui/swift-ui', () => {
 					ReactRuntime.createElement(Native.Text, null, 'Dismiss'),
 				),
 			),
-		Button: ({ label, onPress }: { label: string; onPress: () => void }) =>
+		Button: ({
+			children,
+			label,
+			onPress,
+		}: {
+			children?: React.ReactNode;
+			label?: string;
+			onPress: () => void;
+		}) =>
 			ReactRuntime.createElement(
 				Native.Pressable,
 				{ accessibilityLabel: label, onPress },
-				ReactRuntime.createElement(Native.Text, null, label),
+				children ?? ReactRuntime.createElement(Native.Text, null, label),
 			),
-		Label: ({ title }: { title: string }) =>
-			ReactRuntime.createElement(Native.Text, null, title),
+		Label: ({
+			children,
+			title,
+		}: {
+			children?: React.ReactNode;
+			title?: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				null,
+				children ?? ReactRuntime.createElement(Native.Text, null, title),
+			),
 		Picker: ({
 			children,
 			onSelectionChange,
@@ -81,9 +126,13 @@ jest.mock('@expo/ui/swift-ui', () => {
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	buttonStyle: (value: unknown) => value,
+	contentShape: (value: unknown) => value,
+	frame: (value: unknown) => value,
+	padding: (value: unknown) => value,
 	pickerStyle: (value: unknown) => value,
 	presentationDetents: (value: unknown) => value,
 	presentationDragIndicator: (value: unknown) => value,
+	shapes: { rectangle: () => ({ shape: 'rectangle' }) },
 	tag: (value: unknown) => value,
 }));
 
@@ -117,7 +166,7 @@ describe('ToolsSheet', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Example'));
+		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		fireEvent.press(screen.getByLabelText('Select window presentation'));
 		fireEvent.press(screen.getByLabelText('Dismiss native sheet'));
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);

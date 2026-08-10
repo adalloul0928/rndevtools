@@ -1,13 +1,26 @@
 import { Share, StyleSheet, Text, View } from 'react-native';
 import { PanelButton, PanelToolbar } from '../components/panel-controls';
 import {
+	CodeBlock,
 	colors,
 	DisclosureCard,
+	PanelMetricStrip,
 	PanelScaffold,
+	PanelSignalCard,
+	PanelStatusBadge,
 	panelStyles,
 } from '../components/panel-ui';
 import { serializeValue } from '../core/serialize';
 import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
+
+export function formatEnvironmentValue(value: unknown): string {
+	if (value === undefined || value === null || value === '') return 'Not set';
+	if (typeof value === 'string') return value;
+	if (typeof value === 'boolean' || typeof value === 'number') {
+		return String(value);
+	}
+	return serializeValue(value, 16 * 1024).text;
+}
 
 export type EnvironmentValueType =
 	| 'string'
@@ -158,6 +171,15 @@ function validationLabel(result: EnvironmentValidationResult): string {
 	return `Expected ${serializeValue(result.expectedValue, 256).text}`;
 }
 
+function formatEnvironmentKey(key: string): string {
+	return key
+		.replace(/^EXPO_PUBLIC_/, '')
+		.split(/[_\-.]+/)
+		.filter(Boolean)
+		.map((part) => `${part.charAt(0)}${part.slice(1).toLowerCase()}`)
+		.join(' ');
+}
+
 export function createEnvironmentPlugin({
 	values = {},
 	sections,
@@ -214,72 +236,45 @@ export function createEnvironmentPlugin({
 				title={title}
 				subtitle={`${entryCount} declared values`}
 			>
-				<PanelToolbar>
-					<PanelButton
-						label="Share manifest"
-						onPress={() => {
-							void Share.share({
-								message: serializeValue(exportValue, 512 * 1024).text,
-								title,
-							}).catch(() => undefined);
-						}}
-					/>
-				</PanelToolbar>
+				<PanelSignalCard
+					description={
+						validationResults.length
+							? `${validCount} of ${validationResults.length} declared checks pass.`
+							: `${entryCount} values were deliberately provided by the app.`
+					}
+					eyebrow="Configuration signal"
+					systemImage={
+						missingCount + issueCount > 0
+							? 'exclamationmark.triangle.fill'
+							: 'checkmark.circle.fill'
+					}
+					title={
+						missingCount + issueCount > 0
+							? `${missingCount + issueCount} configuration issue${missingCount + issueCount === 1 ? '' : 's'}`
+							: 'Configuration looks healthy'
+					}
+					tone={missingCount + issueCount > 0 ? 'warning' : 'success'}
+				/>
 				{validationResults.length ? (
 					<View style={styles.validationSection}>
-						<Text style={panelStyles.sectionLabel}>Configuration health</Text>
-						<View style={styles.healthCard}>
-							<View style={styles.healthCopy}>
-								<Text style={styles.healthTitle}>Environment checks</Text>
-								<Text style={styles.healthSubtitle}>
-									{validCount} of {validationResults.length} checks pass
-								</Text>
-							</View>
-							<Text
-								style={[
-									styles.healthValue,
-									{ color: health === 100 ? colors.green : colors.orange },
-								]}
-							>
-								{health}%
-							</Text>
-						</View>
-						<View style={styles.metrics}>
-							<View style={styles.metric}>
-								<Text style={styles.metricValue}>{validCount}</Text>
-								<Text style={styles.metricLabel}>Valid</Text>
-							</View>
-							<View style={styles.metric}>
-								<Text style={[styles.metricValue, { color: colors.red }]}>
-									{missingCount}
-								</Text>
-								<Text style={styles.metricLabel}>Missing</Text>
-							</View>
-							<View style={styles.metric}>
-								<Text style={[styles.metricValue, { color: colors.orange }]}>
-									{issueCount}
-								</Text>
-								<Text style={styles.metricLabel}>Issues</Text>
-							</View>
-						</View>
+						<Text style={panelStyles.sectionLabel}>Configuration checks</Text>
+						<PanelMetricStrip
+							metrics={[
+								{ label: 'Health', value: `${health}%` },
+								{ label: 'Valid', value: validCount, tone: colors.green },
+								{ label: 'Missing', value: missingCount, tone: colors.red },
+								{ label: 'Issues', value: issueCount, tone: colors.orange },
+							]}
+						/>
 						{validationResults.map((result) => (
 							<DisclosureCard
 								key={`${result.section ?? '*'}:${result.key}`}
-								title={result.key}
-								subtitle={validationLabel(result)}
+								title={formatEnvironmentKey(result.key)}
+								subtitle={`${validationLabel(result)} · ${result.key}`}
 								leading={
-									<View
-										style={[
-											styles.statusDot,
-											{
-												backgroundColor:
-													result.status === 'valid'
-														? colors.green
-														: result.status === 'missing'
-															? colors.red
-															: colors.orange,
-											},
-										]}
+									<PanelStatusBadge
+										label={result.status === 'valid' ? 'PASS' : 'ISSUE'}
+										tone={result.status === 'valid' ? 'success' : 'warning'}
 									/>
 								}
 							>
@@ -288,9 +283,12 @@ export function createEnvironmentPlugin({
 										{result.description}
 									</Text>
 								) : null}
-								<Text selectable style={panelStyles.valueText}>
-									Actual: {serializeValue(result.actualValue, 16 * 1024).text}
-								</Text>
+								<View style={styles.actualValue}>
+									<Text style={styles.actualLabel}>Actual value</Text>
+									<CodeBlock>
+										{formatEnvironmentValue(result.actualValue)}
+									</CodeBlock>
+								</View>
 							</DisclosureCard>
 						))}
 					</View>
@@ -305,9 +303,14 @@ export function createEnvironmentPlugin({
 							<View style={styles.group}>
 								{entries.map(([key, value]) => (
 									<View key={key} style={panelStyles.valueRow}>
-										<Text style={panelStyles.valueKey}>{key}</Text>
+										<Text style={panelStyles.valueKey}>
+											{formatEnvironmentKey(key)}
+										</Text>
+										<Text selectable style={styles.rawKey}>
+											{key}
+										</Text>
 										<Text selectable style={panelStyles.valueText}>
-											{serializeValue(value, 16 * 1024).text}
+											{formatEnvironmentValue(value)}
 										</Text>
 									</View>
 								))}
@@ -315,6 +318,17 @@ export function createEnvironmentPlugin({
 						</View>
 					);
 				})}
+				<PanelToolbar>
+					<PanelButton
+						label="Share manifest"
+						onPress={() => {
+							void Share.share({
+								message: serializeValue(exportValue, 512 * 1024).text,
+								title,
+							}).catch(() => undefined);
+						}}
+					/>
+				</PanelToolbar>
 			</PanelScaffold>
 		);
 	}
@@ -331,33 +345,23 @@ export function createEnvironmentPlugin({
 
 const styles = StyleSheet.create({
 	validationSection: { gap: 8 },
-	healthCard: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 16,
-		flexDirection: 'row',
-		padding: 16,
+	rawKey: {
+		color: colors.secondaryLabel,
+		fontFamily: 'Menlo',
+		fontSize: 10,
 	},
-	healthCopy: { flex: 1, gap: 3 },
-	healthTitle: { color: colors.label, fontSize: 16, fontWeight: '700' },
-	healthSubtitle: { color: colors.secondaryLabel, fontSize: 12 },
-	healthValue: { fontSize: 24, fontWeight: '700', letterSpacing: -0.7 },
-	metrics: { flexDirection: 'row', gap: 8 },
-	metric: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 14,
-		flex: 1,
-		paddingVertical: 12,
-	},
-	metricValue: { color: colors.green, fontSize: 20, fontWeight: '700' },
-	metricLabel: { color: colors.secondaryLabel, fontSize: 11, marginTop: 2 },
-	statusDot: { borderRadius: 5, height: 10, marginRight: 12, width: 10 },
 	validationDescription: {
 		color: colors.secondaryLabel,
 		fontSize: 13,
 		lineHeight: 18,
 		marginBottom: 8,
+	},
+	actualValue: { gap: 7 },
+	actualLabel: {
+		color: colors.secondaryLabel,
+		fontSize: 11,
+		fontWeight: '600',
+		textTransform: 'uppercase',
 	},
 	section: { gap: 4 },
 	group: {

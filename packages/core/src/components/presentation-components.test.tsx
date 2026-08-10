@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { StyleSheet, Text } from 'react-native';
+import { PlatformColor, StyleSheet, Text } from 'react-native';
 import type { DevToolsPlugin } from '../types';
 import { FloatingLauncher } from './floating-launcher';
 import { FloatingWindow } from './floating-window';
@@ -125,7 +125,7 @@ describe('presentation components', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Example'));
+		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		fireEvent.press(screen.getByLabelText('Pill presentation'));
 		fireEvent.press(screen.getByLabelText('Close developer tools'));
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);
@@ -142,7 +142,7 @@ describe('presentation components', () => {
 		).toEqual({ selected: true });
 		expect(
 			StyleSheet.flatten(screen.getByText('Sheet').props.style).color,
-		).toBe('#FFFFFF');
+		).toEqual(PlatformColor('labelColor'));
 		fireEvent.press(screen.getByLabelText('Window presentation'));
 		expect(onModeChange).toHaveBeenCalledWith('window');
 	});

@@ -25,9 +25,13 @@ async function flushCapture(): Promise<void> {
 
 describe('createNetworkPlugin', () => {
 	it('parses query parameters and formats payload sizes', () => {
-		expect(parseNetworkUrl('https://example.test/items?a=1&a=2').query).toEqual(
-			{ a: ['1', '2'] },
-		);
+		expect(parseNetworkUrl('https://example.test/items?a=1&a=2')).toEqual({
+			host: 'example.test',
+			origin: 'https://example.test',
+			path: 'https://example.test/items',
+			pathname: '/items',
+			query: { a: ['1', '2'] },
+		});
 		expect(formatNetworkBytes(1536)).toBe('1.5 KB');
 	});
 	it('passes through without collecting while the plugin is not installed', async () => {

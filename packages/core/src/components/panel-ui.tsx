@@ -6,6 +6,7 @@ import {
 	useState,
 } from 'react';
 import {
+	type ColorValue,
 	type FlatListProps,
 	PlatformColor,
 	StyleSheet,
@@ -13,7 +14,7 @@ import {
 	View,
 } from 'react-native';
 import { FlatList, RectButton } from 'react-native-gesture-handler';
-import type { DevToolsPanelProps } from '../types';
+import type { DevToolsPanelProps, DevToolsSystemImage } from '../types';
 import { SystemIcon } from './system-icon';
 
 export const colors = {
@@ -119,6 +120,91 @@ export function PanelList<T>({
 	);
 }
 
+export type PanelMetric = {
+	label: string;
+	value: string | number;
+	tone?: ColorValue;
+};
+
+export type PanelTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+
+function toneColor(tone: PanelTone): ColorValue {
+	if (tone === 'success') return colors.green;
+	if (tone === 'warning') return colors.orange;
+	if (tone === 'danger') return colors.red;
+	if (tone === 'info') return colors.blue;
+	return colors.secondaryLabel;
+}
+
+export function PanelSignalCard({
+	systemImage,
+	eyebrow,
+	title,
+	description,
+	tone = 'neutral',
+}: {
+	systemImage: DevToolsSystemImage;
+	eyebrow: string;
+	title: string;
+	description: string;
+	tone?: PanelTone;
+}) {
+	const accent = toneColor(tone);
+	return (
+		<View style={styles.signalCard}>
+			<View style={styles.signalIcon}>
+				<SystemIcon systemName={systemImage} size={22} color={accent} />
+			</View>
+			<View style={styles.signalCopy}>
+				<Text style={[styles.signalEyebrow, { color: accent }]}>{eyebrow}</Text>
+				<Text style={styles.signalTitle}>{title}</Text>
+				<Text style={styles.signalDescription}>{description}</Text>
+			</View>
+		</View>
+	);
+}
+
+export function PanelStatusBadge({
+	label,
+	tone = 'neutral',
+}: {
+	label: string;
+	tone?: PanelTone;
+}) {
+	const accent = toneColor(tone);
+	return (
+		<View style={[styles.statusBadge, { borderColor: accent }]}>
+			<Text style={[styles.statusBadgeText, { color: accent }]}>{label}</Text>
+		</View>
+	);
+}
+
+export function PanelMetricStrip({
+	metrics,
+}: {
+	metrics: readonly PanelMetric[];
+}) {
+	return (
+		<View style={styles.metricStrip}>
+			{metrics.map((metric, index) => (
+				<View
+					key={metric.label}
+					style={[styles.metric, index > 0 && styles.metricDivider]}
+				>
+					<Text
+						style={[styles.metricValue, { color: metric.tone ?? colors.label }]}
+					>
+						{metric.value}
+					</Text>
+					<Text numberOfLines={1} style={styles.metricLabel}>
+						{metric.label}
+					</Text>
+				</View>
+			))}
+		</View>
+	);
+}
+
 function PanelListSeparator() {
 	return <View style={styles.listSeparator} />;
 }
@@ -143,6 +229,7 @@ export function DisclosureCard({
 		<View style={styles.card}>
 			<RectButton
 				onPress={() => setExpanded((current) => !current)}
+				accessibilityLabel={[title, subtitle].filter(Boolean).join(', ')}
 				accessibilityRole="button"
 				accessibilityState={{ expanded }}
 				style={styles.cardButton}
@@ -179,9 +266,24 @@ export function CodeBlock({ children }: { children: string }) {
 	);
 }
 
-export function EmptyState({ children }: PropsWithChildren) {
+export function EmptyState({
+	children,
+	title,
+	systemImage = 'tray',
+}: PropsWithChildren<{
+	title?: string;
+	systemImage?: DevToolsSystemImage;
+}>) {
 	return (
 		<View style={styles.empty}>
+			<View style={styles.emptyIcon}>
+				<SystemIcon
+					systemName={systemImage}
+					size={24}
+					color={colors.secondaryLabel}
+				/>
+			</View>
+			{title ? <Text style={styles.emptyTitle}>{title}</Text> : null}
 			<Text style={styles.emptyText}>{children}</Text>
 		</View>
 	);
@@ -228,9 +330,10 @@ const styles = StyleSheet.create({
 		borderBottomColor: colors.separator,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		flexDirection: 'row',
-		minHeight: 68,
+		minHeight: 84,
+		paddingBottom: 12,
 		paddingHorizontal: 12,
-		paddingVertical: 8,
+		paddingTop: 20,
 	},
 	backButton: {
 		alignItems: 'center',
@@ -262,26 +365,26 @@ const styles = StyleSheet.create({
 		gap: 10,
 		paddingBottom: 48,
 		paddingHorizontal: 14,
-		paddingTop: 16,
+		paddingTop: 14,
 	},
 	listHeader: {
-		gap: 10,
-		marginBottom: 10,
+		gap: 8,
+		marginBottom: 8,
 	},
 	listSeparator: {
-		height: 10,
+		height: 8,
 	},
 	card: {
 		backgroundColor: colors.card,
-		borderRadius: 16,
+		borderRadius: 14,
 		overflow: 'hidden',
 	},
 	cardButton: {
 		alignItems: 'center',
 		flexDirection: 'row',
-		minHeight: 66,
+		minHeight: 62,
 		paddingHorizontal: 14,
-		paddingVertical: 10,
+		paddingVertical: 11,
 	},
 	cardCopy: {
 		flex: 1,
@@ -303,15 +406,117 @@ const styles = StyleSheet.create({
 		padding: 14,
 	},
 	code: {
+		backgroundColor: colors.background,
+		borderColor: colors.separator,
+		borderRadius: 10,
+		borderWidth: StyleSheet.hairlineWidth,
 		color: colors.label,
 		fontFamily: 'Menlo',
 		fontSize: 11,
 		lineHeight: 17,
+		overflow: 'hidden',
+		padding: 10,
+	},
+	metricStrip: {
+		backgroundColor: colors.card,
+		borderRadius: 14,
+		flexDirection: 'row',
+		overflow: 'hidden',
+	},
+	metric: {
+		alignItems: 'center',
+		flex: 1,
+		justifyContent: 'center',
+		minHeight: 58,
+		paddingHorizontal: 4,
+		paddingVertical: 9,
+	},
+	metricDivider: {
+		borderLeftColor: colors.separator,
+		borderLeftWidth: StyleSheet.hairlineWidth,
+	},
+	metricValue: {
+		fontSize: 18,
+		fontVariant: ['tabular-nums'],
+		fontWeight: '700',
+		letterSpacing: -0.3,
+	},
+	metricLabel: {
+		color: colors.secondaryLabel,
+		fontSize: 10,
+		marginTop: 2,
+	},
+	signalCard: {
+		alignItems: 'flex-start',
+		backgroundColor: colors.card,
+		borderRadius: 16,
+		flexDirection: 'row',
+		gap: 12,
+		padding: 15,
+	},
+	signalIcon: {
+		alignItems: 'center',
+		backgroundColor: colors.background,
+		borderRadius: 12,
+		height: 44,
+		justifyContent: 'center',
+		width: 44,
+	},
+	signalCopy: {
+		flex: 1,
+		gap: 3,
+	},
+	signalEyebrow: {
+		fontSize: 11,
+		fontWeight: '700',
+		letterSpacing: 0.6,
+		textTransform: 'uppercase',
+	},
+	signalTitle: {
+		color: colors.label,
+		fontSize: 18,
+		fontWeight: '700',
+		letterSpacing: -0.35,
+	},
+	signalDescription: {
+		color: colors.secondaryLabel,
+		fontSize: 12,
+		lineHeight: 17,
+	},
+	statusBadge: {
+		alignItems: 'center',
+		borderRadius: 10,
+		borderWidth: 1,
+		justifyContent: 'center',
+		marginRight: 10,
+		minHeight: 22,
+		minWidth: 42,
+		paddingHorizontal: 7,
+	},
+	statusBadgeText: {
+		fontSize: 10,
+		fontVariant: ['tabular-nums'],
+		fontWeight: '700',
 	},
 	empty: {
 		alignItems: 'center',
 		paddingHorizontal: 32,
-		paddingVertical: 64,
+		paddingVertical: 48,
+	},
+	emptyIcon: {
+		alignItems: 'center',
+		backgroundColor: colors.card,
+		borderRadius: 22,
+		height: 44,
+		justifyContent: 'center',
+		marginBottom: 10,
+		width: 44,
+	},
+	emptyTitle: {
+		color: colors.label,
+		fontSize: 16,
+		fontWeight: '600',
+		marginBottom: 3,
 	},
 	emptyText: {
 		color: colors.secondaryLabel,

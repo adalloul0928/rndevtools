@@ -2,7 +2,7 @@ import { Component, type ErrorInfo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { RectButton } from 'react-native-gesture-handler';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
-import { colors, PanelScaffold } from './panel-ui';
+import { colors, PanelScaffold, PanelSignalCard } from './panel-ui';
 
 type PluginPanelRendererProps = {
 	plugin: DevToolsPanelPlugin;
@@ -39,10 +39,15 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 					title={plugin.title}
 					subtitle="Panel unavailable"
 				>
+					<PanelSignalCard
+						description="The collector is still isolated; return to the tool list and try opening this panel again."
+						eyebrow="Panel error"
+						systemImage="exclamationmark.triangle.fill"
+						title="This tool could not render"
+						tone="danger"
+					/>
 					<View style={styles.errorCard}>
-						<Text style={styles.errorTitle}>
-							This tool encountered an error.
-						</Text>
+						<Text style={styles.errorTitle}>Technical detail</Text>
 						<Text selectable style={styles.errorMessage}>
 							{error.message}
 						</Text>

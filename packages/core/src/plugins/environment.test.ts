@@ -1,9 +1,16 @@
 import {
 	createEnvironmentPlugin,
+	formatEnvironmentValue,
 	validateEnvironmentValues,
 } from './environment';
 
 describe('validateEnvironmentValues', () => {
+	it('formats declared values without JSON noise', () => {
+		expect(formatEnvironmentValue('development')).toBe('development');
+		expect(formatEnvironmentValue(true)).toBe('true');
+		expect(formatEnvironmentValue(undefined)).toBe('Not set');
+	});
+
 	it('reports valid, missing, type, and value checks', () => {
 		const sections = [
 			{

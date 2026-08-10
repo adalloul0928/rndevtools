@@ -1,7 +1,9 @@
 import type { PropsWithChildren } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { RectButton } from 'react-native-gesture-handler';
+import type { DevToolsSystemImage } from '../types';
 import { colors } from './panel-ui';
+import { SystemIcon } from './system-icon';
 
 export function PanelToolbar({ children }: PropsWithChildren) {
 	return <View style={styles.toolbar}>{children}</View>;
@@ -17,17 +19,79 @@ export function PanelSearchField({
 	placeholder?: string;
 }) {
 	return (
-		<TextInput
-			accessibilityLabel={placeholder}
-			autoCapitalize="none"
-			autoCorrect={false}
-			clearButtonMode="while-editing"
-			onChangeText={onChangeText}
-			placeholder={placeholder}
-			placeholderTextColor={colors.secondaryLabel}
-			style={styles.search}
-			value={value}
-		/>
+		<View style={styles.searchContainer}>
+			<SystemIcon
+				systemName="magnifyingglass"
+				size={16}
+				color={colors.secondaryLabel}
+			/>
+			<TextInput
+				accessibilityLabel={placeholder}
+				autoCapitalize="none"
+				autoCorrect={false}
+				clearButtonMode="while-editing"
+				onChangeText={onChangeText}
+				placeholder={placeholder}
+				placeholderTextColor={colors.secondaryLabel}
+				style={styles.search}
+				value={value}
+			/>
+		</View>
+	);
+}
+
+export function PanelSegmentedControl<T extends string>({
+	options,
+	selected,
+	onChange,
+	accessibilityLabel,
+}: {
+	options: ReadonlyArray<{
+		id: T;
+		label: string;
+		systemImage?: DevToolsSystemImage;
+	}>;
+	selected: T;
+	onChange: (value: T) => void;
+	accessibilityLabel?: string;
+}) {
+	return (
+		<View
+			accessibilityLabel={accessibilityLabel}
+			accessibilityRole="tablist"
+			style={styles.segmentedControl}
+		>
+			{options.map((option) => {
+				const isSelected = option.id === selected;
+				return (
+					<RectButton
+						key={option.id}
+						accessibilityLabel={option.label}
+						accessibilityRole="tab"
+						accessibilityState={{ selected: isSelected }}
+						onPress={() => onChange(option.id)}
+						style={[styles.segment, isSelected && styles.segmentSelected]}
+					>
+						{option.systemImage ? (
+							<SystemIcon
+								systemName={option.systemImage}
+								size={13}
+								color={isSelected ? colors.label : colors.secondaryLabel}
+							/>
+						) : null}
+						<Text
+							numberOfLines={1}
+							style={[
+								styles.segmentText,
+								isSelected && styles.segmentTextSelected,
+							]}
+						>
+							{option.label}
+						</Text>
+					</RectButton>
+				);
+			})}
+		</View>
 	);
 }
 
@@ -46,6 +110,7 @@ export function PanelButton({
 }) {
 	return (
 		<RectButton
+			accessibilityLabel={label}
 			accessibilityRole="button"
 			accessibilityState={{ disabled, selected }}
 			enabled={!disabled}
@@ -76,24 +141,64 @@ const styles = StyleSheet.create({
 		flexWrap: 'wrap',
 		gap: 7,
 	},
-	search: {
+	searchContainer: {
+		alignItems: 'center',
 		backgroundColor: colors.card,
-		borderColor: colors.separator,
 		borderRadius: 12,
-		borderWidth: StyleSheet.hairlineWidth,
+		flexDirection: 'row',
+		gap: 8,
+		minHeight: 42,
+		paddingLeft: 12,
+		paddingRight: 4,
+	},
+	search: {
 		color: colors.label,
+		flex: 1,
 		fontSize: 15,
 		minHeight: 42,
-		paddingHorizontal: 13,
 		paddingVertical: 9,
+	},
+	segmentedControl: {
+		backgroundColor: colors.separator,
+		borderRadius: 11,
+		flexDirection: 'row',
+		gap: 2,
+		padding: 2,
+	},
+	segment: {
+		alignItems: 'center',
+		borderRadius: 9,
+		flex: 1,
+		flexDirection: 'row',
+		gap: 5,
+		justifyContent: 'center',
+		minHeight: 36,
+		paddingHorizontal: 7,
+	},
+	segmentSelected: {
+		backgroundColor: colors.card,
+		shadowColor: colors.shadow,
+		shadowOffset: { height: 1, width: 0 },
+		shadowOpacity: 0.12,
+		shadowRadius: 2,
+	},
+	segmentText: {
+		color: colors.secondaryLabel,
+		fontSize: 12,
+		fontWeight: '600',
+	},
+	segmentTextSelected: {
+		color: colors.label,
 	},
 	button: {
 		backgroundColor: colors.card,
 		borderColor: colors.separator,
 		borderRadius: 10,
 		borderWidth: StyleSheet.hairlineWidth,
+		justifyContent: 'center',
+		minHeight: 44,
 		paddingHorizontal: 11,
-		paddingVertical: 8,
+		paddingVertical: 7,
 	},
 	buttonSelected: {
 		backgroundColor: colors.blue,
