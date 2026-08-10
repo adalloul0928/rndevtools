@@ -23,9 +23,11 @@ jest.mock('./tools-sheet', () => {
 		ToolsSheet: ({
 			selectedPlugin,
 			onPresentationModeChange,
+			onQuickActionPinnedChange,
 		}: {
 			selectedPlugin?: DevToolsPlugin;
 			onPresentationModeChange: InternalToolsProps['onPresentationModeChange'];
+			onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
 		}) => (
 			<View testID="sheet">
 				<Text>{selectedPlugin?.id ?? 'list'}</Text>
@@ -33,6 +35,12 @@ jest.mock('./tools-sheet', () => {
 					onPress={() => onPresentationModeChange?.('window')}
 					testID="to-window"
 				/>
+				{selectedPlugin?.pillQuickAction ? (
+					<Pressable
+						onPress={() => onQuickActionPinnedChange(selectedPlugin.id, true)}
+						testID="pin-quick-action"
+					/>
+				) : null}
 			</View>
 		),
 	};
@@ -60,10 +68,19 @@ jest.mock('./floating-window', () => {
 });
 
 jest.mock('./mini-pill', () => {
-	const { Pressable } = jest.requireActual('react-native');
+	const { Pressable, Text, View } = jest.requireActual('react-native');
 	return {
-		MiniPill: ({ onRestore }: { onRestore: () => void }) => (
-			<Pressable onPress={onRestore} testID="pill" />
+		MiniPill: ({
+			onRestore,
+			quickActionPlugins,
+		}: {
+			onRestore: () => void;
+			quickActionPlugins: readonly DevToolsPlugin[];
+		}) => (
+			<View testID="pill">
+				<Pressable onPress={onRestore} testID="restore-pill" />
+				<Text>{quickActionPlugins.map((entry) => entry.id).join(',')}</Text>
+			</View>
 		),
 	};
 });
@@ -75,6 +92,14 @@ const plugin: DevToolsPlugin = {
 	description: 'Example panel',
 	systemImage: 'wrench',
 	Panel,
+};
+const quickActionPlugin: DevToolsPlugin = {
+	...plugin,
+	id: 'state',
+	title: 'State',
+	pillQuickAction: {
+		options: [{ id: 'loading', label: 'Loading', action: () => {} }],
+	},
 };
 
 describe('InternalTools', () => {
@@ -97,11 +122,37 @@ describe('InternalTools', () => {
 		fireEvent.press(screen.getByTestId('to-pill'));
 		expect(screen.getByTestId('pill')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('pill'));
+		fireEvent.press(screen.getByTestId('restore-pill'));
 		expect(screen.getByTestId('window')).toBeOnTheScreen();
 
 		act(() => ref.current?.close());
 		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
+	});
+
+	it('persists pinned quick actions and supplies them to the pill', async () => {
+		const setItem = jest.fn();
+		const storage = { getItem: jest.fn(() => null), setItem };
+		const ref = createRef<InternalToolsHandle>();
+		render(
+			<InternalTools
+				enabled
+				persistence={{ storage, key: 'quick-actions' }}
+				plugins={[quickActionPlugin]}
+				ref={ref}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+
+		act(() => ref.current?.openPlugin('state'));
+		fireEvent.press(screen.getByTestId('pin-quick-action'));
+		act(() => ref.current?.setPresentationMode('pill'));
+		await act(async () => Promise.resolve());
+
+		expect(screen.getByText('state')).toBeOnTheScreen();
+		expect(setItem).toHaveBeenLastCalledWith(
+			'quick-actions',
+			expect.stringContaining('"pinnedPillQuickActionIds":["state"]'),
+		);
 	});
 
 	it('hydrates and persists runtime presentation state', async () => {

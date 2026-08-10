@@ -126,6 +126,45 @@ diagnostics. Custom panels also receive the current presentation mode, can
 switch modes themselves, and receive `actions.run(...)` for consistent
 confirmation, error routing, and audit events.
 
+Plugins with a small set of immediate choices can also opt into the minimized
+Pill. The host panel decides how to render its pin control using the optional
+`pillShortcut` controls; the runtime owns the pinned-plugin persistence and the
+native SwiftUI menu:
+
+```tsx
+const fixturesPlugin = createCustomPlugin({
+	id: 'fixtures',
+	title: 'Fixtures',
+	description: 'Switch application fixture data',
+	systemImage: 'shippingbox.fill',
+	section: 'My App',
+	pillQuickAction: {
+		getSelectedOptionId: () => fixtureStore.getState().mode,
+		subscribe: fixtureStore.subscribe,
+		options: [
+			{
+				id: 'live',
+				label: 'Live data',
+				action: () => fixtureStore.getState().setMode('live'),
+			},
+			{
+				id: 'mock',
+				label: 'Mock data',
+				action: () => fixtureStore.getState().setMode('mock'),
+			},
+		],
+	},
+	render: (controls) => (
+		<FixturesPanel pillShortcut={controls.pillShortcut} />
+	),
+});
+```
+
+Pill choices run through the same action service as full panels, including
+confirmation, audit events, and centralized errors. `subscribe` and
+`getSelectedOptionId` are optional for stateless menus; provide both when the
+native menu should mark the current choice.
+
 ## Presentation modes
 
 The runtime supports three interchangeable presentations:
@@ -133,7 +172,7 @@ The runtime supports three interchangeable presentations:
 - `sheet`: native Expo UI / SwiftUI bottom sheet and tool browser.
 - `window`: draggable floating window that leaves the application interactive.
 - `pill`: draggable minimized status pill that restores the previous expanded
-  presentation.
+  presentation and hosts pinned plugin quick-action menus.
 
 ```tsx
 <InternalTools
@@ -156,8 +195,8 @@ Use the optional controlled `presentationMode` and
 state. Switching presentation never reinstalls collectors or clears the active
 plugin.
 
-Launcher, window, pill, and presentation state can be persisted through any
-small key/value storage implementation:
+Launcher, window, pill position, pinned quick actions, and presentation state
+can be persisted through any small key/value storage implementation:
 
 ```tsx
 <InternalTools

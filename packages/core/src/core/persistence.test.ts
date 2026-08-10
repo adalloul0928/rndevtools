@@ -12,6 +12,7 @@ describe('parsePersistedState', () => {
 					presentationMode: 'window',
 					restoreMode: 'window',
 					launcherPosition: { x: 12, y: 24 },
+					pinnedPillQuickActionIds: ['state', 'source', 'state', 42],
 				}),
 			),
 		).toEqual({
@@ -19,6 +20,7 @@ describe('parsePersistedState', () => {
 			presentationMode: 'window',
 			restoreMode: 'window',
 			launcherPosition: { x: 12, y: 24 },
+			pinnedPillQuickActionIds: ['state', 'source'],
 		});
 	});
 

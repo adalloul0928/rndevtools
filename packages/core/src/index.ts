@@ -24,6 +24,7 @@ export { BoundedEventStore, ExternalStore } from './core/external-store';
 export {
 	assertUniquePluginIds,
 	groupPlugins,
+	hasPillQuickAction,
 	isPanelPlugin,
 } from './core/plugins';
 export { serializeValue, truncateText, utf8ByteLength } from './core/serialize';
@@ -38,8 +39,12 @@ export type {
 	DevToolsPanelProps,
 	DevToolsPersistenceOptions,
 	DevToolsPersistenceStorage,
+	DevToolsPillQuickAction,
+	DevToolsPillQuickActionOption,
+	DevToolsPillShortcutControls,
 	DevToolsPlugin,
 	DevToolsPluginMetadata,
+	DevToolsPluginWithPillQuickAction,
 	DevToolsPosition,
 	DevToolsPresentationMode,
 	DevToolsRuntimeErrorContext,

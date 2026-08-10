@@ -13,11 +13,17 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
-import type { DevToolsPosition } from '../types';
+import type {
+	DevToolsActionServices,
+	DevToolsPluginWithPillQuickAction,
+	DevToolsPosition,
+} from '../types';
 import { colors } from './panel-ui';
+import { PillQuickActionMenu } from './pill-quick-action-menu';
 import { SystemIcon } from './system-icon';
 
-const WIDTH = 190;
+const BASE_WIDTH = 190;
+const QUICK_ACTION_WIDTH = 42;
 const HEIGHT = 48;
 const EDGE_MARGIN = 10;
 
@@ -28,6 +34,9 @@ type MiniPillProps = {
 	initialPosition?: DevToolsPosition;
 	onPositionChange?: (position: DevToolsPosition) => void;
 	bottomObstructionInset?: number;
+	quickActionPlugins?: readonly DevToolsPluginWithPillQuickAction[];
+	actions: DevToolsActionServices;
+	onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -42,11 +51,18 @@ export function MiniPill({
 	initialPosition,
 	onPositionChange,
 	bottomObstructionInset = 0,
+	quickActionPlugins = [],
+	actions,
+	onQuickActionPinnedChange,
 }: MiniPillProps) {
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
+	const pillWidth = Math.min(
+		BASE_WIDTH + QUICK_ACTION_WIDTH * quickActionPlugins.length,
+		Math.max(120, width - EDGE_MARGIN * 2),
+	);
 	const minimumX = EDGE_MARGIN;
-	const maximumX = Math.max(minimumX, width - WIDTH - EDGE_MARGIN);
+	const maximumX = Math.max(minimumX, width - pillWidth - EDGE_MARGIN);
 	const minimumY = insets.top + EDGE_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
@@ -96,7 +112,7 @@ export function MiniPill({
 				})
 				.onEnd(() => {
 					const snapX =
-						translateX.value + WIDTH / 2 < width / 2 ? minimumX : maximumX;
+						translateX.value + pillWidth / 2 < width / 2 ? minimumX : maximumX;
 					const finalY = translateY.value;
 					translateX.value = withSpring(snapX, {
 						dampingRatio: 0.88,
@@ -110,6 +126,7 @@ export function MiniPill({
 			maximumX,
 			maximumY,
 			minimumY,
+			pillWidth,
 			startX,
 			startY,
 			translateX,
@@ -127,7 +144,9 @@ export function MiniPill({
 
 	return (
 		<GestureDetector gesture={dragGesture}>
-			<Animated.View style={[styles.positioner, animatedStyle]}>
+			<Animated.View
+				style={[styles.positioner, { width: pillWidth }, animatedStyle]}
+			>
 				<View style={styles.pill}>
 					<RectButton
 						accessibilityHint="Restores the developer tools"
@@ -146,6 +165,14 @@ export function MiniPill({
 							<Text style={styles.status}>Collectors active</Text>
 						</View>
 					</RectButton>
+					{quickActionPlugins.map((plugin) => (
+						<PillQuickActionMenu
+							actions={actions}
+							key={plugin.id}
+							onUnpin={() => onQuickActionPinnedChange(plugin.id, false)}
+							plugin={plugin}
+						/>
+					))}
 					<RectButton
 						accessibilityLabel="Close developer tools"
 						accessibilityRole="button"
@@ -174,7 +201,6 @@ const styles = StyleSheet.create({
 		shadowOpacity: 0.22,
 		shadowRadius: 18,
 		top: 0,
-		width: WIDTH,
 		zIndex: 10_002,
 	},
 	pill: {

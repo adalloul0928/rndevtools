@@ -38,6 +38,8 @@ type ToolsSheetProps = {
 	title: string;
 	onPluginError?: (error: unknown, pluginId: string) => void;
 	actions: DevToolsActionServices;
+	pinnedPillQuickActionIds: readonly string[];
+	onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
 };
 
 export function ToolsSheet({
@@ -51,6 +53,8 @@ export function ToolsSheet({
 	title,
 	onPluginError,
 	actions,
+	pinnedPillQuickActionIds,
+	onQuickActionPinnedChange,
 }: ToolsSheetProps) {
 	const sections = groupPlugins(plugins);
 	const panelProps = {
@@ -59,6 +63,15 @@ export function ToolsSheet({
 		presentationMode: 'sheet' as const,
 		onPresentationModeChange,
 		actions,
+		...(selectedPlugin?.pillQuickAction
+			? {
+					pillShortcut: {
+						isPinned: pinnedPillQuickActionIds.includes(selectedPlugin.id),
+						onPinnedChange: (isPinned: boolean) =>
+							onQuickActionPinnedChange(selectedPlugin.id, isPinned),
+					},
+				}
+			: {}),
 	};
 
 	return (

@@ -1,5 +1,10 @@
 import type { DevToolsPlugin } from '../types';
-import { assertUniquePluginIds, groupPlugins, isPanelPlugin } from './plugins';
+import {
+	assertUniquePluginIds,
+	groupPlugins,
+	hasPillQuickAction,
+	isPanelPlugin,
+} from './plugins';
 
 const Panel = () => null;
 
@@ -56,6 +61,42 @@ describe('plugin helpers', () => {
 
 		expect(isPanelPlugin(panel)).toBe(true);
 		expect(isPanelPlugin(action)).toBe(false);
+		expect(hasPillQuickAction(panel)).toBe(false);
+	});
+
+	it('rejects duplicate quick-action option identifiers within a plugin', () => {
+		const panelPlugin: DevToolsPlugin = {
+			id: 'state',
+			title: 'State',
+			description: 'State overrides',
+			systemImage: 'list.bullet',
+			Panel,
+			pillQuickAction: {
+				options: [
+					{ id: 'loading', label: 'Loading', action: () => {} },
+					{ id: 'loading', label: 'Still loading', action: () => {} },
+				],
+			},
+		};
+
+		expect(() => assertUniquePluginIds([panelPlugin])).toThrow(
+			'Duplicate pill quick-action option id for plugin state: loading',
+		);
+	});
+
+	it('rejects quick-action menus without options', () => {
+		const panelPlugin: DevToolsPlugin = {
+			id: 'empty-menu',
+			title: 'Empty menu',
+			description: 'No actions',
+			systemImage: 'ellipsis.circle',
+			Panel,
+			pillQuickAction: { options: [] },
+		};
+
+		expect(() => assertUniquePluginIds([panelPlugin])).toThrow(
+			'Pill quick actions require at least one option for plugin: empty-menu',
+		);
 	});
 });
 

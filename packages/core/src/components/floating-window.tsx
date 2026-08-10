@@ -38,6 +38,8 @@ type FloatingWindowProps = {
 	onPositionChange?: (position: DevToolsPosition) => void;
 	onPluginError?: (error: unknown, pluginId: string) => void;
 	actions: DevToolsActionServices;
+	pinnedPillQuickActionIds: readonly string[];
+	onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -57,6 +59,8 @@ export function FloatingWindow({
 	onPositionChange,
 	onPluginError,
 	actions,
+	pinnedPillQuickActionIds,
+	onQuickActionPinnedChange,
 }: FloatingWindowProps) {
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
@@ -145,6 +149,15 @@ export function FloatingWindow({
 		presentationMode: 'window' as const,
 		onPresentationModeChange,
 		actions,
+		...(selectedPlugin?.pillQuickAction
+			? {
+					pillShortcut: {
+						isPinned: pinnedPillQuickActionIds.includes(selectedPlugin.id),
+						onPinnedChange: (isPinned: boolean) =>
+							onQuickActionPinnedChange(selectedPlugin.id, isPinned),
+					},
+				}
+			: {}),
 	};
 
 	return (

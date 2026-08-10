@@ -54,12 +54,33 @@ export type DevToolsActionServices = {
 	run: (request: DevToolsActionRequest) => Promise<boolean>;
 };
 
+export type DevToolsPillQuickActionOption = {
+	id: string;
+	label: string;
+	systemImage?: DevToolsSystemImage;
+	confirmation?: DevToolsActionConfirmation;
+	action: () => unknown | Promise<unknown>;
+};
+
+export type DevToolsPillQuickAction = {
+	systemImage?: DevToolsSystemImage;
+	options: readonly DevToolsPillQuickActionOption[];
+	getSelectedOptionId?: () => string | null;
+	subscribe?: (listener: () => void) => () => void;
+};
+
+export type DevToolsPillShortcutControls = {
+	isPinned: boolean;
+	onPinnedChange: (isPinned: boolean) => void;
+};
+
 export type DevToolsPanelProps = {
 	onBack: () => void;
 	onClose: () => void;
 	presentationMode: DevToolsPresentationMode;
 	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
 	actions: DevToolsActionServices;
+	pillShortcut?: DevToolsPillShortcutControls;
 };
 
 export type DevToolsPluginMetadata = {
@@ -69,6 +90,7 @@ export type DevToolsPluginMetadata = {
 	systemImage: DevToolsSystemImage;
 	section?: string;
 	install?: () => () => void;
+	pillQuickAction?: DevToolsPillQuickAction;
 };
 
 export type DevToolsPanelPlugin = DevToolsPluginMetadata & {
@@ -89,6 +111,10 @@ export type DevToolsActionPlugin = DevToolsPluginMetadata & {
 };
 
 export type DevToolsPlugin = DevToolsPanelPlugin | DevToolsActionPlugin;
+
+export type DevToolsPluginWithPillQuickAction = DevToolsPlugin & {
+	pillQuickAction: DevToolsPillQuickAction;
+};
 
 export type InternalToolsProps = {
 	enabled: boolean;

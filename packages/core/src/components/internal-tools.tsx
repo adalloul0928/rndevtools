@@ -15,7 +15,11 @@ import {
 	SerializedPersistenceWriter,
 } from '../core/persistence';
 import { PluginInstallerRegistry } from '../core/plugin-installer-registry';
-import { assertUniquePluginIds, isPanelPlugin } from '../core/plugins';
+import {
+	assertUniquePluginIds,
+	hasPillQuickAction,
+	isPanelPlugin,
+} from '../core/plugins';
 import type {
 	DevToolsPersistenceStorage,
 	DevToolsPlugin,
@@ -90,6 +94,9 @@ export const InternalTools = forwardRef<
 	const [launcherPosition, setLauncherPosition] = useState<DevToolsPosition>();
 	const [windowPosition, setWindowPosition] = useState<DevToolsPosition>();
 	const [pillPosition, setPillPosition] = useState<DevToolsPosition>();
+	const [pinnedPillQuickActionIds, setPinnedPillQuickActionIds] = useState<
+		readonly string[]
+	>([]);
 	const [hydratedPersistenceKey, setHydratedPersistenceKey] = useState<
 		string | null
 	>(null);
@@ -104,6 +111,11 @@ export const InternalTools = forwardRef<
 		selectedPluginCandidate && isPanelPlugin(selectedPluginCandidate)
 			? selectedPluginCandidate
 			: undefined;
+	const pinnedPillQuickActionPlugins = pinnedPillQuickActionIds
+		.map((pluginId) =>
+			validatedPlugins.find((plugin) => plugin.id === pluginId),
+		)
+		.filter((plugin) => plugin !== undefined && hasPillQuickAction(plugin));
 
 	useEffect(() => {
 		installerRegistry.current?.setErrorHandler((error, pluginId) => {
@@ -139,6 +151,7 @@ export const InternalTools = forwardRef<
 					setLauncherPosition(state.launcherPosition);
 					setWindowPosition(state.windowPosition);
 					setPillPosition(state.pillPosition);
+					setPinnedPillQuickActionIds(state.pinnedPillQuickActionIds ?? []);
 				}
 				setHydratedPersistenceKey(persistenceKey);
 				setHydratedPersistenceStorage(persistenceStorage);
@@ -169,6 +182,7 @@ export const InternalTools = forwardRef<
 			launcherPosition,
 			windowPosition,
 			pillPosition,
+			pinnedPillQuickActionIds,
 		});
 		persistenceWriterRef.current
 			.write(persistenceStorage, persistenceKey, state)
@@ -182,10 +196,24 @@ export const InternalTools = forwardRef<
 		persistenceKey,
 		persistenceStorage,
 		pillPosition,
+		pinnedPillQuickActionIds,
 		presentationMode,
 		restoreMode,
 		windowPosition,
 	]);
+
+	const setQuickActionPinned = useCallback(
+		(pluginId: string, isPinned: boolean) => {
+			const plugin = validatedPlugins.find((entry) => entry.id === pluginId);
+			if (!plugin || !hasPillQuickAction(plugin)) return;
+			markLocalStateChange();
+			setPinnedPillQuickActionIds((current) => {
+				const withoutPlugin = current.filter((id) => id !== pluginId);
+				return isPinned ? [...withoutPlugin, pluginId] : withoutPlugin;
+			});
+		},
+		[markLocalStateChange, validatedPlugins],
+	);
 
 	useEffect(() => {
 		if (selectedPluginId && !selectedPluginCandidate) {
@@ -313,6 +341,8 @@ export const InternalTools = forwardRef<
 					onSelectPlugin={selectPlugin}
 					plugins={validatedPlugins}
 					selectedPlugin={selectedPlugin}
+					pinnedPillQuickActionIds={pinnedPillQuickActionIds}
+					onQuickActionPinnedChange={setQuickActionPinned}
 					title={title}
 					onPluginError={handlePluginError}
 					actions={actionServices}
@@ -327,6 +357,8 @@ export const InternalTools = forwardRef<
 					onSelectPlugin={selectPlugin}
 					plugins={validatedPlugins}
 					selectedPlugin={selectedPlugin}
+					pinnedPillQuickActionIds={pinnedPillQuickActionIds}
+					onQuickActionPinnedChange={setQuickActionPinned}
 					title={title}
 					onPluginError={handlePluginError}
 					onPositionChange={(position) =>
@@ -339,8 +371,11 @@ export const InternalTools = forwardRef<
 				<MiniPill
 					initialPosition={pillPosition}
 					label={selectedPlugin?.title ?? pillLabel ?? title}
+					actions={actionServices}
 					onClose={close}
 					onRestore={restore}
+					onQuickActionPinnedChange={setQuickActionPinned}
+					quickActionPlugins={pinnedPillQuickActionPlugins}
 					onPositionChange={(position) =>
 						setPersistedPosition(setPillPosition, position)
 					}

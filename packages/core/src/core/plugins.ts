@@ -1,4 +1,8 @@
-import type { DevToolsPanelPlugin, DevToolsPlugin } from '../types';
+import type {
+	DevToolsPanelPlugin,
+	DevToolsPlugin,
+	DevToolsPluginWithPillQuickAction,
+} from '../types';
 
 export type DevToolsPluginSection = {
 	title: string;
@@ -9,6 +13,12 @@ export function isPanelPlugin(
 	plugin: DevToolsPlugin,
 ): plugin is DevToolsPanelPlugin {
 	return plugin.kind !== 'action';
+}
+
+export function hasPillQuickAction(
+	plugin: DevToolsPlugin,
+): plugin is DevToolsPluginWithPillQuickAction {
+	return plugin.pillQuickAction !== undefined;
 }
 
 export function groupPlugins(
@@ -40,6 +50,28 @@ export function assertUniquePluginIds(
 		}
 		if (seen.has(plugin.id)) duplicates.add(plugin.id);
 		seen.add(plugin.id);
+
+		if (plugin.pillQuickAction) {
+			if (plugin.pillQuickAction.options.length === 0) {
+				throw new Error(
+					`Pill quick actions require at least one option for plugin: ${plugin.id}`,
+				);
+			}
+			const optionIds = new Set<string>();
+			for (const option of plugin.pillQuickAction.options) {
+				if (!option.id.trim()) {
+					throw new Error(
+						`Pill quick-action option ids cannot be empty for plugin: ${plugin.id}`,
+					);
+				}
+				if (optionIds.has(option.id)) {
+					throw new Error(
+						`Duplicate pill quick-action option id for plugin ${plugin.id}: ${option.id}`,
+					);
+				}
+				optionIds.add(option.id);
+			}
+		}
 	}
 	if (duplicates.size > 0) {
 		throw new Error(

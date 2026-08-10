@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { PlatformColor, StyleSheet, Text } from 'react-native';
-import type { DevToolsPlugin } from '../types';
+import type {
+	DevToolsPlugin,
+	DevToolsPluginWithPillQuickAction,
+} from '../types';
 import { FloatingLauncher } from './floating-launcher';
 import { FloatingWindow } from './floating-window';
 import { MiniPill } from './mini-pill';
@@ -10,13 +13,23 @@ jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
 	return {
+		Button: ({ label, onPress }: { label?: string; onPress?: () => void }) =>
+			ReactRuntime.createElement(
+				Native.Pressable,
+				{ accessibilityLabel: label, onPress },
+				ReactRuntime.createElement(Native.Text, null, label),
+			),
+		Divider: () => ReactRuntime.createElement(Native.View),
 		Host: ({ children }: { children?: React.ReactNode }) =>
 			ReactRuntime.createElement(Native.View, null, children),
 		Image: () => ReactRuntime.createElement(Native.View),
+		Menu: ({ children }: { children?: React.ReactNode }) =>
+			ReactRuntime.createElement(Native.View, null, children),
 	};
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	glassEffect: (value: unknown) => value,
 	padding: (value: unknown) => value,
@@ -96,9 +109,11 @@ describe('presentation components', () => {
 		const onClose = jest.fn();
 		render(
 			<MiniPill
+				actions={actions}
 				bottomObstructionInset={84}
 				label="Network"
 				onClose={onClose}
+				onQuickActionPinnedChange={jest.fn()}
 				onRestore={onRestore}
 			/>,
 		);
@@ -107,6 +122,48 @@ describe('presentation components', () => {
 		fireEvent.press(screen.getByLabelText('Close developer tools'));
 		expect(onRestore).toHaveBeenCalledTimes(1);
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('runs and removes pinned quick actions from the mini pill', () => {
+		const quickAction = jest.fn();
+		const onQuickActionPinnedChange = jest.fn();
+		const quickActionPlugin: DevToolsPluginWithPillQuickAction = {
+			...plugin,
+			id: 'data-source',
+			title: 'Data Source',
+			pillQuickAction: {
+				getSelectedOptionId: () => 'real',
+				subscribe: () => () => {},
+				options: [
+					{ id: 'real', label: 'Real data', action: jest.fn() },
+					{ id: 'mock', label: 'Mock data', action: quickAction },
+				],
+			},
+		};
+		render(
+			<MiniPill
+				actions={{
+					run: jest.fn(async (request) => {
+						await request.action();
+						return true;
+					}),
+				}}
+				label="PUMPD Tools"
+				onClose={jest.fn()}
+				onQuickActionPinnedChange={onQuickActionPinnedChange}
+				onRestore={jest.fn()}
+				quickActionPlugins={[quickActionPlugin]}
+			/>,
+		);
+
+		fireEvent.press(screen.getByLabelText('Mock data'));
+		fireEvent.press(screen.getByLabelText('Remove from Pill'));
+
+		expect(quickAction).toHaveBeenCalledTimes(1);
+		expect(onQuickActionPinnedChange).toHaveBeenCalledWith(
+			'data-source',
+			false,
+		);
 	});
 
 	it('selects tools and switches modes in the floating window', () => {
@@ -119,7 +176,9 @@ describe('presentation components', () => {
 				onBack={jest.fn()}
 				onClose={onClose}
 				onPresentationModeChange={onPresentationModeChange}
+				onQuickActionPinnedChange={jest.fn()}
 				onSelectPlugin={onSelectPlugin}
+				pinnedPillQuickActionIds={[]}
 				plugins={[plugin]}
 				title="Developer Tools"
 			/>,

@@ -9,6 +9,7 @@ export type DevToolsPersistedState = {
 	launcherPosition?: DevToolsPosition;
 	windowPosition?: DevToolsPosition;
 	pillPosition?: DevToolsPosition;
+	pinnedPillQuickActionIds?: readonly string[];
 };
 
 function isPosition(value: unknown): value is DevToolsPosition {
@@ -21,12 +22,24 @@ function isPresentationMode(value: unknown): value is DevToolsPresentationMode {
 	return value === 'sheet' || value === 'window' || value === 'pill';
 }
 
+function parsePinnedIds(value: unknown): readonly string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const ids = value.filter(
+		(entry): entry is string =>
+			typeof entry === 'string' && entry.trim() !== '',
+	);
+	return [...new Set(ids)];
+}
+
 export function parsePersistedState(
 	value: string | null,
 ): DevToolsPersistedState | null {
 	if (!value) return null;
 	try {
 		const candidate = JSON.parse(value) as Partial<DevToolsPersistedState>;
+		const pinnedPillQuickActionIds = parsePinnedIds(
+			candidate.pinnedPillQuickActionIds,
+		);
 		if (
 			candidate.version !== 1 ||
 			!isPresentationMode(candidate.presentationMode) ||
@@ -48,6 +61,7 @@ export function parsePersistedState(
 			...(isPosition(candidate.pillPosition)
 				? { pillPosition: candidate.pillPosition }
 				: {}),
+			...(pinnedPillQuickActionIds ? { pinnedPillQuickActionIds } : {}),
 		};
 	} catch {
 		return null;

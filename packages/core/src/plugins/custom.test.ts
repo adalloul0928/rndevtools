@@ -2,12 +2,16 @@ import { createActionPlugin, createCustomPlugin } from './custom';
 
 describe('custom plugins', () => {
 	it('creates a typed panel plugin from a render function', () => {
+		const pillQuickAction = {
+			options: [{ id: 'mock', label: 'Mock data', action: () => {} }],
+		};
 		const plugin = createCustomPlugin({
 			id: 'fixtures',
 			title: 'Fixtures',
 			description: 'Manage fixtures',
 			systemImage: 'shippingbox',
 			section: 'Application',
+			pillQuickAction,
 			render: () => null,
 		});
 
@@ -17,6 +21,7 @@ describe('custom plugins', () => {
 			section: 'Application',
 		});
 		expect(plugin.Panel).toBeInstanceOf(Function);
+		expect(plugin.pillQuickAction).toBe(pillQuickAction);
 	});
 
 	it('passes the runtime context to custom actions', () => {
