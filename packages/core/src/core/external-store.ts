@@ -80,13 +80,13 @@ export class BoundedEventStore<T> {
 		if (!this.replace(predicate, event)) this.append(event);
 	}
 
-	clear(): void {
+	clear = (): void => {
 		if (this.#events.length === 0) return;
 		this.#events = [];
 		this.#sizes = [];
 		this.#bytes = 0;
 		this.#emit();
-	}
+	};
 
 	getSnapshot = (): readonly T[] => this.#events;
 
