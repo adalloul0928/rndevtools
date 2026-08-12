@@ -33,7 +33,11 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 								testID={`devtools-tool-row-${plugin.id}`}
 							>
 								<View style={styles.iconSurface}>
-									<SystemIcon systemName={plugin.systemImage} size={20} />
+									<SystemIcon
+										color={colors.blue}
+										systemName={plugin.systemImage}
+										size={16}
+									/>
 								</View>
 								<View
 									style={[
@@ -43,9 +47,6 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 								>
 									<View style={styles.copy}>
 										<Text style={styles.title}>{plugin.title}</Text>
-										<Text numberOfLines={2} style={styles.description}>
-											{plugin.description}
-										</Text>
 									</View>
 									<SystemIcon
 										systemName={
@@ -53,7 +54,7 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 												? 'arrow.up.right'
 												: 'chevron.right'
 										}
-										size={13}
+										size={12}
 										color={colors.secondaryLabel}
 									/>
 								</View>
@@ -62,59 +63,51 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 					</View>
 				</View>
 			))}
-			<Text style={styles.footer}>
-				Collectors continue recording while tools are minimized.
-			</Text>
 		</ScrollView>
 	);
 }
 
 const styles = StyleSheet.create({
 	content: {
-		gap: 18,
-		paddingBottom: 32,
+		gap: 14,
+		paddingBottom: 20,
 		paddingHorizontal: 12,
-		paddingTop: 14,
+		paddingTop: 10,
 	},
 	section: {
 		gap: 7,
 	},
 	sectionTitle: {
 		color: colors.secondaryLabel,
-		fontSize: 12,
+		fontSize: 13,
 		fontWeight: '600',
-		letterSpacing: 0.4,
-		paddingHorizontal: 10,
-		textTransform: 'uppercase',
+		paddingHorizontal: 4,
 	},
 	group: {
 		backgroundColor: colors.card,
-		borderRadius: 16,
+		borderRadius: 13,
 		overflow: 'hidden',
 	},
 	row: {
 		alignItems: 'center',
 		alignSelf: 'stretch',
 		flexDirection: 'row',
-		minHeight: 72,
-		paddingLeft: 12,
+		minHeight: 48,
+		paddingLeft: 13,
 		width: '100%',
 	},
 	iconSurface: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 10,
-		height: 38,
+		height: 24,
 		justifyContent: 'center',
-		width: 38,
+		width: 22,
 	},
 	rowContent: {
 		alignItems: 'center',
 		flex: 1,
 		flexDirection: 'row',
-		marginLeft: 11,
-		minHeight: 72,
-		paddingVertical: 9,
+		marginLeft: 10,
+		minHeight: 48,
 		paddingRight: 14,
 	},
 	separator: {
@@ -123,22 +116,10 @@ const styles = StyleSheet.create({
 	},
 	copy: {
 		flex: 1,
-		gap: 2,
 	},
 	title: {
 		color: colors.label,
 		fontSize: 15,
-		fontWeight: '600',
-	},
-	description: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		lineHeight: 16,
-	},
-	footer: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		lineHeight: 17,
-		paddingHorizontal: 10,
+		fontWeight: '400',
 	},
 });

@@ -29,7 +29,7 @@ describe('lazy custom plugins', () => {
 		const Panel = plugin.Panel;
 		render(<Panel {...panelProps} />);
 
-		expect(screen.getByText('Loading tool…')).toBeOnTheScreen();
+		expect(screen.getByLabelText('Loading Lazy fixtures')).toBeOnTheScreen();
 		resolvePanel?.(() => <Text>Application tool loaded</Text>);
 
 		expect(

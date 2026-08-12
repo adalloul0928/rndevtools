@@ -163,6 +163,7 @@ export function FloatingLauncher({
 							<Image
 								color="#FFFFFF"
 								modifiers={imageModifiers}
+								size={22}
 								systemName="wrench.and.screwdriver.fill"
 							/>
 						</Host>

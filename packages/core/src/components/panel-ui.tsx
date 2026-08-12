@@ -1,5 +1,5 @@
 import {
-	Children,
+	createContext,
 	type PropsWithChildren,
 	type ReactElement,
 	type ReactNode,
@@ -13,8 +13,12 @@ import {
 	Text,
 	View,
 } from 'react-native';
-import { FlatList, RectButton } from 'react-native-gesture-handler';
-import type { DevToolsPanelProps, DevToolsSystemImage } from '../types';
+import { FlatList, RectButton, ScrollView } from 'react-native-gesture-handler';
+import type {
+	DevToolsPanelProps,
+	DevToolsPresentationMode,
+	DevToolsSystemImage,
+} from '../types';
 import { SystemIcon } from './system-icon';
 
 export const colors = {
@@ -23,6 +27,8 @@ export const colors = {
 	label: PlatformColor('labelColor'),
 	secondaryLabel: PlatformColor('secondaryLabelColor'),
 	separator: PlatformColor('separatorColor'),
+	fill: PlatformColor('tertiarySystemFillColor'),
+	groupedFill: PlatformColor('tertiarySystemGroupedBackgroundColor'),
 	blue: PlatformColor('systemBlueColor'),
 	green: PlatformColor('systemGreenColor'),
 	orange: PlatformColor('systemOrangeColor'),
@@ -43,6 +49,26 @@ type PanelScaffoldProps = PropsWithChildren<
 	}
 >;
 
+const PanelPresentationContext = createContext<{
+	mode: DevToolsPresentationMode;
+	safeAreaTop: number;
+}>({ mode: 'sheet', safeAreaTop: 0 });
+
+export function PanelPresentationProvider({
+	children,
+	mode,
+	safeAreaTop = 0,
+}: PropsWithChildren<{
+	mode: DevToolsPresentationMode;
+	safeAreaTop?: number;
+}>) {
+	return (
+		<PanelPresentationContext.Provider value={{ mode, safeAreaTop }}>
+			{children}
+		</PanelPresentationContext.Provider>
+	);
+}
+
 export function PanelScaffold({
 	title,
 	subtitle,
@@ -51,37 +77,38 @@ export function PanelScaffold({
 	children,
 	scrollable = true,
 }: PanelScaffoldProps) {
-	const rows = Children.toArray(children);
 	return (
 		<View style={styles.screen}>
-			<View style={styles.header}>
+			<View
+				accessibilityLabel={[title, subtitle].filter(Boolean).join(', ')}
+				style={styles.header}
+			>
 				<RectButton
 					onPress={onBack}
 					accessibilityLabel="All tools"
 					accessibilityRole="button"
 					style={styles.backButton}
 				>
-					<SystemIcon systemName="chevron.left" size={17} />
+					<SystemIcon
+						color={colors.label}
+						systemName="chevron.left"
+						size={17}
+					/>
 				</RectButton>
 				<View style={styles.headerCopy}>
-					<Text style={styles.title}>{title}</Text>
-					{subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+					<Text numberOfLines={1} style={styles.title}>
+						{title}
+					</Text>
 				</View>
 				<View style={styles.headerAccessory}>{rightAccessory}</View>
 			</View>
 			{scrollable ? (
-				<FlatList
+				<ScrollView
 					contentContainerStyle={styles.content}
-					data={rows}
-					ItemSeparatorComponent={PanelListSeparator}
-					keyExtractor={(item, index) =>
-						typeof item === 'object' && item && 'key' in item && item.key
-							? String(item.key)
-							: String(index)
-					}
-					renderItem={({ item }) => <>{item}</>}
 					showsVerticalScrollIndicator={false}
-				/>
+				>
+					{children}
+				</ScrollView>
 			) : (
 				children
 			)}
@@ -151,15 +178,14 @@ export function PanelSignalCard({
 }) {
 	const accent = toneColor(tone);
 	return (
-		<View style={styles.signalCard}>
-			<View style={styles.signalIcon}>
-				<SystemIcon systemName={systemImage} size={22} color={accent} />
-			</View>
-			<View style={styles.signalCopy}>
-				<Text style={[styles.signalEyebrow, { color: accent }]}>{eyebrow}</Text>
-				<Text style={styles.signalTitle}>{title}</Text>
-				<Text style={styles.signalDescription}>{description}</Text>
-			</View>
+		<View
+			accessibilityLabel={[eyebrow, title, description].join(', ')}
+			style={styles.signalCard}
+		>
+			<SystemIcon systemName={systemImage} size={15} color={accent} />
+			<Text numberOfLines={1} style={styles.signalTitle}>
+				{title}
+			</Text>
 		</View>
 	);
 }
@@ -247,7 +273,7 @@ export function DisclosureCard({
 				</View>
 				<SystemIcon
 					systemName={expanded ? 'chevron.down' : 'chevron.right'}
-					size={13}
+					size={12}
 					color={colors.secondaryLabel}
 				/>
 			</RectButton>
@@ -292,20 +318,17 @@ export function EmptyState({
 export const panelStyles = StyleSheet.create({
 	sectionLabel: {
 		color: colors.secondaryLabel,
-		fontSize: 12,
+		fontSize: 13,
 		fontWeight: '600',
-		letterSpacing: 0.5,
-		marginBottom: 2,
-		marginLeft: 16,
-		textTransform: 'uppercase',
+		marginBottom: 1,
+		marginLeft: 4,
+		marginTop: 4,
 	},
 	valueRow: {
 		alignItems: 'flex-start',
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
 		gap: 6,
-		paddingHorizontal: 16,
-		paddingVertical: 12,
+		paddingHorizontal: 14,
+		paddingVertical: 10,
 	},
 	valueKey: {
 		color: colors.label,
@@ -327,64 +350,64 @@ const styles = StyleSheet.create({
 	},
 	header: {
 		alignItems: 'center',
+		backgroundColor: colors.card,
 		borderBottomColor: colors.separator,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		flexDirection: 'row',
-		minHeight: 84,
-		paddingBottom: 12,
-		paddingHorizontal: 12,
-		paddingTop: 20,
+		height: 52,
+		paddingHorizontal: 4,
 	},
 	backButton: {
 		alignItems: 'center',
-		borderRadius: 18,
-		height: 36,
+		backgroundColor: colors.fill,
+		borderColor: colors.separator,
+		borderRadius: 22,
+		borderWidth: StyleSheet.hairlineWidth,
+		height: 44,
 		justifyContent: 'center',
-		width: 36,
+		width: 44,
 	},
 	headerCopy: {
+		alignItems: 'center',
 		flex: 1,
-		paddingHorizontal: 6,
+		justifyContent: 'center',
+		paddingHorizontal: 4,
 	},
 	title: {
 		color: colors.label,
-		fontSize: 20,
-		fontWeight: '700',
-		letterSpacing: -0.4,
-	},
-	subtitle: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		marginTop: 1,
+		fontSize: 17,
+		fontWeight: '600',
+		letterSpacing: -0.2,
+		textAlign: 'center',
 	},
 	headerAccessory: {
 		alignItems: 'flex-end',
-		minWidth: 36,
+		minWidth: 44,
 	},
 	content: {
-		gap: 10,
-		paddingBottom: 48,
-		paddingHorizontal: 14,
-		paddingTop: 14,
+		gap: 14,
+		paddingBottom: 28,
+		paddingHorizontal: 16,
+		paddingTop: 18,
 	},
 	listHeader: {
-		gap: 8,
-		marginBottom: 8,
+		gap: 7,
+		marginBottom: 7,
 	},
 	listSeparator: {
-		height: 8,
+		height: 7,
 	},
 	card: {
 		backgroundColor: colors.card,
-		borderRadius: 14,
+		borderRadius: 16,
 		overflow: 'hidden',
 	},
 	cardButton: {
 		alignItems: 'center',
 		flexDirection: 'row',
-		minHeight: 62,
-		paddingHorizontal: 14,
-		paddingVertical: 11,
+		minHeight: 56,
+		paddingHorizontal: 13,
+		paddingVertical: 9,
 	},
 	cardCopy: {
 		flex: 1,
@@ -392,8 +415,8 @@ const styles = StyleSheet.create({
 	},
 	cardTitle: {
 		color: colors.label,
-		fontSize: 15,
-		fontWeight: '600',
+		fontSize: 16,
+		fontWeight: '500',
 	},
 	cardSubtitle: {
 		color: colors.secondaryLabel,
@@ -403,19 +426,19 @@ const styles = StyleSheet.create({
 	details: {
 		borderTopColor: colors.separator,
 		borderTopWidth: StyleSheet.hairlineWidth,
-		padding: 14,
+		padding: 12,
 	},
 	code: {
 		backgroundColor: colors.background,
 		borderColor: colors.separator,
-		borderRadius: 10,
+		borderRadius: 8,
 		borderWidth: StyleSheet.hairlineWidth,
 		color: colors.label,
 		fontFamily: 'Menlo',
 		fontSize: 11,
 		lineHeight: 17,
 		overflow: 'hidden',
-		padding: 10,
+		padding: 9,
 	},
 	metricStrip: {
 		backgroundColor: colors.card,
@@ -427,69 +450,45 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		flex: 1,
 		justifyContent: 'center',
-		minHeight: 58,
+		minHeight: 42,
 		paddingHorizontal: 4,
-		paddingVertical: 9,
+		paddingVertical: 5,
 	},
 	metricDivider: {
 		borderLeftColor: colors.separator,
 		borderLeftWidth: StyleSheet.hairlineWidth,
 	},
 	metricValue: {
-		fontSize: 18,
+		fontSize: 15,
 		fontVariant: ['tabular-nums'],
 		fontWeight: '700',
 		letterSpacing: -0.3,
 	},
 	metricLabel: {
 		color: colors.secondaryLabel,
-		fontSize: 10,
-		marginTop: 2,
+		fontSize: 9,
+		marginTop: 1,
 	},
 	signalCard: {
-		alignItems: 'flex-start',
-		backgroundColor: colors.card,
-		borderRadius: 16,
-		flexDirection: 'row',
-		gap: 12,
-		padding: 15,
-	},
-	signalIcon: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 12,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
-	},
-	signalCopy: {
-		flex: 1,
-		gap: 3,
-	},
-	signalEyebrow: {
-		fontSize: 11,
-		fontWeight: '700',
-		letterSpacing: 0.6,
-		textTransform: 'uppercase',
+		flexDirection: 'row',
+		gap: 7,
+		minHeight: 28,
+		paddingHorizontal: 4,
 	},
 	signalTitle: {
 		color: colors.label,
-		fontSize: 18,
-		fontWeight: '700',
-		letterSpacing: -0.35,
-	},
-	signalDescription: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		lineHeight: 17,
+		flex: 1,
+		fontSize: 13,
+		fontWeight: '500',
 	},
 	statusBadge: {
 		alignItems: 'center',
-		borderRadius: 10,
+		borderRadius: 8,
 		borderWidth: 1,
 		justifyContent: 'center',
 		marginRight: 10,
-		minHeight: 22,
+		minHeight: 20,
 		minWidth: 42,
 		paddingHorizontal: 7,
 	},
@@ -501,16 +500,14 @@ const styles = StyleSheet.create({
 	empty: {
 		alignItems: 'center',
 		paddingHorizontal: 32,
-		paddingVertical: 48,
+		paddingVertical: 38,
 	},
 	emptyIcon: {
 		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 22,
-		height: 44,
+		height: 32,
 		justifyContent: 'center',
-		marginBottom: 10,
-		width: 44,
+		marginBottom: 8,
+		width: 32,
 	},
 	emptyTitle: {
 		color: colors.label,

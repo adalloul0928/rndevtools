@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { PlatformColor, StyleSheet, Text } from 'react-native';
+import { Text } from 'react-native';
 import type {
 	DevToolsPlugin,
 	DevToolsPluginWithPillQuickAction,
@@ -22,20 +22,71 @@ jest.mock('@expo/ui/swift-ui', () => {
 		Divider: () => ReactRuntime.createElement(Native.View),
 		Host: ({ children }: { children?: React.ReactNode }) =>
 			ReactRuntime.createElement(Native.View, null, children),
-		Image: () => ReactRuntime.createElement(Native.View),
+		Image: ({ size, systemName }: { size?: number; systemName?: string }) =>
+			ReactRuntime.createElement(Native.View, {
+				size,
+				testID: `system-icon-${systemName}`,
+			}),
 		Menu: ({ children }: { children?: React.ReactNode }) =>
 			ReactRuntime.createElement(Native.View, null, children),
+		Picker: ({
+			children,
+			onSelectionChange,
+			selection,
+		}: {
+			children?: React.ReactNode;
+			onSelectionChange: (value: string) => void;
+			selection: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				null,
+				ReactRuntime.Children.map(children, (child: React.ReactElement) => {
+					const option = child.props as {
+						children: string;
+						modifiers?: Array<{ tag?: string }>;
+					};
+					const value = option.modifiers?.find((item) => item.tag)?.tag;
+					return ReactRuntime.createElement(
+						Native.Pressable,
+						{
+							accessibilityLabel: `${option.children} presentation`,
+							accessibilityRole: 'tab',
+							accessibilityState: { selected: selection === value },
+							onPress: () => value && onSelectionChange(value),
+						},
+						ReactRuntime.createElement(Native.Text, null, option.children),
+					);
+				}),
+			),
+		Text: ({
+			children,
+			modifiers,
+		}: {
+			children?: React.ReactNode;
+			modifiers?: unknown[];
+		}) => ReactRuntime.createElement(Native.Text, { modifiers }, children),
 	};
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	accessibilityLabel: (value: unknown) => value,
+	buttonStyle: (value: unknown) => value,
+	controlSize: (value: unknown) => value,
+	disabled: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	glassEffect: (value: unknown) => value,
 	padding: (value: unknown) => value,
+	pickerStyle: (value: unknown) => value,
+	tag: (value: unknown) => ({ tag: value }),
+	tint: (value: unknown) => value,
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
+	initialWindowMetrics: {
+		frame: { x: 0, y: 0, width: 402, height: 874 },
+		insets: { top: 47, right: 0, bottom: 34, left: 0 },
+	},
 	useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: 34, left: 0 }),
 }));
 
@@ -184,12 +235,40 @@ describe('presentation components', () => {
 			/>,
 		);
 
+		expect(screen.getByTestId('system-icon-xmark').props.size).toBe(18);
+		expect(screen.getByTestId('system-icon-chevron.right').props.size).toBe(12);
 		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		fireEvent.press(screen.getByLabelText('Pill presentation'));
 		fireEvent.press(screen.getByLabelText('Close developer tools'));
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);
 		expect(onPresentationModeChange).toHaveBeenCalledWith('pill');
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('exposes an adjustable resize handle for the floating window', () => {
+		const onSizeChange = jest.fn();
+		render(
+			<FloatingWindow
+				actions={actions}
+				initialSize={{ width: 320, height: 480 }}
+				onBack={jest.fn()}
+				onClose={jest.fn()}
+				onPresentationModeChange={jest.fn()}
+				onQuickActionPinnedChange={jest.fn()}
+				onSelectPlugin={jest.fn()}
+				onSizeChange={onSizeChange}
+				pinnedPillQuickActionIds={[]}
+				plugins={[plugin]}
+				title="Developer Tools"
+			/>,
+		);
+
+		const handle = screen.getByTestId('devtools-window-resize-handle');
+		expect(handle.props.accessibilityRole).toBe('adjustable');
+		fireEvent(handle, 'accessibilityAction', {
+			nativeEvent: { actionName: 'increment' },
+		});
+		expect(onSizeChange).toHaveBeenCalledWith({ width: 360, height: 520 });
 	});
 
 	it('marks and changes the selected presentation', () => {
@@ -199,9 +278,6 @@ describe('presentation components', () => {
 		expect(
 			screen.getByLabelText('Sheet presentation').props.accessibilityState,
 		).toEqual({ selected: true });
-		expect(
-			StyleSheet.flatten(screen.getByText('Sheet').props.style).color,
-		).toEqual(PlatformColor('labelColor'));
 		fireEvent.press(screen.getByLabelText('Window presentation'));
 		expect(onModeChange).toHaveBeenCalledWith('window');
 	});

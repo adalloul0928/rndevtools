@@ -12,6 +12,7 @@ import {
 	DisclosureCard,
 	EmptyState,
 	PanelList,
+	PanelMetricStrip,
 	PanelScaffold,
 	PanelSignalCard,
 	PanelStatusBadge,
@@ -528,6 +529,25 @@ export function createStoragePlugin({
 											: 'success'
 								}
 							/>
+							<PanelMetricStrip
+								metrics={[
+									{ label: 'Adapters', value: snapshot.adapters.length },
+									{ label: 'Keys', value: keyCount },
+									{
+										label: 'Checks',
+										value: validation.length,
+										tone: colors.green,
+									},
+									{
+										label: 'Issues',
+										value: issueCount + adapterErrorCount,
+										tone:
+											issueCount + adapterErrorCount > 0
+												? colors.red
+												: colors.secondaryLabel,
+									},
+								]}
+							/>
 							<PanelSegmentedControl
 								accessibilityLabel="Storage inspector"
 								onChange={setTab}
@@ -786,12 +806,10 @@ const styles = StyleSheet.create({
 	panelHeader: { gap: 10 },
 	keyIcon: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 9,
-		height: 34,
+		height: 28,
 		justifyContent: 'center',
-		marginRight: 11,
-		width: 34,
+		marginRight: 8,
+		width: 24,
 	},
 	keyDetails: {
 		gap: 7,
@@ -799,9 +817,8 @@ const styles = StyleSheet.create({
 	},
 	detailLabel: {
 		color: colors.secondaryLabel,
-		fontSize: 11,
+		fontSize: 12,
 		fontWeight: '600',
-		textTransform: 'uppercase',
 	},
 	eventValue: {
 		color: colors.label,
@@ -812,19 +829,16 @@ const styles = StyleSheet.create({
 	},
 	adapterHeader: {
 		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderRadius: 14,
 		flexDirection: 'row',
-		gap: 10,
-		padding: 12,
+		gap: 8,
+		paddingHorizontal: 4,
+		paddingVertical: 6,
 	},
 	adapterIcon: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 10,
-		height: 36,
+		height: 28,
 		justifyContent: 'center',
-		width: 36,
+		width: 24,
 	},
 	adapterCopy: {
 		flex: 1,
@@ -832,7 +846,7 @@ const styles = StyleSheet.create({
 	},
 	adapterTitle: {
 		color: colors.label,
-		fontSize: 16,
+		fontSize: 14,
 		fontWeight: '700',
 	},
 	adapterDescription: {

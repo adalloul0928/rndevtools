@@ -130,6 +130,7 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	frame: (value: unknown) => value,
 	padding: (value: unknown) => value,
 	pickerStyle: (value: unknown) => value,
+	presentationBackground: (value: unknown) => value,
 	presentationDetents: (value: unknown) => value,
 	presentationDragIndicator: (value: unknown) => value,
 	shapes: { rectangle: () => ({ shape: 'rectangle' }) },
@@ -141,8 +142,8 @@ const plugin: DevToolsPanelPlugin = {
 	title: 'Example',
 	description: 'Example diagnostics',
 	systemImage: 'wrench',
-	Panel: ({ presentationMode }) => (
-		<Text>{`Panel in ${presentationMode}`}</Text>
+	Panel: ({ presentationMode, safeAreaTop }) => (
+		<Text>{`Panel in ${presentationMode} · top ${safeAreaTop}`}</Text>
 	),
 };
 
@@ -164,6 +165,7 @@ describe('ToolsSheet', () => {
 				onSelectPlugin={onSelectPlugin}
 				pinnedPillQuickActionIds={[]}
 				plugins={[plugin]}
+				safeAreaTop={59}
 				title="Developer Tools"
 			/>,
 		);
@@ -188,11 +190,12 @@ describe('ToolsSheet', () => {
 				onSelectPlugin={jest.fn()}
 				pinnedPillQuickActionIds={[]}
 				plugins={[plugin]}
+				safeAreaTop={59}
 				selectedPlugin={plugin}
 				title="Developer Tools"
 			/>,
 		);
 
-		expect(screen.getByText('Panel in sheet')).toBeOnTheScreen();
+		expect(screen.getByText('Panel in sheet · top 59')).toBeOnTheScreen();
 	});
 });

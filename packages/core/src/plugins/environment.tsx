@@ -359,14 +359,15 @@ const styles = StyleSheet.create({
 	actualValue: { gap: 7 },
 	actualLabel: {
 		color: colors.secondaryLabel,
-		fontSize: 11,
+		fontSize: 12,
 		fontWeight: '600',
-		textTransform: 'uppercase',
 	},
 	section: { gap: 4 },
 	group: {
 		backgroundColor: colors.card,
-		borderRadius: 16,
+		borderColor: colors.separator,
+		borderRadius: 12,
+		borderWidth: StyleSheet.hairlineWidth,
 		overflow: 'hidden',
 	},
 });

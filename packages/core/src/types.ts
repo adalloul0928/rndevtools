@@ -8,6 +8,11 @@ export type DevToolsPosition = {
 	y: number;
 };
 
+export type DevToolsSize = {
+	width: number;
+	height: number;
+};
+
 export type DevToolsPersistenceStorage = {
 	getItem: (key: string) => string | null | Promise<string | null>;
 	setItem: (key: string, value: string) => void | Promise<void>;
@@ -78,6 +83,8 @@ export type DevToolsPanelProps = {
 	onBack: () => void;
 	onClose: () => void;
 	presentationMode: DevToolsPresentationMode;
+	/** Root-window inset forwarded across native sheet hosting boundaries. */
+	safeAreaTop?: number;
 	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
 	actions: DevToolsActionServices;
 	pillShortcut?: DevToolsPillShortcutControls;

@@ -13,11 +13,12 @@ import {
 import {
 	padding,
 	pickerStyle,
+	presentationBackground,
 	presentationDetents,
 	presentationDragIndicator,
 	tag,
 } from '@expo/ui/swift-ui/modifiers';
-import { PlatformColor, StyleSheet, View } from 'react-native';
+import { PlatformColor, StyleSheet, useColorScheme, View } from 'react-native';
 import { groupPlugins } from '../core/plugins';
 import type {
 	DevToolsActionServices,
@@ -40,6 +41,7 @@ type ToolsSheetProps = {
 	actions: DevToolsActionServices;
 	pinnedPillQuickActionIds: readonly string[];
 	onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
+	safeAreaTop: number;
 };
 
 export function ToolsSheet({
@@ -55,12 +57,15 @@ export function ToolsSheet({
 	actions,
 	pinnedPillQuickActionIds,
 	onQuickActionPinnedChange,
+	safeAreaTop,
 }: ToolsSheetProps) {
 	const sections = groupPlugins(plugins);
+	const colorScheme = useColorScheme();
 	const panelProps = {
 		onBack,
 		onClose,
 		presentationMode: 'sheet' as const,
+		safeAreaTop,
 		onPresentationModeChange,
 		actions,
 		...(selectedPlugin?.pillQuickAction
@@ -86,6 +91,9 @@ export function ToolsSheet({
 					modifiers={[
 						presentationDetents(['medium', 'large']),
 						presentationDragIndicator('visible'),
+						presentationBackground(
+							colorScheme === 'dark' ? '#1C1C1E' : '#F2F2F7',
+						),
 					]}
 				>
 					{selectedPlugin ? (
@@ -125,7 +133,6 @@ export function ToolsSheet({
 												/>
 											}
 											onPress={() => onSelectPlugin(plugin)}
-											supportingText={plugin.description}
 											testID={`devtools-tool-row-${plugin.id}`}
 											trailing={
 												<Icon

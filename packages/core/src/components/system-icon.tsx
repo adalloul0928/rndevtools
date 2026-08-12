@@ -20,6 +20,7 @@ export function SystemIcon({
 				<Image
 					color={color}
 					modifiers={[frame({ width: size, height: size })]}
+					size={size}
 					systemName={systemName}
 				/>
 			</Host>

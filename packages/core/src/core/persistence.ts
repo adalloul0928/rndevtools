@@ -1,4 +1,8 @@
-import type { DevToolsPosition, DevToolsPresentationMode } from '../types';
+import type {
+	DevToolsPosition,
+	DevToolsPresentationMode,
+	DevToolsSize,
+} from '../types';
 
 export const DEFAULT_PERSISTENCE_KEY = '@pumpd/devtools/runtime-state';
 
@@ -8,6 +12,7 @@ export type DevToolsPersistedState = {
 	restoreMode: 'sheet' | 'window';
 	launcherPosition?: DevToolsPosition;
 	windowPosition?: DevToolsPosition;
+	windowSize?: DevToolsSize;
 	pillPosition?: DevToolsPosition;
 	pinnedPillQuickActionIds?: readonly string[];
 };
@@ -16,6 +21,17 @@ function isPosition(value: unknown): value is DevToolsPosition {
 	if (!value || typeof value !== 'object') return false;
 	const candidate = value as Partial<DevToolsPosition>;
 	return Number.isFinite(candidate.x) && Number.isFinite(candidate.y);
+}
+
+function isSize(value: unknown): value is DevToolsSize {
+	if (!value || typeof value !== 'object') return false;
+	const candidate = value as Partial<DevToolsSize>;
+	return (
+		Number.isFinite(candidate.width) &&
+		Number.isFinite(candidate.height) &&
+		(candidate.width ?? 0) > 0 &&
+		(candidate.height ?? 0) > 0
+	);
 }
 
 function isPresentationMode(value: unknown): value is DevToolsPresentationMode {
@@ -57,6 +73,9 @@ export function parsePersistedState(
 				: {}),
 			...(isPosition(candidate.windowPosition)
 				? { windowPosition: candidate.windowPosition }
+				: {}),
+			...(isSize(candidate.windowSize)
+				? { windowSize: candidate.windowSize }
 				: {}),
 			...(isPosition(candidate.pillPosition)
 				? { pillPosition: candidate.pillPosition }

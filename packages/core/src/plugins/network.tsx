@@ -531,8 +531,10 @@ export function createNetworkPlugin(
 const styles = StyleSheet.create({
 	detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
 	detailMetric: {
-		backgroundColor: colors.background,
-		borderRadius: 10,
+		backgroundColor: colors.groupedFill,
+		borderColor: colors.separator,
+		borderRadius: 8,
+		borderWidth: StyleSheet.hairlineWidth,
 		minWidth: '46%',
 		padding: 10,
 	},

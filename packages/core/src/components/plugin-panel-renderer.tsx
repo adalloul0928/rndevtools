@@ -1,8 +1,13 @@
 import { Component, type ErrorInfo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { RectButton } from 'react-native-gesture-handler';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
-import { colors, PanelScaffold, PanelSignalCard } from './panel-ui';
+import { PanelButton } from './panel-controls';
+import {
+	colors,
+	PanelPresentationProvider,
+	PanelScaffold,
+	PanelSignalCard,
+} from './panel-ui';
 
 type PluginPanelRendererProps = {
 	plugin: DevToolsPanelPlugin;
@@ -51,13 +56,7 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 						<Text selectable style={styles.errorMessage}>
 							{error.message}
 						</Text>
-						<RectButton
-							accessibilityRole="button"
-							onPress={panelProps.onBack}
-							style={styles.button}
-						>
-							<Text style={styles.buttonText}>Return to tools</Text>
-						</RectButton>
+						<PanelButton label="Return to tools" onPress={panelProps.onBack} />
 					</View>
 				</PanelScaffold>
 			);
@@ -68,13 +67,22 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 }
 
 export function PluginPanelRenderer(props: PluginPanelRendererProps) {
-	return <PluginPanelBoundary key={props.plugin.id} {...props} />;
+	return (
+		<PanelPresentationProvider
+			mode={props.panelProps.presentationMode}
+			safeAreaTop={props.panelProps.safeAreaTop}
+		>
+			<PluginPanelBoundary key={props.plugin.id} {...props} />
+		</PanelPresentationProvider>
+	);
 }
 
 const styles = StyleSheet.create({
 	errorCard: {
 		backgroundColor: colors.card,
-		borderRadius: 16,
+		borderColor: colors.separator,
+		borderRadius: 12,
+		borderWidth: StyleSheet.hairlineWidth,
 		gap: 10,
 		padding: 16,
 	},
@@ -88,18 +96,5 @@ const styles = StyleSheet.create({
 		fontFamily: 'Menlo',
 		fontSize: 12,
 		lineHeight: 18,
-	},
-	button: {
-		alignItems: 'center',
-		backgroundColor: colors.blue,
-		borderRadius: 12,
-		marginTop: 4,
-		paddingHorizontal: 14,
-		paddingVertical: 11,
-	},
-	buttonText: {
-		color: colors.onAccent,
-		fontSize: 14,
-		fontWeight: '700',
 	},
 });

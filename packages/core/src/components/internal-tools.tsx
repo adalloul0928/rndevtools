@@ -8,6 +8,7 @@ import {
 	useState,
 } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createActionServices } from '../core/action-services';
 import {
 	DEFAULT_PERSISTENCE_KEY,
@@ -25,6 +26,7 @@ import type {
 	DevToolsPlugin,
 	DevToolsPosition,
 	DevToolsPresentationMode,
+	DevToolsSize,
 	InternalToolsHandle,
 	InternalToolsProps,
 } from '../types';
@@ -54,6 +56,7 @@ export const InternalTools = forwardRef<
 	},
 	ref,
 ) {
+	const safeAreaInsets = useSafeAreaInsets();
 	const validatedPlugins = useMemo(() => {
 		assertUniquePluginIds(plugins);
 		return plugins;
@@ -93,6 +96,7 @@ export const InternalTools = forwardRef<
 	);
 	const [launcherPosition, setLauncherPosition] = useState<DevToolsPosition>();
 	const [windowPosition, setWindowPosition] = useState<DevToolsPosition>();
+	const [windowSize, setWindowSize] = useState<DevToolsSize>();
 	const [pillPosition, setPillPosition] = useState<DevToolsPosition>();
 	const [pinnedPillQuickActionIds, setPinnedPillQuickActionIds] = useState<
 		readonly string[]
@@ -150,6 +154,7 @@ export const InternalTools = forwardRef<
 					setRestoreMode(state.restoreMode);
 					setLauncherPosition(state.launcherPosition);
 					setWindowPosition(state.windowPosition);
+					setWindowSize(state.windowSize);
 					setPillPosition(state.pillPosition);
 					setPinnedPillQuickActionIds(state.pinnedPillQuickActionIds ?? []);
 				}
@@ -181,6 +186,7 @@ export const InternalTools = forwardRef<
 			restoreMode,
 			launcherPosition,
 			windowPosition,
+			windowSize,
 			pillPosition,
 			pinnedPillQuickActionIds,
 		});
@@ -200,6 +206,7 @@ export const InternalTools = forwardRef<
 		presentationMode,
 		restoreMode,
 		windowPosition,
+		windowSize,
 	]);
 
 	const setQuickActionPinned = useCallback(
@@ -249,6 +256,14 @@ export const InternalTools = forwardRef<
 		) => {
 			markLocalStateChange();
 			setter(position);
+		},
+		[markLocalStateChange],
+	);
+
+	const setPersistedSize = useCallback(
+		(size: DevToolsSize) => {
+			markLocalStateChange();
+			setWindowSize(size);
 		},
 		[markLocalStateChange],
 	);
@@ -335,6 +350,7 @@ export const InternalTools = forwardRef<
 			{isPresented && presentationMode === 'sheet' ? (
 				<ToolsSheet
 					isPresented
+					safeAreaTop={safeAreaInsets.top}
 					onBack={() => setSelectedPluginId(null)}
 					onClose={close}
 					onPresentationModeChange={setPresentationMode}
@@ -351,6 +367,7 @@ export const InternalTools = forwardRef<
 			{isPresented && presentationMode === 'window' ? (
 				<FloatingWindow
 					initialPosition={windowPosition}
+					initialSize={windowSize}
 					onBack={() => setSelectedPluginId(null)}
 					onClose={close}
 					onPresentationModeChange={setPresentationMode}
@@ -364,6 +381,7 @@ export const InternalTools = forwardRef<
 					onPositionChange={(position) =>
 						setPersistedPosition(setWindowPosition, position)
 					}
+					onSizeChange={setPersistedSize}
 					actions={actionServices}
 				/>
 			) : null}

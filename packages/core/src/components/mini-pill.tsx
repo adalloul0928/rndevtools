@@ -156,7 +156,7 @@ export function MiniPill({
 						style={styles.restoreArea}
 					>
 						<View style={styles.iconSurface}>
-							<SystemIcon systemName="wrench.and.screwdriver.fill" size={17} />
+							<SystemIcon systemName="wrench.and.screwdriver.fill" size={15} />
 						</View>
 						<View style={styles.copy}>
 							<Text numberOfLines={1} style={styles.label}>
@@ -181,7 +181,7 @@ export function MiniPill({
 					>
 						<SystemIcon
 							systemName="xmark"
-							size={12}
+							size={17}
 							color={colors.secondaryLabel}
 						/>
 					</RectButton>
@@ -223,15 +223,15 @@ const styles = StyleSheet.create({
 	},
 	iconSurface: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 19,
-		height: 38,
+		backgroundColor: colors.fill,
+		borderRadius: 15,
+		height: 30,
 		justifyContent: 'center',
-		width: 38,
+		width: 30,
 	},
 	copy: {
 		flex: 1,
-		marginLeft: 9,
+		marginLeft: 8,
 	},
 	label: {
 		color: colors.label,
@@ -246,9 +246,9 @@ const styles = StyleSheet.create({
 	},
 	closeButton: {
 		alignItems: 'center',
-		borderRadius: 17,
-		height: 34,
+		borderRadius: 22,
+		height: 44,
 		justifyContent: 'center',
-		width: 34,
+		width: 44,
 	},
 });

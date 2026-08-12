@@ -17,6 +17,7 @@ import type {
 	DevToolsPlugin,
 	DevToolsPosition,
 	DevToolsPresentationMode,
+	DevToolsSize,
 } from '../types';
 import { colors } from './panel-ui';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
@@ -25,6 +26,9 @@ import { SystemIcon } from './system-icon';
 import { ToolList } from './tool-list';
 
 const OUTER_MARGIN = 12;
+const MINIMUM_WINDOW_WIDTH = 300;
+const MINIMUM_WINDOW_HEIGHT = 360;
+const RESIZE_STEP = 40;
 
 type FloatingWindowProps = {
 	title: string;
@@ -35,7 +39,9 @@ type FloatingWindowProps = {
 	onClose: () => void;
 	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
 	initialPosition?: DevToolsPosition;
+	initialSize?: DevToolsSize;
 	onPositionChange?: (position: DevToolsPosition) => void;
+	onSizeChange?: (size: DevToolsSize) => void;
 	onPluginError?: (error: unknown, pluginId: string) => void;
 	actions: DevToolsActionServices;
 	pinnedPillQuickActionIds: readonly string[];
@@ -56,7 +62,9 @@ export function FloatingWindow({
 	onClose,
 	onPresentationModeChange,
 	initialPosition,
+	initialSize,
 	onPositionChange,
+	onSizeChange,
 	onPluginError,
 	actions,
 	pinnedPillQuickActionIds,
@@ -64,42 +72,113 @@ export function FloatingWindow({
 }: FloatingWindowProps) {
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
-	const windowWidth = Math.min(390, Math.max(300, width - OUTER_MARGIN * 2));
-	const windowHeight = Math.min(
-		620,
-		Math.max(360, height - insets.top - insets.bottom - OUTER_MARGIN * 2),
+	const availableWidth = Math.max(1, width - OUTER_MARGIN * 2);
+	const availableHeight = Math.max(
+		1,
+		height - insets.top - insets.bottom - OUTER_MARGIN * 2,
 	);
-	const maximumX = Math.max(OUTER_MARGIN, width - windowWidth - OUTER_MARGIN);
+	const minimumWidth = Math.min(MINIMUM_WINDOW_WIDTH, availableWidth);
+	const minimumHeight = Math.min(MINIMUM_WINDOW_HEIGHT, availableHeight);
+	const resolvedWidth = clamp(
+		initialSize?.width ?? Math.min(390, availableWidth),
+		minimumWidth,
+		availableWidth,
+	);
+	const resolvedHeight = clamp(
+		initialSize?.height ?? Math.min(620, availableHeight),
+		minimumHeight,
+		availableHeight,
+	);
+	const maximumX = Math.max(OUTER_MARGIN, width - resolvedWidth - OUTER_MARGIN);
 	const minimumY = insets.top + OUTER_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
-		height - windowHeight - insets.bottom - OUTER_MARGIN,
+		height - resolvedHeight - insets.bottom - OUTER_MARGIN,
 	);
 	const resolvedX = clamp(
-		initialPosition?.x ?? (width - windowWidth) / 2,
+		initialPosition?.x ?? (width - resolvedWidth) / 2,
 		OUTER_MARGIN,
 		maximumX,
 	);
 	const resolvedY = clamp(
-		initialPosition?.y ?? (height - windowHeight) / 2,
+		initialPosition?.y ?? (height - resolvedHeight) / 2,
 		minimumY,
 		maximumY,
 	);
 	const translateX = useSharedValue(resolvedX);
 	const translateY = useSharedValue(resolvedY);
+	const windowWidth = useSharedValue(resolvedWidth);
+	const windowHeight = useSharedValue(resolvedHeight);
 	const startX = useSharedValue(resolvedX);
 	const startY = useSharedValue(resolvedY);
+	const startWidth = useSharedValue(resolvedWidth);
+	const startHeight = useSharedValue(resolvedHeight);
 	const commitPosition = useCallback(
 		(x: number, y: number) => onPositionChange?.({ x, y }),
 		[onPositionChange],
+	);
+	const commitSize = useCallback(
+		(nextWidth: number, nextHeight: number) =>
+			onSizeChange?.({ width: nextWidth, height: nextHeight }),
+		[onSizeChange],
 	);
 
 	useEffect(() => {
 		translateX.value = resolvedX;
 		translateY.value = resolvedY;
+		windowWidth.value = resolvedWidth;
+		windowHeight.value = resolvedHeight;
 		startX.value = resolvedX;
 		startY.value = resolvedY;
-	}, [resolvedX, resolvedY, startX, startY, translateX, translateY]);
+		startWidth.value = resolvedWidth;
+		startHeight.value = resolvedHeight;
+	}, [
+		resolvedHeight,
+		resolvedWidth,
+		resolvedX,
+		resolvedY,
+		startHeight,
+		startWidth,
+		startX,
+		startY,
+		translateX,
+		translateY,
+		windowHeight,
+		windowWidth,
+	]);
+
+	const resizeBy = useCallback(
+		(delta: number) => {
+			const nextWidth = clamp(
+				windowWidth.value + delta,
+				minimumWidth,
+				Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+			);
+			const nextHeight = clamp(
+				windowHeight.value + delta,
+				minimumHeight,
+				Math.max(
+					minimumHeight,
+					height - translateY.value - insets.bottom - OUTER_MARGIN,
+				),
+			);
+			windowWidth.value = nextWidth;
+			windowHeight.value = nextHeight;
+			commitSize(nextWidth, nextHeight);
+		},
+		[
+			commitSize,
+			height,
+			insets.bottom,
+			minimumHeight,
+			minimumWidth,
+			translateX,
+			translateY,
+			width,
+			windowHeight,
+			windowWidth,
+		],
+	);
 
 	const dragGesture = useMemo(
 		() =>
@@ -113,12 +192,15 @@ export function FloatingWindow({
 					translateX.value = clamp(
 						startX.value + event.translationX,
 						OUTER_MARGIN,
-						maximumX,
+						Math.max(OUTER_MARGIN, width - windowWidth.value - OUTER_MARGIN),
 					);
 					translateY.value = clamp(
 						startY.value + event.translationY,
 						minimumY,
-						maximumY,
+						Math.max(
+							minimumY,
+							height - windowHeight.value - insets.bottom - OUTER_MARGIN,
+						),
 					);
 				})
 				.onEnd(() => {
@@ -126,27 +208,75 @@ export function FloatingWindow({
 				}),
 		[
 			commitPosition,
-			maximumX,
-			maximumY,
+			height,
+			insets.bottom,
 			minimumY,
 			startX,
 			startY,
 			translateX,
 			translateY,
+			width,
+			windowHeight,
+			windowWidth,
+		],
+	);
+
+	const resizeGesture = useMemo(
+		() =>
+			Gesture.Pan()
+				.minDistance(2)
+				.onBegin(() => {
+					startWidth.value = windowWidth.value;
+					startHeight.value = windowHeight.value;
+				})
+				.onUpdate((event) => {
+					windowWidth.value = clamp(
+						startWidth.value + event.translationX,
+						minimumWidth,
+						Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+					);
+					windowHeight.value = clamp(
+						startHeight.value + event.translationY,
+						minimumHeight,
+						Math.max(
+							minimumHeight,
+							height - translateY.value - insets.bottom - OUTER_MARGIN,
+						),
+					);
+				})
+				.onEnd(() => {
+					scheduleOnRN(commitSize, windowWidth.value, windowHeight.value);
+				}),
+		[
+			commitSize,
+			height,
+			insets.bottom,
+			minimumHeight,
+			minimumWidth,
+			startHeight,
+			startWidth,
+			translateX,
+			translateY,
+			width,
+			windowHeight,
+			windowWidth,
 		],
 	);
 
 	const animatedStyle = useAnimatedStyle(() => ({
+		height: windowHeight.value,
 		transform: [
 			{ translateX: translateX.value },
 			{ translateY: translateY.value },
 		],
+		width: windowWidth.value,
 	}));
 
 	const panelProps = {
 		onBack,
 		onClose,
 		presentationMode: 'window' as const,
+		safeAreaTop: insets.top,
 		onPresentationModeChange,
 		actions,
 		...(selectedPlugin?.pillQuickAction
@@ -161,13 +291,7 @@ export function FloatingWindow({
 	};
 
 	return (
-		<Animated.View
-			style={[
-				styles.positioner,
-				{ height: windowHeight, width: windowWidth },
-				animatedStyle,
-			]}
-		>
+		<Animated.View style={[styles.positioner, animatedStyle]}>
 			<View style={styles.window}>
 				<View style={styles.header}>
 					<GestureDetector gesture={dragGesture}>
@@ -176,17 +300,10 @@ export function FloatingWindow({
 							accessibilityLabel={title}
 							style={styles.dragArea}
 						>
-							<View style={styles.headerIcon}>
-								<SystemIcon
-									systemName="wrench.and.screwdriver.fill"
-									size={17}
-								/>
-							</View>
 							<View style={styles.headerCopy}>
 								<Text numberOfLines={1} style={styles.headerTitle}>
 									{title}
 								</Text>
-								<Text style={styles.headerSubtitle}>Floating window</Text>
 							</View>
 						</Animated.View>
 					</GestureDetector>
@@ -198,7 +315,7 @@ export function FloatingWindow({
 					>
 						<SystemIcon
 							systemName="xmark"
-							size={13}
+							size={18}
 							color={colors.secondaryLabel}
 						/>
 					</RectButton>
@@ -220,6 +337,28 @@ export function FloatingWindow({
 						<ToolList plugins={plugins} onSelect={onSelectPlugin} />
 					)}
 				</View>
+				<GestureDetector gesture={resizeGesture}>
+					<Animated.View
+						accessibilityActions={[
+							{ label: 'Make window larger', name: 'increment' },
+							{ label: 'Make window smaller', name: 'decrement' },
+						]}
+						accessibilityHint="Drag diagonally to resize the tools window"
+						accessibilityLabel="Resize developer tools window"
+						accessibilityRole="adjustable"
+						onAccessibilityAction={(event) =>
+							resizeBy(
+								event.nativeEvent.actionName === 'decrement'
+									? -RESIZE_STEP
+									: RESIZE_STEP,
+							)
+						}
+						style={styles.resizeHandle}
+						testID="devtools-window-resize-handle"
+					>
+						<View style={styles.resizeCurve} />
+					</Animated.View>
+				</GestureDetector>
 			</View>
 		</Animated.View>
 	);
@@ -239,7 +378,7 @@ const styles = StyleSheet.create({
 	window: {
 		backgroundColor: colors.background,
 		borderColor: colors.separator,
-		borderRadius: 26,
+		borderRadius: 22,
 		borderWidth: StyleSheet.hairlineWidth,
 		flex: 1,
 		overflow: 'hidden',
@@ -250,9 +389,9 @@ const styles = StyleSheet.create({
 		borderBottomColor: colors.separator,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		flexDirection: 'row',
-		height: 58,
-		paddingLeft: 12,
-		paddingRight: 9,
+		height: 52,
+		paddingLeft: 14,
+		paddingRight: 4,
 	},
 	dragArea: {
 		alignItems: 'center',
@@ -260,43 +399,50 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		height: '100%',
 	},
-	headerIcon: {
-		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 9,
-		height: 34,
-		justifyContent: 'center',
-		width: 34,
-	},
 	headerCopy: {
 		flex: 1,
-		marginLeft: 10,
 	},
 	headerTitle: {
 		color: colors.label,
 		fontSize: 15,
-		fontWeight: '700',
-	},
-	headerSubtitle: {
-		color: colors.secondaryLabel,
-		fontSize: 11,
-		fontWeight: '400',
-		marginTop: 1,
+		fontWeight: '600',
 	},
 	closeButton: {
 		alignItems: 'center',
-		backgroundColor: colors.background,
-		borderRadius: 16,
-		height: 32,
+		backgroundColor: colors.fill,
+		borderRadius: 22,
+		height: 44,
 		justifyContent: 'center',
-		width: 32,
+		width: 44,
 	},
 	switcher: {
 		backgroundColor: colors.card,
-		paddingBottom: 9,
+		paddingBottom: 7,
 		paddingHorizontal: 12,
 	},
 	content: {
 		flex: 1,
+	},
+	resizeHandle: {
+		alignItems: 'flex-end',
+		bottom: 0,
+		height: 44,
+		justifyContent: 'flex-end',
+		paddingBottom: 8,
+		paddingRight: 8,
+		position: 'absolute',
+		right: 0,
+		width: 44,
+		zIndex: 4,
+	},
+	resizeCurve: {
+		borderBottomColor: colors.secondaryLabel,
+		borderBottomRightRadius: 9,
+		borderBottomWidth: 2,
+		borderRightColor: colors.secondaryLabel,
+		borderRightWidth: 2,
+		height: 15,
+		opacity: 0.65,
+		width: 15,
 	},
 });

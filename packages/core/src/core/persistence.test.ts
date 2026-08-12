@@ -12,6 +12,7 @@ describe('parsePersistedState', () => {
 					presentationMode: 'window',
 					restoreMode: 'window',
 					launcherPosition: { x: 12, y: 24 },
+					windowSize: { width: 344, height: 540 },
 					pinnedPillQuickActionIds: ['state', 'source', 'state', 42],
 				}),
 			),
@@ -20,7 +21,25 @@ describe('parsePersistedState', () => {
 			presentationMode: 'window',
 			restoreMode: 'window',
 			launcherPosition: { x: 12, y: 24 },
+			windowSize: { width: 344, height: 540 },
 			pinnedPillQuickActionIds: ['state', 'source'],
+		});
+	});
+
+	it('ignores invalid window dimensions without discarding other state', () => {
+		expect(
+			parsePersistedState(
+				JSON.stringify({
+					version: 1,
+					presentationMode: 'window',
+					restoreMode: 'window',
+					windowSize: { width: -20, height: Number.NaN },
+				}),
+			),
+		).toEqual({
+			version: 1,
+			presentationMode: 'window',
+			restoreMode: 'window',
 		});
 	});
 

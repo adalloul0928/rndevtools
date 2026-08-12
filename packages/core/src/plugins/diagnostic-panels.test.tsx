@@ -17,15 +17,64 @@ jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
 	return {
+		Button: ({ label, onPress }: { label?: string; onPress?: () => void }) =>
+			ReactRuntime.createElement(
+				Native.Pressable,
+				{ accessibilityLabel: label, onPress },
+				ReactRuntime.createElement(Native.Text, null, label),
+			),
 		Host: ({ children }: { children?: React.ReactNode }) =>
 			ReactRuntime.createElement(Native.View, null, children),
 		Image: () => ReactRuntime.createElement(Native.View),
+		Picker: ({
+			children,
+			onSelectionChange,
+			selection,
+		}: {
+			children?: React.ReactNode;
+			onSelectionChange: (value: string) => void;
+			selection: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				null,
+				ReactRuntime.Children.map(children, (child: React.ReactElement) => {
+					const option = child.props as {
+						children: string;
+						modifiers?: Array<{ tag?: string }>;
+					};
+					const value = option.modifiers?.find((item) => item.tag)?.tag;
+					return ReactRuntime.createElement(
+						Native.Pressable,
+						{
+							accessibilityLabel: option.children,
+							accessibilityRole: 'tab',
+							accessibilityState: { selected: selection === value },
+							onPress: () => value && onSelectionChange(value),
+						},
+						ReactRuntime.createElement(Native.Text, null, option.children),
+					);
+				}),
+			),
+		Text: ({
+			children,
+			modifiers,
+		}: {
+			children?: React.ReactNode;
+			modifiers?: unknown[];
+		}) => ReactRuntime.createElement(Native.Text, { modifiers }, children),
 	};
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	buttonStyle: (value: unknown) => value,
+	controlSize: (value: unknown) => value,
+	disabled: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	foregroundStyle: (value: unknown) => value,
+	pickerStyle: (value: unknown) => value,
+	tag: (value: unknown) => ({ tag: value }),
+	tint: (value: unknown) => value,
 }));
 
 jest.mock('react-native-gesture-handler', () => {

@@ -48,6 +48,7 @@ export type {
 	DevToolsPosition,
 	DevToolsPresentationMode,
 	DevToolsRuntimeErrorContext,
+	DevToolsSize,
 	DevToolsSystemImage,
 	InternalToolsHandle,
 	InternalToolsProps,

@@ -6,6 +6,12 @@ jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
 	return {
+		Button: ({ label, onPress }: { label?: string; onPress?: () => void }) =>
+			ReactRuntime.createElement(
+				Native.Pressable,
+				{ accessibilityLabel: label, onPress },
+				ReactRuntime.createElement(Native.Text, null, label),
+			),
 		Host: ({ children }: { children?: React.ReactNode }) =>
 			ReactRuntime.createElement(Native.View, null, children),
 		Image: () => ReactRuntime.createElement(Native.View),
@@ -13,8 +19,12 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	buttonStyle: (value: unknown) => value,
+	controlSize: (value: unknown) => value,
+	disabled: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	foregroundStyle: (value: unknown) => value,
+	tint: (value: unknown) => value,
 }));
 
 jest.mock('react-native-gesture-handler', () => {
@@ -22,6 +32,7 @@ jest.mock('react-native-gesture-handler', () => {
 	return {
 		RectButton: Native.Pressable,
 		FlatList: Native.FlatList,
+		ScrollView: Native.ScrollView,
 	};
 });
 
