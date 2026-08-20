@@ -125,6 +125,37 @@ describe('createNetworkPlugin', () => {
 				responseBody: expect.stringContaining('[REDACTED]'),
 			}),
 		);
+		expect(JSON.stringify(diagnostics.getEvents()[0])).not.toContain('secret');
+		dispose?.();
+	});
+
+	it('never captures a Supabase password grant credential', async () => {
+		const diagnostics = createNetworkPlugin({ captureBody: true });
+		const dispose = diagnostics.plugin.install?.();
+		const fetchImplementation = jest
+			.fn()
+			.mockResolvedValue(
+				response('{"access_token":"session-secret"}'),
+			) as unknown as typeof fetch;
+		const instrumentedFetch = diagnostics.instrumentFetch(fetchImplementation);
+
+		await instrumentedFetch(
+			'https://example.supabase.co/auth/v1/token?grant_type=password',
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					email: 'maestro.power@example.com',
+					password: 'shared-persona-password',
+				}),
+			},
+		);
+		await flushCapture();
+
+		const capturedEvent = JSON.stringify(diagnostics.getEvents()[0]);
+		expect(capturedEvent).toContain('[REDACTED]');
+		expect(capturedEvent).not.toContain('shared-persona-password');
+		expect(capturedEvent).not.toContain('session-secret');
 		dispose?.();
 	});
 
