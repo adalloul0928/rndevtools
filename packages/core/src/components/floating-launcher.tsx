@@ -22,6 +22,8 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { DevToolsPosition } from '../types';
+import { colors } from './panel-ui';
+import { SystemIcon } from './system-icon';
 
 const SIZE = 56;
 const EDGE_MARGIN = 10;
@@ -155,19 +157,31 @@ export function FloatingLauncher({
 					accessibilityRole="button"
 					onPress={onOpen}
 					style={[
-						styles.fallbackSurface,
+						Platform.OS === 'ios'
+							? styles.fallbackSurface
+							: styles.androidSurface,
 						supportsLiquidGlass && styles.liquidGlassSurface,
 					]}
 				>
 					<View pointerEvents="none">
-						<Host style={styles.host}>
-							<Image
-								color={PlatformColor('systemBlueColor')}
-								modifiers={imageModifiers}
-								size={22}
-								systemName="wrench.and.screwdriver.fill"
-							/>
-						</Host>
+						{Platform.OS === 'ios' ? (
+							<Host style={styles.host}>
+								<Image
+									color={PlatformColor('systemBlueColor')}
+									modifiers={imageModifiers}
+									size={22}
+									systemName="wrench.and.screwdriver.fill"
+								/>
+							</Host>
+						) : (
+							<View style={styles.androidIcon}>
+								<SystemIcon
+									color={colors.blue}
+									size={22}
+									systemName="wrench.and.screwdriver.fill"
+								/>
+							</View>
+						)}
 					</View>
 				</RectButton>
 			</Animated.View>
@@ -176,6 +190,22 @@ export function FloatingLauncher({
 }
 
 const styles = StyleSheet.create({
+	androidIcon: {
+		alignItems: 'center',
+		height: SIZE,
+		justifyContent: 'center',
+		width: SIZE,
+	},
+	androidSurface: {
+		backgroundColor: colors.card,
+		borderColor: colors.separator,
+		borderRadius: SIZE / 2,
+		borderWidth: StyleSheet.hairlineWidth,
+		elevation: 6,
+		height: SIZE,
+		overflow: 'hidden',
+		width: SIZE,
+	},
 	positioner: {
 		left: 0,
 		position: 'absolute',

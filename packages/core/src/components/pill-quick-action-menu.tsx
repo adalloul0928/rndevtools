@@ -1,3 +1,4 @@
+import { MenuView } from '@expo/ui/community/menu';
 import {
 	Divider,
 	Host,
@@ -7,13 +8,14 @@ import {
 } from '@expo/ui/swift-ui';
 import { accessibilityLabel, frame } from '@expo/ui/swift-ui/modifiers';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import type {
 	DevToolsActionServices,
 	DevToolsPillQuickActionOption,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
 import { colors } from './panel-ui';
+import { SystemIcon } from './system-icon';
 
 const subscribeToNothing = () => () => {};
 const getNoSelection = () => null;
@@ -63,6 +65,71 @@ export function PillQuickActionMenu({
 		setOptions(resolveOptions(pillQuickAction.options));
 		return subscribe(() => setOptions(resolveOptions(pillQuickAction.options)));
 	}, [subscribe, pillQuickAction]);
+
+	if (Platform.OS !== 'ios') {
+		const openPanelId = '__open-panel';
+		const unpinId = '__unpin';
+		return (
+			<View
+				style={styles.container}
+				testID={`devtools-pill-quick-action-${plugin.id}`}
+			>
+				<MenuView
+					actions={[
+						...options.map((option) => ({
+							id: option.id,
+							state:
+								option.id === selectedOptionId ? ('on' as const) : undefined,
+							title: option.label,
+						})),
+						...(onOpenPanel
+							? [
+									{
+										id: openPanelId,
+										title: `Open ${pillQuickAction.openPanelLabel ?? plugin.title}…`,
+									},
+								]
+							: []),
+						{ id: unpinId, title: 'Remove from Pill' },
+					]}
+					onPressAction={(event) => {
+						const actionId = event.nativeEvent.event;
+						if (actionId === openPanelId) {
+							onOpenPanel?.();
+							return;
+						}
+						if (actionId === unpinId) {
+							onUnpin();
+							return;
+						}
+						const option = options.find(
+							(candidate) => candidate.id === actionId,
+						);
+						if (!option) return;
+						void actions.run({
+							pluginId: plugin.id,
+							label: option.label,
+							confirmation: option.confirmation,
+							action: option.action,
+						});
+					}}
+				>
+					<View
+						accessible
+						accessibilityLabel={`${plugin.title} quick actions`}
+						style={styles.androidTrigger}
+					>
+						<SystemIcon
+							color={isHighlighted ? colors.orange : colors.blue}
+							size={17}
+							systemName={pillQuickAction.systemImage ?? plugin.systemImage}
+						/>
+					</View>
+				</MenuView>
+				{isHighlighted ? <View style={styles.dot} /> : null}
+			</View>
+		);
+	}
 
 	return (
 		<View
@@ -123,6 +190,12 @@ export function PillQuickActionMenu({
 }
 
 const styles = StyleSheet.create({
+	androidTrigger: {
+		alignItems: 'center',
+		height: SLOT_HEIGHT,
+		justifyContent: 'center',
+		width: SLOT_WIDTH,
+	},
 	container: {
 		borderLeftColor: colors.separator,
 		borderLeftWidth: StyleSheet.hairlineWidth,

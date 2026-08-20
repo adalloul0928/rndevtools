@@ -1,6 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { MenuView } from '@expo/ui/community/menu';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { RectButton, ScrollView } from 'react-native-gesture-handler';
-import { groupPlugins } from '../core/plugins';
+import { groupPlugins, hasPillQuickAction } from '../core/plugins';
 import type { DevToolsPlugin } from '../types';
 import { colors } from './panel-ui';
 import { SystemIcon } from './system-icon';
@@ -8,10 +9,75 @@ import { SystemIcon } from './system-icon';
 type ToolListProps = {
 	plugins: readonly DevToolsPlugin[];
 	onSelect: (plugin: DevToolsPlugin) => void;
+	pinnedPillQuickActionIds?: readonly string[];
+	onQuickActionPinnedChange?: (pluginId: string, isPinned: boolean) => void;
 };
 
-export function ToolList({ plugins, onSelect }: ToolListProps) {
+export function ToolList({
+	plugins,
+	onSelect,
+	pinnedPillQuickActionIds = [],
+	onQuickActionPinnedChange,
+}: ToolListProps) {
 	const sections = groupPlugins(plugins);
+	const RowButton = Platform.OS === 'ios' ? RectButton : Pressable;
+	const renderRow = (
+		plugin: DevToolsPlugin,
+		index: number,
+		sectionLength: number,
+	) => {
+		const row = (
+			<RowButton
+				accessibilityHint={plugin.description}
+				accessibilityLabel={plugin.title}
+				accessibilityRole="button"
+				onPress={() => onSelect(plugin)}
+				style={styles.row}
+				testID={`devtools-tool-row-${plugin.id}`}
+			>
+				<View style={styles.iconSurface}>
+					<SystemIcon
+						color={colors.blue}
+						systemName={plugin.systemImage}
+						size={16}
+					/>
+				</View>
+				<View
+					style={[
+						styles.rowContent,
+						index < sectionLength - 1 && styles.separator,
+					]}
+				>
+					<View style={styles.copy}>
+						<Text style={styles.title}>{plugin.title}</Text>
+					</View>
+					<SystemIcon
+						color={colors.secondaryLabel}
+						size={12}
+						systemName={
+							plugin.kind === 'action' ? 'arrow.up.right' : 'chevron.right'
+						}
+					/>
+				</View>
+			</RowButton>
+		);
+		if (!onQuickActionPinnedChange || !hasPillQuickAction(plugin)) return row;
+		const isPinned = pinnedPillQuickActionIds.includes(plugin.id);
+		return (
+			<MenuView
+				actions={[
+					{
+						id: 'toggle-pin',
+						title: isPinned ? 'Remove from Pill' : 'Pin to Pill',
+					},
+				]}
+				onPressAction={() => onQuickActionPinnedChange(plugin.id, !isPinned)}
+				shouldOpenOnLongPress
+			>
+				{row}
+			</MenuView>
+		);
+	};
 
 	return (
 		<ScrollView
@@ -23,42 +89,9 @@ export function ToolList({ plugins, onSelect }: ToolListProps) {
 					<Text style={styles.sectionTitle}>{section.title}</Text>
 					<View style={styles.group}>
 						{section.plugins.map((plugin, index) => (
-							<RectButton
-								key={plugin.id}
-								accessibilityHint={plugin.description}
-								accessibilityLabel={plugin.title}
-								accessibilityRole="button"
-								onPress={() => onSelect(plugin)}
-								style={styles.row}
-								testID={`devtools-tool-row-${plugin.id}`}
-							>
-								<View style={styles.iconSurface}>
-									<SystemIcon
-										color={colors.blue}
-										systemName={plugin.systemImage}
-										size={16}
-									/>
-								</View>
-								<View
-									style={[
-										styles.rowContent,
-										index < section.plugins.length - 1 && styles.separator,
-									]}
-								>
-									<View style={styles.copy}>
-										<Text style={styles.title}>{plugin.title}</Text>
-									</View>
-									<SystemIcon
-										systemName={
-											plugin.kind === 'action'
-												? 'arrow.up.right'
-												: 'chevron.right'
-										}
-										size={12}
-										color={colors.secondaryLabel}
-									/>
-								</View>
-							</RectButton>
+							<View key={plugin.id}>
+								{renderRow(plugin, index, section.plugins.length)}
+							</View>
 						))}
 					</View>
 				</View>

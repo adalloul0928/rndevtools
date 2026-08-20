@@ -1,12 +1,19 @@
+import {
+	Button as UniversalButton,
+	Host as UniversalHost,
+	Icon as UniversalIcon,
+} from '@expo/ui';
 import { Button, Host, Image } from '@expo/ui/swift-ui';
 import { buttonStyle, tint } from '@expo/ui/swift-ui/modifiers';
-import { Platform, PlatformColor, Pressable, Text } from 'react-native';
+import { Platform, PlatformColor } from 'react-native';
 import type { DevToolsSystemImage } from '../types';
+import { colors } from './panel-ui';
+import { universalIconForSystemImage } from './system-icon';
 
 /**
  * Icon button for the panel shell's trailing slot, composed entirely from
- * Expo UI on iOS (SwiftUI plain Button + SF Symbol). Android falls back to
- * a text button until the Jetpack panel variants land.
+ * Expo UI on iOS (SwiftUI plain Button + SF Symbol). Android uses the
+ * universal Expo UI button and Material Symbol implementation.
  */
 export function NavIconButton({
 	systemImage,
@@ -23,16 +30,20 @@ export function NavIconButton({
 }) {
 	if (Platform.OS !== 'ios') {
 		return (
-			<Pressable
-				accessibilityLabel={accessibilityLabel}
-				accessibilityRole="button"
-				onPress={onPress}
-				testID={testID}
-			>
-				<Text style={{ color: destructive ? '#D32F2F' : '#1976D2' }}>
-					{accessibilityLabel}
-				</Text>
-			</Pressable>
+			<UniversalHost matchContents testID={testID}>
+				<UniversalButton
+					onPress={onPress}
+					variant="text"
+					style={{ height: 44, width: 44 }}
+				>
+					<UniversalIcon
+						accessibilityLabel={accessibilityLabel}
+						color={destructive ? colors.red : colors.blue}
+						name={universalIconForSystemImage(systemImage)}
+						size={20}
+					/>
+				</UniversalButton>
+			</UniversalHost>
 		);
 	}
 	return (

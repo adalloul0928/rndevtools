@@ -1,4 +1,9 @@
 import {
+	BottomSheet as UniversalBottomSheet,
+	RNHostView as UniversalRNHostView,
+} from '@expo/ui';
+import { MenuView } from '@expo/ui/community/menu';
+import {
 	BottomSheet,
 	Button,
 	ContextMenu,
@@ -35,9 +40,14 @@ import {
 import { useState } from 'react';
 import {
 	type ColorValue,
+	Platform,
 	PlatformColor,
+	Pressable,
 	StyleSheet,
+	Text,
+	TextInput,
 	useColorScheme,
+	useWindowDimensions,
 	View,
 } from 'react-native';
 import { groupPlugins, hasPillQuickAction } from '../core/plugins';
@@ -48,7 +58,10 @@ import type {
 	DevToolsPlugin,
 	DevToolsPresentationMode,
 } from '../types';
+import { colors } from './panel-ui';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
+import { SystemIcon } from './system-icon';
+import { ToolList } from './tool-list';
 
 /**
  * UIKit's `UIButton(type: .close)` is a 30pt circle, but that is one specific
@@ -121,6 +134,7 @@ export function ToolsSheet({
 }: ToolsSheetProps) {
 	const [query, setQuery] = useState('');
 	const colorScheme = useColorScheme();
+	const window = useWindowDimensions();
 	// SwiftUI quaternary-fill approximation for the circular header controls
 	// (Maps/Find My-style sheet dismiss buttons).
 	const headerControlFill = colorScheme === 'dark' ? '#7676803D' : '#7676801F';
@@ -149,6 +163,155 @@ export function ToolsSheet({
 		setQuery('');
 		onSelectPlugin(plugin);
 	};
+	if (Platform.OS !== 'ios') {
+		const visiblePlugins = sections.flatMap((section) => section.plugins);
+		const sheetHeight = Math.max(360, window.height - safeAreaTop - 40);
+		const sheetWidth = Math.max(280, window.width - 32);
+		return (
+			<UniversalBottomSheet
+				isPresented={isPresented}
+				onDismiss={onClose}
+				showDragIndicator
+				snapPoints={['full']}
+				testID="devtools-sheet"
+			>
+				<UniversalRNHostView style={{ height: sheetHeight, width: sheetWidth }}>
+					<View style={styles.androidSheet}>
+						{selectedPlugin ? (
+							<PluginPanelRenderer
+								onError={onPluginError}
+								panelProps={panelProps}
+								plugin={selectedPlugin}
+							/>
+						) : (
+							<>
+								<View style={styles.androidHeader}>
+									<MenuView
+										actions={[
+											{ id: 'sheet', state: 'on', title: 'Sheet' },
+											{ id: 'window', title: 'Window' },
+											{ id: 'pill', title: 'Pill' },
+										]}
+										onPressAction={(event) =>
+											onPresentationModeChange(
+												event.nativeEvent.event as DevToolsPresentationMode,
+											)
+										}
+										testID="devtools-presentation-menu"
+									>
+										<View
+											accessible
+											accessibilityLabel="Tool presentation"
+											style={styles.androidHeaderControl}
+										>
+											<SystemIcon
+												color={colors.blue}
+												size={20}
+												systemName="wrench.and.screwdriver.fill"
+											/>
+										</View>
+									</MenuView>
+									<Text numberOfLines={1} style={styles.androidTitle}>
+										{title}
+									</Text>
+									<Pressable
+										accessibilityLabel="Close developer tools"
+										accessibilityRole="button"
+										onPress={onClose}
+										style={styles.androidHeaderControl}
+										testID="devtools-sheet-close"
+									>
+										<SystemIcon
+											color={colors.secondaryLabel}
+											size={20}
+											systemName="xmark"
+										/>
+									</Pressable>
+								</View>
+								<View style={styles.androidSearch}>
+									<SystemIcon
+										color={colors.secondaryLabel}
+										size={18}
+										systemName="magnifyingglass"
+									/>
+									<TextInput
+										autoCapitalize="none"
+										autoCorrect={false}
+										onChangeText={setQuery}
+										placeholder="Search tools"
+										placeholderTextColor={colors.secondaryLabel}
+										style={styles.androidSearchInput}
+										value={query}
+									/>
+								</View>
+								{homeStatus.length > 0 ? (
+									<View style={styles.androidStatusGroup}>
+										{homeStatus.map((row) => {
+											const content = (
+												<>
+													<Text style={styles.androidStatusLabel}>
+														{row.label}
+													</Text>
+													<View style={styles.androidStatusValueWrap}>
+														{row.badge ? (
+															<Text
+																style={[
+																	styles.androidBadge,
+																	{
+																		color:
+																			BADGE_TONES[row.badge.tone ?? 'info'],
+																	},
+																]}
+															>
+																{row.badge.label}
+															</Text>
+														) : null}
+														<Text
+															numberOfLines={1}
+															style={styles.androidStatusValue}
+														>
+															{row.value}
+														</Text>
+													</View>
+												</>
+											);
+											return row.onPressPluginId && onOpenPlugin ? (
+												<Pressable
+													key={row.id}
+													onPress={() => {
+														setQuery('');
+														onOpenPlugin(row.onPressPluginId ?? '');
+													}}
+													style={styles.androidStatusRow}
+												>
+													{content}
+												</Pressable>
+											) : (
+												<View key={row.id} style={styles.androidStatusRow}>
+													{content}
+												</View>
+											);
+										})}
+									</View>
+								) : null}
+								<View style={styles.androidList}>
+									<ToolList
+										onQuickActionPinnedChange={onQuickActionPinnedChange}
+										onSelect={selectPlugin}
+										pinnedPillQuickActionIds={pinnedPillQuickActionIds}
+										plugins={visiblePlugins}
+									/>
+								</View>
+								<Text style={styles.androidFooter}>
+									Collectors stay active while this sheet is closed
+								</Text>
+							</>
+						)}
+					</View>
+				</UniversalRNHostView>
+			</UniversalBottomSheet>
+		);
+	}
 
 	return (
 		<Host matchContents style={styles.host}>
@@ -415,6 +578,94 @@ function HomeStatusRowContent({ row }: { row: DevToolsHomeStatusRow }) {
 }
 
 const styles = StyleSheet.create({
+	androidBadge: {
+		fontSize: 11,
+		fontWeight: '700',
+	},
+	androidFooter: {
+		color: colors.secondaryLabel,
+		fontSize: 12,
+		paddingBottom: 6,
+		paddingHorizontal: 16,
+	},
+	androidHeader: {
+		alignItems: 'center',
+		flexDirection: 'row',
+		gap: 12,
+		minHeight: 56,
+		paddingHorizontal: 4,
+	},
+	androidHeaderControl: {
+		alignItems: 'center',
+		backgroundColor: colors.fill,
+		borderRadius: 22,
+		height: 44,
+		justifyContent: 'center',
+		width: 44,
+	},
+	androidList: {
+		flex: 1,
+	},
+	androidSearch: {
+		alignItems: 'center',
+		backgroundColor: colors.groupedFill,
+		borderColor: colors.separator,
+		borderRadius: 24,
+		borderWidth: StyleSheet.hairlineWidth,
+		flexDirection: 'row',
+		gap: 8,
+		marginBottom: 10,
+		paddingHorizontal: 14,
+	},
+	androidSearchInput: {
+		color: colors.label,
+		flex: 1,
+		fontSize: 16,
+		height: 48,
+	},
+	androidSheet: {
+		backgroundColor: colors.background,
+		flex: 1,
+	},
+	androidStatusGroup: {
+		backgroundColor: colors.card,
+		borderRadius: 12,
+		marginBottom: 8,
+		overflow: 'hidden',
+	},
+	androidStatusLabel: {
+		color: colors.label,
+		fontSize: 14,
+		fontWeight: '500',
+	},
+	androidStatusRow: {
+		alignItems: 'center',
+		borderBottomColor: colors.separator,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		flexDirection: 'row',
+		justifyContent: 'space-between',
+		minHeight: 44,
+		paddingHorizontal: 14,
+	},
+	androidStatusValue: {
+		color: colors.secondaryLabel,
+		flexShrink: 1,
+		fontSize: 13,
+	},
+	androidStatusValueWrap: {
+		alignItems: 'center',
+		flex: 1,
+		flexDirection: 'row',
+		gap: 8,
+		justifyContent: 'flex-end',
+		marginLeft: 12,
+	},
+	androidTitle: {
+		color: colors.label,
+		flex: 1,
+		fontSize: 22,
+		fontWeight: '700',
+	},
 	host: {
 		height: 1,
 		width: 1,

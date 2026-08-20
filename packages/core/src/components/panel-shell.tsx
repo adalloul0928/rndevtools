@@ -50,13 +50,11 @@ export function PanelShell({
 					style={styles.back}
 					testID="devtools-panel-back"
 				>
-					{Platform.OS === 'ios' ? (
-						<SystemIcon
-							color={shellColors.tint}
-							size={17}
-							systemName="chevron.left"
-						/>
-					) : null}
+					<SystemIcon
+						color={shellColors.tint}
+						size={17}
+						systemName="chevron.left"
+					/>
 					<Text numberOfLines={1} style={styles.backLabel}>
 						{backLabel}
 					</Text>

@@ -1,6 +1,7 @@
+import { Host as UniversalHost, Picker as UniversalPicker } from '@expo/ui';
 import { Host, Picker, Text as SwiftUIText } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import type { DevToolsSystemImage } from '../types';
 
 /**
@@ -22,6 +23,26 @@ export function PanelSegmentedControl<T extends string>({
 	onChange: (value: T) => void;
 	accessibilityLabel?: string;
 }) {
+	if (Platform.OS !== 'ios') {
+		return (
+			<UniversalHost style={styles.segmentedHost}>
+				<UniversalPicker<T>
+					appearance="menu"
+					onValueChange={onChange}
+					selectedValue={selected}
+					testID={accessibilityLabel}
+				>
+					{options.map((option) => (
+						<UniversalPicker.Item
+							key={option.id}
+							label={option.label}
+							value={option.id}
+						/>
+					))}
+				</UniversalPicker>
+			</UniversalHost>
+		);
+	}
 	return (
 		<Host style={styles.segmentedHost}>
 			<Picker<T>
