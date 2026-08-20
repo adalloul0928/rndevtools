@@ -1,31 +1,47 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
-	PanelButton,
-	PanelSearchField,
-	PanelSegmentedControl,
-	PanelToolbar,
-} from '../components/panel-controls';
+	Button,
+	ContentUnavailableView,
+	DisclosureGroup,
+	Host,
+	HStack,
+	Image,
+	Label,
+	LabeledContent,
+	List,
+	Picker,
+	Section,
+	Spacer,
+	TextField,
+	Text as UIText,
+	useNativeState,
+	VStack,
+} from '@expo/ui/swift-ui';
 import {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	EmptyState,
-	PanelList,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-} from '../components/panel-ui';
-import { SystemIcon } from '../components/system-icon';
+	autocorrectionDisabled,
+	font,
+	foregroundStyle,
+	lineLimit,
+	listRowBackground,
+	listStyle,
+	pickerStyle,
+	refreshable,
+	tag,
+} from '@expo/ui/swift-ui/modifiers';
+import { useMemo, useState, useSyncExternalStore } from 'react';
+import { Platform, PlatformColor } from 'react-native';
+import { NavIconButton } from '../components/nav-controls';
+import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite } from '../core/options';
 import { serializeValue } from '../core/serialize';
 import type {
+	DevToolsActionConfirmation,
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
+import { formatNetworkBytes } from './network-capture';
+import { formatRelativeTime } from './query';
 import {
 	type DevToolsStorageAdapter,
 	isStorageEntryEditable,
@@ -75,66 +91,400 @@ export type StoragePlugin = {
 	clearEvents: () => void;
 };
 
-type StoragePanelRow =
-	| { kind: 'event'; event: StorageChangeEvent }
-	| {
-			kind: 'adapter';
-			adapter: DevToolsStorageAdapter;
-			snapshot: StorageAdapterSnapshot;
-	  }
-	| {
-			kind: 'entry';
-			adapter: DevToolsStorageAdapter;
-			entry: StorageEntrySnapshot;
-	  }
-	| { kind: 'empty'; id: string; message: string }
-	| { kind: 'validationHeader' }
-	| { kind: 'validation'; result: StorageValidationResult };
+/** Plain uppercased section header (SwiftUI headers strip interactivity). */
+function SectionInfoHeader({ title }: { title: string }) {
+	return (
+		<UIText
+			modifiers={[
+				font({ textStyle: 'footnote' }),
+				foregroundStyle('secondary'),
+			]}
+		>
+			{title.toUpperCase()}
+		</UIText>
+	);
+}
 
-export type StorageKeyPresentation = {
-	title: string;
-	context: string;
+type StorageTab = 'stores' | 'activity';
+
+type RunStorageMutation = (
+	label: string,
+	mutation: () => void | Promise<void>,
+	confirmation?: DevToolsActionConfirmation,
+) => void;
+
+function describeValueLength(chars: number): string {
+	if (chars >= 1024) return formatNetworkBytes(chars);
+	return chars === 1 ? '1 char' : `${chars} chars`;
+}
+
+function countStorageChars(adapter: StorageAdapterSnapshot): number {
+	return adapter.entries.reduce(
+		(sum, entry) => sum + (entry.value?.length ?? 0),
+		0,
+	);
+}
+
+function pluralizeKeys(count: number): string {
+	return count === 1 ? '1 key' : `${count} keys`;
+}
+
+function storageKeyPrefix(key: string): string {
+	const separator = key.search(/[/.]/);
+	return separator > 0 ? key.slice(0, separator) : 'other';
+}
+
+function storageKeyTail(key: string): string {
+	const separator = key.search(/[/.]/);
+	return separator > 0 ? key.slice(separator + 1) : key;
+}
+
+type StorageKeyGroup = {
+	prefix: string;
+	entries: StorageEntrySnapshot[];
 };
 
-function humanizeKeyPart(value: string): string {
-	if (value.startsWith('@')) return value;
-	if (/^v\d+$/i.test(value)) return value.toUpperCase();
-	const spaced = value.replace(/[._-]+/g, ' ').trim();
-	return spaced ? `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}` : value;
-}
-
-function describeStorageUrl(value: string): string {
-	try {
-		const url = new URL(value);
-		const path = url.pathname.split('/').filter(Boolean).slice(-2).join('/');
-		return `${url.hostname}${path ? `/${path}` : ''}`;
-	} catch {
-		return value;
+function groupStorageEntries(
+	entries: readonly StorageEntrySnapshot[],
+): StorageKeyGroup[] {
+	const groups = new Map<string, StorageEntrySnapshot[]>();
+	for (const entry of entries) {
+		const prefix = storageKeyPrefix(entry.key);
+		const group = groups.get(prefix);
+		if (group) group.push(entry);
+		else groups.set(prefix, [entry]);
 	}
+	return [...groups.entries()].map(([prefix, grouped]) => ({
+		prefix,
+		entries: grouped,
+	}));
 }
 
-export function createStorageKeyPresentation(
-	key: string,
-): StorageKeyPresentation {
-	const urlStart = key.search(/https?:\/\//i);
-	const prefix = urlStart >= 0 ? key.slice(0, urlStart) : key;
-	const url = urlStart >= 0 ? key.slice(urlStart) : undefined;
-	const parts = prefix.replace(/[:/]$/, '').split(/[:/]+/).filter(Boolean);
-	const titleParts = url ? parts.slice(-2) : parts.slice(-1);
-	const contextParts = url ? parts.slice(0, -2) : parts.slice(0, -1);
+function describeStorageGroup(group: StorageKeyGroup): string {
+	const chars = group.entries.reduce(
+		(sum, entry) => sum + (entry.value?.length ?? 0),
+		0,
+	);
+	const size = chars >= 1024 ? ` · ${formatNetworkBytes(chars)}` : '';
+	return `${group.prefix} · ${pluralizeKeys(group.entries.length)}${size}`;
+}
 
-	return {
-		title:
-			titleParts.map(humanizeKeyPart).join(' · ') ||
-			(url ? 'Stored URL value' : key),
-		context:
-			[
-				contextParts.map(humanizeKeyPart).join(' › '),
-				url ? describeStorageUrl(url) : '',
-			]
-				.filter(Boolean)
-				.join(' · ') || 'Application key',
-	};
+function describeAdapterSnapshot(adapter: StorageAdapterSnapshot): string {
+	if (adapter.error) return `Unavailable · ${adapter.error}`;
+	const parts = [adapter.description, pluralizeKeys(adapter.entries.length)];
+	if (adapter.sensitive) parts.push('values hidden');
+	else {
+		const chars = countStorageChars(adapter);
+		if (chars > 0) parts.push(formatNetworkBytes(chars));
+	}
+	return parts.filter(Boolean).join(' · ');
+}
+
+function describeStorageEntry(entry: StorageEntrySnapshot): string {
+	if (entry.valueHidden) return 'Value protected';
+	if (entry.readError) return `Read failed · ${entry.readError}`;
+	if (entry.binary) return 'Binary value · editing disabled';
+	const sized =
+		entry.valueType === 'string' ||
+		entry.valueType === 'object' ||
+		entry.valueType === 'array';
+	const size = sized
+		? ` · ${describeValueLength(entry.value?.length ?? 0)}`
+		: '';
+	const truncated = entry.truncated ? ' · too large to edit' : '';
+	return `${entry.valueType ?? 'unknown'}${size}${truncated}`;
+}
+
+function describeValidationIssue(result: StorageValidationResult): string {
+	if (result.status === 'typeMismatch') {
+		return `Expected ${result.expectedType}, found ${result.actualType ?? 'unknown'}`;
+	}
+	return 'Missing';
+}
+
+const storageEventPresentation: Record<
+	StorageChangeEvent['type'],
+	{ verb: string; systemImage: DevToolsSystemImage; color: string }
+> = {
+	added: { verb: 'Added', systemImage: 'plus', color: 'systemGreenColor' },
+	updated: { verb: 'Updated', systemImage: 'pencil', color: 'systemBlueColor' },
+	removed: { verb: 'Deleted', systemImage: 'minus', color: 'systemRedColor' },
+};
+
+function describeStorageEvent(event: StorageChangeEvent): string {
+	const parts = [event.adapterTitle, new Date(event.at).toLocaleTimeString()];
+	if (event.valueHidden) parts.push('value never read');
+	else {
+		const value = event.value ?? event.previousValue;
+		if (value !== undefined) parts.push(describeValueLength(value.length));
+	}
+	return parts.join(' · ');
+}
+
+function StorageTabPicker({
+	selection,
+	onChange,
+}: {
+	selection: StorageTab;
+	onChange: (tab: StorageTab) => void;
+}) {
+	return (
+		<Section>
+			<Picker
+				label="Storage view"
+				modifiers={[pickerStyle('segmented'), listRowBackground('clear')]}
+				onSelectionChange={onChange}
+				selection={selection}
+			>
+				<UIText modifiers={[tag('stores')]}>Stores</UIText>
+				<UIText modifiers={[tag('activity')]}>Activity</UIText>
+			</Picker>
+		</Section>
+	);
+}
+
+/** Verb-tinted icon row shared by recent activity and the activity log. */
+function StorageEventLabel({
+	event,
+	detail,
+}: {
+	event: StorageChangeEvent;
+	detail: string;
+}) {
+	const presentation = storageEventPresentation[event.type];
+	return (
+		<Label
+			color={PlatformColor(presentation.color)}
+			systemImage={presentation.systemImage}
+		>
+			<VStack alignment="leading" spacing={2}>
+				<UIText>
+					<UIText>{`${presentation.verb} `}</UIText>
+					<UIText
+						modifiers={[font({ design: 'monospaced', textStyle: 'footnote' })]}
+					>
+						{event.key}
+					</UIText>
+				</UIText>
+				<UIText
+					modifiers={[
+						font({ textStyle: 'footnote' }),
+						foregroundStyle('secondary'),
+					]}
+				>
+					{detail}
+				</UIText>
+			</VStack>
+		</Label>
+	);
+}
+
+/** Activity row; updated events expand to a previous/current diff. */
+function ActivityEventRow({ event }: { event: StorageChangeEvent }) {
+	const row = (
+		<StorageEventLabel detail={describeStorageEvent(event)} event={event} />
+	);
+	const hasDiff =
+		event.type === 'updated' &&
+		!event.valueHidden &&
+		(event.previousValue !== undefined || event.value !== undefined);
+	if (!hasDiff) return row;
+	return (
+		<DisclosureGroup>
+			<DisclosureGroup.Label>{row}</DisclosureGroup.Label>
+			{event.previousValue !== undefined ? (
+				<UIText
+					modifiers={[
+						font({ design: 'monospaced', textStyle: 'footnote' }),
+						foregroundStyle(PlatformColor('systemRedColor')),
+						lineLimit(4),
+					]}
+				>
+					{`- ${event.previousValue}`}
+				</UIText>
+			) : null}
+			{event.value !== undefined ? (
+				<UIText
+					modifiers={[
+						font({ design: 'monospaced', textStyle: 'footnote' }),
+						foregroundStyle(PlatformColor('systemGreenColor')),
+						lineLimit(4),
+					]}
+				>
+					{`+ ${event.value}`}
+				</UIText>
+			) : null}
+		</DisclosureGroup>
+	);
+}
+
+/**
+ * Expanded key detail: full key, value editor (when the entry is safely
+ * editable), and destructive delete. Mounted only while expanded so the
+ * draft reseeds from the snapshot on every expansion.
+ */
+function StorageEntryDetails({
+	adapter,
+	entry,
+	runMutation,
+}: {
+	adapter: DevToolsStorageAdapter;
+	entry: StorageEntrySnapshot;
+	runMutation: RunStorageMutation;
+}) {
+	const [draft, setDraft] = useState(entry.value ?? '');
+	const draftSeed = useNativeState(entry.value ?? '');
+	const canEdit = isStorageEntryEditable(adapter, entry);
+	return (
+		<>
+			<UIText
+				modifiers={[
+					font({ design: 'monospaced', textStyle: 'footnote' }),
+					foregroundStyle('secondary'),
+				]}
+			>
+				{entry.key}
+			</UIText>
+			{entry.valueHidden ? (
+				<UIText
+					modifiers={[
+						font({ textStyle: 'footnote' }),
+						foregroundStyle('secondary'),
+					]}
+				>
+					This store exposes key metadata only. Its values are never read.
+				</UIText>
+			) : canEdit ? (
+				<TextField
+					axis="vertical"
+					modifiers={[
+						font({ design: 'monospaced', textStyle: 'footnote' }),
+						autocorrectionDisabled(),
+						lineLimit(8),
+					]}
+					onTextChange={setDraft}
+					placeholder="Value"
+					text={draftSeed}
+				/>
+			) : entry.value !== undefined ? (
+				<UIText
+					modifiers={[
+						font({ design: 'monospaced', textStyle: 'footnote' }),
+						lineLimit(8),
+					]}
+				>
+					{entry.value}
+				</UIText>
+			) : null}
+			{canEdit ? (
+				<Button
+					label="Save"
+					onPress={() => {
+						runMutation('Save storage value', () => {
+							const parsed = adapter.parseValue
+								? adapter.parseValue(entry.key, draft, entry.valueType ?? '')
+								: parseStorageDraft(draft, entry.valueType ?? '');
+							return adapter.setValue?.(entry.key, parsed);
+						});
+					}}
+				/>
+			) : null}
+			{adapter.removeValue ? (
+				// biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA
+				<Button
+					label="Delete key"
+					onPress={() =>
+						runMutation(
+							'Delete storage value',
+							() => adapter.removeValue?.(entry.key),
+							{
+								title: 'Delete storage value?',
+								message: entry.key,
+								confirmLabel: 'Delete',
+								destructive: true,
+							},
+						)
+					}
+					role="destructive"
+				/>
+			) : null}
+		</>
+	);
+}
+
+/** Key row in the store browser: mono tail, type · size, small-value badge. */
+function StorageEntryRow({
+	adapter,
+	entry,
+	expanded,
+	onExpandedChange,
+	runMutation,
+}: {
+	adapter: DevToolsStorageAdapter;
+	entry: StorageEntrySnapshot;
+	expanded: boolean;
+	onExpandedChange: (expanded: boolean) => void;
+	runMutation: RunStorageMutation;
+}) {
+	const smallValue =
+		!entry.valueHidden &&
+		!entry.readError &&
+		!entry.binary &&
+		!entry.truncated &&
+		entry.value !== undefined &&
+		entry.value.length <= 24
+			? entry.valueType === 'string'
+				? `"${entry.value}"`
+				: entry.value
+			: undefined;
+	return (
+		<DisclosureGroup
+			isExpanded={expanded}
+			onIsExpandedChange={onExpandedChange}
+		>
+			<DisclosureGroup.Label>
+				<HStack spacing={10}>
+					<VStack alignment="leading" spacing={2}>
+						<UIText
+							modifiers={[
+								font({ design: 'monospaced', textStyle: 'subheadline' }),
+							]}
+						>
+							{storageKeyTail(entry.key)}
+						</UIText>
+						<UIText
+							modifiers={[
+								font({ textStyle: 'footnote' }),
+								foregroundStyle('secondary'),
+							]}
+						>
+							{describeStorageEntry(entry)}
+						</UIText>
+					</VStack>
+					<Spacer />
+					{smallValue !== undefined ? (
+						<UIText
+							modifiers={[
+								font({ design: 'monospaced', textStyle: 'footnote' }),
+								foregroundStyle('secondary'),
+								lineLimit(1),
+							]}
+						>
+							{smallValue}
+						</UIText>
+					) : null}
+				</HStack>
+			</DisclosureGroup.Label>
+			{expanded ? (
+				<StorageEntryDetails
+					adapter={adapter}
+					entry={entry}
+					key={`details:${entry.value ?? ''}`}
+					runMutation={runMutation}
+				/>
+			) : null}
+		</DisclosureGroup>
+	);
 }
 
 export function createStoragePlugin({
@@ -261,120 +611,23 @@ export function createStoragePlugin({
 		});
 	};
 
-	function StorageEntry({
-		adapter,
-		entry,
-		runMutation,
-	}: {
-		adapter: DevToolsStorageAdapter;
-		entry: StorageEntrySnapshot;
-		runMutation: (
-			label: string,
-			mutation: () => void | Promise<void>,
-			confirmation?: {
-				title: string;
-				message?: string;
-				confirmLabel?: string;
-				destructive?: boolean;
-			},
-		) => void;
-	}) {
-		const [draft, setDraft] = useState(entry.value ?? '');
-		useEffect(() => {
-			setDraft(entry.value ?? '');
-		}, [entry.value]);
-		const canEdit = isStorageEntryEditable(adapter, entry);
-		const valueSummary = entry.valueHidden
-			? 'Value protected'
-			: entry.readError
-				? `Read failed · ${entry.readError}`
-				: entry.binary
-					? 'Binary value · editing disabled'
-					: `${humanizeKeyPart(entry.valueType ?? 'unknown')} · ${entry.value?.length ?? 0} chars${entry.truncated ? ' · truncated' : ''}`;
-		const presentation = createStorageKeyPresentation(entry.key);
-		return (
-			<DisclosureCard
-				leading={
-					<View style={styles.keyIcon}>
-						<SystemIcon
-							systemName={entry.valueHidden ? 'lock.fill' : 'doc.text.fill'}
-							size={16}
-						/>
-					</View>
-				}
-				title={presentation.title}
-				subtitle={`${presentation.context} · ${valueSummary}`}
-			>
-				<View style={styles.keyDetails}>
-					<Text style={styles.detailLabel}>Full key</Text>
-					<CodeBlock>{entry.key}</CodeBlock>
-				</View>
-				{entry.valueHidden ? (
-					<Text style={styles.protectedText}>
-						This adapter exposes key metadata only. Its values are never read.
-					</Text>
-				) : (
-					<TextInput
-						accessibilityLabel={`${entry.key} value`}
-						editable={canEdit}
-						multiline
-						onChangeText={setDraft}
-						style={styles.editor}
-						value={draft}
-					/>
-				)}
-				<PanelToolbar>
-					{canEdit ? (
-						<PanelButton
-							label="Save"
-							onPress={() => {
-								runMutation('Save storage value', () => {
-									const parsed = adapter.parseValue
-										? adapter.parseValue(
-												entry.key,
-												draft,
-												entry.valueType ?? '',
-											)
-										: parseStorageDraft(draft, entry.valueType ?? '');
-									return adapter.setValue?.(entry.key, parsed);
-								});
-							}}
-						/>
-					) : null}
-					{adapter.removeValue ? (
-						<PanelButton
-							label="Delete"
-							onPress={() =>
-								runMutation(
-									'Delete storage value',
-									() => adapter.removeValue?.(entry.key),
-									{
-										title: 'Delete storage value?',
-										message: entry.key,
-										confirmLabel: 'Delete',
-										destructive: true,
-									},
-								)
-							}
-							tone="danger"
-						/>
-					) : null}
-				</PanelToolbar>
-			</DisclosureCard>
-		);
-	}
-
 	function StoragePanel({ onBack, actions }: DevToolsPanelProps) {
-		const runMutation = (
-			label: string,
-			mutation: () => void | Promise<void>,
-			confirmation?: {
-				title: string;
-				message?: string;
-				confirmLabel?: string;
-				destructive?: boolean;
-			},
-		): void => {
+		const snapshot = useSyncExternalStore(
+			store.subscribe,
+			store.getSnapshot,
+			store.getServerSnapshot,
+		);
+		const events = useSyncExternalStore(
+			eventStore.subscribe,
+			eventStore.getSnapshot,
+			eventStore.getServerSnapshot,
+		);
+		const [tab, setTab] = useState<StorageTab>('stores');
+		const [openAdapterId, setOpenAdapterId] = useState<string | null>(null);
+		const [search, setSearch] = useState('');
+		const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
+		const runMutation: RunStorageMutation = (label, mutation, confirmation) => {
 			void actions.run({
 				pluginId: id,
 				label,
@@ -385,360 +638,348 @@ export function createStoragePlugin({
 				},
 			});
 		};
-		const snapshot = useSyncExternalStore(
-			store.subscribe,
-			store.getSnapshot,
-			store.getServerSnapshot,
+
+		const openSnapshot = snapshot.adapters.find(
+			(candidate) => candidate.id === openAdapterId,
 		);
-		const [search, setSearch] = useState('');
-		const [tab, setTab] = useState<'browser' | 'events'>('browser');
-		const events = useSyncExternalStore(
-			eventStore.subscribe,
-			eventStore.getSnapshot,
-			eventStore.getServerSnapshot,
+		const openAdapter = adapters.find(
+			(candidate) => candidate.id === openAdapterId,
 		);
-		const needle = search.trim().toLowerCase();
-		const visibleAdapters = useMemo(
-			() =>
-				snapshot.adapters.map((adapter) => ({
-					...adapter,
-					entries: adapter.entries.filter((entry) => {
-						const presentation = createStorageKeyPresentation(entry.key);
-						return (
-							!needle ||
-							entry.key.toLowerCase().includes(needle) ||
-							presentation.title.toLowerCase().includes(needle) ||
-							presentation.context.toLowerCase().includes(needle)
-						);
-					}),
-				})),
-			[needle, snapshot.adapters],
-		);
+		const browsing =
+			openSnapshot && openAdapter
+				? { adapter: openAdapter, snapshot: openSnapshot }
+				: undefined;
+
 		const validation = useMemo(
 			() => validateStorageSnapshot(snapshot, rules),
 			[snapshot],
 		);
-		const issueCount = validation.filter(
-			(result) => result.status !== 'valid' && result.status !== 'protected',
-		).length;
-		const keyCount = snapshot.adapters.reduce(
-			(sum, adapter) => sum + adapter.entries.length,
+		const failing = validation.filter(
+			(result) =>
+				result.status === 'missing' || result.status === 'typeMismatch',
+		);
+
+		const openStore = (adapterId: string) => {
+			setSearch('');
+			setExpandedKey(null);
+			setOpenAdapterId(adapterId);
+		};
+
+		const now = Date.now();
+		const recentEvents = events.slice(-3).reverse();
+		const orderedEvents = [...events].reverse();
+		const activitySections = [
+			{
+				title: 'Just now',
+				events: orderedEvents.filter((event) => now - event.at < 60_000),
+			},
+			{
+				title: 'Earlier this session',
+				events: orderedEvents.filter((event) => now - event.at >= 60_000),
+			},
+		].filter((ageGroup) => ageGroup.events.length > 0);
+
+		const totalChars = snapshot.adapters.reduce(
+			(sum, adapter) => sum + countStorageChars(adapter),
 			0,
 		);
-		const adapterErrorCount = snapshot.adapters.filter(
-			(adapter) => adapter.error,
-		).length;
-		const rows = useMemo<readonly StoragePanelRow[]>(() => {
-			if (tab === 'events') {
-				const filteredEvents = [...events]
-					.reverse()
-					.filter(
-						(event) =>
-							!needle ||
-							event.key.toLowerCase().includes(needle) ||
-							event.adapterTitle.toLowerCase().includes(needle),
-					);
-				return filteredEvents.length
-					? filteredEvents.map((event) => ({ kind: 'event', event }))
-					: [
-							{
-								kind: 'empty',
-								id: 'events-empty',
-								message: 'Storage mutations will appear here.',
-							},
-						];
-			}
 
-			const browserRows: StoragePanelRow[] = [];
-			if (visibleAdapters.length === 0) {
-				browserRows.push({
-					kind: 'empty',
-					id: 'adapters-empty',
-					message: 'No storage adapters are registered.',
-				});
-			} else {
-				for (const adapterSnapshot of visibleAdapters) {
-					const adapter = adapters.find(
-						(candidate) => candidate.id === adapterSnapshot.id,
-					);
-					if (!adapter) continue;
-					browserRows.push({
-						kind: 'adapter',
-						adapter,
-						snapshot: adapterSnapshot,
-					});
-					if (adapterSnapshot.entries.length === 0) {
-						browserRows.push({
-							kind: 'empty',
-							id: `adapter-empty:${adapter.id}`,
-							message: needle ? 'No matching keys.' : 'This adapter is empty.',
-						});
-					} else {
-						for (const entry of adapterSnapshot.entries) {
-							browserRows.push({ kind: 'entry', adapter, entry });
-						}
-					}
-				}
-			}
-			if (validation.length) {
-				browserRows.push({ kind: 'validationHeader' });
-				for (const result of validation) {
-					browserRows.push({ kind: 'validation', result });
-				}
-			}
-			return browserRows;
-		}, [events, needle, tab, validation, visibleAdapters]);
+		const needle = search.trim().toLowerCase();
+		const visibleEntries = browsing
+			? browsing.snapshot.entries.filter(
+					(entry) => !needle || entry.key.toLowerCase().includes(needle),
+				)
+			: [];
+		const groups = groupStorageEntries(visibleEntries);
 
 		return (
-			<PanelScaffold
-				onBack={onBack}
-				scrollable={false}
-				title={title}
-				subtitle={`${snapshot.adapters.reduce((sum, adapter) => sum + adapter.entries.length, 0)} registered keys${snapshot.loading ? ' · refreshing' : ''}`}
-			>
-				<PanelList
-					data={rows}
-					header={
-						<View style={styles.panelHeader}>
-							<PanelSignalCard
-								description={
-									snapshot.loading
-										? 'Registered adapters are being read now.'
-										: `${snapshot.adapters.length} adapters expose ${keyCount} keys and ${events.length} recent changes.`
-								}
-								eyebrow="Storage signal"
-								systemImage={
-									snapshot.loading
-										? 'arrow.triangle.2.circlepath'
-										: issueCount + adapterErrorCount > 0
-											? 'exclamationmark.triangle.fill'
-											: 'checkmark.circle.fill'
-								}
-								title={
-									snapshot.loading
-										? 'Refreshing storage'
-										: issueCount + adapterErrorCount > 0
-											? `${issueCount + adapterErrorCount} storage issue${issueCount + adapterErrorCount === 1 ? '' : 's'}`
-											: 'Registered storage looks healthy'
-								}
-								tone={
-									snapshot.loading
-										? 'info'
-										: issueCount + adapterErrorCount > 0
-											? 'warning'
-											: 'success'
-								}
-							/>
-							<PanelMetricStrip
-								metrics={[
-									{ label: 'Adapters', value: snapshot.adapters.length },
-									{ label: 'Keys', value: keyCount },
+			<PanelShell
+				backLabel={browsing ? title : undefined}
+				onBack={browsing ? () => setOpenAdapterId(null) : onBack}
+				title={browsing ? browsing.snapshot.title : title}
+				trailing={
+					browsing?.adapter.clear ? (
+						<NavIconButton
+							accessibilityLabel={`Clear ${browsing.snapshot.title}`}
+							destructive
+							onPress={() =>
+								runMutation(
+									'Clear storage adapter',
+									() => browsing.adapter.clear?.(),
 									{
-										label: 'Checks',
-										value: validation.length,
-										tone: colors.green,
+										title: `Clear ${browsing.snapshot.title}?`,
+										message: 'This cannot be undone.',
+										confirmLabel: 'Clear',
+										destructive: true,
 									},
-									{
-										label: 'Issues',
-										value: issueCount + adapterErrorCount,
-										tone:
-											issueCount + adapterErrorCount > 0
-												? colors.red
-												: colors.secondaryLabel,
-									},
-								]}
-							/>
-							<PanelSegmentedControl
-								accessibilityLabel="Storage inspector"
-								onChange={setTab}
-								options={[
-									{ id: 'browser', label: 'Browser' },
-									{ id: 'events', label: 'Events' },
-								]}
-								selected={tab}
-							/>
-							<PanelSearchField
-								onChangeText={setSearch}
-								placeholder="Search storage keys"
-								value={search}
-							/>
-							<PanelToolbar>
-								<PanelButton label="Refresh" onPress={() => void refresh()} />
-								{tab === 'events' ? (
-									<PanelButton
-										label="Clear events"
-										onPress={eventStore.clear}
-										tone="danger"
-									/>
-								) : null}
-							</PanelToolbar>
-						</View>
-					}
-					keyExtractor={(row) => {
-						switch (row.kind) {
-							case 'event':
-								return `event:${row.event.id}`;
-							case 'adapter':
-								return `adapter:${row.adapter.id}`;
-							case 'entry':
-								return `entry:${row.adapter.id}:${row.entry.key}`;
-							case 'empty':
-								return row.id;
-							case 'validationHeader':
-								return 'validation-header';
-							case 'validation':
-								return `validation:${row.result.adapterId}:${row.result.key}`;
-						}
-					}}
-					renderItem={({ item: row }) => {
-						switch (row.kind) {
-							case 'empty':
-								return (
-									<EmptyState
-										systemImage={
-											tab === 'events'
-												? 'clock.arrow.circlepath'
-												: 'externaldrive'
-										}
-										title={
-											tab === 'events'
-												? 'No storage events'
-												: 'No matching keys'
-										}
-									>
-										{row.message}
-									</EmptyState>
-								);
-							case 'adapter':
-								return (
-									<View style={styles.adapterHeader}>
-										<View style={styles.adapterIcon}>
-											<SystemIcon systemName="externaldrive.fill" size={17} />
-										</View>
-										<View style={styles.adapterCopy}>
-											<Text style={styles.adapterTitle}>
-												{row.adapter.title}
-											</Text>
-											<Text style={styles.adapterDescription}>
-												{row.snapshot.error ??
-													row.adapter.description ??
-													`${row.snapshot.entries.length} keys`}
-											</Text>
-										</View>
-										{row.adapter.clear ? (
-											<PanelButton
-												label="Clear"
-												onPress={() =>
-													runMutation(
-														'Clear storage adapter',
-														() => row.adapter.clear?.(),
-														{
-															title: `Clear ${row.adapter.title}?`,
-															message: 'This cannot be undone.',
-															confirmLabel: 'Clear',
-															destructive: true,
-														},
-													)
-												}
-												tone="danger"
-											/>
-										) : null}
-									</View>
-								);
-							case 'entry':
-								return (
-									<StorageEntry
-										adapter={row.adapter}
-										entry={row.entry}
-										runMutation={runMutation}
-									/>
-								);
-							case 'event': {
-								const presentation = createStorageKeyPresentation(
-									row.event.key,
-								);
-								return (
-									<DisclosureCard
-										leading={
-											<PanelStatusBadge
-												label={
-													row.event.type === 'removed'
-														? 'DEL'
-														: row.event.type === 'added'
-															? 'ADD'
-															: 'EDIT'
-												}
-												tone={
-													row.event.type === 'removed'
-														? 'danger'
-														: row.event.type === 'added'
-															? 'success'
-															: 'info'
-												}
-											/>
-										}
-										title={presentation.title}
-										subtitle={`${row.event.type} · ${row.event.adapterTitle} · ${presentation.context} · ${new Date(row.event.at).toLocaleTimeString()}`}
-									>
-										<Text style={styles.protectedText}>
-											{row.event.valueHidden
-												? 'This protected value was never read.'
-												: 'Captured by the registered adapter subscription.'}
-										</Text>
-										{row.event.previousValue !== undefined ? (
-											<Text selectable style={styles.eventValue}>
-												Previous: {row.event.previousValue}
-											</Text>
-										) : null}
-										{row.event.value !== undefined ? (
-											<Text selectable style={styles.eventValue}>
-												Current: {row.event.value}
-											</Text>
-										) : null}
-									</DisclosureCard>
-								);
+								)
 							}
-							case 'validationHeader':
-								return <Text style={styles.adapterTitle}>Expected keys</Text>;
-							case 'validation':
-								return (
-									<DisclosureCard
-										leading={
-											<PanelStatusBadge
-												label={
-													row.result.status === 'valid' ||
-													row.result.status === 'protected'
-														? 'PASS'
-														: 'ISSUE'
-												}
-												tone={
-													row.result.status === 'valid' ||
-													row.result.status === 'protected'
-														? 'success'
-														: 'danger'
-												}
+							systemImage="trash"
+							testID="devtools-storage-clear-store"
+						/>
+					) : !browsing && tab === 'activity' ? (
+						<NavIconButton
+							accessibilityLabel="Clear activity"
+							destructive
+							onPress={() =>
+								runMutation('Clear storage activity', eventStore.clear, {
+									title: 'Clear recorded activity?',
+									message:
+										'The captured reads and writes are only held in memory, so this cannot be undone.',
+									confirmLabel: 'Clear',
+									destructive: true,
+								})
+							}
+							systemImage="trash"
+							testID="devtools-storage-clear-activity"
+						/>
+					) : undefined
+				}
+			>
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						{browsing ? (
+							<List
+								key={`store:${browsing.snapshot.id}`}
+								modifiers={[listStyle('insetGrouped'), refreshable(refresh)]}
+							>
+								<Section>
+									<TextField
+										modifiers={[autocorrectionDisabled()]}
+										onTextChange={setSearch}
+										placeholder={`Search ${pluralizeKeys(browsing.snapshot.entries.length)}`}
+									/>
+								</Section>
+								{browsing.snapshot.error ? (
+									<Section>
+										<Label
+											color={PlatformColor('systemOrangeColor')}
+											systemImage="exclamationmark.triangle.fill"
+											title="Store unavailable"
+										/>
+										<UIText
+											modifiers={[
+												font({ textStyle: 'footnote' }),
+												foregroundStyle('secondary'),
+											]}
+										>
+											{browsing.snapshot.error}
+										</UIText>
+									</Section>
+								) : null}
+								{groups.length === 0 ? (
+									<Section>
+										<ContentUnavailableView
+											description={
+												needle
+													? `No keys match "${search.trim()}".`
+													: 'This store is empty.'
+											}
+											systemImage={needle ? 'magnifyingglass' : 'externaldrive'}
+											title={needle ? 'No matching keys' : 'No keys'}
+										/>
+									</Section>
+								) : (
+									groups.map((group, index) => (
+										<Section
+											header={
+												index === 0 ? (
+													<SectionInfoHeader
+														title={describeStorageGroup(group)}
+													/>
+												) : undefined
+											}
+											key={group.prefix}
+											title={
+												index === 0 ? undefined : describeStorageGroup(group)
+											}
+										>
+											{group.entries.map((entry) => (
+												<StorageEntryRow
+													adapter={browsing.adapter}
+													entry={entry}
+													expanded={expandedKey === entry.key}
+													key={entry.key}
+													onExpandedChange={(next) =>
+														setExpandedKey(next ? entry.key : null)
+													}
+													runMutation={runMutation}
+												/>
+											))}
+										</Section>
+									))
+								)}
+							</List>
+						) : tab === 'stores' ? (
+							<List
+								modifiers={[listStyle('insetGrouped'), refreshable(refresh)]}
+							>
+								<StorageTabPicker onChange={setTab} selection={tab} />
+								<Section
+									header={
+										<SectionInfoHeader
+											title={
+												totalChars > 0
+													? `On this device · ${formatNetworkBytes(totalChars)}`
+													: 'On this device'
+											}
+										/>
+									}
+								>
+									{snapshot.adapters.length === 0 ? (
+										<ContentUnavailableView
+											description="No storage adapters are registered."
+											systemImage="externaldrive"
+											title="No stores"
+										/>
+									) : (
+										snapshot.adapters.map((adapterSnapshot) => (
+											<Button
+												key={adapterSnapshot.id}
+												onPress={() => openStore(adapterSnapshot.id)}
+											>
+												<HStack spacing={12}>
+													<Image
+														color={
+															adapterSnapshot.sensitive
+																? PlatformColor('systemYellowColor')
+																: PlatformColor('systemGrayColor')
+														}
+														size={20}
+														systemName={
+															adapterSnapshot.sensitive
+																? 'lock.fill'
+																: 'externaldrive.fill'
+														}
+													/>
+													<VStack alignment="leading" spacing={2}>
+														<UIText
+															modifiers={[
+																foregroundStyle(PlatformColor('labelColor')),
+															]}
+														>
+															{adapterSnapshot.title}
+														</UIText>
+														<UIText
+															modifiers={[
+																font({ textStyle: 'footnote' }),
+																foregroundStyle('secondary'),
+															]}
+														>
+															{describeAdapterSnapshot(adapterSnapshot)}
+														</UIText>
+													</VStack>
+													<Spacer />
+													<Image
+														color={PlatformColor('tertiaryLabelColor')}
+														size={13}
+														systemName="chevron.right"
+													/>
+												</HStack>
+											</Button>
+										))
+									)}
+								</Section>
+								{validation.length > 0 ? (
+									<Section title="Health">
+										{failing.length === 0 ? (
+											<Label
+												color={PlatformColor('systemGreenColor')}
+												systemImage="checkmark.circle.fill"
+												title={`All expected keys present · ${validation.length} ${validation.length === 1 ? 'check' : 'checks'}`}
 											/>
-										}
-										title={row.result.key}
-										subtitle={`${row.result.adapterId} · ${row.result.status}`}
-									>
-										{row.result.description ? (
-											<Text style={styles.protectedText}>
-												{row.result.description}
-											</Text>
-										) : null}
-										<Text style={styles.eventValue}>
-											Expected: {row.result.expectedType ?? 'present'}
-											{row.result.actualType
-												? ` · Actual: ${row.result.actualType}`
-												: ''}
-										</Text>
-									</DisclosureCard>
-								);
-						}
-					}}
-				/>
-			</PanelScaffold>
+										) : (
+											<>
+												<Label
+													color={PlatformColor('systemOrangeColor')}
+													systemImage="exclamationmark.triangle.fill"
+													title={`${failing.length} of ${validation.length} ${validation.length === 1 ? 'check' : 'checks'} failing`}
+												/>
+												{failing.map((result) => (
+													<DisclosureGroup
+														key={`${result.adapterId}:${result.key}`}
+														label={`${result.key} — ${describeValidationIssue(result)}`}
+													>
+														{result.description ? (
+															<UIText>{result.description}</UIText>
+														) : null}
+														<LabeledContent label="Store">
+															<UIText>{result.adapterId}</UIText>
+														</LabeledContent>
+														<LabeledContent label="Expected">
+															<UIText>
+																{result.expectedType ?? 'present'}
+															</UIText>
+														</LabeledContent>
+														{result.actualType ? (
+															<LabeledContent label="Actual">
+																<UIText>{result.actualType}</UIText>
+															</LabeledContent>
+														) : null}
+													</DisclosureGroup>
+												))}
+											</>
+										)}
+									</Section>
+								) : null}
+								<Section header={<SectionInfoHeader title="Recent activity" />}>
+									{recentEvents.length === 0 ? (
+										<UIText
+											modifiers={[
+												font({ textStyle: 'footnote' }),
+												foregroundStyle('secondary'),
+											]}
+										>
+											No changes recorded this session.
+										</UIText>
+									) : (
+										recentEvents.map((event) => (
+											<StorageEventLabel
+												detail={`${event.adapterTitle} · ${formatRelativeTime(event.at, now)}`}
+												event={event}
+												key={event.id}
+											/>
+										))
+									)}
+									<Button
+										label="See all activity"
+										onPress={() => setTab('activity')}
+									/>
+								</Section>
+							</List>
+						) : (
+							<List modifiers={[listStyle('insetGrouped')]}>
+								<StorageTabPicker onChange={setTab} selection={tab} />
+								{activitySections.length === 0 ? (
+									<Section>
+										<ContentUnavailableView
+											description="Storage mutations will appear here."
+											systemImage="clock.arrow.circlepath"
+											title="No storage activity"
+										/>
+									</Section>
+								) : (
+									activitySections.map((ageGroup, index) => (
+										<Section
+											header={
+												index === 0 ? (
+													<SectionInfoHeader title={ageGroup.title} />
+												) : undefined
+											}
+											key={ageGroup.title}
+											title={index === 0 ? undefined : ageGroup.title}
+										>
+											{ageGroup.events.map((event) => (
+												<ActivityEventRow event={event} key={event.id} />
+											))}
+										</Section>
+									))
+								)}
+							</List>
+						)}
+					</Host>
+				) : null}
+			</PanelShell>
 		);
 	}
 
@@ -801,75 +1042,3 @@ export function createStoragePlugin({
 		clearEvents: eventStore.clear,
 	};
 }
-
-const styles = StyleSheet.create({
-	panelHeader: { gap: 10 },
-	keyIcon: {
-		alignItems: 'center',
-		height: 28,
-		justifyContent: 'center',
-		marginRight: 8,
-		width: 24,
-	},
-	keyDetails: {
-		gap: 7,
-		marginBottom: 10,
-	},
-	detailLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		fontWeight: '600',
-	},
-	eventValue: {
-		color: colors.label,
-		fontFamily: 'Menlo',
-		fontSize: 11,
-		lineHeight: 17,
-		marginTop: 8,
-	},
-	adapterHeader: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		gap: 8,
-		paddingHorizontal: 4,
-		paddingVertical: 6,
-	},
-	adapterIcon: {
-		alignItems: 'center',
-		height: 28,
-		justifyContent: 'center',
-		width: 24,
-	},
-	adapterCopy: {
-		flex: 1,
-		gap: 2,
-	},
-	adapterTitle: {
-		color: colors.label,
-		fontSize: 14,
-		fontWeight: '700',
-	},
-	adapterDescription: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-	},
-	protectedText: {
-		color: colors.secondaryLabel,
-		fontSize: 13,
-		lineHeight: 19,
-	},
-	editor: {
-		backgroundColor: colors.background,
-		borderColor: colors.separator,
-		borderRadius: 10,
-		borderWidth: StyleSheet.hairlineWidth,
-		color: colors.label,
-		fontFamily: 'Menlo',
-		fontSize: 11,
-		marginBottom: 10,
-		maxHeight: 240,
-		minHeight: 72,
-		padding: 10,
-		textAlignVertical: 'top',
-	},
-});

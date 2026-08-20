@@ -5,6 +5,8 @@ import { PluginPanelRenderer } from './plugin-panel-renderer';
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
+	const Container = ({ children }: { children?: React.ReactNode }) =>
+		ReactRuntime.createElement(Native.View, null, children);
 	return {
 		Button: ({ label, onPress }: { label?: string; onPress?: () => void }) =>
 			ReactRuntime.createElement(
@@ -12,9 +14,37 @@ jest.mock('@expo/ui/swift-ui', () => {
 				{ accessibilityLabel: label, onPress },
 				ReactRuntime.createElement(Native.Text, null, label),
 			),
-		Host: ({ children }: { children?: React.ReactNode }) =>
-			ReactRuntime.createElement(Native.View, null, children),
+		ContentUnavailableView: ({
+			title,
+			description,
+		}: {
+			title?: string;
+			description?: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				null,
+				ReactRuntime.createElement(Native.Text, null, title),
+				ReactRuntime.createElement(Native.Text, null, description),
+			),
+		Host: Container,
 		Image: () => ReactRuntime.createElement(Native.View),
+		List: Container,
+		Section: ({
+			children,
+			title,
+		}: {
+			children?: React.ReactNode;
+			title?: string;
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				null,
+				title ? ReactRuntime.createElement(Native.Text, null, title) : null,
+				children,
+			),
+		Text: ({ children }: { children?: React.ReactNode }) =>
+			ReactRuntime.createElement(Native.Text, null, children),
 	};
 });
 
@@ -24,6 +54,7 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	disabled: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	foregroundStyle: (value: unknown) => value,
+	listStyle: (value: unknown) => value,
 	tint: (value: unknown) => value,
 }));
 

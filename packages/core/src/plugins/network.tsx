@@ -1,26 +1,44 @@
+import {
+	Button,
+	ContentUnavailableView,
+	DisclosureGroup,
+	Host,
+	HStack,
+	Image,
+	LabeledContent,
+	List,
+	Picker,
+	Section,
+	Spacer,
+	TextField,
+	Toggle,
+	Text as UIText,
+	VStack,
+} from '@expo/ui/swift-ui';
+import {
+	autocorrectionDisabled,
+	badge,
+	buttonStyle,
+	font,
+	foregroundStyle,
+	frame,
+	listStyle,
+	pickerStyle,
+	tag,
+	textSelection,
+} from '@expo/ui/swift-ui/modifiers';
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { Share, StyleSheet, Text, View } from 'react-native';
-import {
-	PanelButton,
-	PanelSearchField,
-	PanelSegmentedControl,
-	PanelToolbar,
-} from '../components/panel-controls';
-import {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	EmptyState,
-	PanelList,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-} from '../components/panel-ui';
+import { Platform, PlatformColor, Share } from 'react-native';
+import { NavIconButton } from '../components/nav-controls';
+import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite } from '../core/options';
-import { serializeValue } from '../core/serialize';
-import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
+import { serializeValue, truncateText } from '../core/serialize';
+import type {
+	DevToolsActionServices,
+	DevToolsPanelPlugin,
+	DevToolsSystemImage,
+} from '../types';
 import {
 	captureRequestBody,
 	captureResponseBody,
@@ -78,105 +96,561 @@ export type NetworkPlugin = {
 	getEvents: () => readonly NetworkEvent[];
 };
 
-function NetworkEventCard({ event }: { event: NetworkEvent }) {
-	const parsedUrl = parseNetworkUrl(event.url);
-	const endpoint =
-		parsedUrl.pathname.split('/').filter(Boolean).at(-1) ||
-		parsedUrl.host ||
-		parsedUrl.path;
-	const status = event.status ?? event.state.toUpperCase();
-	const statusTone =
-		event.state === 'pending'
-			? 'info'
-			: event.state !== 'success'
-				? 'danger'
-				: (event.status ?? 0) >= 400
-					? 'warning'
-					: 'success';
-	return (
-		<DisclosureCard
-			leading={<PanelStatusBadge label={String(status)} tone={statusTone} />}
-			title={`${event.method} · ${endpoint}`}
-			subtitle={`${parsedUrl.host || parsedUrl.path} · ${Math.round(event.durationMs)} ms · ${event.source}`}
-			renderDetails={() => (
-				<>
-					<PanelToolbar>
-						<PanelButton
-							label="Share request"
-							onPress={() => {
-								void Share.share({
-									title: `${event.method} ${parsedUrl.path}`,
-									message: serializeValue(event, 512 * 1024).text,
-								}).catch(() => undefined);
-							}}
-						/>
-					</PanelToolbar>
-					<View style={styles.detailGrid}>
-						{[
-							['Duration', `${Math.round(event.durationMs)} ms`],
-							['Source', event.source],
-							['Request', formatNetworkBytes(event.requestSizeBytes)],
-							['Response', formatNetworkBytes(event.responseSizeBytes)],
-						].map(([label, value]) => (
-							<View key={label} style={styles.detailMetric}>
-								<Text style={styles.detailLabel}>{label}</Text>
-								<Text style={styles.detailValue}>{value}</Text>
-							</View>
-						))}
-					</View>
-					<View style={styles.detailSection}>
-						<Text style={styles.detailTitle}>URL</Text>
-						<CodeBlock>{parsedUrl.path}</CodeBlock>
-					</View>
-					{Object.keys(parsedUrl.query).length ? (
-						<View style={styles.detailSection}>
-							<Text style={styles.detailTitle}>Query parameters</Text>
-							<CodeBlock>
-								{serializeValue(parsedUrl.query, 64 * 1024).text}
-							</CodeBlock>
-						</View>
-					) : null}
-					<View style={styles.detailSection}>
-						<Text style={styles.detailTitle}>Request headers</Text>
-						<CodeBlock>
-							{serializeValue(event.requestHeaders, 128 * 1024).text}
-						</CodeBlock>
-					</View>
-					{event.requestBody !== undefined ? (
-						<View style={styles.detailSection}>
-							<Text style={styles.detailTitle}>Request body</Text>
-							<CodeBlock>{event.requestBody}</CodeBlock>
-						</View>
-					) : null}
-					{event.responseHeaders ? (
-						<View style={styles.detailSection}>
-							<Text style={styles.detailTitle}>Response headers</Text>
-							<CodeBlock>
-								{serializeValue(event.responseHeaders, 128 * 1024).text}
-							</CodeBlock>
-						</View>
-					) : null}
-					{event.responseBody !== undefined ? (
-						<View style={styles.detailSection}>
-							<Text style={styles.detailTitle}>Response body</Text>
-							<CodeBlock>{event.responseBody}</CodeBlock>
-						</View>
-					) : null}
-					{event.error ? (
-						<View style={styles.detailSection}>
-							<Text style={[styles.detailTitle, { color: colors.red }]}>
-								Error
-							</Text>
-							<CodeBlock>{event.error}</CodeBlock>
-						</View>
-					) : null}
-				</>
-			)}
-		/>
+export type NetworkSegment = 'all' | 'supabase' | 'errors' | 'slow';
+
+export type NetworkStatusTone = 'success' | 'danger' | 'warning' | 'info';
+
+export type CollapsedNetworkEvent = {
+	event: NetworkEvent;
+	count: number;
+};
+
+const SLOW_REQUEST_MS = 1000;
+const MAX_BODY_PREVIEW_BYTES = 32 * 1024;
+/** Placeholders the collector writes in place of a captured secret. */
+const REDACTED_VALUES = new Set(['[REDACTED]', '[REDACTION FAILED]']);
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const SUPABASE_PATH_PREFIXES = ['/rest/', '/functions/', '/storage/', '/auth/'];
+const STORAGE_OBJECT_MODES = new Set([
+	'authenticated',
+	'copy',
+	'info',
+	'list',
+	'move',
+	'public',
+	'sign',
+	'upload',
+]);
+
+function hostParts(host: string): { hostname: string; port: number } {
+	const [hostname = '', portText = ''] = host.toLowerCase().split(':');
+	return { hostname, port: Number(portText) };
+}
+
+export function networkEventLabel(event: NetworkEvent): {
+	label: string;
+	sourceKind?: 'rest' | 'edge function' | 'storage' | 'auth';
+} {
+	const parsed = parseNetworkUrl(event.url);
+	const segments = parsed.pathname.split('/').filter(Boolean);
+	const last = segments.at(-1);
+	if (segments[0] === 'rest') {
+		return { label: segments[2] ?? last ?? 'rest', sourceKind: 'rest' };
+	}
+	if (segments[0] === 'functions') {
+		return {
+			label: segments[2] ?? last ?? 'functions',
+			sourceKind: 'edge function',
+		};
+	}
+	if (segments[0] === 'storage') {
+		const objectIndex = segments.indexOf('object');
+		let label = last ?? 'storage';
+		if (objectIndex >= 0) {
+			const mode = segments[objectIndex + 1];
+			label =
+				(STORAGE_OBJECT_MODES.has(mode ?? '')
+					? segments[objectIndex + 2]
+					: mode) ?? label;
+		}
+		return { label, sourceKind: 'storage' };
+	}
+	if (segments[0] === 'auth') {
+		return { label: last ?? 'auth', sourceKind: 'auth' };
+	}
+	return { label: last || parsed.host || parsed.path };
+}
+
+export function isSupabaseNetworkEvent(event: NetworkEvent): boolean {
+	const parsed = parseNetworkUrl(event.url);
+	if (hostParts(parsed.host).hostname.includes('supabase')) return true;
+	return SUPABASE_PATH_PREFIXES.some((prefix) =>
+		parsed.pathname.startsWith(prefix),
 	);
 }
 
-type NetworkFilter = 'all' | 'pending' | 'errors' | 'success';
+export function isFailedNetworkEvent(event: NetworkEvent): boolean {
+	return (
+		event.state === 'error' ||
+		event.state === 'aborted' ||
+		(event.status ?? 0) >= 400
+	);
+}
+
+/**
+ * Connectivity checks, Sentry ingest, and the Metro dev server are ambient
+ * traffic the panel hides by default. Analytics such as PostHog stay visible
+ * because the app sends them deliberately.
+ */
+export function isSystemNetworkEvent(event: NetworkEvent): boolean {
+	const parsed = parseNetworkUrl(event.url);
+	const { hostname, port } = hostParts(parsed.host);
+	const pathname = parsed.pathname.toLowerCase();
+	if (pathname.includes('generate_204') || pathname.includes('generate204')) {
+		return true;
+	}
+	if (/^clients\d*\.google\.com$/.test(hostname)) return true;
+	if (hostname === 'gstatic.com' || hostname.endsWith('.gstatic.com')) {
+		return true;
+	}
+	if (hostname === 'captive.apple.com') return true;
+	if (hostname === 'sentry.io' || hostname.endsWith('.sentry.io')) return true;
+	if (
+		(hostname === 'localhost' || hostname === '127.0.0.1') &&
+		port >= 8081 &&
+		port <= 8090
+	) {
+		return true;
+	}
+	return false;
+}
+
+export function matchesNetworkSegment(
+	event: NetworkEvent,
+	segment: NetworkSegment,
+): boolean {
+	if (segment === 'supabase') return isSupabaseNetworkEvent(event);
+	if (segment === 'errors') return isFailedNetworkEvent(event);
+	if (segment === 'slow') {
+		return event.state !== 'pending' && event.durationMs >= SLOW_REQUEST_MS;
+	}
+	return true;
+}
+
+export function matchesNetworkSearch(
+	event: NetworkEvent,
+	needle: string,
+): boolean {
+	if (!needle) return true;
+	return (
+		event.url.toLowerCase().includes(needle) ||
+		event.method.toLowerCase().includes(needle) ||
+		String(event.status ?? '').includes(needle) ||
+		networkEventLabel(event).label.toLowerCase().includes(needle)
+	);
+}
+
+export function collapseNetworkEvents(
+	events: readonly NetworkEvent[],
+): CollapsedNetworkEvent[] {
+	const collapsed: CollapsedNetworkEvent[] = [];
+	for (const event of events) {
+		const previous = collapsed.at(-1);
+		if (
+			previous &&
+			previous.event.method === event.method &&
+			previous.event.url === event.url &&
+			previous.event.status === event.status &&
+			previous.event.state === event.state
+		) {
+			previous.count += 1;
+		} else {
+			collapsed.push({ event, count: 1 });
+		}
+	}
+	return collapsed;
+}
+
+export function summarizeNetworkEvents(
+	events: readonly NetworkEvent[],
+	nowMs: number,
+): string {
+	if (events.length === 0) return 'No requests';
+	const oldest = events.reduce(
+		(minimum, event) => Math.min(minimum, event.startedAt),
+		Number.POSITIVE_INFINITY,
+	);
+	const minutes = Math.max(1, Math.ceil((nowMs - oldest) / 60_000));
+	const window =
+		minutes < 60 ? `Last ${minutes} min` : `Last ${Math.ceil(minutes / 60)} hr`;
+	const failed = events.filter(isFailedNetworkEvent).length;
+	const bytes = events.reduce(
+		(total, event) =>
+			total + (event.requestSizeBytes ?? 0) + (event.responseSizeBytes ?? 0),
+		0,
+	);
+	const parts = [
+		window,
+		`${events.length} request${events.length === 1 ? '' : 's'}`,
+	];
+	if (failed > 0) parts.push(`${failed} failed`);
+	if (bytes > 0) parts.push(formatNetworkBytes(bytes));
+	return parts.join(' · ');
+}
+
+export function networkStatusPresentation(event: NetworkEvent): {
+	text: string;
+	tone: NetworkStatusTone;
+} {
+	if (event.state === 'pending') return { text: '…', tone: 'info' };
+	if (event.state === 'aborted') {
+		return {
+			text: event.status ? String(event.status) : 'ABORTED',
+			tone: 'warning',
+		};
+	}
+	if (event.state === 'error') {
+		return {
+			text: event.status ? String(event.status) : 'ERROR',
+			tone: 'danger',
+		};
+	}
+	const status = event.status ?? 0;
+	if (status >= 500) return { text: String(status), tone: 'danger' };
+	if (status >= 400) return { text: String(status), tone: 'warning' };
+	return { text: event.status ? String(event.status) : 'OK', tone: 'success' };
+}
+
+function hostToken(host: string): string | undefined {
+	const { hostname } = hostParts(host);
+	if (!hostname) return undefined;
+	if (hostname === 'localhost' || /^[\d.]+$/.test(hostname)) return host;
+	const parts = hostname.split('.');
+	return parts.length >= 2 ? parts[parts.length - 2] : hostname;
+}
+
+export function formatNetworkDuration(durationMs: number): string {
+	if (!Number.isFinite(durationMs) || durationMs < 0) return '—';
+	if (durationMs < 1000) return `${Math.round(durationMs)} ms`;
+	return `${(durationMs / 1000).toFixed(1)} s`;
+}
+
+export function networkRowSubtitle(event: NetworkEvent): string {
+	const parsed = parseNetworkUrl(event.url);
+	const source =
+		networkEventLabel(event).sourceKind ??
+		hostToken(parsed.host) ??
+		event.source;
+	const tokens = [source];
+	if (event.state === 'pending') {
+		tokens.push('pending');
+		if (event.requestSizeBytes !== undefined) {
+			tokens.push(`${formatNetworkBytes(event.requestSizeBytes)} ↑`);
+		}
+	} else {
+		tokens.push(formatNetworkDuration(event.durationMs));
+		if (event.state === 'error' || event.state === 'aborted') {
+			const reason = event.error ?? event.state;
+			tokens.push(reason.length > 48 ? `${reason.slice(0, 47)}…` : reason);
+		} else if (event.responseSizeBytes !== undefined) {
+			tokens.push(formatNetworkBytes(event.responseSizeBytes));
+		}
+	}
+	return tokens.join(' · ');
+}
+
+export function formatNetworkClock(epochMs: number): string {
+	const date = new Date(epochMs);
+	const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+		date.getSeconds(),
+	)}.${pad(date.getMilliseconds(), 3)}`;
+}
+
+export function networkRequestPath(url: string): string {
+	try {
+		const parsed = new URL(url);
+		return `${parsed.pathname}${parsed.search}` || url;
+	} catch {
+		return url;
+	}
+}
+
+export function prettyNetworkBody(body: string): string {
+	try {
+		return JSON.stringify(JSON.parse(body), null, 2);
+	} catch {
+		return body;
+	}
+}
+
+export function detailStatusText(event: NetworkEvent): string {
+	if (event.state === 'pending') return 'Pending…';
+	if (event.state === 'aborted') return 'Aborted';
+	if (event.status === undefined) {
+		return event.state === 'error' ? 'Failed' : 'Unknown';
+	}
+	return event.status === 200 ? '200 OK' : String(event.status);
+}
+
+export function responseBodySummaryText(event: NetworkEvent): string {
+	if (event.responseBody === undefined) {
+		return event.state === 'pending' ? 'Pending' : 'Empty';
+	}
+	const kind = event.contentType?.toLowerCase().includes('json')
+		? 'JSON'
+		: (event.contentType?.split(';')[0]?.trim() ?? 'Text');
+	return event.responseSizeBytes === undefined
+		? kind
+		: `${kind} · ${formatNetworkBytes(event.responseSizeBytes)}`;
+}
+
+export function buildCurlCommand(event: NetworkEvent): string {
+	const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+	const parts = [`curl -X ${event.method} ${quote(event.url)}`];
+	for (const [name, value] of Object.entries(event.requestHeaders)) {
+		parts.push(`-H ${quote(`${name}: ${value}`)}`);
+	}
+	if (
+		event.requestBody !== undefined &&
+		event.method !== 'GET' &&
+		event.method !== 'HEAD'
+	) {
+		parts.push(`--data ${quote(event.requestBody)}`);
+	}
+	return parts.join(' \\\n  ');
+}
+
+function statusColor(tone: NetworkStatusTone) {
+	if (tone === 'success') return PlatformColor('systemGreenColor');
+	if (tone === 'danger') return PlatformColor('systemRedColor');
+	if (tone === 'warning') return PlatformColor('systemOrangeColor');
+	return PlatformColor('systemBlueColor');
+}
+
+const monoSmall = () => font({ design: 'monospaced', size: 12 });
+const secondarySmall = () => [
+	font({ size: 13 }),
+	foregroundStyle(PlatformColor('secondaryLabelColor')),
+];
+
+function HeaderRows({
+	entries,
+}: {
+	entries: ReadonlyArray<readonly [string, string]>;
+}) {
+	return (
+		<>
+			{entries.map(([name, value]) => (
+				<LabeledContent key={name} label={name}>
+					<UIText modifiers={[monoSmall()]}>{value}</UIText>
+				</LabeledContent>
+			))}
+		</>
+	);
+}
+
+function NetworkEventDetail({
+	actions,
+	event,
+	listTitle,
+	maxBodyBytes,
+	onBack,
+	pluginId,
+}: {
+	actions: DevToolsActionServices;
+	event: NetworkEvent;
+	listTitle: string;
+	maxBodyBytes: number;
+	onBack: () => void;
+	pluginId: string;
+}) {
+	const { label } = networkEventLabel(event);
+	const status = networkStatusPresentation(event);
+	const path = networkRequestPath(event.url);
+	const requestHeaderEntries = Object.entries(event.requestHeaders);
+	const responseHeaderEntries = Object.entries(event.responseHeaders ?? {});
+	// Pretty-printing can chew through 256 KB bodies; cache per event so live
+	// capture ticks don't re-parse while the detail is open.
+	const requestBody = useMemo(
+		() =>
+			event.requestBody === undefined
+				? undefined
+				: truncateText(
+						prettyNetworkBody(event.requestBody),
+						MAX_BODY_PREVIEW_BYTES,
+					).text,
+		[event],
+	);
+	const responseBody = useMemo(
+		() =>
+			event.responseBody === undefined
+				? undefined
+				: truncateText(
+						prettyNetworkBody(event.responseBody),
+						MAX_BODY_PREVIEW_BYTES,
+					).text,
+		[event],
+	);
+	const shareEvent = () => {
+		void Share.share({
+			title: `${event.method} ${path}`,
+			message: serializeValue(event, 512 * 1024).text,
+		}).catch(() => undefined);
+	};
+	// expo-clipboard is not a dependency; the share sheet's Copy action is the
+	// sanctioned way to get text onto the pasteboard from here.
+	const copyCurl = () => {
+		void Share.share({ message: buildCurlCommand(event) }).catch(
+			() => undefined,
+		);
+	};
+	const resendRequest = () => {
+		// The store only ever holds the redacted copy of a request, so a replay
+		// cannot carry the original credentials. Drop the placeholder headers
+		// instead of sending `Authorization: [REDACTED]` upstream, and say what
+		// will actually leave the device before it does.
+		const headers = Object.fromEntries(
+			requestHeaderEntries.filter(([, value]) => !REDACTED_VALUES.has(value)),
+		);
+		const droppedHeaders =
+			requestHeaderEntries.length - Object.keys(headers).length;
+		void actions.run({
+			pluginId,
+			label: 'Re-send request',
+			confirmation: {
+				title: 'Re-send this request?',
+				message: `A real ${event.method} goes to ${parseNetworkUrl(event.url).host}. Redacted values are never replayed${
+					droppedHeaders > 0
+						? ` (${droppedHeaders} header${droppedHeaders === 1 ? '' : 's'} dropped)`
+						: ''
+				}, so the response can differ from the captured one.`,
+				confirmLabel: 'Re-send',
+				destructive: MUTATING_METHODS.has(event.method),
+			},
+			action: async () => {
+				const init: RequestInit = { method: event.method, headers };
+				if (
+					event.requestBody !== undefined &&
+					event.method !== 'GET' &&
+					event.method !== 'HEAD'
+				) {
+					init.body = event.requestBody;
+				}
+				// The instrumented global fetch captures the replay as a new event.
+				await globalThis.fetch(event.url, init);
+			},
+		});
+	};
+
+	return (
+		<PanelShell
+			backLabel={listTitle}
+			onBack={onBack}
+			title={`${event.method} ${label}`}
+			trailing={
+				<NavIconButton
+					accessibilityLabel="Share request"
+					onPress={shareEvent}
+					systemImage="square.and.arrow.up"
+					testID="devtools-network-share"
+				/>
+			}
+		>
+			{Platform.OS === 'ios' ? (
+				<Host style={{ flex: 1 }}>
+					<List modifiers={[listStyle('insetGrouped')]}>
+						<Section title="Overview">
+							<LabeledContent label="Status">
+								<UIText
+									modifiers={[
+										font({ design: 'monospaced', weight: 'semibold' }),
+										foregroundStyle(statusColor(status.tone)),
+									]}
+								>
+									{detailStatusText(event)}
+								</UIText>
+							</LabeledContent>
+							<LabeledContent label="Duration">
+								<UIText>
+									{event.state === 'pending'
+										? 'Pending'
+										: formatNetworkDuration(event.durationMs)}
+								</UIText>
+							</LabeledContent>
+							<LabeledContent label="Started">
+								<UIText>{formatNetworkClock(event.startedAt)}</UIText>
+							</LabeledContent>
+							<LabeledContent label="Size">
+								<UIText>{`↑ ${formatNetworkBytes(event.requestSizeBytes)} · ↓ ${formatNetworkBytes(event.responseSizeBytes)}`}</UIText>
+							</LabeledContent>
+							<LabeledContent label="Source">
+								<UIText>{event.source}</UIText>
+							</LabeledContent>
+							{event.error ? (
+								<LabeledContent label="Error">
+									<UIText
+										modifiers={[
+											foregroundStyle(PlatformColor('systemRedColor')),
+										]}
+									>
+										{event.error}
+									</UIText>
+								</LabeledContent>
+							) : null}
+						</Section>
+						<Section title="Request">
+							<VStack alignment="leading" spacing={3}>
+								<UIText modifiers={secondarySmall()}>URL</UIText>
+								<UIText modifiers={[monoSmall(), textSelection(true)]}>
+									{path}
+								</UIText>
+							</VStack>
+							<DisclosureGroup
+								label={`Headers (${requestHeaderEntries.length})`}
+							>
+								<HeaderRows entries={requestHeaderEntries} />
+							</DisclosureGroup>
+							<LabeledContent label="Body">
+								<UIText>
+									{event.requestBody === undefined
+										? 'Empty'
+										: formatNetworkBytes(event.requestSizeBytes)}
+								</UIText>
+							</LabeledContent>
+							{requestBody !== undefined ? (
+								<UIText modifiers={[monoSmall(), textSelection(true)]}>
+									{requestBody}
+								</UIText>
+							) : null}
+						</Section>
+						<Section
+							footer={
+								<UIText>
+									{`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are truncated at capture time.`}
+								</UIText>
+							}
+							title="Response"
+						>
+							{responseHeaderEntries.length > 0 ? (
+								<DisclosureGroup
+									label={`Headers (${responseHeaderEntries.length})`}
+								>
+									<HeaderRows entries={responseHeaderEntries} />
+								</DisclosureGroup>
+							) : null}
+							<LabeledContent label="Body">
+								<UIText>{responseBodySummaryText(event)}</UIText>
+							</LabeledContent>
+							{responseBody !== undefined ? (
+								<UIText modifiers={[monoSmall(), textSelection(true)]}>
+									{responseBody}
+								</UIText>
+							) : null}
+						</Section>
+						<Section>
+							<Button
+								label="Copy as cURL"
+								onPress={copyCurl}
+								testID="devtools-network-copy-curl"
+							/>
+							<Button
+								label="Re-send request"
+								onPress={resendRequest}
+								testID="devtools-network-resend"
+							/>
+							<Button
+								label="Share…"
+								onPress={shareEvent}
+								testID="devtools-network-share-action"
+							/>
+						</Section>
+					</List>
+				</Host>
+			) : null}
+		</PanelShell>
+	);
+}
 
 export function createNetworkPlugin(
 	options: NetworkPluginOptions = {},
@@ -336,7 +810,13 @@ export function createNetworkPlugin(
 		return wrappedFetch;
 	};
 
-	function NetworkPanel({ onBack }: { onBack: () => void }) {
+	function NetworkPanel({
+		actions,
+		onBack,
+	}: {
+		actions: DevToolsActionServices;
+		onBack: () => void;
+	}) {
 		const events = useSyncExternalStore(
 			store.subscribe,
 			store.getSnapshot,
@@ -347,135 +827,218 @@ export function createNetworkPlugin(
 			pausedStore.getSnapshot,
 			pausedStore.getServerSnapshot,
 		);
+		const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
 		const [search, setSearch] = useState('');
-		const [filter, setFilter] = useState<NetworkFilter>('all');
-		const visibleEvents = useMemo(() => {
+		const [segment, setSegment] = useState<NetworkSegment>('all');
+		const [hideSystemTraffic, setHideSystemTraffic] = useState(true);
+
+		// URL parsing per event is the hot path here; recompute only when the
+		// inputs actually change instead of on every render. Hooks stay above
+		// the detail early-return.
+		const { systemCount, rows, summary } = useMemo(() => {
 			const needle = search.trim().toLowerCase();
-			return [...events].reverse().filter((event) => {
-				if (filter === 'pending' && event.state !== 'pending') return false;
-				if (
-					filter === 'errors' &&
-					event.state !== 'error' &&
-					event.state !== 'aborted' &&
-					(event.status ?? 0) < 400
-				) {
-					return false;
-				}
-				if (
-					filter === 'success' &&
-					(event.state !== 'success' || (event.status ?? 0) >= 400)
-				) {
-					return false;
-				}
-				return (
-					!needle ||
-					event.url.toLowerCase().includes(needle) ||
-					event.method.toLowerCase().includes(needle) ||
-					String(event.status ?? '').includes(needle)
+			const matching = [...events]
+				.reverse()
+				.filter(
+					(candidate) =>
+						matchesNetworkSegment(candidate, segment) &&
+						matchesNetworkSearch(candidate, needle),
 				);
+			const systemEvents: NetworkEvent[] = [];
+			const appEvents: NetworkEvent[] = [];
+			for (const candidate of matching) {
+				(isSystemNetworkEvent(candidate) ? systemEvents : appEvents).push(
+					candidate,
+				);
+			}
+			const visibleEvents = hideSystemTraffic ? appEvents : matching;
+			return {
+				systemCount: systemEvents.length,
+				rows: collapseNetworkEvents(visibleEvents),
+				summary: summarizeNetworkEvents(visibleEvents, Date.now()),
+			};
+		}, [events, search, segment, hideSystemTraffic]);
+
+		// The search field is native-owned and unmounts with the list, so a query
+		// that outlived it would filter the list behind an empty search box.
+		const openEvent = (eventId: number) => {
+			setSearch('');
+			setSelectedEventId(eventId);
+		};
+
+		const selectedEvent =
+			selectedEventId === null
+				? undefined
+				: events.find((event) => event.id === selectedEventId);
+		if (selectedEvent) {
+			return (
+				<NetworkEventDetail
+					actions={actions}
+					event={selectedEvent}
+					listTitle={title}
+					maxBodyBytes={maxBodyBytes}
+					onBack={() => setSelectedEventId(null)}
+					pluginId={pluginId}
+				/>
+			);
+		}
+		const headerText = paused ? `Paused · ${summary}` : summary;
+		const clearRequests = () => {
+			void actions.run({
+				pluginId,
+				label: 'Clear requests',
+				confirmation: {
+					title: 'Clear captured requests?',
+					message: 'Removes all captured requests from this session.',
+					confirmLabel: 'Clear',
+					destructive: true,
+				},
+				action: store.clear,
 			});
-		}, [events, filter, search]);
-		const pendingCount = events.filter(
-			(event) => event.state === 'pending',
-		).length;
-		const errorCount = events.filter(
-			(event) =>
-				event.state === 'error' ||
-				event.state === 'aborted' ||
-				(event.status ?? 0) >= 400,
-		).length;
-		const successCount = events.filter(
-			(event) => event.state === 'success' && (event.status ?? 0) < 400,
-		).length;
+		};
 
 		return (
-			<PanelScaffold
+			<PanelShell
 				onBack={onBack}
-				scrollable={false}
 				title={title}
-				subtitle={`${events.length} recent requests${paused ? ' · paused' : ''}`}
+				trailing={
+					<>
+						<NavIconButton
+							accessibilityLabel={paused ? 'Resume capture' : 'Pause capture'}
+							onPress={() => pausedStore.set(!paused)}
+							systemImage={paused ? 'play.fill' : 'pause.fill'}
+							testID="devtools-network-pause"
+						/>
+						<NavIconButton
+							accessibilityLabel="Clear requests"
+							destructive
+							onPress={clearRequests}
+							systemImage="trash"
+							testID="devtools-network-clear"
+						/>
+					</>
+				}
 			>
-				<PanelList
-					data={visibleEvents}
-					empty={
-						<EmptyState>
-							{events.length === 0
-								? 'Captured requests will appear here.'
-								: 'No requests match the current filters.'}
-						</EmptyState>
-					}
-					header={
-						<>
-							<PanelSignalCard
-								description={
-									paused
-										? `${events.length} requests remain available while new traffic is ignored.`
-										: `${visibleEvents.length} of ${events.length} captured requests are visible.`
-								}
-								eyebrow="Capture status"
-								systemImage={
-									paused
-										? 'pause.circle.fill'
-										: errorCount > 0
-											? 'exclamationmark.triangle.fill'
-											: events.length > 0
-												? 'checkmark.circle.fill'
-												: 'network'
-								}
-								title={
-									paused
-										? 'Capture is paused'
-										: errorCount > 0
-											? `${errorCount} request${errorCount === 1 ? '' : 's'} need attention`
-											: events.length > 0
-												? 'Traffic looks healthy'
-												: 'Waiting for app traffic'
-								}
-								tone={
-									paused ? 'warning' : errorCount > 0 ? 'danger' : 'success'
-								}
-							/>
-							<PanelMetricStrip
-								metrics={[
-									{ label: 'Total', value: events.length },
-									{ label: 'Pending', value: pendingCount, tone: colors.blue },
-									{ label: 'Success', value: successCount, tone: colors.green },
-									{ label: 'Errors', value: errorCount, tone: colors.red },
-								]}
-							/>
-							<PanelSearchField
-								onChangeText={setSearch}
-								placeholder="Search URL, method, or status"
-								value={search}
-							/>
-							<PanelSegmentedControl
-								accessibilityLabel="Network request filter"
-								onChange={setFilter}
-								options={(['all', 'pending', 'errors', 'success'] as const).map(
-									(value) => ({
-										id: value,
-										label: value.charAt(0).toUpperCase() + value.slice(1),
-									}),
-								)}
-								selected={filter}
-							/>
-							<PanelToolbar>
-								<PanelButton
-									label={paused ? 'Resume' : 'Pause'}
-									onPress={() => pausedStore.set(!paused)}
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						<List modifiers={[listStyle('insetGrouped')]}>
+							<Section>
+								<TextField
+									modifiers={[autocorrectionDisabled()]}
+									onTextChange={setSearch}
+									placeholder="Search URL, table, or status"
+									testID="devtools-network-search"
 								/>
-								<PanelButton
-									label="Clear"
-									onPress={store.clear}
-									tone="danger"
-								/>
-							</PanelToolbar>
-						</>
-					}
-					keyExtractor={(event) => String(event.id)}
-					renderItem={({ item }) => <NetworkEventCard event={item} />}
-				/>
-			</PanelScaffold>
+								<Picker
+									modifiers={[pickerStyle('segmented')]}
+									onSelectionChange={(value) => setSegment(value)}
+									selection={segment}
+									testID="devtools-network-filter"
+								>
+									<UIText modifiers={[tag('all')]}>All</UIText>
+									<UIText modifiers={[tag('supabase')]}>Supabase</UIText>
+									<UIText modifiers={[tag('errors')]}>Errors</UIText>
+									<UIText modifiers={[tag('slow')]}>Slow</UIText>
+								</Picker>
+							</Section>
+							{rows.length === 0 ? (
+								<Section>
+									<ContentUnavailableView
+										description={
+											events.length === 0
+												? 'Captured requests will appear here.'
+												: 'No requests match the current filters.'
+										}
+										systemImage="network"
+										testID="devtools-network-empty"
+										title={events.length === 0 ? 'No requests' : 'No matches'}
+									/>
+								</Section>
+							) : (
+								<Section title={headerText}>
+									{rows.map(({ event, count }) => {
+										const status = networkStatusPresentation(event);
+										const rowModifiers =
+											count > 1
+												? [buttonStyle('plain'), badge(`×${count}`)]
+												: [buttonStyle('plain')];
+										return (
+											<Button
+												key={event.id}
+												modifiers={rowModifiers}
+												onPress={() => openEvent(event.id)}
+												testID={`devtools-network-row-${event.id}`}
+											>
+												<HStack alignment="center" spacing={12}>
+													<UIText
+														modifiers={[
+															font({
+																design: 'monospaced',
+																size: 13,
+																weight: 'semibold',
+															}),
+															foregroundStyle(statusColor(status.tone)),
+															frame({ minWidth: 36, alignment: 'leading' }),
+														]}
+													>
+														{status.text}
+													</UIText>
+													<VStack alignment="leading" spacing={2}>
+														<HStack alignment="firstTextBaseline" spacing={5}>
+															<UIText
+																modifiers={[
+																	font({
+																		design: 'monospaced',
+																		size: 15,
+																		weight: 'bold',
+																	}),
+																	foregroundStyle(PlatformColor('labelColor')),
+																]}
+															>
+																{event.method}
+															</UIText>
+															<UIText
+																modifiers={[
+																	foregroundStyle(PlatformColor('labelColor')),
+																]}
+															>
+																{networkEventLabel(event).label}
+															</UIText>
+														</HStack>
+														<UIText modifiers={secondarySmall()}>
+															{networkRowSubtitle(event)}
+														</UIText>
+													</VStack>
+													<Spacer />
+													<Image
+														color={PlatformColor('tertiaryLabelColor')}
+														size={12}
+														systemName="chevron.right"
+													/>
+												</HStack>
+											</Button>
+										);
+									})}
+								</Section>
+							)}
+							<Section>
+								<Toggle
+									isOn={hideSystemTraffic}
+									onIsOnChange={setHideSystemTraffic}
+									testID="devtools-network-hide-system"
+								>
+									<UIText>Hide system traffic</UIText>
+									<UIText>
+										{hideSystemTraffic
+											? `${systemCount} hidden`
+											: `${systemCount} shown`}
+									</UIText>
+								</Toggle>
+							</Section>
+						</List>
+					</Host>
+				) : null}
+			</PanelShell>
 		);
 	}
 
@@ -527,25 +1090,3 @@ export function createNetworkPlugin(
 		resume: () => pausedStore.set(false),
 	};
 }
-
-const styles = StyleSheet.create({
-	detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
-	detailMetric: {
-		backgroundColor: colors.groupedFill,
-		borderColor: colors.separator,
-		borderRadius: 8,
-		borderWidth: StyleSheet.hairlineWidth,
-		minWidth: '46%',
-		padding: 10,
-	},
-	detailLabel: { color: colors.secondaryLabel, fontSize: 10, marginBottom: 3 },
-	detailValue: { color: colors.label, fontSize: 13, fontWeight: '600' },
-	detailSection: {
-		borderTopColor: colors.separator,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		gap: 8,
-		marginTop: 12,
-		paddingTop: 12,
-	},
-	detailTitle: { color: colors.label, fontSize: 13, fontWeight: '600' },
-});

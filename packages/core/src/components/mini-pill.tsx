@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import {
 	Gesture,
 	GestureDetector,
@@ -22,21 +22,21 @@ import { colors } from './panel-ui';
 import { PillQuickActionMenu } from './pill-quick-action-menu';
 import { SystemIcon } from './system-icon';
 
-const BASE_WIDTH = 190;
-const QUICK_ACTION_WIDTH = 42;
+const BASE_WIDTH = 58;
+const QUICK_ACTION_WIDTH = 38;
 const HEIGHT = 48;
 const EDGE_MARGIN = 10;
 
 type MiniPillProps = {
 	label: string;
 	onRestore: () => void;
-	onClose: () => void;
 	initialPosition?: DevToolsPosition;
 	onPositionChange?: (position: DevToolsPosition) => void;
 	bottomObstructionInset?: number;
 	quickActionPlugins?: readonly DevToolsPluginWithPillQuickAction[];
 	actions: DevToolsActionServices;
 	onQuickActionPinnedChange: (pluginId: string, isPinned: boolean) => void;
+	onOpenPlugin?: (pluginId: string) => void;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -47,13 +47,13 @@ function clamp(value: number, minimum: number, maximum: number): number {
 export function MiniPill({
 	label,
 	onRestore,
-	onClose,
 	initialPosition,
 	onPositionChange,
 	bottomObstructionInset = 0,
 	quickActionPlugins = [],
 	actions,
 	onQuickActionPinnedChange,
+	onOpenPlugin,
 }: MiniPillProps) {
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
@@ -154,37 +154,27 @@ export function MiniPill({
 						accessibilityRole="button"
 						onPress={onRestore}
 						style={styles.restoreArea}
+						testID="devtools-pill-restore"
 					>
 						<View style={styles.iconSurface}>
-							<SystemIcon systemName="wrench.and.screwdriver.fill" size={15} />
-						</View>
-						<View style={styles.copy}>
-							<Text numberOfLines={1} style={styles.label}>
-								{label}
-							</Text>
-							<Text style={styles.status}>Collectors active</Text>
+							<SystemIcon
+								color={colors.blue}
+								systemName="wrench.and.screwdriver.fill"
+								size={15}
+							/>
 						</View>
 					</RectButton>
 					{quickActionPlugins.map((plugin) => (
 						<PillQuickActionMenu
 							actions={actions}
 							key={plugin.id}
+							onOpenPanel={
+								onOpenPlugin ? () => onOpenPlugin(plugin.id) : undefined
+							}
 							onUnpin={() => onQuickActionPinnedChange(plugin.id, false)}
 							plugin={plugin}
 						/>
 					))}
-					<RectButton
-						accessibilityLabel="Close developer tools"
-						accessibilityRole="button"
-						onPress={onClose}
-						style={styles.closeButton}
-					>
-						<SystemIcon
-							systemName="xmark"
-							size={17}
-							color={colors.secondaryLabel}
-						/>
-					</RectButton>
 				</View>
 			</Animated.View>
 		</GestureDetector>
@@ -217,38 +207,18 @@ const styles = StyleSheet.create({
 	},
 	restoreArea: {
 		alignItems: 'center',
-		flex: 1,
 		flexDirection: 'row',
 		height: '100%',
+		justifyContent: 'center',
+		width: 48,
 	},
+	// Tinted glyph on a system fill, matching the sheet header's controls.
 	iconSurface: {
 		alignItems: 'center',
 		backgroundColor: colors.fill,
-		borderRadius: 15,
-		height: 30,
+		borderRadius: 17,
+		height: 34,
 		justifyContent: 'center',
-		width: 30,
-	},
-	copy: {
-		flex: 1,
-		marginLeft: 8,
-	},
-	label: {
-		color: colors.label,
-		fontSize: 13,
-		fontWeight: '600',
-	},
-	status: {
-		color: colors.green,
-		fontSize: 10,
-		fontWeight: '500',
-		marginTop: 1,
-	},
-	closeButton: {
-		alignItems: 'center',
-		borderRadius: 22,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
+		width: 34,
 	},
 });

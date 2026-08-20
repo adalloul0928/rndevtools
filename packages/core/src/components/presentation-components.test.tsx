@@ -155,24 +155,21 @@ describe('presentation components', () => {
 		expect(onOpen).toHaveBeenCalledTimes(1);
 	});
 
-	it('restores or closes from the mini pill', () => {
+	it('restores the tools from the mini pill', () => {
 		const onRestore = jest.fn();
-		const onClose = jest.fn();
 		render(
 			<MiniPill
 				actions={actions}
 				bottomObstructionInset={84}
 				label="Network"
-				onClose={onClose}
 				onQuickActionPinnedChange={jest.fn()}
 				onRestore={onRestore}
 			/>,
 		);
 
 		fireEvent.press(screen.getByLabelText('Network'));
-		fireEvent.press(screen.getByLabelText('Close developer tools'));
 		expect(onRestore).toHaveBeenCalledTimes(1);
-		expect(onClose).toHaveBeenCalledTimes(1);
+		expect(screen.queryByLabelText('Close developer tools')).toBeNull();
 	});
 
 	it('runs and removes pinned quick actions from the mini pill', () => {
@@ -200,7 +197,6 @@ describe('presentation components', () => {
 					}),
 				}}
 				label="PUMPD Tools"
-				onClose={jest.fn()}
 				onQuickActionPinnedChange={onQuickActionPinnedChange}
 				onRestore={jest.fn()}
 				quickActionPlugins={[quickActionPlugin]}
@@ -227,9 +223,7 @@ describe('presentation components', () => {
 				onBack={jest.fn()}
 				onClose={onClose}
 				onPresentationModeChange={onPresentationModeChange}
-				onQuickActionPinnedChange={jest.fn()}
 				onSelectPlugin={onSelectPlugin}
-				pinnedPillQuickActionIds={[]}
 				plugins={[plugin]}
 				title="Developer Tools"
 			/>,
@@ -254,10 +248,8 @@ describe('presentation components', () => {
 				onBack={jest.fn()}
 				onClose={jest.fn()}
 				onPresentationModeChange={jest.fn()}
-				onQuickActionPinnedChange={jest.fn()}
 				onSelectPlugin={jest.fn()}
 				onSizeChange={onSizeChange}
-				pinnedPillQuickActionIds={[]}
 				plugins={[plugin]}
 				title="Developer Tools"
 			/>,

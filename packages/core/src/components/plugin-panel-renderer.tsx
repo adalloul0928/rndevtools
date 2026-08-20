@@ -1,13 +1,16 @@
-import { Component, type ErrorInfo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
-import { PanelButton } from './panel-controls';
 import {
-	colors,
-	PanelPresentationProvider,
-	PanelScaffold,
-	PanelSignalCard,
-} from './panel-ui';
+	Button,
+	ContentUnavailableView,
+	Host,
+	List,
+	Section,
+	Text as UIText,
+} from '@expo/ui/swift-ui';
+import { foregroundStyle, listStyle } from '@expo/ui/swift-ui/modifiers';
+import { Component, type ErrorInfo } from 'react';
+import { Platform, PlatformColor, Pressable, Text } from 'react-native';
+import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
+import { PanelShell } from './panel-shell';
 
 type PluginPanelRendererProps = {
 	plugin: DevToolsPanelPlugin;
@@ -37,28 +40,48 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 	render() {
 		const { error } = this.state;
 		const { panelProps, plugin } = this.props;
+		if (Platform.OS !== 'ios') {
+			return (
+				<PanelShell onBack={panelProps.onBack} title={plugin.title}>
+					<Text
+						style={{ color: '#5F6368', fontSize: 15, padding: 24 }}
+					>{`${plugin.title} isn't built for Android yet. Use the iOS dev client for this tool.`}</Text>
+				</PanelShell>
+			);
+		}
 		if (error) {
 			return (
-				<PanelScaffold
-					onBack={panelProps.onBack}
-					title={plugin.title}
-					subtitle="Panel unavailable"
-				>
-					<PanelSignalCard
-						description="The collector is still isolated; return to the tool list and try opening this panel again."
-						eyebrow="Panel error"
-						systemImage="exclamationmark.triangle.fill"
-						title="This tool could not render"
-						tone="danger"
-					/>
-					<View style={styles.errorCard}>
-						<Text style={styles.errorTitle}>Technical detail</Text>
-						<Text selectable style={styles.errorMessage}>
-							{error.message}
-						</Text>
-						<PanelButton label="Return to tools" onPress={panelProps.onBack} />
-					</View>
-				</PanelScaffold>
+				<PanelShell onBack={panelProps.onBack} title={plugin.title}>
+					{Platform.OS === 'ios' ? (
+						<Host style={{ flex: 1 }}>
+							<List modifiers={[listStyle('insetGrouped')]}>
+								<Section>
+									<ContentUnavailableView
+										description="The collector is still isolated; return to the tool list and try opening this panel again."
+										systemImage="exclamationmark.triangle.fill"
+										title="This tool could not render"
+									/>
+								</Section>
+								<Section title="Technical detail">
+									<UIText
+										modifiers={[
+											foregroundStyle(PlatformColor('systemRedColor')),
+										]}
+									>
+										{error.message}
+									</UIText>
+								</Section>
+								<Section>
+									<Button label="Return to tools" onPress={panelProps.onBack} />
+								</Section>
+							</List>
+						</Host>
+					) : (
+						<Pressable accessibilityRole="button" onPress={panelProps.onBack}>
+							<Text>{`This tool could not render: ${error.message}`}</Text>
+						</Pressable>
+					)}
+				</PanelShell>
 			);
 		}
 
@@ -67,34 +90,5 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 }
 
 export function PluginPanelRenderer(props: PluginPanelRendererProps) {
-	return (
-		<PanelPresentationProvider
-			mode={props.panelProps.presentationMode}
-			safeAreaTop={props.panelProps.safeAreaTop}
-		>
-			<PluginPanelBoundary key={props.plugin.id} {...props} />
-		</PanelPresentationProvider>
-	);
+	return <PluginPanelBoundary key={props.plugin.id} {...props} />;
 }
-
-const styles = StyleSheet.create({
-	errorCard: {
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: 12,
-		borderWidth: StyleSheet.hairlineWidth,
-		gap: 10,
-		padding: 16,
-	},
-	errorTitle: {
-		color: colors.label,
-		fontSize: 16,
-		fontWeight: '700',
-	},
-	errorMessage: {
-		color: colors.red,
-		fontFamily: 'Menlo',
-		fontSize: 12,
-		lineHeight: 18,
-	},
-});

@@ -1,23 +1,33 @@
+import {
+	Button,
+	ContentUnavailableView,
+	DisclosureGroup,
+	Host,
+	HStack,
+	Image,
+	LabeledContent,
+	List,
+	Picker,
+	Section,
+	SwipeActions,
+	TextField,
+	Text as UIText,
+	VStack,
+} from '@expo/ui/swift-ui';
+import {
+	autocorrectionDisabled,
+	badge,
+	font,
+	foregroundColor,
+	listStyle,
+	pickerStyle,
+	tag,
+	tint,
+} from '@expo/ui/swift-ui/modifiers';
 import type { QueryClient } from '@tanstack/react-query';
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import {
-	PanelButton,
-	PanelSearchField,
-	PanelSegmentedControl,
-	PanelToolbar,
-} from '../components/panel-controls';
-import {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	EmptyState,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-	panelStyles,
-} from '../components/panel-ui';
+import { Platform } from 'react-native';
+import { iosColor, PanelShell } from '../components/panel-shell';
 import { ExternalStore } from '../core/external-store';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
 import { serializeValue } from '../core/serialize';
@@ -58,6 +68,7 @@ export type QueryPluginOptions = {
 	description?: string;
 	section?: string;
 	systemImage?: DevToolsSystemImage;
+	tint?: string;
 };
 
 export type QueryPlugin = DevToolsPanelPlugin & {
@@ -65,31 +76,192 @@ export type QueryPlugin = DevToolsPanelPlugin & {
 	getSnapshot: () => QueryPluginSnapshot;
 };
 
-type QueryFilter = 'all' | 'active' | 'fetching' | 'stale' | 'error';
 type InspectorTab = 'queries' | 'mutations';
+type QueryStatusKind = 'error' | 'fetching' | 'stale' | 'fresh';
 type RunQueryAction = (
 	label: string,
 	action: () => unknown | Promise<unknown>,
 	confirmation?: DevToolsActionConfirmation,
 ) => void;
 
+const palette = {
+	blue: iosColor('systemBlueColor', '#007AFF'),
+	gray: iosColor('systemGrayColor', '#8E8E93'),
+	green: iosColor('systemGreenColor', '#34C759'),
+	orange: iosColor('systemOrangeColor', '#FF9500'),
+	red: iosColor('systemRedColor', '#FF3B30'),
+	secondary: iosColor('secondaryLabelColor', 'rgba(60,60,67,0.6)'),
+};
+
+const statusDotColors = {
+	error: palette.red,
+	fetching: palette.blue,
+	fresh: palette.green,
+	stale: palette.orange,
+};
+
+const statusLabels: Record<QueryStatusKind, string> = {
+	error: 'error',
+	fetching: 'fetching…',
+	fresh: 'fresh',
+	stale: 'stale',
+};
+
+function queryStatusKind(
+	query: Pick<QuerySnapshot, 'fetchStatus' | 'isStale' | 'status'>,
+): QueryStatusKind {
+	if (query.status === 'error') return 'error';
+	if (query.fetchStatus === 'fetching' || query.status === 'pending') {
+		return 'fetching';
+	}
+	if (query.isStale) return 'stale';
+	return 'fresh';
+}
+
+function mutationDotColor(status: string) {
+	if (status === 'error') return palette.red;
+	if (status === 'pending') return palette.blue;
+	if (status === 'success') return palette.green;
+	return palette.gray;
+}
+
+function formatQueryKeySegment(part: unknown): string {
+	if (typeof part === 'string') return part;
+	if (
+		typeof part === 'number' ||
+		typeof part === 'boolean' ||
+		typeof part === 'bigint'
+	) {
+		return String(part);
+	}
+	return serializeValue(part, 256).text.replace(/\s+/g, ' ');
+}
+
 export function formatQueryKey(
 	queryKey: readonly unknown[] | undefined,
 ): string {
 	if (!queryKey?.length) return 'Anonymous mutation';
-	return queryKey
-		.map((part) => {
-			if (typeof part === 'string') return part;
-			if (
-				typeof part === 'number' ||
-				typeof part === 'boolean' ||
-				typeof part === 'bigint'
-			) {
-				return String(part);
-			}
-			return serializeValue(part, 256).text.replace(/\s+/g, ' ');
-		})
-		.join(' › ');
+	return queryKey.map(formatQueryKeySegment).join(' › ');
+}
+
+/** Row title: every key segment after the grouping segment, ' · ' joined. */
+export function formatQueryKeyRemainder(
+	queryKey: readonly unknown[] | undefined,
+): string {
+	const [root, ...rest] = queryKey ?? [];
+	if (rest.length > 0) return rest.map(formatQueryKeySegment).join(' · ');
+	return formatQueryKeySegment(root);
+}
+
+export function groupQueriesByRoot(
+	queries: readonly QuerySnapshot[],
+): ReadonlyArray<{ segment: string; queries: readonly QuerySnapshot[] }> {
+	const groups = new Map<string, QuerySnapshot[]>();
+	for (const query of queries) {
+		const segment = String(query.queryKey[0]);
+		const group = groups.get(segment);
+		if (group) group.push(query);
+		else groups.set(segment, [query]);
+	}
+	return [...groups.entries()].map(([segment, grouped]) => ({
+		segment,
+		queries: grouped,
+	}));
+}
+
+export function formatRelativeTime(
+	timestamp: number,
+	now = Date.now(),
+): string | undefined {
+	if (!timestamp) return undefined;
+	const seconds = Math.floor(Math.max(0, now - timestamp) / 1000);
+	if (seconds < 1) return 'now';
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h`;
+	return `${Math.floor(hours / 24)}d`;
+}
+
+function firstLine(text: string): string {
+	const index = text.indexOf('\n');
+	return index === -1 ? text : text.slice(0, index);
+}
+
+function describeLiveError(error: unknown): string | undefined {
+	if (error instanceof Error) {
+		return error.name ? `${error.name}: ${error.message}` : error.message;
+	}
+	if (typeof error === 'string' && error) return error;
+	return undefined;
+}
+
+/** One-line error summary from the live error, else its serialized snapshot. */
+export function summarizeError(
+	serialized: string | undefined,
+	liveError: unknown,
+): string | undefined {
+	const live = describeLiveError(liveError);
+	if (live) return firstLine(live);
+	if (!serialized) return undefined;
+	try {
+		const parsed: unknown = JSON.parse(serialized);
+		if (parsed && typeof parsed === 'object') {
+			const record = parsed as { message?: unknown; name?: unknown };
+			const name = typeof record.name === 'string' ? record.name : undefined;
+			const message =
+				typeof record.message === 'string' ? record.message : undefined;
+			const joined = [name, message].filter(Boolean).join(': ');
+			if (joined) return firstLine(joined);
+		}
+	} catch {
+		// Not JSON (for example truncated); fall through to the raw text.
+	}
+	return firstLine(serialized);
+}
+
+function formatTimestamp(timestamp: number): string {
+	return timestamp ? new Date(timestamp).toISOString() : 'Never';
+}
+
+function secondaryFootnote() {
+	return [font({ textStyle: 'footnote' }), foregroundColor(palette.secondary)];
+}
+
+function MetadataRow({ label, value }: { label: string; value: string }) {
+	return (
+		<LabeledContent label={label}>
+			<UIText>{value}</UIText>
+		</LabeledContent>
+	);
+}
+
+function SnapshotPreview({
+	label,
+	text,
+	isError = false,
+}: {
+	label: string;
+	text?: string;
+	isError?: boolean;
+}) {
+	if (text === undefined) return null;
+	return (
+		<VStack alignment="leading" spacing={4}>
+			<UIText
+				modifiers={[
+					font({ textStyle: 'footnote' }),
+					foregroundColor(isError ? palette.red : palette.secondary),
+				]}
+			>
+				{label}
+			</UIText>
+			<UIText modifiers={[font({ design: 'monospaced', size: 12 })]}>
+				{text}
+			</UIText>
+		</VStack>
+	);
 }
 
 export function createQueryPlugin({
@@ -104,6 +276,7 @@ export function createQueryPlugin({
 	description = 'TanStack Query and mutation cache state',
 	section,
 	systemImage = 'square.stack.3d.up.fill',
+	tint: pluginTint = '#AF52DE',
 }: QueryPluginOptions): QueryPlugin {
 	assertPositiveInteger(maxQueries, 'maxQueries');
 	assertPositiveInteger(maxMutations, 'maxMutations');
@@ -157,6 +330,35 @@ export function createQueryPlugin({
 		exact: true,
 	});
 
+	function QueryDetails({ query }: { query: QuerySnapshot }) {
+		const liveQuery = queryClient.getQueryCache().get(query.hash);
+		const data =
+			captureData && liveQuery
+				? serializeValue(liveQuery.state.data, maxSnapshotBytes)
+				: undefined;
+		const error = liveQuery?.state.error
+			? serializeValue(liveQuery.state.error, maxSnapshotBytes)
+			: undefined;
+		return (
+			<>
+				<MetadataRow label="Hash" value={query.hash} />
+				<MetadataRow label="Status" value={query.status} />
+				<MetadataRow label="Fetch status" value={query.fetchStatus} />
+				<MetadataRow label="Observers" value={String(query.observerCount)} />
+				<MetadataRow
+					label="Updated at"
+					value={formatTimestamp(query.dataUpdatedAt)}
+				/>
+				<MetadataRow
+					label="Failure count"
+					value={String(query.fetchFailureCount)}
+				/>
+				<SnapshotPreview label="Data" text={data?.text} />
+				<SnapshotPreview isError label="Error" text={error?.text} />
+			</>
+		);
+	}
+
 	function QueryRow({
 		query,
 		runAction,
@@ -164,155 +366,157 @@ export function createQueryPlugin({
 		query: QuerySnapshot;
 		runAction: RunQueryAction;
 	}) {
-		const presentation = queryStatusPresentation(
-			query.status,
-			query.fetchStatus,
-			query.isStale,
-		);
+		const [isExpanded, setIsExpanded] = useState(false);
+		const kind = queryStatusKind(query);
+		const updatedBadge = formatRelativeTime(query.dataUpdatedAt);
+		// Row subtitles render from the captured snapshot only; reading the live
+		// query cache during render tears against React Compiler caching.
+		const errorLine =
+			kind === 'error' ? summarizeError(query.error, undefined) : undefined;
 		return (
-			<DisclosureCard
-				leading={
-					<PanelStatusBadge
-						label={presentation.label}
-						tone={presentation.tone}
-					/>
-				}
-				title={formatQueryKey(query.queryKey)}
-				subtitle={`${query.observerCount} observer${query.observerCount === 1 ? '' : 's'} · ${query.fetchStatus === 'idle' ? 'Not fetching' : query.fetchStatus}`}
-				renderDetails={() => {
-					const liveQuery = queryClient.getQueryCache().get(query.hash);
-					const data =
-						captureData && liveQuery
-							? serializeValue(liveQuery.state.data, maxSnapshotBytes)
-							: undefined;
-					const error = liveQuery?.state.error
-						? serializeValue(liveQuery.state.error, maxSnapshotBytes)
-						: undefined;
-					return (
-						<>
-							<PanelToolbar>
-								<PanelButton
-									label="Refetch"
-									onPress={() =>
-										runAction('Refetch query', () =>
-											queryClient.refetchQueries(filtersFor(query)),
-										)
-									}
-								/>
-								<PanelButton
-									label="Invalidate"
-									onPress={() =>
-										runAction('Invalidate query', () =>
-											queryClient.invalidateQueries(filtersFor(query)),
-										)
-									}
-								/>
-								<PanelButton
-									label="Reset"
-									onPress={() =>
-										runAction(
-											'Reset query',
-											() => queryClient.resetQueries(filtersFor(query)),
-											{
-												title: 'Reset query?',
-												message: query.key,
-												confirmLabel: 'Reset',
-											},
-										)
-									}
-								/>
-								<PanelButton
-									label="Remove"
-									tone="danger"
-									onPress={() =>
-										runAction(
-											'Remove query',
-											() => queryClient.removeQueries(filtersFor(query)),
-											{
-												title: 'Remove query?',
-												message: query.key,
-												confirmLabel: 'Remove',
-												destructive: true,
-											},
-										)
-									}
-								/>
-							</PanelToolbar>
-							<SnapshotMetadata
-								value={{
-									hash: query.hash,
-									status: query.status,
-									fetchStatus: query.fetchStatus,
-									observers: query.observerCount,
-									stale: query.isStale,
-									dataUpdatedAt: query.dataUpdatedAt,
-									errorUpdatedAt: query.errorUpdatedAt,
-									updateCount: query.dataUpdateCount,
-									failureCount: query.fetchFailureCount,
-									truncated:
-										query.truncated || !!data?.truncated || !!error?.truncated,
-								}}
+			<SwipeActions>
+				<DisclosureGroup
+					isExpanded={isExpanded}
+					onIsExpandedChange={setIsExpanded}
+				>
+					<DisclosureGroup.Label>
+						<HStack
+							modifiers={updatedBadge ? [badge(updatedBadge)] : undefined}
+							spacing={12}
+						>
+							<Image
+								color={statusDotColors[kind]}
+								size={10}
+								systemName="circle.fill"
 							/>
-							<SnapshotValue label="Data" value={data?.text} />
-							<SnapshotValue error label="Error" value={error?.text} />
-						</>
-					);
-				}}
-			/>
+							<VStack alignment="leading" spacing={2}>
+								<UIText modifiers={[font({ design: 'monospaced', size: 15 })]}>
+									{formatQueryKeyRemainder(query.queryKey)}
+								</UIText>
+								<UIText modifiers={secondaryFootnote()}>
+									{`${query.observerCount} observer${query.observerCount === 1 ? '' : 's'} · ${statusLabels[kind]}`}
+								</UIText>
+								{errorLine ? (
+									<UIText
+										modifiers={[
+											font({ textStyle: 'footnote' }),
+											foregroundColor(palette.red),
+										]}
+									>
+										{errorLine}
+									</UIText>
+								) : null}
+							</VStack>
+						</HStack>
+					</DisclosureGroup.Label>
+					{isExpanded ? <QueryDetails query={query} /> : null}
+				</DisclosureGroup>
+				<SwipeActions.Actions edge="trailing">
+					{/* biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA */}
+					<Button
+						label="Remove"
+						onPress={() =>
+							runAction(
+								'Remove query',
+								() => queryClient.removeQueries(filtersFor(query)),
+								{
+									title: 'Remove query?',
+									message: query.key,
+									confirmLabel: 'Remove',
+									destructive: true,
+								},
+							)
+						}
+						role="destructive"
+						systemImage="trash"
+					/>
+					<Button
+						label="Refetch"
+						modifiers={[tint(palette.orange)]}
+						onPress={() =>
+							runAction('Refetch query', () =>
+								queryClient.refetchQueries(filtersFor(query)),
+							)
+						}
+						systemImage="arrow.clockwise"
+					/>
+					<Button
+						label="Invalidate"
+						modifiers={[tint(palette.blue)]}
+						onPress={() =>
+							runAction('Invalidate query', () =>
+								queryClient.invalidateQueries(filtersFor(query)),
+							)
+						}
+						systemImage="arrow.triangle.2.circlepath"
+					/>
+				</SwipeActions.Actions>
+			</SwipeActions>
+		);
+	}
+
+	function MutationDetails({ mutation }: { mutation: MutationSnapshot }) {
+		const liveMutation = queryClient
+			.getMutationCache()
+			.getAll()
+			.find((candidate) => candidate.mutationId === mutation.id);
+		const variables =
+			captureData && liveMutation
+				? serializeValue(liveMutation.state.variables, maxSnapshotBytes)
+				: undefined;
+		const data =
+			captureData && liveMutation
+				? serializeValue(liveMutation.state.data, maxSnapshotBytes)
+				: undefined;
+		const error = liveMutation?.state.error
+			? serializeValue(liveMutation.state.error, maxSnapshotBytes)
+			: undefined;
+		return (
+			<>
+				<MetadataRow label="ID" value={String(mutation.id)} />
+				<MetadataRow label="Status" value={mutation.status} />
+				<MetadataRow
+					label="Submitted at"
+					value={formatTimestamp(mutation.submittedAt)}
+				/>
+				<MetadataRow
+					label="Failure count"
+					value={String(mutation.failureCount)}
+				/>
+				<MetadataRow label="Paused" value={mutation.isPaused ? 'Yes' : 'No'} />
+				<SnapshotPreview label="Variables" text={variables?.text} />
+				<SnapshotPreview label="Data" text={data?.text} />
+				<SnapshotPreview isError label="Error" text={error?.text} />
+			</>
 		);
 	}
 
 	function MutationRow({ mutation }: { mutation: MutationSnapshot }) {
-		const presentation = queryStatusPresentation(mutation.status);
+		const [isExpanded, setIsExpanded] = useState(false);
 		return (
-			<DisclosureCard
-				leading={
-					<PanelStatusBadge
-						label={presentation.label}
-						tone={presentation.tone}
-					/>
-				}
-				title={formatQueryKey(mutation.mutationKey)}
-				subtitle={`${mutation.failureCount} failure${mutation.failureCount === 1 ? '' : 's'}${mutation.isPaused ? ' · Paused' : ''}`}
-				renderDetails={() => {
-					const liveMutation = queryClient
-						.getMutationCache()
-						.getAll()
-						.find((candidate) => candidate.mutationId === mutation.id);
-					const variables =
-						captureData && liveMutation
-							? serializeValue(liveMutation.state.variables, maxSnapshotBytes)
-							: undefined;
-					const data =
-						captureData && liveMutation
-							? serializeValue(liveMutation.state.data, maxSnapshotBytes)
-							: undefined;
-					const error = liveMutation?.state.error
-						? serializeValue(liveMutation.state.error, maxSnapshotBytes)
-						: undefined;
-					return (
-						<>
-							<SnapshotMetadata
-								value={{
-									id: mutation.id,
-									status: mutation.status,
-									submittedAt: mutation.submittedAt,
-									failureCount: mutation.failureCount,
-									paused: mutation.isPaused,
-									truncated:
-										mutation.truncated ||
-										!!variables?.truncated ||
-										!!data?.truncated ||
-										!!error?.truncated,
-								}}
-							/>
-							<SnapshotValue label="Variables" value={variables?.text} />
-							<SnapshotValue label="Data" value={data?.text} />
-							<SnapshotValue error label="Error" value={error?.text} />
-						</>
-					);
-				}}
-			/>
+			<DisclosureGroup
+				isExpanded={isExpanded}
+				onIsExpandedChange={setIsExpanded}
+			>
+				<DisclosureGroup.Label>
+					<HStack modifiers={[badge(mutation.status)]} spacing={12}>
+						<Image
+							color={mutationDotColor(mutation.status)}
+							size={10}
+							systemName="circle.fill"
+						/>
+						<VStack alignment="leading" spacing={2}>
+							<UIText modifiers={[font({ design: 'monospaced', size: 15 })]}>
+								{formatQueryKey(mutation.mutationKey)}
+							</UIText>
+							<UIText modifiers={secondaryFootnote()}>
+								{`${mutation.failureCount} failure${mutation.failureCount === 1 ? '' : 's'}${mutation.isPaused ? ' · paused' : ''}`}
+							</UIText>
+						</VStack>
+					</HStack>
+				</DisclosureGroup.Label>
+				{isExpanded ? <MutationDetails mutation={mutation} /> : null}
+			</DisclosureGroup>
 		);
 	}
 
@@ -324,19 +528,13 @@ export function createQueryPlugin({
 		);
 		const [tab, setTab] = useState<InspectorTab>('queries');
 		const [search, setSearch] = useState('');
-		const [filter, setFilter] = useState<QueryFilter>('all');
 		const needle = search.trim().toLowerCase();
 		const visibleQueries = useMemo(
 			() =>
-				snapshot.queries.filter((query) => {
-					if (filter === 'active' && query.observerCount === 0) return false;
-					if (filter === 'fetching' && query.fetchStatus !== 'fetching')
-						return false;
-					if (filter === 'stale' && !query.isStale) return false;
-					if (filter === 'error' && query.status !== 'error') return false;
-					return !needle || query.key.toLowerCase().includes(needle);
-				}),
-			[filter, needle, snapshot.queries],
+				snapshot.queries.filter(
+					(query) => !needle || query.key.toLowerCase().includes(needle),
+				),
+			[needle, snapshot.queries],
 		);
 		const visibleMutations = useMemo(
 			() =>
@@ -348,6 +546,10 @@ export function createQueryPlugin({
 				),
 			[needle, snapshot.mutations],
 		);
+		const queryGroups = useMemo(
+			() => groupQueriesByRoot(visibleQueries),
+			[visibleQueries],
+		);
 		const runAction: RunQueryAction = (label, action, confirmation) => {
 			void actions.run({ pluginId: id, label, action, confirmation });
 		};
@@ -358,92 +560,133 @@ export function createQueryPlugin({
 		const errors = snapshot.queries.filter(
 			(query) => query.status === 'error',
 		).length;
+		const summary = `${snapshot.queries.length} CACHED · ${fetching} FETCHING · ${stale} STALE · ${errors} ${errors === 1 ? 'ERROR' : 'ERRORS'}`;
 
 		return (
-			<PanelScaffold
-				onBack={onBack}
-				title={title}
-				subtitle={`${snapshot.queries.length} queries · ${snapshot.mutations.length} mutations`}
-			>
-				<PanelSignalCard
-					description={`${fetching} fetching · ${stale} stale · ${snapshot.mutations.length} recent mutations`}
-					eyebrow="Cache signal"
-					systemImage={
-						errors > 0
-							? 'exclamationmark.triangle.fill'
-							: fetching > 0
-								? 'arrow.triangle.2.circlepath'
-								: 'checkmark.circle.fill'
-					}
-					title={
-						errors > 0
-							? `${errors} quer${errors === 1 ? 'y' : 'ies'} need attention`
-							: fetching > 0
-								? `${fetching} quer${fetching === 1 ? 'y is' : 'ies are'} fetching`
-								: snapshot.queries.length > 0
-									? 'Query cache is settled'
-									: 'Waiting for query activity'
-					}
-					tone={errors > 0 ? 'danger' : fetching > 0 ? 'info' : 'success'}
-				/>
-				<PanelMetricStrip
-					metrics={[
-						{ label: 'Cached', value: snapshot.queries.length },
-						{ label: 'Fetching', value: fetching, tone: colors.blue },
-						{ label: 'Stale', value: stale, tone: colors.orange },
-						{ label: 'Errors', value: errors, tone: colors.red },
-					]}
-				/>
-				<PanelSegmentedControl
-					accessibilityLabel="Query inspector"
-					onChange={setTab}
-					options={[
-						{ id: 'queries', label: 'Queries' },
-						{ id: 'mutations', label: 'Mutations' },
-					]}
-					selected={tab}
-				/>
-				<PanelSearchField
-					onChangeText={setSearch}
-					placeholder={`Search ${tab}`}
-					value={search}
-				/>
-				{tab === 'queries' ? (
-					<PanelSegmentedControl
-						accessibilityLabel="Query filter"
-						onChange={setFilter}
-						options={(
-							['all', 'active', 'fetching', 'stale', 'error'] as const
-						).map((value) => ({
-							id: value,
-							label: value.charAt(0).toUpperCase() + value.slice(1),
-						}))}
-						selected={filter}
-					/>
+			<PanelShell onBack={onBack} title={title}>
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						<List modifiers={[listStyle('insetGrouped')]}>
+							<Section>
+								<Picker
+									modifiers={[pickerStyle('segmented')]}
+									onSelectionChange={(selection) =>
+										setTab(selection === 'mutations' ? 'mutations' : 'queries')
+									}
+									selection={tab}
+								>
+									<UIText modifiers={[tag('queries')]}>Queries</UIText>
+									<UIText modifiers={[tag('mutations')]}>Mutations</UIText>
+								</Picker>
+								<TextField
+									modifiers={[autocorrectionDisabled()]}
+									onTextChange={setSearch}
+									placeholder={
+										tab === 'queries' ? 'Search query keys' : 'Search mutations'
+									}
+								/>
+							</Section>
+							{tab === 'queries' ? (
+								<>
+									<Section
+										header={
+											<HStack spacing={5}>
+												<UIText modifiers={secondaryFootnote()}>
+													{summary}
+												</UIText>
+												<Image
+													color={palette.secondary}
+													size={13}
+													systemName="info.circle"
+												/>
+											</HStack>
+										}
+									>
+										{null}
+									</Section>
+									{queryGroups.length === 0 ? (
+										<Section>
+											<ContentUnavailableView
+												description={
+													snapshot.queries.length === 0
+														? 'Query cache activity will appear here.'
+														: 'No queries match the current search.'
+												}
+												systemImage="square.stack.3d.up"
+												title="No queries to show"
+											/>
+										</Section>
+									) : null}
+									{queryGroups.map((group) => (
+										<Section
+											key={group.segment}
+											title={`${group.segment} · ${group.queries.length}`}
+										>
+											{group.queries.map((query) => (
+												<QueryRow
+													key={query.hash}
+													query={query}
+													runAction={runAction}
+												/>
+											))}
+										</Section>
+									))}
+								</>
+							) : null}
+							{tab === 'mutations' ? (
+								visibleMutations.length === 0 ? (
+									<Section>
+										<ContentUnavailableView
+											description={
+												snapshot.mutations.length === 0
+													? 'Mutation activity will appear here.'
+													: 'No mutations match the current search.'
+											}
+											systemImage="bolt.horizontal"
+											title="No mutations yet"
+										/>
+									</Section>
+								) : (
+									<Section title={`recent · ${visibleMutations.length}`}>
+										{visibleMutations.map((mutation) => (
+											<MutationRow key={mutation.id} mutation={mutation} />
+										))}
+									</Section>
+								)
+							) : null}
+							<Section>
+								<Button
+									label="Invalidate all"
+									onPress={() =>
+										runAction(
+											'Invalidate all queries',
+											() => queryClient.invalidateQueries(),
+											{
+												title: 'Invalidate all queries?',
+												message: 'Marks every cached query as stale.',
+												confirmLabel: 'Invalidate',
+											},
+										)
+									}
+								/>
+								{/* biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA */}
+								<Button
+									label="Clear query cache"
+									onPress={() =>
+										runAction('Clear query cache', () => queryClient.clear(), {
+											title: 'Clear query cache?',
+											message: 'Removes every cached query and mutation.',
+											confirmLabel: 'Clear',
+											destructive: true,
+										})
+									}
+									role="destructive"
+								/>
+							</Section>
+						</List>
+					</Host>
 				) : null}
-				{tab === 'queries' && visibleQueries.length === 0 ? (
-					<EmptyState
-						systemImage="square.stack.3d.up"
-						title="No queries to show"
-					>
-						{snapshot.queries.length === 0
-							? 'Query cache activity will appear here.'
-							: 'No queries match the current filters.'}
-					</EmptyState>
-				) : null}
-				{tab === 'mutations' && visibleMutations.length === 0 ? (
-					<EmptyState systemImage="bolt.horizontal" title="No mutations yet">
-						Mutation activity will appear here.
-					</EmptyState>
-				) : null}
-				{tab === 'queries'
-					? visibleQueries.map((query) => (
-							<QueryRow key={query.hash} query={query} runAction={runAction} />
-						))
-					: visibleMutations.map((mutation) => (
-							<MutationRow key={mutation.id} mutation={mutation} />
-						))}
-			</PanelScaffold>
+			</PanelShell>
 		);
 	}
 
@@ -453,6 +696,7 @@ export function createQueryPlugin({
 			title,
 			description,
 			systemImage,
+			tint: pluginTint,
 			section,
 			Panel: QueryPanel,
 			install: () => {
@@ -482,60 +726,3 @@ export function createQueryPlugin({
 		{ refresh, getSnapshot: store.getSnapshot },
 	);
 }
-
-function queryStatusPresentation(
-	status: string,
-	fetchStatus?: string,
-	stale?: boolean,
-): { label: string; tone: 'danger' | 'info' | 'warning' | 'success' } {
-	if (status === 'error') return { label: 'ERROR', tone: 'danger' };
-	if (fetchStatus === 'fetching' || status === 'pending') {
-		return { label: 'ACTIVE', tone: 'info' };
-	}
-	if (stale) return { label: 'STALE', tone: 'warning' };
-	return { label: 'READY', tone: 'success' };
-}
-
-function SnapshotMetadata({
-	value,
-}: {
-	value: Readonly<Record<string, unknown>>;
-}) {
-	return (
-		<View style={styles.metadata}>
-			<Text style={panelStyles.valueKey}>Metadata</Text>
-			<CodeBlock>{serializeValue(value, 64 * 1024).text}</CodeBlock>
-		</View>
-	);
-}
-
-function SnapshotValue({
-	label,
-	value,
-	error = false,
-}: {
-	label: string;
-	value?: string;
-	error?: boolean;
-}) {
-	if (value === undefined) return null;
-	return (
-		<View style={styles.detailSection}>
-			<Text style={[panelStyles.valueKey, error && { color: colors.red }]}>
-				{label}
-			</Text>
-			<CodeBlock>{value}</CodeBlock>
-		</View>
-	);
-}
-
-const styles = StyleSheet.create({
-	metadata: { gap: 8 },
-	detailSection: {
-		borderTopColor: colors.separator,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		gap: 8,
-		marginTop: 12,
-		paddingTop: 12,
-	},
-});

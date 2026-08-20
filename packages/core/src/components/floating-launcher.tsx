@@ -134,10 +134,11 @@ export function FloatingLauncher({
 		? [
 				frame({ width: SIZE, height: SIZE }),
 				padding({ all: 16 }),
+				// Untinted glass: the accent belongs on the glyph, not poured
+				// through the whole surface.
 				glassEffect({
 					glass: {
 						interactive: true,
-						tint: PlatformColor('systemBlueColor'),
 						variant: 'regular',
 					},
 					shape: 'circle',
@@ -161,7 +162,7 @@ export function FloatingLauncher({
 					<View pointerEvents="none">
 						<Host style={styles.host}>
 							<Image
-								color="#FFFFFF"
+								color={PlatformColor('systemBlueColor')}
 								modifiers={imageModifiers}
 								size={22}
 								systemName="wrench.and.screwdriver.fill"
@@ -181,8 +182,10 @@ const styles = StyleSheet.create({
 		top: 0,
 		zIndex: 10_000,
 	},
+	// A floating control, not an accent disc: a card-coloured circle carries
+	// the tinted glyph. Untinted glass alone disappears over a light screen.
 	fallbackSurface: {
-		backgroundColor: PlatformColor('systemBlueColor'),
+		backgroundColor: PlatformColor('secondarySystemGroupedBackgroundColor'),
 		borderColor: PlatformColor('separatorColor'),
 		borderRadius: SIZE / 2,
 		borderWidth: StyleSheet.hairlineWidth,
@@ -195,9 +198,7 @@ const styles = StyleSheet.create({
 		width: SIZE,
 	},
 	liquidGlassSurface: {
-		backgroundColor: 'transparent',
-		borderColor: 'transparent',
-		shadowOpacity: 0.14,
+		shadowOpacity: 0.16,
 	},
 	host: {
 		height: SIZE,

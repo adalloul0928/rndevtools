@@ -1,23 +1,8 @@
 export { InternalTools } from './components/internal-tools';
-export {
-	PanelButton,
-	PanelSearchField,
-	PanelSegmentedControl,
-	PanelToolbar,
-} from './components/panel-controls';
-export type { PanelMetric, PanelTone } from './components/panel-ui';
-export {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	EmptyState,
-	PanelList,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-	panelStyles,
-} from './components/panel-ui';
+export { NavIconButton } from './components/nav-controls';
+export { PanelSegmentedControl } from './components/panel-controls';
+export { PanelShell, shellColors } from './components/panel-shell';
+export { colors } from './components/panel-ui';
 export { SystemIcon } from './components/system-icon';
 export { createActionServices } from './core/action-services';
 export { BoundedEventStore, ExternalStore } from './core/external-store';
@@ -35,13 +20,13 @@ export type {
 	DevToolsActionRequest,
 	DevToolsActionServices,
 	DevToolsAuditEvent,
+	DevToolsHomeStatusRow,
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsPersistenceOptions,
 	DevToolsPersistenceStorage,
 	DevToolsPillQuickAction,
 	DevToolsPillQuickActionOption,
-	DevToolsPillShortcutControls,
 	DevToolsPlugin,
 	DevToolsPluginMetadata,
 	DevToolsPluginWithPillQuickAction,

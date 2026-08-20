@@ -43,6 +43,7 @@ export const InternalTools = forwardRef<
 		enabled,
 		visible = enabled,
 		plugins,
+		homeStatus,
 		title = 'Developer Tools',
 		launcherLabel = 'Open developer tools',
 		pillLabel,
@@ -362,6 +363,8 @@ export const InternalTools = forwardRef<
 					title={title}
 					onPluginError={handlePluginError}
 					actions={actionServices}
+					homeStatus={homeStatus}
+					onOpenPlugin={openPlugin}
 				/>
 			) : null}
 			{isPresented && presentationMode === 'window' ? (
@@ -374,8 +377,6 @@ export const InternalTools = forwardRef<
 					onSelectPlugin={selectPlugin}
 					plugins={validatedPlugins}
 					selectedPlugin={selectedPlugin}
-					pinnedPillQuickActionIds={pinnedPillQuickActionIds}
-					onQuickActionPinnedChange={setQuickActionPinned}
 					title={title}
 					onPluginError={handlePluginError}
 					onPositionChange={(position) =>
@@ -390,10 +391,10 @@ export const InternalTools = forwardRef<
 					initialPosition={pillPosition}
 					label={selectedPlugin?.title ?? pillLabel ?? title}
 					actions={actionServices}
-					onClose={close}
 					onRestore={restore}
 					onQuickActionPinnedChange={setQuickActionPinned}
 					quickActionPlugins={pinnedPillQuickActionPlugins}
+					onOpenPlugin={openPlugin}
 					onPositionChange={(position) =>
 						setPersistedPosition(setPillPosition, position)
 					}

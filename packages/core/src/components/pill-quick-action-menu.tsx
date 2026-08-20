@@ -6,34 +6,63 @@ import {
 	Button as NativeMenuButton,
 } from '@expo/ui/swift-ui';
 import { accessibilityLabel, frame } from '@expo/ui/swift-ui/modifiers';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type {
 	DevToolsActionServices,
+	DevToolsPillQuickActionOption,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
 import { colors } from './panel-ui';
 
 const subscribeToNothing = () => () => {};
 const getNoSelection = () => null;
+const getNotHighlighted = () => false;
+
+const SLOT_WIDTH = 38;
+const SLOT_HEIGHT = 48;
 
 type PillQuickActionMenuProps = {
 	plugin: DevToolsPluginWithPillQuickAction;
 	actions: DevToolsActionServices;
 	onUnpin: () => void;
+	onOpenPanel?: () => void;
 };
+
+function resolveOptions(
+	options: DevToolsPluginWithPillQuickAction['pillQuickAction']['options'],
+): readonly DevToolsPillQuickActionOption[] {
+	return typeof options === 'function' ? options() : options;
+}
 
 export function PillQuickActionMenu({
 	plugin,
 	actions,
 	onUnpin,
+	onOpenPanel,
 }: PillQuickActionMenuProps) {
 	const { pillQuickAction } = plugin;
+	const subscribe = pillQuickAction.subscribe ?? subscribeToNothing;
 	const selectedOptionId = useSyncExternalStore(
-		pillQuickAction.subscribe ?? subscribeToNothing,
+		subscribe,
 		pillQuickAction.getSelectedOptionId ?? getNoSelection,
 		pillQuickAction.getSelectedOptionId ?? getNoSelection,
 	);
+	const isHighlighted = useSyncExternalStore(
+		subscribe,
+		pillQuickAction.getIsHighlighted ?? getNotHighlighted,
+		pillQuickAction.getIsHighlighted ?? getNotHighlighted,
+	);
+	// Function-typed options produce a fresh array per call, so they cannot be
+	// a useSyncExternalStore snapshot (React would re-render forever). Resolve
+	// once and again on each store notification instead.
+	const [options, setOptions] = useState(() =>
+		resolveOptions(pillQuickAction.options),
+	);
+	useEffect(() => {
+		setOptions(resolveOptions(pillQuickAction.options));
+		return subscribe(() => setOptions(resolveOptions(pillQuickAction.options)));
+	}, [subscribe, pillQuickAction]);
 
 	return (
 		<View
@@ -44,9 +73,9 @@ export function PillQuickActionMenu({
 				<Menu
 					label={
 						<Image
-							color={colors.blue}
+							color={isHighlighted ? colors.orange : colors.blue}
 							modifiers={[
-								frame({ width: 42, height: 48 }),
+								frame({ width: SLOT_WIDTH, height: SLOT_HEIGHT }),
 								accessibilityLabel(`${plugin.title} quick actions`),
 							]}
 							size={17}
@@ -54,7 +83,7 @@ export function PillQuickActionMenu({
 						/>
 					}
 				>
-					{pillQuickAction.options.map((option) => (
+					{options.map((option) => (
 						<NativeMenuButton
 							key={option.id}
 							label={option.label}
@@ -74,6 +103,13 @@ export function PillQuickActionMenu({
 						/>
 					))}
 					<Divider />
+					{onOpenPanel ? (
+						<NativeMenuButton
+							label={`Open ${pillQuickAction.openPanelLabel ?? plugin.title}…`}
+							onPress={onOpenPanel}
+							systemImage="arrow.up.forward.app"
+						/>
+					) : null}
 					<NativeMenuButton
 						label="Remove from Pill"
 						onPress={onUnpin}
@@ -81,6 +117,7 @@ export function PillQuickActionMenu({
 					/>
 				</Menu>
 			</Host>
+			{isHighlighted ? <View style={styles.dot} /> : null}
 		</View>
 	);
 }
@@ -89,10 +126,21 @@ const styles = StyleSheet.create({
 	container: {
 		borderLeftColor: colors.separator,
 		borderLeftWidth: StyleSheet.hairlineWidth,
-		height: 48,
-		width: 42,
+		height: SLOT_HEIGHT,
+		width: SLOT_WIDTH,
 	},
 	host: {
 		flex: 1,
+	},
+	dot: {
+		backgroundColor: colors.orange,
+		borderColor: colors.card,
+		borderRadius: 5,
+		borderWidth: 1.5,
+		height: 10,
+		position: 'absolute',
+		right: 3,
+		top: 5,
+		width: 10,
 	},
 });

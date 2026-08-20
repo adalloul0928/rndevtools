@@ -1,15 +1,17 @@
-import { Share, StyleSheet, Text, View } from 'react-native';
-import { PanelButton, PanelToolbar } from '../components/panel-controls';
 import {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-	panelStyles,
-} from '../components/panel-ui';
+	Button,
+	DisclosureGroup,
+	Host,
+	Label,
+	LabeledContent,
+	List,
+	Section,
+	Text as UIText,
+} from '@expo/ui/swift-ui';
+import { listStyle } from '@expo/ui/swift-ui/modifiers';
+import { Platform, PlatformColor, Share } from 'react-native';
+import { NavIconButton } from '../components/nav-controls';
+import { PanelShell } from '../components/panel-shell';
 import { serializeValue } from '../core/serialize';
 import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
 
@@ -64,6 +66,7 @@ export type EnvironmentPluginOptions = {
 	description?: string;
 	section?: string;
 	systemImage?: DevToolsSystemImage;
+	tint?: string;
 };
 
 function valueType(value: unknown): string {
@@ -162,13 +165,18 @@ export function validateEnvironmentValues(
 	});
 }
 
-function validationLabel(result: EnvironmentValidationResult): string {
+/**
+ * Collapsed-row summary. Deliberately short: a serialized expected value would
+ * be truncated to nothing useful in a disclosure label, so both values are
+ * rendered as rows inside the expansion instead.
+ */
+export function validationLabel(result: EnvironmentValidationResult): string {
 	if (result.status === 'valid') return 'Valid';
 	if (result.status === 'missing') return 'Missing';
 	if (result.status === 'typeMismatch') {
 		return `Expected ${result.expectedType}, found ${result.actualType}`;
 	}
-	return `Expected ${serializeValue(result.expectedValue, 256).text}`;
+	return 'Unexpected value';
 }
 
 function formatEnvironmentKey(key: string): string {
@@ -189,6 +197,7 @@ export function createEnvironmentPlugin({
 	description = 'Declared build and runtime values',
 	section,
 	systemImage = 'gearshape.2.fill',
+	tint = '#34C759',
 }: EnvironmentPluginOptions): DevToolsPanelPlugin {
 	const declaredSections =
 		sections && sections.length > 0
@@ -208,128 +217,106 @@ export function createEnvironmentPlugin({
 	}
 
 	function EnvironmentPanel({ onBack }: { onBack: () => void }) {
-		const entryCount = declaredSections.reduce(
-			(sum, section) => sum + Object.keys(section.values).length,
-			0,
-		);
 		const validationResults = validateEnvironmentValues(
 			declaredSections,
 			rules,
 		);
-		const validCount = validationResults.filter(
-			(result) => result.status === 'valid',
-		).length;
-		const missingCount = validationResults.filter(
-			(result) => result.status === 'missing',
-		).length;
-		const issueCount = validationResults.length - validCount - missingCount;
-		const health = validationResults.length
-			? Math.round((validCount / validationResults.length) * 100)
-			: 100;
-		const exportValue = Object.fromEntries(
-			declaredSections.map((section) => [section.title, section.values]),
+		const failing = validationResults.filter(
+			(result) => result.status !== 'valid',
 		);
+		const exportValue = Object.fromEntries(
+			declaredSections.map((declared) => [declared.title, declared.values]),
+		);
+		const shareManifest = () => {
+			void Share.share({
+				message: serializeValue(exportValue, 512 * 1024).text,
+				title,
+			}).catch(() => undefined);
+		};
 
 		return (
-			<PanelScaffold
+			<PanelShell
 				onBack={onBack}
 				title={title}
-				subtitle={`${entryCount} declared values`}
-			>
-				<PanelSignalCard
-					description={
-						validationResults.length
-							? `${validCount} of ${validationResults.length} declared checks pass.`
-							: `${entryCount} values were deliberately provided by the app.`
-					}
-					eyebrow="Configuration signal"
-					systemImage={
-						missingCount + issueCount > 0
-							? 'exclamationmark.triangle.fill'
-							: 'checkmark.circle.fill'
-					}
-					title={
-						missingCount + issueCount > 0
-							? `${missingCount + issueCount} configuration issue${missingCount + issueCount === 1 ? '' : 's'}`
-							: 'Configuration looks healthy'
-					}
-					tone={missingCount + issueCount > 0 ? 'warning' : 'success'}
-				/>
-				{validationResults.length ? (
-					<View style={styles.validationSection}>
-						<Text style={panelStyles.sectionLabel}>Configuration checks</Text>
-						<PanelMetricStrip
-							metrics={[
-								{ label: 'Health', value: `${health}%` },
-								{ label: 'Valid', value: validCount, tone: colors.green },
-								{ label: 'Missing', value: missingCount, tone: colors.red },
-								{ label: 'Issues', value: issueCount, tone: colors.orange },
-							]}
-						/>
-						{validationResults.map((result) => (
-							<DisclosureCard
-								key={`${result.section ?? '*'}:${result.key}`}
-								title={formatEnvironmentKey(result.key)}
-								subtitle={`${validationLabel(result)} · ${result.key}`}
-								leading={
-									<PanelStatusBadge
-										label={result.status === 'valid' ? 'PASS' : 'ISSUE'}
-										tone={result.status === 'valid' ? 'success' : 'warning'}
-									/>
-								}
-							>
-								{result.description ? (
-									<Text style={styles.validationDescription}>
-										{result.description}
-									</Text>
-								) : null}
-								<View style={styles.actualValue}>
-									<Text style={styles.actualLabel}>Actual value</Text>
-									<CodeBlock>
-										{formatEnvironmentValue(result.actualValue)}
-									</CodeBlock>
-								</View>
-							</DisclosureCard>
-						))}
-					</View>
-				) : null}
-				{declaredSections.map((section) => {
-					const entries = Object.entries(section.values).sort(
-						([left], [right]) => left.localeCompare(right),
-					);
-					return (
-						<View key={section.title} style={styles.section}>
-							<Text style={panelStyles.sectionLabel}>{section.title}</Text>
-							<View style={styles.group}>
-								{entries.map(([key, value]) => (
-									<View key={key} style={panelStyles.valueRow}>
-										<Text style={panelStyles.valueKey}>
-											{formatEnvironmentKey(key)}
-										</Text>
-										<Text selectable style={styles.rawKey}>
-											{key}
-										</Text>
-										<Text selectable style={panelStyles.valueText}>
-											{formatEnvironmentValue(value)}
-										</Text>
-									</View>
-								))}
-							</View>
-						</View>
-					);
-				})}
-				<PanelToolbar>
-					<PanelButton
-						label="Share manifest"
-						onPress={() => {
-							void Share.share({
-								message: serializeValue(exportValue, 512 * 1024).text,
-								title,
-							}).catch(() => undefined);
-						}}
+				trailing={
+					<NavIconButton
+						accessibilityLabel="Share manifest"
+						onPress={shareManifest}
+						systemImage="square.and.arrow.up"
+						testID="devtools-environment-share"
 					/>
-				</PanelToolbar>
-			</PanelScaffold>
+				}
+			>
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						<List modifiers={[listStyle('insetGrouped')]}>
+							{validationResults.length > 0 ? (
+								<Section>
+									<Label
+										color={
+											failing.length > 0
+												? PlatformColor('systemOrangeColor')
+												: PlatformColor('systemGreenColor')
+										}
+										systemImage={
+											failing.length > 0
+												? 'exclamationmark.triangle.fill'
+												: 'checkmark.circle.fill'
+										}
+										title={
+											failing.length > 0
+												? `${failing.length} of ${validationResults.length} checks failing`
+												: `${validationResults.length} of ${validationResults.length} checks passing`
+										}
+									/>
+									{failing.map((result) => (
+										<DisclosureGroup
+											key={`${result.section ?? '*'}:${result.key}`}
+											label={`${formatEnvironmentKey(result.key)} — ${validationLabel(result)}`}
+										>
+											{result.description ? (
+												<UIText>{result.description}</UIText>
+											) : null}
+											{Object.hasOwn(result, 'expectedValue') ? (
+												<LabeledContent label="Expected">
+													<UIText>
+														{formatEnvironmentValue(result.expectedValue)}
+													</UIText>
+												</LabeledContent>
+											) : null}
+											<LabeledContent label="Actual">
+												<UIText>
+													{formatEnvironmentValue(result.actualValue)}
+												</UIText>
+											</LabeledContent>
+										</DisclosureGroup>
+									))}
+								</Section>
+							) : null}
+							{declaredSections.map((declared) => {
+								const entries = Object.entries(declared.values).sort(
+									([left], [right]) => left.localeCompare(right),
+								);
+								return (
+									<Section key={declared.title} title={declared.title}>
+										{entries.map(([key, value]) => (
+											<LabeledContent
+												key={key}
+												label={formatEnvironmentKey(key)}
+											>
+												<UIText>{formatEnvironmentValue(value)}</UIText>
+											</LabeledContent>
+										))}
+									</Section>
+								);
+							})}
+							<Section footer={<UIText>Fixed at build time.</UIText>}>
+								<Button label="Share manifest…" onPress={shareManifest} />
+							</Section>
+						</List>
+					</Host>
+				) : null}
+			</PanelShell>
 		);
 	}
 
@@ -338,36 +325,8 @@ export function createEnvironmentPlugin({
 		title,
 		description,
 		systemImage,
+		tint,
 		section,
 		Panel: EnvironmentPanel,
 	};
 }
-
-const styles = StyleSheet.create({
-	validationSection: { gap: 8 },
-	rawKey: {
-		color: colors.secondaryLabel,
-		fontFamily: 'Menlo',
-		fontSize: 10,
-	},
-	validationDescription: {
-		color: colors.secondaryLabel,
-		fontSize: 13,
-		lineHeight: 18,
-		marginBottom: 8,
-	},
-	actualValue: { gap: 7 },
-	actualLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		fontWeight: '600',
-	},
-	section: { gap: 4 },
-	group: {
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: 12,
-		borderWidth: StyleSheet.hairlineWidth,
-		overflow: 'hidden',
-	},
-});

@@ -17,6 +17,7 @@ export {
 } from './environment';
 export {
 	createNavigationPlugin,
+	getPinnedRoutes,
 	inferNavigationRouteKind,
 	type NavigationAction,
 	type NavigationEvent,
@@ -25,6 +26,9 @@ export {
 	type NavigationRouteDescriptor,
 	type NavigationRouteKind,
 	type NavigationStackEntry,
+	navigationRouteDisplayName,
+	setRoutePinned,
+	subscribePinnedRoutes,
 } from './navigation';
 export {
 	createNetworkPlugin,

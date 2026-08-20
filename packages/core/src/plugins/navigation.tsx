@@ -1,21 +1,37 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, View } from 'react-native';
 import {
-	PanelButton,
-	PanelSearchField,
-	PanelSegmentedControl,
-	PanelToolbar,
-} from '../components/panel-controls';
+	Button,
+	DisclosureGroup,
+	Host,
+	HStack,
+	Image,
+	LabeledContent,
+	List,
+	Section,
+	Spacer,
+	SwipeActions,
+	TextField,
+	type TextFieldRef,
+	Text as UIText,
+	VStack,
+} from '@expo/ui/swift-ui';
 import {
-	CodeBlock,
-	colors,
-	DisclosureCard,
-	EmptyState,
-	PanelMetricStrip,
-	PanelScaffold,
-	PanelSignalCard,
-	PanelStatusBadge,
-} from '../components/panel-ui';
+	autocorrectionDisabled,
+	buttonStyle,
+	controlSize,
+	disabled,
+	fixedSize,
+	font,
+	foregroundStyle,
+	keyboardType,
+	lineLimit,
+	listStyle,
+	onSubmit,
+	textInputAutocapitalization,
+} from '@expo/ui/swift-ui/modifiers';
+import { Fragment, useRef, useState, useSyncExternalStore } from 'react';
+import { Platform, PlatformColor } from 'react-native';
+import { NavIconButton } from '../components/nav-controls';
+import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { serializeValue } from '../core/serialize';
 import type {
@@ -23,6 +39,7 @@ import type {
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
+import { formatRelativeTime } from './query';
 
 export type NavigationEvent = {
 	id: number;
@@ -67,6 +84,14 @@ export type NavigationPluginOptions = {
 	description?: string;
 	section?: string;
 	systemImage?: DevToolsSystemImage;
+	tint?: string;
+	/**
+	 * Jump handler: the host closes the tools and routes to the given path.
+	 * When absent the panel renders route rows without tap navigation.
+	 */
+	onNavigate?: (path: string) => void;
+	/** Opens a raw deep link URL. When absent the deep link section is hidden. */
+	onOpenDeepLink?: (url: string) => void;
 };
 export type NavigationPlugin = {
 	plugin: DevToolsPanelPlugin;
@@ -85,15 +110,115 @@ export type NavigationPlugin = {
 	getStack: () => readonly NavigationStackEntry[];
 };
 
-type NavigationTab = 'history' | 'routes' | 'stack';
+type ScreensSessionState = {
+	pinnedPaths: readonly string[];
+	lastParamValues: Readonly<Record<string, string>>;
+};
 
-function formatRelativeTime(at: number): string {
-	const elapsedSeconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-	if (elapsedSeconds < 2) return 'Now';
-	if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-	const elapsedMinutes = Math.round(elapsedSeconds / 60);
-	if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-	return new Date(at).toLocaleTimeString();
+/**
+ * Session-scoped pins and remembered dynamic-route param values. Module-level
+ * so both survive panel re-mounts within an app session, and so hosts can
+ * mirror pinned routes into pill quick actions.
+ */
+const screensSessionStore = new ExternalStore<ScreensSessionState>({
+	pinnedPaths: [],
+	lastParamValues: {},
+});
+
+export function getPinnedRoutes(): readonly string[] {
+	return screensSessionStore.getSnapshot().pinnedPaths;
+}
+
+export function subscribePinnedRoutes(listener: () => void): () => void {
+	return screensSessionStore.subscribe(listener);
+}
+
+export function setRoutePinned(path: string, pinned: boolean): void {
+	const state = screensSessionStore.getSnapshot();
+	if (pinned === state.pinnedPaths.includes(path)) return;
+	screensSessionStore.set({
+		...state,
+		pinnedPaths: pinned
+			? [...state.pinnedPaths, path]
+			: state.pinnedPaths.filter((candidate) => candidate !== path),
+	});
+}
+
+function rememberParamValues(values: Readonly<Record<string, string>>): void {
+	const state = screensSessionStore.getSnapshot();
+	screensSessionStore.set({
+		...state,
+		lastParamValues: { ...state.lastParamValues, ...values },
+	});
+}
+
+function isParamSegment(segment: string): boolean {
+	return segment.startsWith('[') && segment.endsWith(']');
+}
+
+function paramNameFromSegment(segment: string): string {
+	return segment.replace(/^\[+\.{0,3}|\]+$/g, '');
+}
+
+function stripGroupParens(segment: string): string {
+	return segment.replace(/^\(+|\)+$/g, '');
+}
+
+/** Derives a human name from the last meaningful path segment. */
+export function navigationRouteDisplayName(path: string): string {
+	const segments = path
+		.split('/')
+		.filter(
+			(segment) => segment && segment !== 'index' && segment !== '_layout',
+		);
+	const last = segments.at(-1);
+	if (!last) return 'Root';
+	const words = paramNameFromSegment(stripGroupParens(last))
+		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+		.split(/[-_.\s]+/)
+		.filter(Boolean);
+	if (words.length === 0) return 'Root';
+	return words
+		.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+		.join(' ');
+}
+
+function routeGroupLabel(path: string): string {
+	const first = path.split('/').find((segment) => segment.length > 0);
+	if (!first) return 'ROOT';
+	const cleaned = paramNameFromSegment(stripGroupParens(first));
+	return cleaned ? cleaned.toUpperCase() : 'ROOT';
+}
+
+function routeParamNames(path: string): readonly string[] {
+	return path.split('/').filter(isParamSegment).map(paramNameFromSegment);
+}
+
+function buildRoutePath(
+	path: string,
+	values: Readonly<Record<string, string>>,
+): string {
+	return path
+		.split('/')
+		.map((segment) =>
+			isParamSegment(segment)
+				? (values[paramNameFromSegment(segment)] ?? segment)
+				: segment,
+		)
+		.join('/');
+}
+
+function routeMatches(path: string, needle: string): boolean {
+	if (!needle) return true;
+	return (
+		path.toLowerCase().includes(needle) ||
+		navigationRouteDisplayName(path).toLowerCase().includes(needle)
+	);
+}
+
+function truncateMiddleValue(value: string, maxLength = 18): string {
+	if (value.length <= maxLength) return value;
+	return `${value.slice(0, maxLength - 1)}…`;
 }
 
 export function inferNavigationRouteKind(
@@ -113,10 +238,30 @@ export function inferNavigationRouteKind(
 	return 'static';
 }
 
+const secondaryText = () => [
+	font({ textStyle: 'footnote' }),
+	foregroundStyle({ type: 'hierarchical', style: 'secondary' }),
+];
+
+const monoPathText = () => [
+	font({ textStyle: 'footnote', design: 'monospaced' }),
+	foregroundStyle({ type: 'hierarchical', style: 'secondary' }),
+	lineLimit(1),
+];
+
+const groupLabelText = () => [
+	font({ textStyle: 'footnote', weight: 'semibold' }),
+	foregroundStyle({ type: 'hierarchical', style: 'secondary' }),
+];
+
+function SectionHeaderWithInfo({ title }: { title: string }) {
+	return <UIText>{title}</UIText>;
+}
+
 export function createNavigationPlugin(
 	options: NavigationPluginOptions = {},
 ): NavigationPlugin {
-	const title = options.title ?? 'Navigation';
+	const title = options.title ?? 'Screens';
 	const id = options.id ?? 'navigation';
 	const historyStore = new BoundedEventStore<NavigationEvent>({
 		maxEvents: options.maxEvents ?? 100,
@@ -129,7 +274,7 @@ export function createNavigationPlugin(
 	const stackStore = new ExternalStore<readonly NavigationStackEntry[]>([]);
 	let nextId = 1;
 
-	function NavigationPanel({ onBack, actions }: DevToolsPanelProps) {
+	function ScreensPanel({ onBack, actions }: DevToolsPanelProps) {
 		const events = useSyncExternalStore(
 			historyStore.subscribe,
 			historyStore.getSnapshot,
@@ -145,201 +290,481 @@ export function createNavigationPlugin(
 			stackStore.getSnapshot,
 			stackStore.getServerSnapshot,
 		);
-		const [tab, setTab] = useState<NavigationTab>('history');
+		const session = useSyncExternalStore(
+			screensSessionStore.subscribe,
+			screensSessionStore.getSnapshot,
+			screensSessionStore.getServerSnapshot,
+		);
 		const [search, setSearch] = useState('');
-		const current = events.at(-1);
+		const [historyExpanded, setHistoryExpanded] = useState(false);
+		const [expandedParamsKey, setExpandedParamsKey] = useState<string | null>(
+			null,
+		);
+		const [paramDrafts, setParamDrafts] = useState<
+			Readonly<Record<string, string>>
+		>({});
+		const [deepLink, setDeepLink] = useState('');
+		const deepLinkField = useRef<TextFieldRef>(null);
+
+		const { onNavigate, onOpenDeepLink } = options;
 		const needle = search.trim().toLowerCase();
-		const visibleEvents = useMemo(
-			() =>
-				[...events]
-					.reverse()
-					.filter(
-						(event) => !needle || event.route.toLowerCase().includes(needle),
-					),
-			[events, needle],
+		const current = events.at(-1);
+		const mountedCount = stack.length;
+		const visibleCount = stack.filter((entry) => entry.visible).length;
+		const backAction = options.actions?.find(
+			(action) => action.id === 'back' || action.title === 'Go back',
 		);
-		const visibleRoutes = useMemo(
-			() =>
-				routes.filter(
-					(route) =>
-						!needle ||
-						route.path.toLowerCase().includes(needle) ||
-						route.kind.toLowerCase().includes(needle),
+		const currentSummary = `${
+			current?.segments?.length
+				? `${current.segments.map(stripGroupParens).join(' › ')} — `
+				: ''
+		}${mountedCount} mounted, ${visibleCount} visible`;
+
+		// The sitemap can expose the same path twice (e.g. a group root and its
+		// index route); one jump row per path is enough.
+		const seenJumpablePaths = new Set<string>();
+		const jumpableRoutes = routes.filter((route) => {
+			if (route.kind === 'layout' || route.kind === 'internal') return false;
+			if (seenJumpablePaths.has(route.path)) return false;
+			seenJumpablePaths.add(route.path);
+			return true;
+		});
+		const visibleJumpable = jumpableRoutes.filter((route) =>
+			routeMatches(route.path, needle),
+		);
+		const visibleInternal = routes.filter(
+			(route) =>
+				(route.kind === 'layout' || route.kind === 'internal') &&
+				routeMatches(route.path, needle),
+		);
+		const groups: { label: string; routes: NavigationRouteDescriptor[] }[] = [];
+		for (const route of visibleJumpable) {
+			const label = routeGroupLabel(route.path);
+			const group = groups.find((candidate) => candidate.label === label);
+			if (group) group.routes.push(route);
+			else groups.push({ label, routes: [route] });
+		}
+
+		const visiblePinned = session.pinnedPaths.filter((path) =>
+			routeMatches(path, needle),
+		);
+		const recents: NavigationEvent[] = [];
+		for (let index = events.length - 1; index >= 0; index -= 1) {
+			const event = events[index];
+			if (!event || event.route === current?.route) continue;
+			if (recents.some((existing) => existing.route === event.route)) continue;
+			recents.push(event);
+			if (recents.length === 5) break;
+		}
+		const visibleRecents = recents.filter((event) =>
+			routeMatches(event.route, needle),
+		);
+
+		const draftFor = (path: string, param: string): string => {
+			const key = `${path}:${param}`;
+			return paramDrafts[key] ?? session.lastParamValues[key] ?? '';
+		};
+
+		const navigateWithParams = (path: string) => {
+			const values: Record<string, string> = {};
+			for (const param of routeParamNames(path)) {
+				const value = draftFor(path, param).trim();
+				if (!value) return;
+				values[param] = value;
+			}
+			rememberParamValues(
+				Object.fromEntries(
+					Object.entries(values).map(([param, value]) => [
+						`${path}:${param}`,
+						value,
+					]),
 				),
-			[needle, routes],
-		);
-		const visibleStack = useMemo(
-			() =>
-				stack.filter(
-					(entry) =>
-						!needle ||
-						entry.name.toLowerCase().includes(needle) ||
-						entry.path?.toLowerCase().includes(needle),
-				),
-			[needle, stack],
-		);
-		const dynamicCount = routes.filter(
-			(route) => route.kind === 'dynamic' || route.kind === 'catchAll',
-		).length;
+			);
+			setExpandedParamsKey(null);
+			onNavigate?.(buildRoutePath(path, values));
+		};
+
+		const handleRouteTap = (path: string, expandKey: string) => {
+			if (!onNavigate) return;
+			if (routeParamNames(path).length > 0) {
+				setExpandedParamsKey((key) => {
+					if (key === expandKey) {
+						// Collapsing discards unsubmitted drafts so an invisible value
+						// can never drive the next Go.
+						setParamDrafts((drafts) => {
+							const next = { ...drafts };
+							for (const draftKey of Object.keys(next)) {
+								if (draftKey.startsWith(`${path}:`)) delete next[draftKey];
+							}
+							return next;
+						});
+						return null;
+					}
+					return expandKey;
+				});
+				return;
+			}
+			onNavigate(path);
+		};
+
+		const openDeepLink = () => {
+			const url = deepLink.trim();
+			if (url) onOpenDeepLink?.(url);
+		};
+
+		const renderParamEditorRow = (path: string) => {
+			const params = routeParamNames(path);
+			const canGo = params.every(
+				(param) => draftFor(path, param).trim().length > 0,
+			);
+			const fields = params.map((param) => {
+				const key = `${path}:${param}`;
+				const remembered = session.lastParamValues[key];
+				return (
+					<TextField
+						key={key}
+						modifiers={[
+							autocorrectionDisabled(true),
+							textInputAutocapitalization('never'),
+						]}
+						onTextChange={(text) =>
+							setParamDrafts((drafts) => ({ ...drafts, [key]: text }))
+						}
+						placeholder={
+							remembered
+								? `${param} — last: ${truncateMiddleValue(remembered)}`
+								: param
+						}
+					/>
+				);
+			});
+			const goButton = (
+				<Button
+					label="Go"
+					modifiers={[
+						buttonStyle('borderedProminent'),
+						controlSize('small'),
+						disabled(!canGo),
+					]}
+					onPress={() => navigateWithParams(path)}
+				/>
+			);
+			return params.length === 1 ? (
+				<HStack spacing={8}>
+					{fields}
+					{goButton}
+				</HStack>
+			) : (
+				<VStack alignment="leading" spacing={8}>
+					{fields}
+					{goButton}
+				</VStack>
+			);
+		};
+
+		const renderRouteRow = (
+			path: string,
+			expandKey: string,
+			rowOptions?: { star?: boolean; subtitle?: string },
+		) => {
+			const pinned = session.pinnedPaths.includes(path);
+			const expanded =
+				expandedParamsKey === expandKey &&
+				onNavigate !== undefined &&
+				routeParamNames(path).length > 0;
+			const content = (
+				<HStack spacing={12}>
+					{rowOptions?.star ? (
+						<Image
+							color={PlatformColor('systemOrangeColor')}
+							size={14}
+							systemName="star.fill"
+						/>
+					) : null}
+					<VStack alignment="leading" spacing={2}>
+						<UIText>{navigationRouteDisplayName(path)}</UIText>
+						<UIText modifiers={monoPathText()}>
+							{rowOptions?.subtitle ?? path}
+						</UIText>
+					</VStack>
+					<Spacer />
+					{onNavigate ? (
+						<Image
+							color={PlatformColor('tertiaryLabelColor')}
+							size={12}
+							systemName="chevron.right"
+						/>
+					) : null}
+				</HStack>
+			);
+			return (
+				<Fragment key={expandKey}>
+					<SwipeActions>
+						{onNavigate ? (
+							<Button
+								modifiers={[buttonStyle('plain')]}
+								onPress={() => handleRouteTap(path, expandKey)}
+							>
+								{content}
+							</Button>
+						) : (
+							content
+						)}
+						<SwipeActions.Actions edge="trailing">
+							<Button
+								label={pinned ? 'Unpin' : 'Pin'}
+								onPress={() => setRoutePinned(path, !pinned)}
+							/>
+						</SwipeActions.Actions>
+					</SwipeActions>
+					{expanded ? renderParamEditorRow(path) : null}
+				</Fragment>
+			);
+		};
 
 		return (
-			<PanelScaffold
+			<PanelShell
 				onBack={onBack}
 				title={title}
-				subtitle={current?.route ?? 'No route recorded'}
+				trailing={
+					onOpenDeepLink ? (
+						<NavIconButton
+							accessibilityLabel="Focus deep link field"
+							onPress={() => {
+								void deepLinkField.current?.focus();
+							}}
+							systemImage="link"
+							testID="devtools-navigation-deeplink"
+						/>
+					) : undefined
+				}
 			>
-				<PanelSignalCard
-					description={
-						current
-							? `${stack.length} mounted stack entries · changed ${formatRelativeTime(current.at).toLowerCase()}`
-							: 'Route transitions will appear as the app navigates.'
-					}
-					eyebrow="Current route"
-					systemImage={current ? 'location.fill' : 'location.slash.fill'}
-					title={current?.route ?? 'No route recorded'}
-					tone={current ? 'info' : 'neutral'}
-				/>
-				<PanelMetricStrip
-					metrics={[
-						{ label: 'History', value: events.length },
-						{ label: 'Routes', value: routes.length },
-						{ label: 'Dynamic', value: dynamicCount, tone: colors.orange },
-						{ label: 'Stack', value: stack.length, tone: colors.blue },
-					]}
-				/>
-				{options.actions?.length ? (
-					<PanelToolbar>
-						{options.actions.map((action) => (
-							<PanelButton
-								key={action.id}
-								label={action.title}
-								onPress={() =>
-									void actions.run({
-										pluginId: id,
-										label: action.title,
-										action: action.run,
-									})
-								}
-							/>
-						))}
-					</PanelToolbar>
-				) : null}
-				<PanelSegmentedControl
-					accessibilityLabel="Navigation inspector"
-					onChange={setTab}
-					options={[
-						{ id: 'history', label: 'History' },
-						{ id: 'routes', label: 'Routes' },
-						{ id: 'stack', label: 'Stack' },
-					]}
-					selected={tab}
-				/>
-				<PanelSearchField
-					onChangeText={setSearch}
-					placeholder={`Search ${tab}`}
-					value={search}
-				/>
-				{tab === 'history' ? (
-					<>
-						<PanelToolbar>
-							<PanelButton
-								label="Clear history"
-								onPress={historyStore.clear}
-								tone="danger"
-							/>
-						</PanelToolbar>
-						{visibleEvents.length === 0 ? (
-							<EmptyState
-								systemImage="arrow.triangle.turn.up.right.diamond"
-								title="No route history"
-							>
-								{events.length === 0
-									? 'Route transitions will appear here.'
-									: 'No routes match the current search.'}
-							</EmptyState>
-						) : (
-							visibleEvents.map((event, index) => (
-								<DisclosureCard
-									key={event.id}
-									leading={
-										<PanelStatusBadge
-											label={index === 0 ? 'NOW' : formatRelativeTime(event.at)}
-											tone={index === 0 ? 'info' : 'neutral'}
-										/>
-									}
-									title={event.route}
-									subtitle={
-										event.segments?.length
-											? event.segments.join(' › ')
-											: 'Route transition'
-									}
-								>
-									<CodeBlock>
-										{serializeValue(event, 128 * 1024).text}
-									</CodeBlock>
-								</DisclosureCard>
-							))
-						)}
-					</>
-				) : tab === 'routes' ? (
-					visibleRoutes.length === 0 ? (
-						<EmptyState systemImage="map" title="No route inventory">
-							The public router route inventory will appear here.
-						</EmptyState>
-					) : (
-						visibleRoutes.map((route) => (
-							<DisclosureCard
-								key={route.id}
-								title={route.path}
-								subtitle={`${route.kind}${route.isInitial ? ' · initial' : ''}`}
-							>
-								<CodeBlock>{serializeValue(route, 64 * 1024).text}</CodeBlock>
-							</DisclosureCard>
-						))
-					)
-				) : visibleStack.length === 0 ? (
-					<EmptyState systemImage="square.stack.3d.up" title="No live stack">
-						The live public navigation stack will appear here.
-					</EmptyState>
-				) : (
-					visibleStack.map((entry) => (
-						<DisclosureCard
-							key={entry.key}
-							leading={
-								<View
-									style={[
-										styles.stackBar,
-										{
-											marginLeft: Math.min(entry.depth, 5) * 8,
-											backgroundColor: entry.visible
-												? colors.blue
-												: colors.separator,
-										},
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						<List modifiers={[listStyle('insetGrouped')]}>
+							<Section>
+								<TextField
+									modifiers={[
+										autocorrectionDisabled(true),
+										textInputAutocapitalization('never'),
 									]}
+									onTextChange={setSearch}
+									placeholder="Jump to any screen…"
 								/>
-							}
-							title={entry.name}
-							subtitle={`${entry.visible ? 'Visible' : 'Mounted'}${entry.path ? ` · ${entry.path}` : ''}`}
-						>
-							<CodeBlock>{serializeValue(entry, 64 * 1024).text}</CodeBlock>
-						</DisclosureCard>
-					))
-				)}
-			</PanelScaffold>
+							</Section>
+							<Section title="Current">
+								<HStack spacing={12}>
+									<Image
+										color={PlatformColor(
+											current ? 'systemGreenColor' : 'systemGrayColor',
+										)}
+										size={10}
+										systemName="circle.fill"
+									/>
+									<VStack alignment="leading" spacing={2}>
+										<UIText
+											modifiers={[
+												font({ textStyle: 'body', weight: 'semibold' }),
+											]}
+										>
+											{current
+												? navigationRouteDisplayName(current.route)
+												: 'No route recorded'}
+										</UIText>
+										<UIText modifiers={monoPathText()}>
+											{current?.route ?? '—'}
+										</UIText>
+									</VStack>
+									<Spacer />
+									{backAction ? (
+										<Button
+											label="Back"
+											modifiers={[
+												buttonStyle('bordered'),
+												controlSize('small'),
+												fixedSize(),
+											]}
+											onPress={() =>
+												void actions.run({
+													pluginId: id,
+													label: backAction.title,
+													action: backAction.run,
+												})
+											}
+										/>
+									) : null}
+								</HStack>
+								<UIText modifiers={secondaryText()}>{currentSummary}</UIText>
+								<DisclosureGroup label={`Stack · ${stack.length}`}>
+									{stack.map((entry) => (
+										<LabeledContent
+											key={entry.key}
+											label={entry.visible ? 'Visible' : 'Mounted'}
+										>
+											<UIText modifiers={monoPathText()}>
+												{entry.path ?? entry.name}
+											</UIText>
+										</LabeledContent>
+									))}
+									{stack.length === 0 ? (
+										<UIText modifiers={secondaryText()}>
+											No stack entries
+										</UIText>
+									) : null}
+								</DisclosureGroup>
+							</Section>
+							<Section
+								footer={<UIText>Swipe any screen to pin it here.</UIText>}
+								title="Pinned"
+							>
+								{visiblePinned.length === 0 ? (
+									<UIText modifiers={secondaryText()}>
+										{needle
+											? 'No pinned screens match.'
+											: 'Nothing pinned yet.'}
+									</UIText>
+								) : (
+									visiblePinned.map((path) =>
+										renderRouteRow(path, `pinned:${path}`, { star: true }),
+									)
+								)}
+							</Section>
+							<Section
+								header={
+									<SectionHeaderWithInfo
+										title={`All screens · ${visibleJumpable.length}`}
+									/>
+								}
+							>
+								{groups.map((group) => (
+									<Fragment key={group.label}>
+										<UIText modifiers={groupLabelText()}>{group.label}</UIText>
+										{group.routes.map((route) =>
+											renderRouteRow(route.path, `all:${route.id}`),
+										)}
+									</Fragment>
+								))}
+								{visibleJumpable.length === 0 ? (
+									<UIText modifiers={secondaryText()}>
+										{routes.length === 0
+											? 'No screens registered yet.'
+											: 'No screens match.'}
+									</UIText>
+								) : null}
+								{visibleInternal.length > 0 ? (
+									<DisclosureGroup
+										label={`Internal & layouts · ${visibleInternal.length}`}
+									>
+										{visibleInternal.map((route) => (
+											<UIText key={route.id} modifiers={monoPathText()}>
+												{route.path}
+											</UIText>
+										))}
+									</DisclosureGroup>
+								) : null}
+							</Section>
+							{visibleRecents.length > 0 ? (
+								<Section title="Recent">
+									{visibleRecents.map((event) =>
+										renderRouteRow(event.route, `recent:${event.id}`, {
+											subtitle: `${event.route} · ${formatRelativeTime(event.at)}`,
+										}),
+									)}
+								</Section>
+							) : null}
+							{onOpenDeepLink ? (
+								<Section header={<SectionHeaderWithInfo title="Deep link" />}>
+									<HStack spacing={8}>
+										<TextField
+											modifiers={[
+												keyboardType('url'),
+												autocorrectionDisabled(true),
+												textInputAutocapitalization('never'),
+												onSubmit(openDeepLink),
+											]}
+											onTextChange={setDeepLink}
+											placeholder="pumpd://…"
+											ref={deepLinkField}
+										/>
+										<Button
+											label="Open"
+											modifiers={[
+												buttonStyle('borderedProminent'),
+												controlSize('small'),
+												disabled(deepLink.trim().length === 0),
+											]}
+											onPress={openDeepLink}
+										/>
+									</HStack>
+								</Section>
+							) : null}
+							<Section>
+								<DisclosureGroup
+									isExpanded={historyExpanded}
+									label={`History · ${events.length}`}
+									onIsExpandedChange={setHistoryExpanded}
+								>
+									{historyExpanded
+										? [...events].reverse().map((event) => (
+												<LabeledContent key={event.id} label={event.route}>
+													<UIText>{formatRelativeTime(event.at)}</UIText>
+												</LabeledContent>
+											))
+										: null}
+									{events.length === 0 ? (
+										<UIText modifiers={secondaryText()}>
+											No route history
+										</UIText>
+									) : (
+										// biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA
+										<Button
+											label="Clear history"
+											onPress={historyStore.clear}
+											role="destructive"
+										/>
+									)}
+								</DisclosureGroup>
+							</Section>
+						</List>
+					</Host>
+				) : null}
+			</PanelShell>
 		);
 	}
 
+	const onNavigate = options.onNavigate;
 	return {
 		plugin: {
 			id,
 			title,
 			description:
 				options.description ??
-				'Route history, inventory, and live public-router stack',
+				'Jump to any screen, pins, live stack, and route history',
 			systemImage:
 				options.systemImage ?? 'arrow.triangle.turn.up.right.diamond.fill',
+			tint: options.tint ?? '#30B0C7',
 			section: options.section,
-			Panel: NavigationPanel,
+			Panel: ScreensPanel,
+			...(onNavigate
+				? {
+						pillQuickAction: {
+							systemImage: 'location.fill' as const,
+							openPanelLabel: title,
+							subscribe: subscribePinnedRoutes,
+							// Dynamic routes need their param editor; the menu's
+							// "Open …" item covers them.
+							options: () =>
+								getPinnedRoutes()
+									.filter((path) => routeParamNames(path).length === 0)
+									.map((path) => ({
+										id: path,
+										label: navigationRouteDisplayName(path),
+										systemImage: 'arrow.up.forward' as const,
+										action: () => onNavigate(path),
+									})),
+						},
+					}
+				: {}),
 		},
 		record: (route, recordOptions) => {
 			const previous = historyStore.getSnapshot().at(-1);
@@ -368,7 +793,3 @@ export function createNavigationPlugin(
 		getStack: stackStore.getSnapshot,
 	};
 }
-
-const styles = StyleSheet.create({
-	stackBar: { borderRadius: 2, height: 32, marginRight: 10, width: 3 },
-});

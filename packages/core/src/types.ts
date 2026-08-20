@@ -1,5 +1,6 @@
 import type { Image } from '@expo/ui/swift-ui';
 import type { ComponentProps, ComponentType } from 'react';
+import type { ColorValue } from 'react-native';
 
 export type DevToolsPresentationMode = 'sheet' | 'window' | 'pill';
 
@@ -69,14 +70,15 @@ export type DevToolsPillQuickActionOption = {
 
 export type DevToolsPillQuickAction = {
 	systemImage?: DevToolsSystemImage;
-	options: readonly DevToolsPillQuickActionOption[];
+	options:
+		| readonly DevToolsPillQuickActionOption[]
+		| (() => readonly DevToolsPillQuickActionOption[]);
 	getSelectedOptionId?: () => string | null;
+	/** Show the pill slot's attention dot (e.g. an override is active). */
+	getIsHighlighted?: () => boolean;
+	/** Adds an "Open <label>…" item that opens this plugin's full panel. */
+	openPanelLabel?: string;
 	subscribe?: (listener: () => void) => () => void;
-};
-
-export type DevToolsPillShortcutControls = {
-	isPinned: boolean;
-	onPinnedChange: (isPinned: boolean) => void;
 };
 
 export type DevToolsPanelProps = {
@@ -87,7 +89,6 @@ export type DevToolsPanelProps = {
 	safeAreaTop?: number;
 	onPresentationModeChange: (mode: DevToolsPresentationMode) => void;
 	actions: DevToolsActionServices;
-	pillShortcut?: DevToolsPillShortcutControls;
 };
 
 export type DevToolsPluginMetadata = {
@@ -95,6 +96,11 @@ export type DevToolsPluginMetadata = {
 	title: string;
 	description: string;
 	systemImage: DevToolsSystemImage;
+	/**
+	 * Icon-chip color on the tools home; hosts theme their tools. Prefer a
+	 * `PlatformColor` over a literal so the chip follows the system palette.
+	 */
+	tint?: ColorValue;
 	section?: string;
 	install?: () => () => void;
 	pillQuickAction?: DevToolsPillQuickAction;
@@ -123,10 +129,24 @@ export type DevToolsPluginWithPillQuickAction = DevToolsPlugin & {
 	pillQuickAction: DevToolsPillQuickAction;
 };
 
+export type DevToolsHomeStatusRow = {
+	id: string;
+	label: string;
+	value: string;
+	badge?: {
+		label: string;
+		tone?: 'info' | 'success' | 'warning' | 'danger';
+	};
+	/** Opens this plugin's panel when the row is tapped. */
+	onPressPluginId?: string;
+};
+
 export type InternalToolsProps = {
 	enabled: boolean;
 	visible?: boolean;
 	plugins: readonly DevToolsPlugin[];
+	/** Glanceable rows pinned above the tool list (backend, build, data …). */
+	homeStatus?: readonly DevToolsHomeStatusRow[];
 	title?: string;
 	launcherLabel?: string;
 	pillLabel?: string;

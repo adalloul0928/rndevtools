@@ -52,13 +52,20 @@ export function assertUniquePluginIds(
 		seen.add(plugin.id);
 
 		if (plugin.pillQuickAction) {
-			if (plugin.pillQuickAction.options.length === 0) {
+			const declaredOptions = plugin.pillQuickAction.options;
+			// Dynamic option lists are validated against their current snapshot;
+			// they may legitimately be empty until the source store fills in.
+			const options =
+				typeof declaredOptions === 'function'
+					? declaredOptions()
+					: declaredOptions;
+			if (typeof declaredOptions !== 'function' && options.length === 0) {
 				throw new Error(
 					`Pill quick actions require at least one option for plugin: ${plugin.id}`,
 				);
 			}
 			const optionIds = new Set<string>();
-			for (const option of plugin.pillQuickAction.options) {
+			for (const option of options) {
 				if (!option.id.trim()) {
 					throw new Error(
 						`Pill quick-action option ids cannot be empty for plugin: ${plugin.id}`,

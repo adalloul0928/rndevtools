@@ -1,6 +1,7 @@
 import { type ComponentType, lazy, type ReactNode, Suspense } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { colors, PanelScaffold } from '../components/panel-ui';
+import { PanelShell } from '../components/panel-shell';
+import { colors } from '../components/panel-ui';
 import type {
 	DevToolsActionConfirmation,
 	DevToolsActionContext,
@@ -59,7 +60,7 @@ export function createLazyCustomPlugin({
 		return (
 			<Suspense
 				fallback={
-					<PanelScaffold onBack={props.onBack} title={metadata.title}>
+					<PanelShell onBack={props.onBack} title={metadata.title}>
 						<View
 							accessible
 							accessibilityLabel={`Loading ${metadata.title}`}
@@ -68,7 +69,7 @@ export function createLazyCustomPlugin({
 						>
 							<ActivityIndicator color={colors.blue} />
 						</View>
-					</PanelScaffold>
+					</PanelShell>
 				}
 			>
 				<LazyPanel {...props} />
