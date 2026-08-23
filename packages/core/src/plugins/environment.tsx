@@ -10,6 +10,11 @@ import {
 } from '@expo/ui/swift-ui';
 import { listStyle } from '@expo/ui/swift-ui/modifiers';
 import { Platform, PlatformColor, Share } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSection,
+} from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { serializeValue } from '../core/serialize';
@@ -315,7 +320,44 @@ export function createEnvironmentPlugin({
 							</Section>
 						</List>
 					</Host>
-				) : null}
+				) : (
+					<AndroidPanelScroll>
+						{validationResults.length > 0 ? (
+							<AndroidPanelSection title="Health">
+								<AndroidPanelRow
+									label={
+										failing.length > 0
+											? `${failing.length} checks failing`
+											: 'All checks passing'
+									}
+									tone={failing.length > 0 ? 'warning' : 'success'}
+								/>
+								{failing.map((result) => (
+									<AndroidPanelRow
+										key={`${result.section ?? '*'}:${result.key}`}
+										label={formatEnvironmentKey(result.key)}
+										detail={result.description}
+										tone="warning"
+										value={validationLabel(result)}
+									/>
+								))}
+							</AndroidPanelSection>
+						) : null}
+						{declaredSections.map((declared) => (
+							<AndroidPanelSection key={declared.title} title={declared.title}>
+								{Object.entries(declared.values)
+									.sort(([left], [right]) => left.localeCompare(right))
+									.map(([key, value]) => (
+										<AndroidPanelRow
+											key={key}
+											label={formatEnvironmentKey(key)}
+											value={formatEnvironmentValue(value)}
+										/>
+									))}
+							</AndroidPanelSection>
+						))}
+					</AndroidPanelScroll>
+				)}
 			</PanelShell>
 		);
 	}

@@ -1,7 +1,3 @@
-import {
-	BottomSheet as UniversalBottomSheet,
-	RNHostView as UniversalRNHostView,
-} from '@expo/ui';
 import { MenuView } from '@expo/ui/community/menu';
 import {
 	BottomSheet,
@@ -40,6 +36,7 @@ import {
 import { useState } from 'react';
 import {
 	type ColorValue,
+	Modal,
 	Platform,
 	PlatformColor,
 	Pressable,
@@ -165,18 +162,22 @@ export function ToolsSheet({
 	};
 	if (Platform.OS !== 'ios') {
 		const visiblePlugins = sections.flatMap((section) => section.plugins);
-		const sheetHeight = Math.max(360, window.height - safeAreaTop - 40);
-		const sheetWidth = Math.max(280, window.width - 32);
+		const sheetHeight = Math.max(360, window.height - safeAreaTop - 24);
 		return (
-			<UniversalBottomSheet
-				isPresented={isPresented}
-				onDismiss={onClose}
-				showDragIndicator
-				snapPoints={['full']}
-				testID="devtools-sheet"
+			<Modal
+				animationType="slide"
+				onRequestClose={onClose}
+				presentationStyle="overFullScreen"
+				statusBarTranslucent
+				transparent
+				visible={isPresented}
 			>
-				<UniversalRNHostView style={{ height: sheetHeight, width: sheetWidth }}>
-					<View style={styles.androidSheet}>
+				<View style={styles.androidBackdrop}>
+					<View
+						style={[styles.androidSheet, { height: sheetHeight }]}
+						testID="devtools-sheet"
+					>
+						<View style={styles.androidDragIndicator} />
 						{selectedPlugin ? (
 							<PluginPanelRenderer
 								onError={onPluginError}
@@ -308,8 +309,8 @@ export function ToolsSheet({
 							</>
 						)}
 					</View>
-				</UniversalRNHostView>
-			</UniversalBottomSheet>
+				</View>
+			</Modal>
 		);
 	}
 
@@ -578,6 +579,11 @@ function HomeStatusRowContent({ row }: { row: DevToolsHomeStatusRow }) {
 }
 
 const styles = StyleSheet.create({
+	androidBackdrop: {
+		backgroundColor: '#00000066',
+		flex: 1,
+		justifyContent: 'flex-end',
+	},
 	androidBadge: {
 		fontSize: 11,
 		fontWeight: '700',
@@ -587,6 +593,16 @@ const styles = StyleSheet.create({
 		fontSize: 12,
 		paddingBottom: 6,
 		paddingHorizontal: 16,
+	},
+	androidDragIndicator: {
+		alignSelf: 'center',
+		backgroundColor: colors.secondaryLabel,
+		borderRadius: 2,
+		height: 4,
+		marginBottom: 4,
+		marginTop: 8,
+		opacity: 0.55,
+		width: 36,
 	},
 	androidHeader: {
 		alignItems: 'center',
@@ -625,7 +641,11 @@ const styles = StyleSheet.create({
 	},
 	androidSheet: {
 		backgroundColor: colors.background,
-		flex: 1,
+		borderTopLeftRadius: 28,
+		borderTopRightRadius: 28,
+		overflow: 'hidden',
+		paddingBottom: 8,
+		paddingHorizontal: 12,
 	},
 	androidStatusGroup: {
 		backgroundColor: colors.card,

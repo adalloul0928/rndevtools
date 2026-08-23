@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { Platform } from 'react-native';
 import {
 	createMutationSnapshot,
 	createQueryPlugin,
@@ -320,6 +321,42 @@ describe('createMutationSnapshot', () => {
 });
 
 describe('QueryPanel', () => {
+	it('keeps cache-wide confirmations on Android', () => {
+		const originalPlatform = Platform.OS;
+		Object.defineProperty(Platform, 'OS', {
+			configurable: true,
+			value: 'android',
+		});
+		try {
+			const queryClient = new QueryClient();
+			const plugin = createQueryPlugin({ queryClient });
+			const dispose = plugin.install?.();
+			const run = renderPanel(plugin);
+
+			fireEvent.press(screen.getByText('Invalidate all'));
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({
+					confirmation: expect.objectContaining({
+						title: 'Invalidate all queries?',
+					}),
+				}),
+			);
+			fireEvent.press(screen.getByText('Clear query cache'));
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({
+					confirmation: expect.objectContaining({ destructive: true }),
+				}),
+			);
+
+			dispose?.();
+		} finally {
+			Object.defineProperty(Platform, 'OS', {
+				configurable: true,
+				value: originalPlatform,
+			});
+		}
+	});
+
 	it('groups queries by first key segment with a summary header and search', () => {
 		const queryClient = new QueryClient();
 		queryClient.setQueryData(['workouts', 'list', 'week-12'], { items: [1] });

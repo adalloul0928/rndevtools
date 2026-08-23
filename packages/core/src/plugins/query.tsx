@@ -27,6 +27,13 @@ import {
 import type { QueryClient } from '@tanstack/react-query';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+	AndroidPanelTabs,
+} from '../components/android-panel-ui';
 import { iosColor, PanelShell } from '../components/panel-shell';
 import { ExternalStore } from '../core/external-store';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
@@ -685,7 +692,102 @@ export function createQueryPlugin({
 							</Section>
 						</List>
 					</Host>
-				) : null}
+				) : (
+					<AndroidPanelScroll>
+						<AndroidPanelTabs
+							onSelect={setTab}
+							options={[
+								{ label: 'Queries', value: 'queries' },
+								{ label: 'Mutations', value: 'mutations' },
+							]}
+							selected={tab}
+						/>
+						<AndroidPanelSearch
+							onChangeText={setSearch}
+							placeholder={
+								tab === 'queries' ? 'Search query keys' : 'Search mutations'
+							}
+							value={search}
+						/>
+						{tab === 'queries' ? (
+							<>
+								<AndroidPanelSection title={summary}>
+									{visibleQueries.length === 0 ? (
+										<AndroidPanelRow label="No queries to show" />
+									) : null}
+								</AndroidPanelSection>
+								{queryGroups.map((group) => (
+									<AndroidPanelSection
+										key={group.segment}
+										title={`${group.segment} · ${group.queries.length}`}
+									>
+										{group.queries.map((query) => (
+											<AndroidPanelRow
+												key={query.hash}
+												label={formatQueryKeyRemainder(query.queryKey)}
+												detail={`${query.fetchStatus} · ${query.observerCount} observers`}
+												tone={
+													query.status === 'error'
+														? 'danger'
+														: query.isStale
+															? 'warning'
+															: 'success'
+												}
+												value={query.status}
+											/>
+										))}
+									</AndroidPanelSection>
+								))}
+							</>
+						) : (
+							<AndroidPanelSection
+								title={`Recent · ${visibleMutations.length}`}
+							>
+								{visibleMutations.length === 0 ? (
+									<AndroidPanelRow label="No mutations yet" />
+								) : (
+									visibleMutations.map((mutation) => (
+										<AndroidPanelRow
+											key={mutation.id}
+											label={formatQueryKey(mutation.mutationKey)}
+											detail={`${mutation.failureCount} failures${mutation.isPaused ? ' · paused' : ''}`}
+											tone={mutation.status === 'error' ? 'danger' : 'default'}
+											value={mutation.status}
+										/>
+									))
+								)}
+							</AndroidPanelSection>
+						)}
+						<AndroidPanelSection title="Actions">
+							<AndroidPanelRow
+								label="Invalidate all"
+								onPress={() =>
+									runAction(
+										'Invalidate all queries',
+										() => queryClient.invalidateQueries(),
+										{
+											title: 'Invalidate all queries?',
+											message: 'Marks every cached query as stale.',
+											confirmLabel: 'Invalidate',
+										},
+									)
+								}
+							/>
+							<AndroidPanelRow
+								label="Clear query cache"
+								onPress={() =>
+									runAction('Clear query cache', () => queryClient.clear(), {
+										title: 'Clear query cache?',
+										message: 'Removes every cached query and mutation.',
+										confirmLabel: 'Clear',
+										destructive: true,
+									})
+								}
+								tone="danger"
+							/>
+						</AndroidPanelSection>
+					</AndroidPanelScroll>
+				)}
 			</PanelShell>
 		);
 	}

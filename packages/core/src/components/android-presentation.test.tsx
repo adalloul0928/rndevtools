@@ -216,7 +216,7 @@ describe('Android presentation boundary', () => {
 		).toBeOnTheScreen();
 	});
 
-	it('uses the universal sheet and community menu on Android', () => {
+	it('uses the scrollable React Native sheet and community menu on Android', () => {
 		const onPresentationModeChange = jest.fn();
 		const onSelectPlugin = jest.fn();
 		const onClose = jest.fn();
@@ -238,7 +238,7 @@ describe('Android presentation boundary', () => {
 
 		fireEvent.press(screen.getByLabelText('Window'));
 		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
-		fireEvent.press(screen.getByLabelText('Dismiss native sheet'));
+		fireEvent.press(screen.getByTestId('devtools-sheet-close'));
 
 		expect(onPresentationModeChange).toHaveBeenCalledWith('window');
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);

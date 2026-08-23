@@ -29,7 +29,13 @@ import {
 	textInputAutocapitalization,
 } from '@expo/ui/swift-ui/modifiers';
 import { Fragment, useRef, useState, useSyncExternalStore } from 'react';
-import { Platform, PlatformColor } from 'react-native';
+import { Platform, PlatformColor, View } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+} from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
@@ -522,6 +528,53 @@ export function createNavigationPlugin(
 			);
 		};
 
+		const renderAndroidRouteRow = (path: string, expandKey: string) => {
+			const params = routeParamNames(path);
+			const expanded =
+				expandedParamsKey === expandKey &&
+				onNavigate !== undefined &&
+				params.length > 0;
+			const canGo = params.every(
+				(param) => draftFor(path, param).trim().length > 0,
+			);
+
+			return (
+				<Fragment key={expandKey}>
+					<AndroidPanelRow
+						label={navigationRouteDisplayName(path)}
+						detail={path}
+						onPress={
+							onNavigate ? () => handleRouteTap(path, expandKey) : undefined
+						}
+					/>
+					{expanded ? (
+						<View style={{ gap: 8, padding: 12 }}>
+							{params.map((param) => {
+								const key = `${path}:${param}`;
+								return (
+									<AndroidPanelSearch
+										key={key}
+										onChangeText={(text) =>
+											setParamDrafts((drafts) => ({
+												...drafts,
+												[key]: text,
+											}))
+										}
+										placeholder={param}
+										value={draftFor(path, param)}
+									/>
+								);
+							})}
+							<AndroidPanelRow
+								label="Go"
+								onPress={canGo ? () => navigateWithParams(path) : undefined}
+							/>
+						</View>
+					) : null}
+				</Fragment>
+			);
+		};
+
 		return (
 			<PanelShell
 				onBack={onBack}
@@ -727,7 +780,85 @@ export function createNavigationPlugin(
 							</Section>
 						</List>
 					</Host>
-				) : null}
+				) : (
+					<AndroidPanelScroll>
+						<AndroidPanelSearch
+							onChangeText={setSearch}
+							placeholder="Jump to any screen…"
+							value={search}
+						/>
+						<AndroidPanelSection title="Current">
+							<AndroidPanelRow
+								label={
+									current
+										? navigationRouteDisplayName(current.route)
+										: 'No route recorded'
+								}
+								detail={current?.route ?? '—'}
+								tone={current ? 'success' : 'default'}
+								value={`${mountedCount} mounted · ${visibleCount} visible`}
+							/>
+							{backAction ? (
+								<AndroidPanelRow
+									label="Go back"
+									onPress={() =>
+										void actions.run({
+											pluginId: id,
+											label: backAction.title,
+											action: backAction.run,
+										})
+									}
+								/>
+							) : null}
+						</AndroidPanelSection>
+						<AndroidPanelSection title="Pinned">
+							{visiblePinned.length === 0 ? (
+								<AndroidPanelRow
+									label={
+										needle ? 'No pinned screens match' : 'Nothing pinned yet'
+									}
+								/>
+							) : (
+								visiblePinned.map((path) =>
+									renderAndroidRouteRow(path, `pinned:${path}`),
+								)
+							)}
+						</AndroidPanelSection>
+						{groups.map((group) => (
+							<AndroidPanelSection key={group.label} title={group.label}>
+								{group.routes.map((route) =>
+									renderAndroidRouteRow(route.path, `all:${route.id}`),
+								)}
+							</AndroidPanelSection>
+						))}
+						{onOpenDeepLink ? (
+							<AndroidPanelSection title="Deep link">
+								<AndroidPanelSearch
+									onChangeText={setDeepLink}
+									placeholder="pumpd://…"
+									value={deepLink}
+								/>
+								<AndroidPanelRow
+									label="Open deep link"
+									onPress={openDeepLink}
+								/>
+							</AndroidPanelSection>
+						) : null}
+						<AndroidPanelSection title={`History · ${events.length}`}>
+							{[...events]
+								.reverse()
+								.slice(0, 20)
+								.map((event) => (
+									<AndroidPanelRow
+										key={event.id}
+										label={navigationRouteDisplayName(event.route)}
+										detail={event.route}
+										value={formatRelativeTime(event.at)}
+									/>
+								))}
+						</AndroidPanelSection>
+					</AndroidPanelScroll>
+				)}
 			</PanelShell>
 		);
 	}

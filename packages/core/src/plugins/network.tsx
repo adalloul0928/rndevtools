@@ -29,6 +29,14 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, PlatformColor, Share } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+	AndroidPanelTabs,
+	AndroidPanelTextBlock,
+} from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
@@ -647,7 +655,82 @@ function NetworkEventDetail({
 						</Section>
 					</List>
 				</Host>
-			) : null}
+			) : (
+				<AndroidPanelScroll>
+					<AndroidPanelSection title="Overview">
+						<AndroidPanelRow label="Status" value={detailStatusText(event)} />
+						<AndroidPanelRow
+							label="Duration"
+							value={
+								event.state === 'pending'
+									? 'Pending'
+									: formatNetworkDuration(event.durationMs)
+							}
+						/>
+						<AndroidPanelRow
+							label="Started"
+							value={formatNetworkClock(event.startedAt)}
+						/>
+						<AndroidPanelRow
+							label="Size"
+							value={`↑ ${formatNetworkBytes(event.requestSizeBytes)} · ↓ ${formatNetworkBytes(event.responseSizeBytes)}`}
+						/>
+						<AndroidPanelRow label="Source" value={event.source} />
+						{event.error ? (
+							<AndroidPanelTextBlock
+								label="Error"
+								tone="danger"
+								value={event.error}
+							/>
+						) : null}
+					</AndroidPanelSection>
+					<AndroidPanelSection title="Request">
+						<AndroidPanelTextBlock label="URL" value={path} />
+						<AndroidPanelRow
+							label="Headers"
+							value={String(requestHeaderEntries.length)}
+						/>
+						{requestHeaderEntries.map(([name, value]) => (
+							<AndroidPanelTextBlock key={name} label={name} value={value} />
+						))}
+						<AndroidPanelRow
+							label="Body"
+							value={
+								event.requestBody === undefined
+									? 'Empty'
+									: formatNetworkBytes(event.requestSizeBytes)
+							}
+						/>
+						{requestBody !== undefined ? (
+							<AndroidPanelTextBlock label="Payload" value={requestBody} />
+						) : null}
+					</AndroidPanelSection>
+					<AndroidPanelSection
+						title="Response"
+						footer={`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are truncated at capture time.`}
+					>
+						<AndroidPanelRow
+							label="Headers"
+							value={String(responseHeaderEntries.length)}
+						/>
+						{responseHeaderEntries.map(([name, value]) => (
+							<AndroidPanelTextBlock key={name} label={name} value={value} />
+						))}
+						<AndroidPanelRow
+							label="Body"
+							value={responseBodySummaryText(event)}
+						/>
+						{responseBody !== undefined ? (
+							<AndroidPanelTextBlock label="Payload" value={responseBody} />
+						) : null}
+					</AndroidPanelSection>
+					<AndroidPanelSection title="Actions">
+						<AndroidPanelRow label="Copy as cURL" onPress={copyCurl} />
+						<AndroidPanelRow label="Re-send request" onPress={resendRequest} />
+						<AndroidPanelRow label="Share…" onPress={shareEvent} />
+					</AndroidPanelSection>
+				</AndroidPanelScroll>
+			)}
 		</PanelShell>
 	);
 }
@@ -1037,7 +1120,58 @@ export function createNetworkPlugin(
 							</Section>
 						</List>
 					</Host>
-				) : null}
+				) : (
+					<AndroidPanelScroll>
+						<AndroidPanelSearch
+							onChangeText={setSearch}
+							placeholder="Search URL, table, or status"
+							value={search}
+						/>
+						<AndroidPanelTabs
+							onSelect={setSegment}
+							options={[
+								{ label: 'All', value: 'all' },
+								{ label: 'Supabase', value: 'supabase' },
+								{ label: 'Errors', value: 'errors' },
+								{ label: 'Slow', value: 'slow' },
+							]}
+							selected={segment}
+						/>
+						<AndroidPanelSection title={headerText}>
+							{rows.length === 0 ? (
+								<AndroidPanelRow
+									label={events.length === 0 ? 'No requests' : 'No matches'}
+									detail="Captured app requests appear here."
+								/>
+							) : (
+								rows.map(({ event, count }) => {
+									const status = networkStatusPresentation(event);
+									return (
+										<AndroidPanelRow
+											key={event.id}
+											label={`${event.method} ${networkEventLabel(event).label}`}
+											detail={networkRowSubtitle(event)}
+											onPress={() => openEvent(event.id)}
+											tone={status.tone === 'info' ? 'default' : status.tone}
+											value={`${status.text}${count > 1 ? ` ×${count}` : ''}`}
+										/>
+									);
+								})
+							)}
+						</AndroidPanelSection>
+						<AndroidPanelSection>
+							<AndroidPanelRow
+								label={
+									hideSystemTraffic
+										? 'Show system traffic'
+										: 'Hide system traffic'
+								}
+								detail={`${systemCount} system request${systemCount === 1 ? '' : 's'}`}
+								onPress={() => setHideSystemTraffic((hidden) => !hidden)}
+							/>
+						</AndroidPanelSection>
+					</AndroidPanelScroll>
+				)}
 			</PanelShell>
 		);
 	}

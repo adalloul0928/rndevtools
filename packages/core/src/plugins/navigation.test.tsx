@@ -4,6 +4,7 @@ import {
 	render,
 	screen,
 } from '@testing-library/react-native';
+import { Platform } from 'react-native';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
 import {
 	createNavigationPlugin,
@@ -229,6 +230,33 @@ describe('createNavigationPlugin', () => {
 });
 
 describe('Screens panel', () => {
+	it('collects dynamic route parameters before navigating on Android', () => {
+		const originalPlatform = Platform.OS;
+		Object.defineProperty(Platform, 'OS', {
+			configurable: true,
+			value: 'android',
+		});
+		try {
+			const onNavigate = jest.fn();
+			const navigation = createNavigationPlugin({ onNavigate });
+			navigation.updateRoutes([
+				{ id: 'block', path: '/plan/block/[blockId]', kind: 'dynamic' },
+			]);
+
+			renderPanel(navigation.plugin);
+			fireEvent.press(screen.getByText('Block Id'));
+			fireEvent.changeText(screen.getByPlaceholderText('blockId'), 'blk_81');
+			fireEvent.press(screen.getByText('Go'));
+
+			expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
+		} finally {
+			Object.defineProperty(Platform, 'OS', {
+				configurable: true,
+				value: originalPlatform,
+			});
+		}
+	});
+
 	it('renders the current route, stack summary, and back host action', async () => {
 		const backRun = jest.fn();
 		const navigation = createNavigationPlugin({
@@ -288,7 +316,10 @@ describe('Screens panel', () => {
 		expect(onNavigate).toHaveBeenCalledWith('/(tabs)/(train)');
 
 		fireEvent.press(screen.getByText('Block Id'));
-		fireEvent.changeText(screen.getByPlaceholderText('blockId'), 'blk_81');
+		fireEvent.changeText(
+			screen.getByPlaceholderText(/^blockId(?: — last: blk_81)?$/),
+			'blk_81',
+		);
 		fireEvent.press(screen.getByLabelText('Go'));
 		expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
 

@@ -40,15 +40,6 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 	render() {
 		const { error } = this.state;
 		const { panelProps, plugin } = this.props;
-		if (Platform.OS !== 'ios') {
-			return (
-				<PanelShell onBack={panelProps.onBack} title={plugin.title}>
-					<Text
-						style={{ color: '#5F6368', fontSize: 15, padding: 24 }}
-					>{`${plugin.title} isn't built for Android yet. Use the iOS dev client for this tool.`}</Text>
-				</PanelShell>
-			);
-		}
 		if (error) {
 			return (
 				<PanelShell onBack={panelProps.onBack} title={plugin.title}>

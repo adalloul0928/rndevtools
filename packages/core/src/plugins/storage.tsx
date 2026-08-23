@@ -29,6 +29,13 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, PlatformColor } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+	AndroidPanelTabs,
+} from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
@@ -978,7 +985,109 @@ export function createStoragePlugin({
 							</List>
 						)}
 					</Host>
-				) : null}
+				) : (
+					<AndroidPanelScroll>
+						{browsing ? (
+							<>
+								<AndroidPanelSearch
+									onChangeText={setSearch}
+									placeholder={`Search ${pluralizeKeys(browsing.snapshot.entries.length)}`}
+									value={search}
+								/>
+								{groups.map((group) => (
+									<AndroidPanelSection
+										key={group.prefix}
+										title={`${group.prefix} · ${describeStorageGroup(group)}`}
+									>
+										{group.entries.map((entry) => (
+											<AndroidPanelRow
+												key={entry.key}
+												label={entry.key}
+												detail={describeStorageEntry(entry)}
+												value={
+													entry.valueHidden
+														? 'Protected'
+														: (entry.value ?? 'Empty')
+												}
+											/>
+										))}
+									</AndroidPanelSection>
+								))}
+							</>
+						) : (
+							<>
+								<AndroidPanelTabs
+									onSelect={setTab}
+									options={[
+										{ label: 'Stores', value: 'stores' },
+										{ label: 'Activity', value: 'activity' },
+									]}
+									selected={tab}
+								/>
+								{tab === 'stores' ? (
+									<>
+										<AndroidPanelSection title="Stores">
+											{snapshot.adapters.map((adapter) => (
+												<AndroidPanelRow
+													key={adapter.id}
+													label={adapter.title}
+													detail={adapter.description}
+													onPress={() => openStore(adapter.id)}
+													tone={adapter.error ? 'warning' : 'default'}
+													value={describeAdapterSnapshot(adapter)}
+												/>
+											))}
+										</AndroidPanelSection>
+										{validation.length > 0 ? (
+											<AndroidPanelSection title="Health">
+												<AndroidPanelRow
+													label={
+														failing.length === 0
+															? 'All expected keys present'
+															: `${failing.length} checks failing`
+													}
+													tone={failing.length === 0 ? 'success' : 'warning'}
+												/>
+											</AndroidPanelSection>
+										) : null}
+										<AndroidPanelSection
+											title="Recent activity"
+											footer={`${describeValueLength(totalChars)} captured`}
+										>
+											{recentEvents.length === 0 ? (
+												<AndroidPanelRow label="No changes recorded this session" />
+											) : (
+												recentEvents.map((event) => (
+													<AndroidPanelRow
+														key={event.id}
+														label={event.key}
+														detail={event.adapterTitle}
+														value={describeStorageEvent(event)}
+													/>
+												))
+											)}
+										</AndroidPanelSection>
+									</>
+								) : (
+									<AndroidPanelSection title={`Activity · ${events.length}`}>
+										{orderedEvents.length === 0 ? (
+											<AndroidPanelRow label="No storage activity" />
+										) : (
+											orderedEvents.map((event) => (
+												<AndroidPanelRow
+													key={event.id}
+													label={event.key}
+													detail={event.adapterTitle}
+													value={describeStorageEvent(event)}
+												/>
+											))
+										)}
+									</AndroidPanelSection>
+								)}
+							</>
+						)}
+					</AndroidPanelScroll>
+				)}
 			</PanelShell>
 		);
 	}
