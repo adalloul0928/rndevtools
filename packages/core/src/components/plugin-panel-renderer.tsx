@@ -8,8 +8,16 @@ import {
 } from '@expo/ui/swift-ui';
 import { foregroundStyle, listStyle } from '@expo/ui/swift-ui/modifiers';
 import { Component, type ErrorInfo } from 'react';
-import { Platform, PlatformColor, Pressable, Text } from 'react-native';
+import { Platform, PlatformColor } from 'react-native';
+import { diagnosticErrorText } from '../core/redact';
+import { truncateText } from '../core/serialize';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSection,
+	AndroidPanelTextBlock,
+} from './android-panel-ui';
 import { PanelShell } from './panel-shell';
 
 type PluginPanelRendererProps = {
@@ -22,23 +30,38 @@ type BoundaryProps = PluginPanelRendererProps;
 
 type BoundaryState = {
 	error: Error | null;
+	retryKey: number;
 };
 
 class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
-	state: BoundaryState = { error: null };
+	state: BoundaryState = { error: null, retryKey: 0 };
 
-	static getDerivedStateFromError(error: unknown): BoundaryState {
+	static getDerivedStateFromError(
+		error: unknown,
+	): Pick<BoundaryState, 'error'> {
+		const message = truncateText(diagnosticErrorText(error), 8 * 1024).text;
 		return {
-			error: error instanceof Error ? error : new Error(String(error)),
+			error: new Error(message || 'Unknown panel error'),
 		};
 	}
 
 	componentDidCatch(error: Error, _info: ErrorInfo): void {
-		this.props.onError?.(error, this.props.plugin.id);
+		try {
+			this.props.onError?.(error, this.props.plugin.id);
+		} catch {
+			// Error reporting must not escape the panel isolation boundary.
+		}
 	}
 
+	retry = (): void => {
+		this.setState((state) => ({
+			error: null,
+			retryKey: state.retryKey + 1,
+		}));
+	};
+
 	render() {
-		const { error } = this.state;
+		const { error, retryKey } = this.state;
 		const { panelProps, plugin } = this.props;
 		if (error) {
 			return (
@@ -48,7 +71,7 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 							<List modifiers={[listStyle('insetGrouped')]}>
 								<Section>
 									<ContentUnavailableView
-										description="The collector is still isolated; return to the tool list and try opening this panel again."
+										description="The collector is still isolated. Retry the panel or return to the tool list."
 										systemImage="exclamationmark.triangle.fill"
 										title="This tool could not render"
 									/>
@@ -63,20 +86,37 @@ class PluginPanelBoundary extends Component<BoundaryProps, BoundaryState> {
 									</UIText>
 								</Section>
 								<Section>
+									<Button label="Retry" onPress={this.retry} />
 									<Button label="Return to tools" onPress={panelProps.onBack} />
 								</Section>
 							</List>
 						</Host>
 					) : (
-						<Pressable accessibilityRole="button" onPress={panelProps.onBack}>
-							<Text>{`This tool could not render: ${error.message}`}</Text>
-						</Pressable>
+						<AndroidPanelScroll>
+							<AndroidPanelSection
+								footer="The collector is still isolated. Retry the panel or return to the tool list."
+								title="This tool could not render"
+							>
+								<AndroidPanelTextBlock
+									label="Technical detail"
+									tone="danger"
+									value={error.message}
+								/>
+							</AndroidPanelSection>
+							<AndroidPanelSection title="Actions">
+								<AndroidPanelRow label="Retry" onPress={this.retry} />
+								<AndroidPanelRow
+									label="Return to tools"
+									onPress={panelProps.onBack}
+								/>
+							</AndroidPanelSection>
+						</AndroidPanelScroll>
 					)}
 				</PanelShell>
 			);
 		}
 
-		return <plugin.Panel {...panelProps} />;
+		return <plugin.Panel key={retryKey} {...panelProps} />;
 	}
 }
 

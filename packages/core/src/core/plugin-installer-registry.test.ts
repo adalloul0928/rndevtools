@@ -75,4 +75,24 @@ describe('PluginInstallerRegistry', () => {
 			'broken-dispose',
 		]);
 	});
+
+	it('rejects invalid installer return values without poisoning teardown', () => {
+		const onError = jest.fn();
+		const registry = new PluginInstallerRegistry();
+		registry.setErrorHandler(onError);
+		const invalidInstall = jest.fn(
+			() => undefined,
+		) as unknown as () => () => void;
+
+		expect(() =>
+			registry.update(true, [plugin('invalid-disposer', invalidInstall)]),
+		).not.toThrow();
+		expect(() => registry.dispose()).not.toThrow();
+		expect(onError).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: 'Plugin installer did not return a disposer.',
+			}),
+			'invalid-disposer',
+		);
+	});
 });

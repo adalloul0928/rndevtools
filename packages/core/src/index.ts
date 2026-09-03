@@ -14,12 +14,22 @@ export { colors } from './components/panel-ui';
 export { SystemIcon } from './components/system-icon';
 export { createActionServices } from './core/action-services';
 export { BoundedEventStore, ExternalStore } from './core/external-store';
+export { formatBytes, formatRelativeTime } from './core/format';
 export {
 	assertUniquePluginIds,
 	groupPlugins,
 	hasPillQuickAction,
 	isPanelPlugin,
+	resolvePillQuickActionOptions,
 } from './core/plugins';
+export {
+	type DiagnosticSanitization,
+	diagnosticErrorText,
+	isSensitiveDiagnosticKey,
+	redactDiagnosticText,
+	sanitizeDiagnosticValue,
+	sanitizeDiagnosticValueWithMetadata,
+} from './core/redact';
 export { serializeValue, truncateText, utf8ByteLength } from './core/serialize';
 export type {
 	DevToolsActionConfirmation,

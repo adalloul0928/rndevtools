@@ -1,7 +1,8 @@
 # @pumpd/devtools
 
-Private, reusable on-device diagnostics for Expo and React Native. The first
-release is intentionally iOS-only and uses Expo UI for native SwiftUI chrome.
+Private, reusable on-device diagnostics for Expo and React Native. The UI is
+iOS-first, with native SwiftUI chrome on iOS and matching React Native panels
+on Android.
 
 The package is a greenfield implementation. It does not contain code or visual
 assets from React Buoy or the current `@buoy-gg/*` packages.
@@ -49,17 +50,41 @@ Collectors install when `InternalTools` is enabled and remain active while its
 panel is closed. The runtime reconciles collectors by plugin ID and installer,
 so adding an application action does not restart unrelated collectors. Network
 collection wraps explicit fetch implementations by default. Broad global fetch
-capture is opt-in with `patchGlobalFetch: true`, and disposal only restores the
-global when the plugin still owns the installed wrapper.
+capture is opt-in with `patchGlobalFetch: true`. Multiple collectors compose as
+layers, and disposal safely rebuilds or restores the global wrapper in either
+order.
 
 Captured events are bounded by count and estimated UTF-8 byte size. Known-large
 and binary response bodies are omitted, and unknown-length bodies are omitted
 unless `captureUnknownLengthBodies` is explicitly enabled. Header, URL, and
 body redaction runs before an event enters the store.
 
-The reusable diagnostics included in the first release are Network, TanStack
-Query, registered storage adapters, a deliberate environment manifest, and a
-public navigation adapter. None of them imports application code.
+The reusable diagnostics include Network, TanStack Query, registered storage
+adapters, a deliberate environment manifest, public navigation adapters, a
+logger-backed Console, explicit Zustand projections, bounded restore points,
+JavaScript responsiveness reviews, and explicit component targets. None of
+them imports application code.
+
+## Advanced diagnostics safety model
+
+The advanced plugins use host-owned adapters instead of global interception:
+
+- Zustand requires `getInspectableState`; there is no automatic store
+  discovery and the built-in panel is read-only.
+- Restore points accept only declared sources. Snapshots must be JSON, are
+  bounded by source and session size, remain in memory, and capture rollback
+  state before applying a restore.
+- Console subscribes to an application's structured logger instead of patching
+  `console.*`. Host sanitization and built-in credential/identifier redaction
+  run before bounded storage.
+- Performance Review samples React Native runtime / JavaScript responsiveness
+  only. It does not claim native UI-thread FPS, CPU, memory, or profiler data.
+- Component Inspector lists only deliberate target metadata supplied by the
+  host; it does not traverse React fibers or native view hierarchies.
+
+Collectors still follow the runtime `enabled` lifecycle. Console and Zustand
+subscriptions detach when internal tools are disabled, performance sampling
+stops, and component sources unsubscribe.
 
 ## Custom tools
 
@@ -120,16 +145,15 @@ const livePreviewPlugin = createLazyCustomPlugin({
 });
 ```
 
-`PanelScaffold`, disclosure cards, code blocks, empty states, colors, and shared
-panel styles are exported for custom tools that should visually match built-in
+`PanelShell`, navigation controls, Android panel primitives, icons, and shared
+colors are exported for custom tools that should visually match built-in
 diagnostics. Custom panels also receive the current presentation mode, can
 switch modes themselves, and receive `actions.run(...)` for consistent
 confirmation, error routing, and audit events.
 
 Plugins with a small set of immediate choices can also opt into the minimized
-Pill. The host panel decides how to render its pin control using the optional
-`pillShortcut` controls; the runtime owns the pinned-plugin persistence and the
-native SwiftUI menu:
+Pill. The runtime exposes pin controls from the tool browser, persists the
+selection, and owns the native quick-action menu:
 
 ```tsx
 const fixturesPlugin = createCustomPlugin({
@@ -154,9 +178,7 @@ const fixturesPlugin = createCustomPlugin({
 			},
 		],
 	},
-	render: (controls) => (
-		<FixturesPanel pillShortcut={controls.pillShortcut} />
-	),
+	render: (controls) => <FixturesPanel onBack={controls.onBack} />,
 });
 ```
 

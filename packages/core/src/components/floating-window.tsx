@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+	Pressable,
+	StyleSheet,
+	Text,
+	TextInput,
+	useWindowDimensions,
+	View,
+} from 'react-native';
 import {
 	Gesture,
 	GestureDetector,
@@ -13,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import type {
 	DevToolsActionServices,
+	DevToolsHomeStatusRow,
 	DevToolsPanelPlugin,
 	DevToolsPlugin,
 	DevToolsPosition,
@@ -44,6 +52,10 @@ type FloatingWindowProps = {
 	onSizeChange?: (size: DevToolsSize) => void;
 	onPluginError?: (error: unknown, pluginId: string) => void;
 	actions: DevToolsActionServices;
+	pinnedPillQuickActionIds?: readonly string[];
+	onQuickActionPinnedChange?: (pluginId: string, isPinned: boolean) => void;
+	homeStatus?: readonly DevToolsHomeStatusRow[];
+	onOpenPlugin?: (pluginId: string) => void;
 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -65,7 +77,12 @@ export function FloatingWindow({
 	onSizeChange,
 	onPluginError,
 	actions,
+	pinnedPillQuickActionIds = [],
+	onQuickActionPinnedChange,
+	homeStatus = [],
+	onOpenPlugin,
 }: FloatingWindowProps) {
+	const [query, setQuery] = useState('');
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
 	const availableWidth = Math.max(1, width - OUTER_MARGIN * 2);
@@ -276,6 +293,17 @@ export function FloatingWindow({
 		onPresentationModeChange,
 		actions,
 	};
+	const normalizedQuery = query.trim().toLowerCase();
+	const visiblePlugins = plugins.filter(
+		(plugin) =>
+			normalizedQuery.length === 0 ||
+			plugin.title.toLowerCase().includes(normalizedQuery) ||
+			plugin.description.toLowerCase().includes(normalizedQuery),
+	);
+	const selectPlugin = (plugin: DevToolsPlugin) => {
+		setQuery('');
+		onSelectPlugin(plugin);
+	};
 
 	return (
 		<Animated.View style={[styles.positioner, animatedStyle]}>
@@ -321,7 +349,69 @@ export function FloatingWindow({
 							onError={onPluginError}
 						/>
 					) : (
-						<ToolList plugins={plugins} onSelect={onSelectPlugin} />
+						<View style={styles.home}>
+							<View style={styles.search}>
+								<SystemIcon
+									color={colors.secondaryLabel}
+									size={16}
+									systemName="magnifyingglass"
+								/>
+								<TextInput
+									autoCapitalize="none"
+									autoCorrect={false}
+									onChangeText={setQuery}
+									placeholder="Search tools"
+									placeholderTextColor={colors.secondaryLabel}
+									style={styles.searchInput}
+									value={query}
+								/>
+							</View>
+							{homeStatus.length > 0 ? (
+								<View style={styles.statusGroup}>
+									{homeStatus.map((row) => {
+										const content = (
+											<>
+												<Text style={styles.statusLabel}>{row.label}</Text>
+												<View style={styles.statusValueWrap}>
+													{row.badge ? (
+														<Text style={styles.statusBadge}>
+															{row.badge.label}
+														</Text>
+													) : null}
+													<Text numberOfLines={1} style={styles.statusValue}>
+														{row.value}
+													</Text>
+												</View>
+											</>
+										);
+										return row.onPressPluginId && onOpenPlugin ? (
+											<Pressable
+												key={row.id}
+												onPress={() => {
+													setQuery('');
+													onOpenPlugin(row.onPressPluginId ?? '');
+												}}
+												style={styles.statusRow}
+											>
+												{content}
+											</Pressable>
+										) : (
+											<View key={row.id} style={styles.statusRow}>
+												{content}
+											</View>
+										);
+									})}
+								</View>
+							) : null}
+							<View style={styles.toolList}>
+								<ToolList
+									onQuickActionPinnedChange={onQuickActionPinnedChange}
+									onSelect={selectPlugin}
+									pinnedPillQuickActionIds={pinnedPillQuickActionIds}
+									plugins={visiblePlugins}
+								/>
+							</View>
+						</View>
 					)}
 				</View>
 				<GestureDetector gesture={resizeGesture}>
@@ -408,6 +498,67 @@ const styles = StyleSheet.create({
 		paddingHorizontal: 12,
 	},
 	content: {
+		flex: 1,
+	},
+	home: {
+		flex: 1,
+	},
+	search: {
+		alignItems: 'center',
+		backgroundColor: colors.card,
+		borderColor: colors.separator,
+		borderRadius: 11,
+		borderWidth: StyleSheet.hairlineWidth,
+		flexDirection: 'row',
+		marginHorizontal: 12,
+		marginTop: 10,
+		paddingHorizontal: 10,
+	},
+	searchInput: {
+		color: colors.label,
+		flex: 1,
+		fontSize: 14,
+		height: 40,
+		paddingHorizontal: 8,
+	},
+	statusGroup: {
+		backgroundColor: colors.card,
+		borderRadius: 11,
+		marginHorizontal: 12,
+		marginTop: 10,
+		overflow: 'hidden',
+	},
+	statusRow: {
+		alignItems: 'center',
+		borderBottomColor: colors.separator,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		flexDirection: 'row',
+		gap: 8,
+		minHeight: 36,
+		paddingHorizontal: 11,
+	},
+	statusLabel: {
+		color: colors.secondaryLabel,
+		fontSize: 12,
+	},
+	statusValueWrap: {
+		alignItems: 'center',
+		flex: 1,
+		flexDirection: 'row',
+		gap: 6,
+		justifyContent: 'flex-end',
+	},
+	statusBadge: {
+		color: colors.orange,
+		fontSize: 10,
+		fontWeight: '700',
+	},
+	statusValue: {
+		color: colors.label,
+		fontSize: 12,
+		maxWidth: '70%',
+	},
+	toolList: {
 		flex: 1,
 	},
 	resizeHandle: {

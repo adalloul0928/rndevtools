@@ -1,0 +1,588 @@
+import {
+	Button,
+	ContentUnavailableView,
+	DisclosureGroup,
+	Host,
+	Label,
+	LabeledContent,
+	List,
+	Picker,
+	Section,
+	TextField,
+	Text as UIText,
+} from '@expo/ui/swift-ui';
+import {
+	autocorrectionDisabled,
+	font,
+	foregroundStyle,
+	lineLimit,
+	listRowBackground,
+	listStyle,
+	pickerStyle,
+	tag,
+} from '@expo/ui/swift-ui/modifiers';
+import { useMemo, useState, useSyncExternalStore } from 'react';
+import { Platform, PlatformColor } from 'react-native';
+import {
+	AndroidPanelRow,
+	AndroidPanelScroll,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+	AndroidPanelTabs,
+	AndroidPanelTextBlock,
+} from '../components/android-panel-ui';
+import { NavIconButton } from '../components/nav-controls';
+import { PanelShell } from '../components/panel-shell';
+import { BoundedEventStore } from '../core/external-store';
+import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
+import { redactDiagnosticText } from '../core/redact';
+import { createRefCountedInstaller } from '../core/ref-counted-installer';
+import { serializeValue, truncateText } from '../core/serialize';
+import { shareDiagnosticContent } from '../core/share';
+import type {
+	DevToolsPanelPlugin,
+	DevToolsPanelProps,
+	DevToolsSystemImage,
+} from '../types';
+
+export type ConsoleLogLevel =
+	| 'trace'
+	| 'debug'
+	| 'info'
+	| 'warn'
+	| 'error'
+	| 'fatal';
+
+export type ConsoleLogInput = {
+	at?: number;
+	level: ConsoleLogLevel;
+	message: string;
+	attributes?: Readonly<Record<string, unknown>>;
+};
+
+export type ConsoleLogEvent = {
+	id: number;
+	at: number;
+	level: ConsoleLogLevel;
+	message: string;
+	messageTruncated: boolean;
+	attributesText?: string;
+	attributesTruncated: boolean;
+};
+
+export type ConsoleLogSource = {
+	subscribe: (listener: (event: ConsoleLogInput) => void) => () => void;
+};
+
+export type ConsolePluginOptions = {
+	source: ConsoleLogSource;
+	/** Optional host sanitizer. Built-in credential and identifier redaction runs after it. */
+	sanitize?: (event: ConsoleLogInput) => ConsoleLogInput | null;
+	maxEvents?: number;
+	maxEventBytes?: number;
+	maxMessageBytes?: number;
+	maxAttributesBytes?: number;
+	title?: string;
+	id?: string;
+	description?: string;
+	section?: string;
+	systemImage?: DevToolsSystemImage;
+};
+
+export type ConsolePlugin = {
+	plugin: DevToolsPanelPlugin;
+	getEvents: () => readonly ConsoleLogEvent[];
+	clear: () => void;
+};
+
+type ConsoleFilter = 'all' | 'debug' | 'info' | 'warn' | 'error';
+
+const LOG_LEVELS = new Set<ConsoleLogLevel>([
+	'trace',
+	'debug',
+	'info',
+	'warn',
+	'error',
+	'fatal',
+]);
+
+const SENSITIVE_KEY =
+	/(^|[_-])(authorization|body|content|cookie|email|id|message|name|password|path|phone|prompt|query|response|secret|token|url)([_-]|$)/i;
+/**
+ * `SENSITIVE_KEY` only matches separator-delimited words, so `accessToken` and
+ * `userId` slip past it. Insert a separator at each camelCase boundary and
+ * collapse the rest, then re-test with the same anchored pattern. Stripping the
+ * separators instead would make every listed word a bare substring, which
+ * redacts ordinary keys such as `width`, `isValid` and `gridSize` (all contain
+ * `id`).
+ */
+function separatorNormalizedKey(key: string): string {
+	return key
+		.replace(/([a-z\d])([A-Z])/g, '$1_$2')
+		.replace(/[^a-z\d]+/gi, '_')
+		.toLowerCase();
+}
+const UUID =
+	/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
+const MAX_DATE_TIMESTAMP = 8_640_000_000_000_000;
+const MAX_CONSOLE_EVENTS = 10_000;
+const MAX_CONSOLE_STORE_BYTES = 16 * 1024 * 1024;
+const MAX_CONSOLE_MESSAGE_BYTES = 64 * 1024;
+const MAX_CONSOLE_ATTRIBUTES_BYTES = 1024 * 1024;
+
+function isConsoleLogLevel(value: unknown): value is ConsoleLogLevel {
+	return typeof value === 'string' && LOG_LEVELS.has(value as ConsoleLogLevel);
+}
+
+export function redactConsoleText(value: string): string {
+	return redactDiagnosticText(value)
+		.replaceAll('[REDACTED EMAIL]', '[REDACTED_EMAIL]')
+		.replaceAll('[REDACTED JWT]', '[REDACTED_TOKEN]')
+		.replace(UUID, '[REDACTED_ID]');
+}
+
+function redactConsoleValue(
+	value: unknown,
+	key: string,
+	depth: number,
+	seen: WeakSet<object>,
+): unknown {
+	if (
+		SENSITIVE_KEY.test(key) ||
+		SENSITIVE_KEY.test(separatorNormalizedKey(key))
+	) {
+		return '[REDACTED]';
+	}
+	if (typeof value === 'string') return redactConsoleText(value);
+	if (
+		value === null ||
+		typeof value === 'number' ||
+		typeof value === 'boolean'
+	) {
+		return value;
+	}
+	if (typeof value !== 'object') return undefined;
+	if (depth >= 6) return '[Max depth]';
+	if (seen.has(value)) return '[Circular]';
+	seen.add(value);
+	try {
+		return redactConsoleObject(value, depth, seen);
+	} finally {
+		// `seen` is the ancestor path, not a visited-set: leaving entries behind
+		// would report a value referenced twice in a tree as a cycle.
+		seen.delete(value);
+	}
+}
+
+function redactConsoleObject(
+	value: object,
+	depth: number,
+	seen: WeakSet<object>,
+): unknown {
+	let descriptors: Record<string, PropertyDescriptor>;
+	try {
+		descriptors = Object.getOwnPropertyDescriptors(value);
+	} catch {
+		return '[Unreadable object]';
+	}
+	if (Array.isArray(value)) {
+		const lengthDescriptor = descriptors.length;
+		const length =
+			lengthDescriptor &&
+			'value' in lengthDescriptor &&
+			typeof lengthDescriptor.value === 'number'
+				? lengthDescriptor.value
+				: 0;
+		return Array.from({ length: Math.min(length, 50) }, (_unused, index) => {
+			const descriptor = descriptors[String(index)];
+			return descriptor && 'value' in descriptor
+				? redactConsoleValue(descriptor.value, '', depth + 1, seen)
+				: '[Accessor omitted]';
+		});
+	}
+	return Object.fromEntries(
+		Object.entries(descriptors)
+			.filter(([, descriptor]) => descriptor.enumerable)
+			.slice(0, 100)
+			.map(([nestedKey, descriptor]) => [
+				nestedKey,
+				'value' in descriptor
+					? redactConsoleValue(descriptor.value, nestedKey, depth + 1, seen)
+					: '[Accessor omitted]',
+			]),
+	);
+}
+
+function matchesFilter(level: ConsoleLogLevel, filter: ConsoleFilter): boolean {
+	if (filter === 'all') return true;
+	if (filter === 'debug') return level === 'trace' || level === 'debug';
+	if (filter === 'error') return level === 'error' || level === 'fatal';
+	return level === filter;
+}
+
+function levelColor(level: ConsoleLogLevel): string {
+	if (level === 'fatal' || level === 'error') return 'systemRedColor';
+	if (level === 'warn') return 'systemOrangeColor';
+	if (level === 'info') return 'systemBlueColor';
+	return 'systemGrayColor';
+}
+
+function levelImage(level: ConsoleLogLevel): DevToolsSystemImage {
+	if (level === 'fatal' || level === 'error') return 'xmark.octagon.fill';
+	if (level === 'warn') return 'exclamationmark.triangle.fill';
+	if (level === 'info') return 'info.circle.fill';
+	return 'ladybug.fill';
+}
+
+function eventSearchText(event: ConsoleLogEvent): string {
+	return `${event.level} ${event.message} ${event.attributesText ?? ''}`.toLowerCase();
+}
+
+export function createConsolePlugin(
+	options: ConsolePluginOptions,
+): ConsolePlugin {
+	const title = options.title ?? 'Console';
+	const id = options.id ?? 'console';
+	const maxEvents = options.maxEvents ?? 300;
+	const maxEventBytes = options.maxEventBytes ?? 512 * 1024;
+	const maxMessageBytes = options.maxMessageBytes ?? 2 * 1024;
+	const maxAttributesBytes = options.maxAttributesBytes ?? 16 * 1024;
+	assertPositiveInteger(maxEvents, 'maxEvents');
+	assertPositiveFinite(maxEventBytes, 'maxEventBytes');
+	assertPositiveFinite(maxMessageBytes, 'maxMessageBytes');
+	assertPositiveFinite(maxAttributesBytes, 'maxAttributesBytes');
+	if (maxEvents > MAX_CONSOLE_EVENTS) {
+		throw new Error(`maxEvents cannot exceed ${MAX_CONSOLE_EVENTS}`);
+	}
+	if (maxEventBytes > MAX_CONSOLE_STORE_BYTES) {
+		throw new Error(`maxEventBytes cannot exceed ${MAX_CONSOLE_STORE_BYTES}`);
+	}
+	if (maxMessageBytes > MAX_CONSOLE_MESSAGE_BYTES) {
+		throw new Error(
+			`maxMessageBytes cannot exceed ${MAX_CONSOLE_MESSAGE_BYTES}`,
+		);
+	}
+	if (maxAttributesBytes > MAX_CONSOLE_ATTRIBUTES_BYTES) {
+		throw new Error(
+			`maxAttributesBytes cannot exceed ${MAX_CONSOLE_ATTRIBUTES_BYTES}`,
+		);
+	}
+
+	const eventStore = new BoundedEventStore<ConsoleLogEvent>({
+		maxEvents,
+		maxBytes: maxEventBytes,
+		estimateBytes: (event) =>
+			serializeValue(event, maxMessageBytes + maxAttributesBytes + 1024)
+				.estimatedBytes,
+	});
+	let nextEventId = 1;
+
+	const ingest = (input: ConsoleLogInput): void => {
+		let hostSanitized: ConsoleLogInput | null;
+		try {
+			hostSanitized = options.sanitize ? options.sanitize(input) : input;
+		} catch {
+			return;
+		}
+		if (!hostSanitized || typeof hostSanitized !== 'object') return;
+		let descriptors: Record<string, PropertyDescriptor>;
+		try {
+			descriptors = Object.getOwnPropertyDescriptors(hostSanitized);
+		} catch {
+			return;
+		}
+		const field = (key: string): unknown => {
+			const descriptor = descriptors[key];
+			return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+		};
+		const level = field('level');
+		const rawMessage = field('message');
+		if (!isConsoleLogLevel(level) || typeof rawMessage !== 'string') return;
+		const message = truncateText(
+			redactConsoleText(rawMessage),
+			maxMessageBytes,
+		);
+		const redactedAttributes = redactConsoleValue(
+			field('attributes') ?? {},
+			'',
+			0,
+			new WeakSet(),
+		);
+		const attributes = serializeValue(redactedAttributes, maxAttributesBytes);
+		const hasAttributes =
+			attributes.text !== '{}' && attributes.text !== 'undefined';
+		const rawTimestamp = field('at');
+		eventStore.append({
+			id: nextEventId,
+			at:
+				typeof rawTimestamp === 'number' &&
+				Number.isFinite(rawTimestamp) &&
+				rawTimestamp >= 0 &&
+				rawTimestamp <= MAX_DATE_TIMESTAMP
+					? rawTimestamp
+					: Date.now(),
+			level,
+			message: message.text,
+			messageTruncated: message.truncated,
+			attributesText: hasAttributes ? attributes.text : undefined,
+			attributesTruncated: attributes.truncated,
+		});
+		nextEventId += 1;
+	};
+	const install = createRefCountedInstaller(({ addCleanup }) => {
+		let active = true;
+		addCleanup(() => {
+			active = false;
+		});
+		const dispose = options.source.subscribe((event) => {
+			if (!active) return;
+			try {
+				ingest(event);
+			} catch {
+				// A malformed diagnostic event must not affect the logger source.
+			}
+		});
+		if (typeof dispose !== 'function') {
+			throw new Error('Console source subscription did not return a disposer.');
+		}
+		addCleanup(() => {
+			active = false;
+			dispose();
+		});
+	});
+
+	function ConsolePanel({ onBack, actions }: DevToolsPanelProps) {
+		const events = useSyncExternalStore(
+			eventStore.subscribe,
+			eventStore.getSnapshot,
+			eventStore.getServerSnapshot,
+		);
+		const [filter, setFilter] = useState<ConsoleFilter>('all');
+		const [search, setSearch] = useState('');
+		const needle = search.trim().toLowerCase();
+		const visibleEvents = useMemo(
+			() =>
+				[...events]
+					.reverse()
+					.filter(
+						(event) =>
+							matchesFilter(event.level, filter) &&
+							(!needle || eventSearchText(event).includes(needle)),
+					),
+			[events, filter, needle],
+		);
+		const shareEvents = () => {
+			shareDiagnosticContent({
+				title,
+				message: truncateText(
+					events
+						.map(
+							(event) =>
+								`${new Date(event.at).toISOString()} [${event.level.toUpperCase()}] ${event.message}${event.attributesText ? ` ${event.attributesText}` : ''}`,
+						)
+						.join('\n'),
+					1024 * 1024,
+				).text,
+			});
+		};
+		const clearCapturedLogs = () => {
+			void actions.run({
+				pluginId: id,
+				label: 'Clear captured logs',
+				confirmation: {
+					title: 'Clear captured logs?',
+					confirmLabel: 'Clear',
+					destructive: true,
+				},
+				action: eventStore.clear,
+			});
+		};
+
+		return (
+			<PanelShell
+				onBack={onBack}
+				title={title}
+				trailing={
+					<NavIconButton
+						accessibilityLabel="Share structured logs"
+						onPress={shareEvents}
+						systemImage="square.and.arrow.up"
+						testID="devtools-console-share"
+					/>
+				}
+			>
+				{Platform.OS === 'ios' ? (
+					<Host style={{ flex: 1 }}>
+						<List modifiers={[listStyle('insetGrouped')]}>
+							<Section>
+								<Picker
+									label="Log level"
+									modifiers={[
+										pickerStyle('segmented'),
+										listRowBackground('clear'),
+									]}
+									onSelectionChange={setFilter}
+									selection={filter}
+								>
+									<UIText modifiers={[tag('all')]}>All</UIText>
+									<UIText modifiers={[tag('debug')]}>Debug</UIText>
+									<UIText modifiers={[tag('info')]}>Info</UIText>
+									<UIText modifiers={[tag('warn')]}>Warn</UIText>
+									<UIText modifiers={[tag('error')]}>Error</UIText>
+								</Picker>
+								<TextField
+									modifiers={[autocorrectionDisabled()]}
+									onTextChange={setSearch}
+									placeholder="Search structured logs"
+								/>
+							</Section>
+							<Section
+								footer={
+									<UIText>
+										This view subscribes to the app logger; it does not replace
+										or monkey-patch the global console. Credentials and common
+										identifiers are redacted before storage.
+									</UIText>
+								}
+								title={`Logs · ${visibleEvents.length}`}
+							>
+								{visibleEvents.length === 0 ? (
+									<ContentUnavailableView
+										description={
+											events.length === 0
+												? 'Structured logger events will appear while internal tools are enabled.'
+												: 'No logs match the selected filter.'
+										}
+										systemImage="terminal"
+										title={
+											events.length === 0 ? 'No logs yet' : 'No matching logs'
+										}
+									/>
+								) : (
+									visibleEvents.map((event) => (
+										<DisclosureGroup
+											key={event.id}
+											label={`${event.level.toUpperCase()} — ${event.message}`}
+										>
+											<Label
+												color={PlatformColor(levelColor(event.level))}
+												systemImage={levelImage(event.level)}
+												title={new Date(event.at).toLocaleTimeString()}
+											/>
+											<LabeledContent label="Message">
+												<UIText modifiers={[lineLimit(12)]}>
+													{event.message}
+												</UIText>
+											</LabeledContent>
+											{event.attributesText ? (
+												<UIText
+													modifiers={[
+														font({
+															design: 'monospaced',
+															textStyle: 'footnote',
+														}),
+														foregroundStyle('secondary'),
+														lineLimit(20),
+													]}
+												>
+													{event.attributesText}
+												</UIText>
+											) : null}
+										</DisclosureGroup>
+									))
+								)}
+							</Section>
+							{events.length > 0 ? (
+								<Section>
+									<Button
+										label="Clear captured logs"
+										onPress={clearCapturedLogs}
+									/>
+								</Section>
+							) : null}
+						</List>
+					</Host>
+				) : (
+					<AndroidPanelScroll>
+						<AndroidPanelTabs
+							onSelect={setFilter}
+							options={[
+								{ label: 'All', value: 'all' },
+								{ label: 'Debug', value: 'debug' },
+								{ label: 'Info', value: 'info' },
+								{ label: 'Warn', value: 'warn' },
+								{ label: 'Error', value: 'error' },
+							]}
+							selected={filter}
+						/>
+						<AndroidPanelSearch
+							onChangeText={setSearch}
+							placeholder="Search structured logs"
+							value={search}
+						/>
+						<AndroidPanelSection
+							footer="Subscribes to the app logger without patching the global console. Sensitive values are redacted before storage."
+							title={`Logs · ${visibleEvents.length}`}
+						>
+							{visibleEvents.length === 0 ? (
+								<AndroidPanelRow
+									detail={
+										events.length === 0
+											? 'Structured logger events will appear while internal tools are enabled.'
+											: 'Change the level or search filter.'
+									}
+									label={
+										events.length === 0 ? 'No logs yet' : 'No matching logs'
+									}
+								/>
+							) : (
+								visibleEvents.map((event) => (
+									<AndroidPanelTextBlock
+										key={event.id}
+										label={`${event.level.toUpperCase()} · ${new Date(event.at).toLocaleTimeString()}`}
+										tone={
+											event.level === 'error' || event.level === 'fatal'
+												? 'danger'
+												: event.level === 'warn'
+													? 'warning'
+													: 'default'
+										}
+										value={`${event.message}${event.attributesText ? `\n${event.attributesText}` : ''}`}
+									/>
+								))
+							)}
+						</AndroidPanelSection>
+						{events.length > 0 ? (
+							<AndroidPanelSection title="Actions">
+								<AndroidPanelRow
+									label="Clear captured logs"
+									onPress={clearCapturedLogs}
+									tone="danger"
+								/>
+							</AndroidPanelSection>
+						) : null}
+					</AndroidPanelScroll>
+				)}
+			</PanelShell>
+		);
+	}
+
+	const plugin: DevToolsPanelPlugin = {
+		id,
+		title,
+		description:
+			options.description ??
+			'Search bounded events from the structured app logger',
+		systemImage: options.systemImage ?? 'terminal.fill',
+		tint: Platform.OS === 'ios' ? PlatformColor('systemGrayColor') : '#8E8E93',
+		section: options.section,
+		Panel: ConsolePanel,
+		install,
+	};
+
+	return {
+		plugin,
+		getEvents: eventStore.getSnapshot,
+		clear: eventStore.clear,
+	};
+}

@@ -1,9 +1,10 @@
-import type { DevToolsPlugin } from '../types';
+import type { DevToolsPillQuickActionOption, DevToolsPlugin } from '../types';
 import {
 	assertUniquePluginIds,
 	groupPlugins,
 	hasPillQuickAction,
 	isPanelPlugin,
+	resolvePillQuickActionOptions,
 } from './plugins';
 
 const Panel = () => null;
@@ -98,6 +99,114 @@ describe('plugin helpers', () => {
 			'Pill quick actions require at least one option for plugin: empty-menu',
 		);
 	});
+
+	it('does not execute dynamic option getters during plugin validation', () => {
+		const options = jest.fn(() => []);
+		const panelPlugin: DevToolsPlugin = {
+			id: 'dynamic-menu',
+			title: 'Dynamic menu',
+			description: 'Runtime options',
+			systemImage: 'ellipsis.circle',
+			Panel,
+			pillQuickAction: { options },
+		};
+
+		expect(() => assertUniquePluginIds([panelPlugin])).not.toThrow();
+		expect(options).not.toHaveBeenCalled();
+	});
+
+	it('rejects option ids reserved for host menu actions', () => {
+		const panelPlugin: DevToolsPlugin = {
+			id: 'reserved-menu',
+			title: 'Reserved menu',
+			description: 'Invalid option id',
+			systemImage: 'ellipsis.circle',
+			Panel,
+			pillQuickAction: {
+				options: [{ id: '__unpin', label: 'Collision', action: () => {} }],
+			},
+		};
+
+		expect(() => assertUniquePluginIds([panelPlugin])).toThrow(
+			'Reserved pill quick-action option id',
+		);
+	});
+
+	it('rejects malformed confirmations instead of silently running the action', () => {
+		const action = jest.fn();
+		const confirmation = {} as Record<string, unknown>;
+		const getter = jest.fn(() => 'Delete everything?');
+		Object.defineProperty(confirmation, 'title', {
+			enumerable: true,
+			get: getter,
+		});
+		const declared = [
+			{
+				id: 'delete',
+				label: 'Delete',
+				action,
+				confirmation,
+			},
+		] as unknown as Parameters<typeof resolvePillQuickActionOptions>[0];
+
+		expect(resolvePillQuickActionOptions(declared)).toEqual([]);
+		expect(getter).not.toHaveBeenCalled();
+	});
+
+	it('detaches validated confirmation data from extension-owned objects', () => {
+		const confirmation = { title: 'Continue?', destructive: true };
+		const resolved = resolvePillQuickActionOptions([
+			{ id: 'continue', label: 'Continue', action: () => {}, confirmation },
+		]);
+		confirmation.title = 'Changed after capture';
+
+		expect(resolved[0]?.confirmation).toEqual({
+			title: 'Continue?',
+			destructive: true,
+		});
+	});
+
+	it('bounds and redacts dynamic option labels before rendering them', () => {
+		const resolved = resolvePillQuickActionOptions([
+			{
+				id: 'inspect',
+				label: `email=person@example.com ${'🏋️'.repeat(200)}`,
+				action: () => {},
+			},
+		]);
+
+		expect(resolved[0]?.label).toContain('email=[REDACTED]');
+		expect(resolved[0]?.label).not.toContain('person@example.com');
+		expect(
+			new TextEncoder().encode(resolved[0]?.label).length,
+		).toBeLessThanOrEqual(256);
+		expect(resolved[0]?.label).not.toContain('\uFFFD');
+	});
+
+	it('does not invoke dynamic option-array accessors', () => {
+		const getter = jest.fn(() => ({
+			id: 'unsafe',
+			label: 'Unsafe',
+			action: () => {},
+		}));
+		const options: unknown[] = [];
+		Object.defineProperty(options, '0', { get: getter });
+		options.length = 1;
+
+		expect(
+			resolvePillQuickActionOptions(
+				() => options as readonly DevToolsPillQuickActionOption[],
+			),
+		).toEqual([]);
+		expect(getter).not.toHaveBeenCalled();
+	});
+
+	it('fails closed for a revoked dynamic option-array proxy', () => {
+		const revoked = Proxy.revocable<DevToolsPillQuickActionOption[]>([], {});
+		revoked.revoke();
+
+		expect(resolvePillQuickActionOptions(() => revoked.proxy)).toEqual([]);
+	});
 });
 
 describe('assertUniquePluginIds', () => {
@@ -113,5 +222,31 @@ describe('assertUniquePluginIds', () => {
 		expect(() => assertUniquePluginIds([panelPlugin, duplicate])).toThrow(
 			'Duplicate developer-tools plugin id: network',
 		);
+	});
+
+	it('rejects static option-array accessors without invoking them', () => {
+		const getter = jest.fn(() => ({
+			id: 'unsafe',
+			label: 'Unsafe',
+			action: () => {},
+		}));
+		const options: unknown[] = [];
+		Object.defineProperty(options, '0', { get: getter });
+		options.length = 1;
+		const plugin: DevToolsPlugin = {
+			id: 'state',
+			title: 'State',
+			description: 'State',
+			systemImage: 'list.bullet',
+			Panel,
+			pillQuickAction: {
+				options: options as readonly DevToolsPillQuickActionOption[],
+			},
+		};
+
+		expect(() => assertUniquePluginIds([plugin])).toThrow(
+			'Invalid pill quick-action option',
+		);
+		expect(getter).not.toHaveBeenCalled();
 	});
 });

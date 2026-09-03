@@ -7,19 +7,17 @@ import {
 	Button as NativeMenuButton,
 } from '@expo/ui/swift-ui';
 import { accessibilityLabel, frame } from '@expo/ui/swift-ui/modifiers';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
+import { resolvePillQuickActionOptions } from '../core/plugins';
 import type {
 	DevToolsActionServices,
+	DevToolsPillQuickAction,
 	DevToolsPillQuickActionOption,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
 import { colors } from './panel-ui';
 import { SystemIcon } from './system-icon';
-
-const subscribeToNothing = () => () => {};
-const getNoSelection = () => null;
-const getNotHighlighted = () => false;
 
 const SLOT_WIDTH = 38;
 const SLOT_HEIGHT = 48;
@@ -31,10 +29,35 @@ type PillQuickActionMenuProps = {
 	onOpenPanel?: () => void;
 };
 
-function resolveOptions(
-	options: DevToolsPluginWithPillQuickAction['pillQuickAction']['options'],
-): readonly DevToolsPillQuickActionOption[] {
-	return typeof options === 'function' ? options() : options;
+type QuickActionSnapshot = {
+	options: readonly DevToolsPillQuickActionOption[];
+	selectedOptionId: string | null;
+	isHighlighted: boolean;
+};
+
+function readQuickActionSnapshot(
+	quickAction: DevToolsPillQuickAction,
+): QuickActionSnapshot {
+	const options = resolvePillQuickActionOptions(quickAction.options);
+	let selectedOptionId: string | null = null;
+	let isHighlighted = false;
+	try {
+		const selected = quickAction.getSelectedOptionId?.();
+		if (
+			typeof selected === 'string' &&
+			options.some((option) => option.id === selected)
+		) {
+			selectedOptionId = selected;
+		}
+	} catch {
+		// Faulty extension state cannot take down the persistent pill.
+	}
+	try {
+		isHighlighted = quickAction.getIsHighlighted?.() === true;
+	} catch {
+		// Use the unhighlighted fallback when the extension getter fails.
+	}
+	return { options, selectedOptionId, isHighlighted };
 }
 
 export function PillQuickActionMenu({
@@ -44,27 +67,33 @@ export function PillQuickActionMenu({
 	onOpenPanel,
 }: PillQuickActionMenuProps) {
 	const { pillQuickAction } = plugin;
-	const subscribe = pillQuickAction.subscribe ?? subscribeToNothing;
-	const selectedOptionId = useSyncExternalStore(
-		subscribe,
-		pillQuickAction.getSelectedOptionId ?? getNoSelection,
-		pillQuickAction.getSelectedOptionId ?? getNoSelection,
-	);
-	const isHighlighted = useSyncExternalStore(
-		subscribe,
-		pillQuickAction.getIsHighlighted ?? getNotHighlighted,
-		pillQuickAction.getIsHighlighted ?? getNotHighlighted,
-	);
-	// Function-typed options produce a fresh array per call, so they cannot be
-	// a useSyncExternalStore snapshot (React would re-render forever). Resolve
-	// once and again on each store notification instead.
-	const [options, setOptions] = useState(() =>
-		resolveOptions(pillQuickAction.options),
+	const [snapshot, setSnapshot] = useState(() =>
+		readQuickActionSnapshot(pillQuickAction),
 	);
 	useEffect(() => {
-		setOptions(resolveOptions(pillQuickAction.options));
-		return subscribe(() => setOptions(resolveOptions(pillQuickAction.options)));
-	}, [subscribe, pillQuickAction]);
+		let active = true;
+		const refresh = () => {
+			if (active) setSnapshot(readQuickActionSnapshot(pillQuickAction));
+		};
+		refresh();
+		let unsubscribe: unknown;
+		try {
+			unsubscribe = pillQuickAction.subscribe?.(refresh);
+		} catch {
+			unsubscribe = undefined;
+		}
+		return () => {
+			active = false;
+			if (typeof unsubscribe === 'function') {
+				try {
+					unsubscribe();
+				} catch {
+					// Continue unmounting even when extension cleanup fails.
+				}
+			}
+		};
+	}, [pillQuickAction]);
+	const { isHighlighted, options, selectedOptionId } = snapshot;
 
 	if (Platform.OS !== 'ios') {
 		const openPanelId = '__open-panel';

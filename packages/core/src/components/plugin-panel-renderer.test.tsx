@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { Text } from 'react-native';
+import { createLazyCustomPlugin } from '../plugins/custom';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
 
@@ -102,6 +104,32 @@ describe('PluginPanelRenderer', () => {
 		expect(onError).toHaveBeenCalledWith(expect.any(Error), 'broken');
 		fireEvent.press(screen.getByText('Return to tools'));
 		expect(panelProps.onBack).toHaveBeenCalledTimes(1);
+		consoleError.mockRestore();
+	});
+
+	it('retries a rejected lazy panel with a fresh load', async () => {
+		const consoleError = jest.spyOn(console, 'error').mockImplementation();
+		let attempts = 0;
+		const plugin = createLazyCustomPlugin({
+			id: 'retryable',
+			title: 'Retryable',
+			description: 'Retries failed imports',
+			systemImage: 'arrow.clockwise',
+			load: async () => {
+				attempts += 1;
+				if (attempts === 1) throw new Error('temporary load failure');
+				return () => <Text>Recovered panel</Text>;
+			},
+		});
+
+		render(<PluginPanelRenderer panelProps={panelProps} plugin={plugin} />);
+
+		expect(
+			await screen.findByText('This tool could not render'),
+		).toBeOnTheScreen();
+		fireEvent.press(screen.getByText('Retry'));
+		expect(await screen.findByText('Recovered panel')).toBeOnTheScreen();
+		expect(attempts).toBe(2);
 		consoleError.mockRestore();
 	});
 });

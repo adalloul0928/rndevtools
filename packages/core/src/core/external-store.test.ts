@@ -1,4 +1,4 @@
-import { BoundedEventStore } from './external-store';
+import { BoundedEventStore, ExternalStore } from './external-store';
 
 describe('BoundedEventStore', () => {
 	it('evicts the oldest events by count', () => {
@@ -75,5 +75,43 @@ describe('BoundedEventStore', () => {
 		store.append(1);
 		expect(store.getSnapshot()).toEqual([]);
 		expect(store.getEstimatedBytes()).toBe(0);
+	});
+
+	it('contains estimator and observer failures', () => {
+		const store = new BoundedEventStore<number>({
+			maxEvents: 2,
+			maxBytes: 10,
+			estimateBytes: () => {
+				throw new Error('estimate failed');
+			},
+		});
+		const healthyListener = jest.fn();
+		store.subscribe(() => {
+			throw new Error('observer failed');
+		});
+		store.subscribe(healthyListener);
+
+		expect(() => store.append(1)).not.toThrow();
+		expect(store.getSnapshot()).toEqual([]);
+
+		const external = new ExternalStore(0);
+		external.subscribe(() => {
+			throw new Error('observer failed');
+		});
+		external.subscribe(healthyListener);
+		expect(() => external.set(1)).not.toThrow();
+		expect(external.getSnapshot()).toBe(1);
+		expect(healthyListener).toHaveBeenCalledTimes(1);
+	});
+
+	it('defers listeners added during an active notification', () => {
+		const store = new ExternalStore(0);
+		const lateListener = jest.fn();
+		store.subscribe(() => store.subscribe(lateListener));
+
+		store.set(1);
+		expect(lateListener).not.toHaveBeenCalled();
+		store.set(2);
+		expect(lateListener).toHaveBeenCalledTimes(1);
 	});
 });

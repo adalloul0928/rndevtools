@@ -5,6 +5,7 @@ import {
 	screen,
 	within,
 } from '@testing-library/react-native';
+import { Platform } from 'react-native';
 import type { DevToolsActionRequest, DevToolsPanelProps } from '../types';
 import {
 	createStoragePlugin,
@@ -418,6 +419,55 @@ describe('storage panel UI', () => {
 		expect(props.onBack).toHaveBeenCalledTimes(1);
 	});
 
+	it('supports inspecting, editing, and deleting a key on Android', async () => {
+		const originalPlatform = Platform.OS;
+		Object.defineProperty(Platform, 'OS', {
+			configurable: true,
+			value: 'android',
+		});
+		try {
+			const setValue = jest.fn();
+			const removeValue = jest.fn();
+			const storage = createStoragePlugin({
+				adapters: [
+					{
+						id: 'app',
+						title: 'App Storage',
+						getAllKeys: () => ['settings/theme'],
+						getValue: () => 'dark',
+						setValue,
+						removeValue,
+					},
+				],
+			});
+			await storage.refresh();
+			const { props, run } = createPanelProps();
+			const Panel = storage.plugin.Panel;
+			render(<Panel {...props} />);
+
+			fireEvent.press(screen.getByText('App Storage'));
+			fireEvent.press(screen.getByText('settings/theme'));
+			fireEvent.changeText(screen.getByPlaceholderText('Value'), 'light');
+			await act(async () => {
+				fireEvent.press(screen.getByText('Save value'));
+			});
+			await act(async () => {
+				fireEvent.press(screen.getByText('Delete key'));
+			});
+
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({ label: 'Save storage value' }),
+			);
+			expect(setValue).toHaveBeenCalledWith('settings/theme', 'light');
+			expect(removeValue).toHaveBeenCalledWith('settings/theme');
+		} finally {
+			Object.defineProperty(Platform, 'OS', {
+				configurable: true,
+				value: originalPlatform,
+			});
+		}
+	});
+
 	it('shows the activity log with diffs and clears the event store', async () => {
 		let value = 'first';
 		const storage = createStoragePlugin({
@@ -537,6 +587,86 @@ describe('createStoragePlugin', () => {
 		});
 	});
 
+	it('bounds adapter snapshots by entry count and reports incomplete validation', async () => {
+		const getValue = jest.fn((key: string) => `value:${key}`);
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () => ['third', 'first', 'second'],
+					getValue,
+				},
+			],
+			maxEntriesPerAdapter: 2,
+			rules: [{ adapterId: 'standard', key: 'third' }],
+		});
+
+		await storage.refresh();
+
+		const snapshot = storage.getSnapshot();
+		expect(snapshot.adapters[0]).toEqual(
+			expect.objectContaining({
+				omittedKeyCount: 1,
+				totalKeyCount: 3,
+				truncated: true,
+			}),
+		);
+		expect(snapshot.adapters[0]?.entries.map((entry) => entry.key)).toEqual([
+			'first',
+			'second',
+		]);
+		expect(getValue).toHaveBeenCalledTimes(2);
+		expect(
+			validateStorageSnapshot(snapshot, [
+				{ adapterId: 'standard', key: 'third' },
+			]),
+		).toEqual([expect.objectContaining({ status: 'notCaptured' })]);
+	});
+
+	it('bounds the serialized bytes retained by each adapter', async () => {
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () => ['first', 'second'],
+					getValue: () => 'x'.repeat(4_096),
+				},
+			],
+			maxAdapterBytes: 512,
+			maxValueBytes: 4_096,
+		});
+
+		await storage.refresh();
+
+		const snapshot = storage.getSnapshot().adapters[0];
+		expect(snapshot?.estimatedBytes).toBeLessThanOrEqual(512);
+		expect(snapshot?.truncated).toBe(true);
+		expect(snapshot?.entries[0]?.truncated).toBe(true);
+	});
+
+	it('does not fabricate activity while either snapshot is incomplete', async () => {
+		let keys = ['first', 'second'];
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () => keys,
+					getValue: (key) => key,
+				},
+			],
+			maxEntriesPerAdapter: 1,
+		});
+
+		await storage.refresh();
+		keys = ['second'];
+		await storage.refresh();
+
+		expect(storage.getEvents()).toEqual([]);
+	});
+
 	it('validates expected keys and records adapter changes after its baseline', async () => {
 		let value = 'first';
 		const storage = createStoragePlugin({
@@ -593,6 +723,64 @@ describe('createStoragePlugin', () => {
 		).toBe(false);
 	});
 
+	it('redacts credential-shaped values and disables edits of altered previews', async () => {
+		const adapter = {
+			id: 'standard',
+			title: 'Standard',
+			getAllKeys: () => ['session'],
+			getValue: () => ({ accessToken: 'private-token', ready: true }),
+			setValue: jest.fn(),
+		};
+		const storage = createStoragePlugin({ adapters: [adapter] });
+
+		await storage.refresh();
+		const entry = storage.getSnapshot().adapters[0]?.entries[0];
+		expect(entry?.value).toContain('[REDACTED]');
+		expect(entry?.value).not.toContain('private-token');
+		expect(entry?.redacted).toBe(true);
+		expect(entry && isStorageEntryEditable(adapter, entry)).toBe(false);
+	});
+
+	it('never invokes accessors returned as storage values or key-list items', async () => {
+		const valueGetter = jest.fn(() => 'must not run');
+		const value = {} as Record<string, unknown>;
+		Object.defineProperty(value, 'unsafe', {
+			enumerable: true,
+			get: valueGetter,
+		});
+		const keys: string[] = [];
+		const keyGetter = jest.fn(() => 'unsafe-key');
+		Object.defineProperty(keys, '0', {
+			enumerable: true,
+			get: keyGetter,
+		});
+		keys.length = 1;
+		const safeStorage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'safe',
+					title: 'Safe',
+					getAllKeys: () => ['value'],
+					getValue: () => value,
+				},
+			],
+		});
+		const unsafeKeys = createStoragePlugin({
+			adapters: [{ id: 'unsafe', title: 'Unsafe', getAllKeys: () => keys }],
+		});
+
+		await safeStorage.refresh();
+		await unsafeKeys.refresh();
+		expect(valueGetter).not.toHaveBeenCalled();
+		expect(keyGetter).not.toHaveBeenCalled();
+		expect(safeStorage.getSnapshot().adapters[0]?.entries[0]?.truncated).toBe(
+			true,
+		);
+		expect(unsafeKeys.getSnapshot().adapters[0]?.error).toContain(
+			'holes or accessors',
+		);
+	});
+
 	it('rolls back subscriptions if a later adapter fails to subscribe', () => {
 		const unsubscribe = jest.fn();
 		const storage = createStoragePlugin({
@@ -615,6 +803,31 @@ describe('createStoragePlugin', () => {
 		});
 
 		expect(() => storage.plugin.install?.()).toThrow('subscribe failed');
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
+	});
+
+	it('rejects invalid subscription disposers and rolls back earlier adapters', () => {
+		const unsubscribe = jest.fn();
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'first',
+					title: 'First',
+					getAllKeys: () => [],
+					subscribe: () => unsubscribe,
+				},
+				{
+					id: 'invalid',
+					title: 'Invalid',
+					getAllKeys: () => [],
+					subscribe: (() => undefined) as unknown as () => () => void,
+				},
+			],
+		});
+
+		expect(() => storage.plugin.install?.()).toThrow(
+			'did not return an unsubscribe function',
+		);
 		expect(unsubscribe).toHaveBeenCalledTimes(1);
 	});
 
@@ -644,6 +857,61 @@ describe('createStoragePlugin', () => {
 		expect(() =>
 			createStoragePlugin({ adapters: [], maxValueBytes: 0 }),
 		).toThrow('maxValueBytes');
+		expect(() =>
+			createStoragePlugin({ adapters: [], maxEntriesPerAdapter: 1.5 }),
+		).toThrow('maxEntriesPerAdapter');
+		expect(() =>
+			createStoragePlugin({ adapters: [], maxAdapterBytes: 0 }),
+		).toThrow('maxAdapterBytes');
+		expect(() =>
+			createStoragePlugin({ adapters: [], maxTotalBytes: 0 }),
+		).toThrow('maxTotalBytes');
+	});
+
+	it('rejects ambiguous adapter registrations', () => {
+		expect(() =>
+			createStoragePlugin({
+				adapters: [
+					{ id: 'duplicate', title: 'First', getAllKeys: () => [] },
+					{ id: 'duplicate', title: 'Second', getAllKeys: () => [] },
+				],
+			}),
+		).toThrow('Duplicate storage adapter id');
+	});
+
+	it('validates storage rules and does not invoke configuration accessors', () => {
+		const adapter = { id: 'standard', title: 'Standard', getAllKeys: () => [] };
+		expect(() =>
+			createStoragePlugin({
+				adapters: [adapter],
+				rules: [{ adapterId: 'missing', key: 'key' }],
+			}),
+		).toThrow('known adapter');
+		expect(() =>
+			createStoragePlugin({
+				adapters: [adapter],
+				rules: [
+					{ adapterId: 'standard', key: 'key' },
+					{ adapterId: 'standard', key: 'key' },
+				],
+			}),
+		).toThrow('Duplicate storage validation rule');
+
+		const getter = jest.fn(() => 'standard');
+		const unsafeRule = { key: 'key' } as Record<string, unknown>;
+		Object.defineProperty(unsafeRule, 'adapterId', {
+			enumerable: true,
+			get: getter,
+		});
+		expect(() =>
+			createStoragePlugin({
+				adapters: [adapter],
+				rules: [unsafeRule] as unknown as Parameters<
+					typeof createStoragePlugin
+				>[0]['rules'],
+			}),
+		).toThrow('cannot be an accessor');
+		expect(getter).not.toHaveBeenCalled();
 	});
 
 	it('restarts an in-flight refresh when the collector lifecycle changes', async () => {
@@ -698,5 +966,111 @@ describe('createStoragePlugin', () => {
 		await Promise.resolve();
 
 		expect(getAllKeys).not.toHaveBeenCalled();
+	});
+
+	it('ignores retained adapter callbacks after reinstallation', async () => {
+		const listeners: Array<() => void> = [];
+		const getAllKeys = jest.fn(() => ['key']);
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys,
+					subscribe: (listener) => {
+						listeners.push(listener);
+						return () => {};
+					},
+				},
+			],
+		});
+		const firstDispose = storage.plugin.install?.();
+		await storage.refresh();
+		const staleListener = listeners[0];
+		firstDispose?.();
+		const secondDispose = storage.plugin.install?.();
+		await storage.refresh();
+		getAllKeys.mockClear();
+
+		staleListener?.();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(getAllKeys).not.toHaveBeenCalled();
+		secondDispose?.();
+	});
+
+	it('keeps another install active when a disposer is called twice', () => {
+		const unsubscribe = jest.fn();
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () => [],
+					subscribe: () => unsubscribe,
+				},
+			],
+		});
+		const firstDispose = storage.plugin.install?.();
+		const secondDispose = storage.plugin.install?.();
+
+		firstDispose?.();
+		firstDispose?.();
+		expect(unsubscribe).not.toHaveBeenCalled();
+		secondDispose?.();
+		expect(unsubscribe).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears loading state when disposed during an in-flight refresh', async () => {
+		let resolveKeys: ((keys: readonly string[]) => void) | undefined;
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () =>
+						new Promise<readonly string[]>((resolve) => {
+							resolveKeys = resolve;
+						}),
+				},
+			],
+		});
+
+		const dispose = storage.plugin.install?.();
+		expect(storage.getSnapshot().loading).toBe(true);
+		dispose?.();
+		expect(storage.getSnapshot().loading).toBe(false);
+
+		resolveKeys?.(['late']);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(storage.getSnapshot().loading).toBe(false);
+		expect(storage.getSnapshot().adapters).toEqual([]);
+	});
+});
+
+describe('storage snapshot key accounting', () => {
+	it('does not count adapter-reported duplicate keys as omitted', async () => {
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'app',
+					title: 'App Storage',
+					description: 'Preferences',
+					// A duplicate is de-duplicated before capture, so nothing was
+					// dropped. Counting it as omitted would flip `truncated`, which makes
+					// validateStorageSnapshot report every rule as `notCaptured`.
+					getAllKeys: () => ['a', 'a', 'b'],
+					getValue: (key: string) => `value-${key}`,
+				},
+			],
+		});
+		await storage.refresh();
+		const adapter = storage.getSnapshot().adapters[0];
+		expect(adapter?.entries.map((entry) => entry.key)).toEqual(['a', 'b']);
+		expect(adapter?.totalKeyCount).toBe(2);
+		expect(adapter?.omittedKeyCount).toBe(0);
+		expect(adapter?.truncated).toBe(false);
 	});
 });

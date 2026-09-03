@@ -26,6 +26,7 @@ import type {
 	DevToolsPlugin,
 	DevToolsPosition,
 	DevToolsPresentationMode,
+	DevToolsRuntimeErrorContext,
 	DevToolsSize,
 	InternalToolsHandle,
 	InternalToolsProps,
@@ -64,6 +65,16 @@ export const InternalTools = forwardRef<
 	}, [plugins]);
 	const onErrorRef = useRef(onError);
 	onErrorRef.current = onError;
+	const reportRuntimeError = useCallback(
+		(error: unknown, context: DevToolsRuntimeErrorContext) => {
+			try {
+				onErrorRef.current?.(error, context);
+			} catch {
+				// Host reporting must never escape the developer-tools boundary.
+			}
+		},
+		[],
+	);
 	const onAuditEventRef = useRef(onAuditEvent);
 	onAuditEventRef.current = onAuditEvent;
 	const localStateVersionRef = useRef(0);
@@ -75,10 +86,10 @@ export const InternalTools = forwardRef<
 		() =>
 			createActionServices({
 				onError: (error, pluginId) =>
-					onErrorRef.current?.(error, { kind: 'action', pluginId }),
+					reportRuntimeError(error, { kind: 'action', pluginId }),
 				onAuditEvent: (event) => onAuditEventRef.current?.(event),
 			}),
-		[],
+		[reportRuntimeError],
 	);
 	const controlledPresentationModeRef = useRef(controlledPresentationMode);
 	controlledPresentationModeRef.current = controlledPresentationMode;
@@ -124,10 +135,10 @@ export const InternalTools = forwardRef<
 
 	useEffect(() => {
 		installerRegistry.current?.setErrorHandler((error, pluginId) => {
-			onErrorRef.current?.(error, { kind: 'collector', pluginId });
+			reportRuntimeError(error, { kind: 'collector', pluginId });
 		});
 		installerRegistry.current?.update(enabled, validatedPlugins);
-	}, [enabled, validatedPlugins]);
+	}, [enabled, reportRuntimeError, validatedPlugins]);
 
 	useEffect(
 		() => () => {
@@ -144,35 +155,44 @@ export const InternalTools = forwardRef<
 		}
 		let active = true;
 		const localStateVersion = localStateVersionRef.current;
-		Promise.resolve(persistenceStorage.getItem(persistenceKey)).then(
-			(value) => {
-				if (!active) return;
-				const state = parsePersistedState(value);
-				if (state && localStateVersionRef.current === localStateVersion) {
-					if (controlledPresentationModeRef.current === undefined) {
-						setUncontrolledPresentationMode(state.presentationMode);
+		Promise.resolve()
+			.then(() => persistenceStorage.getItem(persistenceKey))
+			.then(
+				(value) => {
+					if (!active) return;
+					const state = parsePersistedState(value);
+					if (value !== null && !state) {
+						reportRuntimeError(
+							new Error('Persisted developer-tools state is invalid.'),
+							{ kind: 'persistence' },
+						);
+						return;
 					}
-					setRestoreMode(state.restoreMode);
-					setLauncherPosition(state.launcherPosition);
-					setWindowPosition(state.windowPosition);
-					setWindowSize(state.windowSize);
-					setPillPosition(state.pillPosition);
-					setPinnedPillQuickActionIds(state.pinnedPillQuickActionIds ?? []);
-				}
-				setHydratedPersistenceKey(persistenceKey);
-				setHydratedPersistenceStorage(persistenceStorage);
-			},
-			(error: unknown) => {
-				if (!active) return;
-				onErrorRef.current?.(error, { kind: 'persistence' });
-				setHydratedPersistenceKey(persistenceKey);
-				setHydratedPersistenceStorage(persistenceStorage);
-			},
-		);
+					if (state && localStateVersionRef.current === localStateVersion) {
+						if (controlledPresentationModeRef.current === undefined) {
+							setUncontrolledPresentationMode(state.presentationMode);
+						}
+						setRestoreMode(state.restoreMode);
+						setLauncherPosition(state.launcherPosition);
+						setWindowPosition(state.windowPosition);
+						setWindowSize(state.windowSize);
+						setPillPosition(state.pillPosition);
+						setPinnedPillQuickActionIds(state.pinnedPillQuickActionIds ?? []);
+					}
+					setHydratedPersistenceKey(persistenceKey);
+					setHydratedPersistenceStorage(persistenceStorage);
+				},
+				(error: unknown) => {
+					if (!active) return;
+					// Stay unhydrated on a failed read: writes would persist default
+					// in-memory state over a stored layout we were unable to read.
+					reportRuntimeError(error, { kind: 'persistence' });
+				},
+			);
 		return () => {
 			active = false;
 		};
-	}, [persistenceKey, persistenceStorage]);
+	}, [persistenceKey, persistenceStorage, reportRuntimeError]);
 
 	useEffect(() => {
 		if (
@@ -194,7 +214,7 @@ export const InternalTools = forwardRef<
 		persistenceWriterRef.current
 			.write(persistenceStorage, persistenceKey, state)
 			.catch((error: unknown) =>
-				onErrorRef.current?.(error, { kind: 'persistence' }),
+				reportRuntimeError(error, { kind: 'persistence' }),
 			);
 	}, [
 		hydratedPersistenceKey,
@@ -205,6 +225,7 @@ export const InternalTools = forwardRef<
 		pillPosition,
 		pinnedPillQuickActionIds,
 		presentationMode,
+		reportRuntimeError,
 		restoreMode,
 		windowPosition,
 		windowSize,
@@ -329,9 +350,12 @@ export const InternalTools = forwardRef<
 		[close, open, openPlugin, setPresentationMode],
 	);
 
-	const handlePluginError = useCallback((error: unknown, pluginId: string) => {
-		onErrorRef.current?.(error, { kind: 'panel', pluginId });
-	}, []);
+	const handlePluginError = useCallback(
+		(error: unknown, pluginId: string) => {
+			reportRuntimeError(error, { kind: 'panel', pluginId });
+		},
+		[reportRuntimeError],
+	);
 
 	if (!enabled || !visible) return null;
 
@@ -377,6 +401,8 @@ export const InternalTools = forwardRef<
 					onSelectPlugin={selectPlugin}
 					plugins={validatedPlugins}
 					selectedPlugin={selectedPlugin}
+					pinnedPillQuickActionIds={pinnedPillQuickActionIds}
+					onQuickActionPinnedChange={setQuickActionPinned}
 					title={title}
 					onPluginError={handlePluginError}
 					onPositionChange={(position) =>
@@ -384,6 +410,8 @@ export const InternalTools = forwardRef<
 					}
 					onSizeChange={setPersistedSize}
 					actions={actionServices}
+					homeStatus={homeStatus}
+					onOpenPlugin={openPlugin}
 				/>
 			) : null}
 			{isPresented && presentationMode === 'pill' ? (

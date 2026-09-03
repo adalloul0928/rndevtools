@@ -1,3 +1,5 @@
+import { diagnosticErrorText, sanitizeDiagnosticValue } from './redact';
+
 export type SerializedValue = {
 	text: string;
 	truncated: boolean;
@@ -6,22 +8,23 @@ export type SerializedValue = {
 
 const CIRCULAR_VALUE = '[Circular]';
 
-export function utf8ByteLength(text: string): number {
-	if (typeof TextEncoder !== 'undefined') {
-		return new TextEncoder().encode(text).byteLength;
+function utf8CodePointBytes(text: string, index: number): [number, number] {
+	const code = text.charCodeAt(index);
+	if (code < 0x80) return [1, 1];
+	if (code < 0x800) return [2, 1];
+	if (code >= 0xd800 && code <= 0xdbff) {
+		const next = text.charCodeAt(index + 1);
+		if (next >= 0xdc00 && next <= 0xdfff) return [4, 2];
 	}
+	return [3, 1];
+}
+
+export function utf8ByteLength(text: string): number {
 	let bytes = 0;
-	for (let index = 0; index < text.length; index += 1) {
-		const code = text.charCodeAt(index);
-		if (code < 0x80) bytes += 1;
-		else if (code < 0x800) bytes += 2;
-		else if (code >= 0xd800 && code <= 0xdbff) {
-			const next = text.charCodeAt(index + 1);
-			if (next >= 0xdc00 && next <= 0xdfff) {
-				bytes += 4;
-				index += 1;
-			} else bytes += 3;
-		} else bytes += 3;
+	for (let index = 0; index < text.length; ) {
+		const [codePointBytes, codeUnits] = utf8CodePointBytes(text, index);
+		bytes += codePointBytes;
+		index += codeUnits;
 	}
 	return bytes;
 }
@@ -29,62 +32,40 @@ export function utf8ByteLength(text: string): number {
 function truncateUtf8(text: string, maxBytes: number): SerializedValue {
 	const budget = Number.isFinite(maxBytes)
 		? Math.max(0, Math.floor(maxBytes))
-		: 0;
-	const fullBytes = utf8ByteLength(text);
-	if (fullBytes <= budget) {
-		return { text, truncated: false, estimatedBytes: fullBytes };
-	}
+		: maxBytes === Number.POSITIVE_INFINITY
+			? Number.MAX_SAFE_INTEGER
+			: 0;
 	const ellipsis = '…';
 	const ellipsisBytes = utf8ByteLength(ellipsis);
-	if (budget < ellipsisBytes) {
-		return { text: '', truncated: true, estimatedBytes: 0 };
+	let bytes = 0;
+	let prefixEnd = 0;
+	let prefixBytes = 0;
+	for (let index = 0; index < text.length; ) {
+		const [codePointBytes, codeUnits] = utf8CodePointBytes(text, index);
+		bytes += codePointBytes;
+		index += codeUnits;
+		if (bytes + ellipsisBytes <= budget) {
+			prefixEnd = index;
+			prefixBytes = bytes;
+		}
+		if (bytes > budget) {
+			if (budget < ellipsisBytes) {
+				return { text: '', truncated: true, estimatedBytes: 0 };
+			}
+			return {
+				text: `${text.slice(0, prefixEnd)}${ellipsis}`,
+				truncated: true,
+				estimatedBytes: prefixBytes + ellipsisBytes,
+			};
+		}
 	}
-	let low = 0;
-	let high = text.length;
-	while (low < high) {
-		const middle = Math.ceil((low + high) / 2);
-		const prefix = text.slice(0, middle);
-		if (utf8ByteLength(prefix) + ellipsisBytes <= budget) low = middle;
-		else high = middle - 1;
-	}
-	if (
-		low > 0 &&
-		text.charCodeAt(low - 1) >= 0xd800 &&
-		text.charCodeAt(low - 1) <= 0xdbff
-	) {
-		low -= 1;
-	}
-	const truncatedText = `${text.slice(0, low)}${ellipsis}`;
-	return {
-		text: truncatedText,
-		truncated: true,
-		estimatedBytes: utf8ByteLength(truncatedText),
-	};
+	return { text, truncated: false, estimatedBytes: bytes };
 }
 
 function stringify(value: unknown): string {
-	const seen = new WeakSet<object>();
-	const result = JSON.stringify(
-		value,
-		(_key, nestedValue: unknown) => {
-			if (typeof nestedValue === 'bigint') return `${nestedValue.toString()}n`;
-			if (nestedValue instanceof Error) {
-				return {
-					name: nestedValue.name,
-					message: nestedValue.message,
-					stack: nestedValue.stack,
-				};
-			}
-			if (typeof nestedValue === 'object' && nestedValue !== null) {
-				if (seen.has(nestedValue)) return CIRCULAR_VALUE;
-				seen.add(nestedValue);
-			}
-			return nestedValue;
-		},
-		2,
-	);
+	const result = JSON.stringify(sanitizeDiagnosticValue(value), null, 2);
 
-	return result ?? String(value);
+	return result ?? CIRCULAR_VALUE;
 }
 
 export function serializeValue(
@@ -95,7 +76,7 @@ export function serializeValue(
 	try {
 		text = stringify(value);
 	} catch (error) {
-		text = error instanceof Error ? error.message : String(error);
+		text = diagnosticErrorText(error);
 	}
 
 	return truncateUtf8(text, maxBytes);

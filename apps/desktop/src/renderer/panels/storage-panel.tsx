@@ -1,0 +1,354 @@
+import { Button } from '@heroui/react/button';
+import { Input } from '@heroui/react/input';
+import { Label } from '@heroui/react/label';
+import { TextArea } from '@heroui/react/textarea';
+import { TextField } from '@heroui/react/textfield';
+import {
+	DataGrid,
+	type DataGridColumn,
+	type DataGridSelection,
+} from '@heroui-pro/react/data-grid';
+import { Database, EyeOff, History, Save, ShieldCheck } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+	CodePreview,
+	ConfirmAction,
+	DetailPlaceholder,
+	EmptyPanel,
+	KeyValue,
+	PanelHeader,
+	PanelNotice,
+	SearchControl,
+	StatusPill,
+	Toolbar,
+} from '@/components/ui';
+import { formatBytes, formatRelativeTime } from '@/lib/format';
+import { useDesktopRuntime } from '@/state/desktop-runtime';
+import type { StorageEntry } from '../../shared/protocol';
+
+export function StoragePanel() {
+	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const entries = selectedDevice?.tools.storage ?? [];
+	const events = selectedDevice?.tools.storageEvents ?? [];
+	const summary = selectedDevice?.tools.storageSummary;
+	const [query, setQuery] = useState('');
+	const [adapter, setAdapter] = useState('all');
+	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
+	const [draftState, setDraftState] = useState({
+		deviceId: null as string | null,
+		entryId: null as string | null,
+		sourceValue: '',
+		value: '',
+	});
+
+	const adapters = useMemo(
+		() => [...new Set(entries.map((entry) => entry.adapterTitle))],
+		[entries]
+	);
+	const filtered = useMemo(() => {
+		const needle = query.trim().toLowerCase();
+		return entries.filter(
+			(entry) =>
+				(adapter === 'all' || entry.adapterTitle === adapter) &&
+				(!needle ||
+					[entry.key, entry.valueText, entry.adapterTitle, entry.valueType]
+						.join(' ')
+						.toLowerCase()
+						.includes(needle))
+		);
+	}, [adapter, entries, query]);
+	const selected =
+		filtered.find((entry) => entry.id === selectedId) ?? filtered[0] ?? null;
+	const selectedSourceValue = selected?.valueText ?? '';
+	const draft =
+		draftState.deviceId === selectedDevice?.info.id &&
+		draftState.entryId === selected?.id &&
+		draftState.sourceValue === selectedSourceValue
+			? draftState.value
+			: selectedSourceValue;
+	const selectedEvents = useMemo(
+		() =>
+			selected
+				? events
+						.filter(
+							(event) =>
+								event.adapterId === selected.adapterId && event.key === selected.key
+						)
+						.sort((left, right) => right.at - left.at)
+				: [],
+		[events, selected]
+	);
+
+	useEffect(() => {
+		if (adapter !== 'all' && !adapters.includes(adapter)) setAdapter('all');
+	}, [adapter, adapters]);
+
+	const columns = useMemo<DataGridColumn<StorageEntry>[]>(
+		() => [
+			{
+				id: 'key',
+				header: 'Key',
+				minWidth: 340,
+				isRowHeader: true,
+				cell: (entry) => (
+					<div className="min-w-0 py-0.5">
+						<div className="truncate font-mono text-[11px] text-(--foreground)">
+							{entry.key}
+						</div>
+						<div className="mt-0.5 truncate text-[10px] text-(--text-3)">
+							{entry.adapterTitle}
+						</div>
+					</div>
+				),
+			},
+			{
+				id: 'value',
+				header: 'Value',
+				minWidth: 280,
+				cell: (entry) =>
+					entry.sensitive ? (
+						<span className="flex items-center gap-1.5 text-[11px] text-(--text-3)">
+							<EyeOff className="h-3.5 w-3.5" /> Value intentionally hidden
+						</span>
+					) : (
+						<span className="block truncate font-mono text-[11px] text-(--muted)">
+							{entry.valueText ?? 'undefined'}
+						</span>
+					),
+			},
+			{
+				id: 'type',
+				header: 'Type',
+				width: 92,
+				cell: (entry) => (
+					<StatusPill tone={entry.sensitive ? 'warning' : 'default'}>
+						{entry.valueType}
+					</StatusPill>
+				),
+			},
+			{
+				id: 'size',
+				header: 'Size',
+				width: 80,
+				align: 'end',
+				cell: (entry) => (
+					<span className="font-mono text-[10px] text-(--text-3)">
+						{formatBytes(entry.bytes)}
+					</span>
+				),
+			},
+		],
+		[]
+	);
+
+	function onSelectionChange(selection: DataGridSelection): void {
+		const key = selection === 'all' ? filtered[0]?.id : [...selection][0];
+		setSelectedId(key === undefined ? null : String(key));
+	}
+
+	return (
+		<section className="panel-root">
+			<PanelHeader
+				eyebrow="Inspect"
+				title="Storage"
+				description="Browse standard and encrypted MMKV keys, edit explicitly writable values, and review recent changes."
+				meta={
+					<span className="flex items-center gap-1.5 text-amber-300">
+						<ShieldCheck className="h-3 w-3" /> Secure values never leave device
+					</span>
+				}
+			/>
+			<Toolbar>
+				<SearchControl
+					ariaLabel="Search storage keys"
+					placeholder="Key or value…"
+					value={query}
+					onChange={setQuery}
+				/>
+				<div className="flex items-center gap-1">
+					<Button
+						aria-pressed={adapter === 'all'}
+						className="h-7 rounded-md px-2.5 text-[11px]"
+						size="sm"
+						variant={adapter === 'all' ? 'secondary' : 'ghost'}
+						onPress={() => setAdapter('all')}
+					>
+						All adapters
+					</Button>
+					{adapters.map((value) => (
+						<Button
+							aria-pressed={adapter === value}
+							className="h-7 rounded-md px-2.5 text-[11px]"
+							key={value}
+							size="sm"
+							variant={adapter === value ? 'secondary' : 'ghost'}
+							onPress={() => setAdapter(value)}
+						>
+							<span className="max-w-36 truncate" title={value}>
+								{value.replace(' MMKV', '')}
+							</span>
+						</Button>
+					))}
+				</div>
+				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+					{summary?.totalKeyCount ?? entries.length} keys · {events.length} changes
+				</span>
+			</Toolbar>
+			{summary && (summary.truncated || summary.errors.length > 0) ? (
+				<PanelNotice
+					title="Storage capture incomplete."
+					tone={summary.errors.length > 0 ? 'danger' : 'warning'}
+				>
+					{summary.errors.length > 0
+						? summary.errors
+								.map((error) => `${error.adapterTitle}: ${error.message}`)
+								.join(' · ')
+						: `${summary.omittedKeyCount} ${summary.omittedKeyCount === 1 ? 'key was' : 'keys were'} omitted by the on-device safety budget.`}
+				</PanelNotice>
+			) : null}
+			<div className="split-panel">
+				<div className="min-w-0 overflow-hidden">
+					{filtered.length === 0 ? (
+						<EmptyPanel
+							icon={<Database className="h-5 w-5" />}
+							title="No matching keys"
+							description="Change the adapter or search filters to inspect stored values."
+						/>
+					) : (
+						<DataGrid
+							aria-label="Device storage keys"
+							className="desktop-grid"
+							columns={columns}
+							data={filtered}
+							getRowId={(entry) => entry.id}
+							headingHeight={36}
+							rowHeight={42}
+							selectedKeys={selected ? new Set([selected.id]) : new Set()}
+							selectionMode="single"
+							virtualized
+							onSelectionChange={onSelectionChange}
+						/>
+					)}
+				</div>
+				<aside className="detail-pane">
+					{selected ? (
+						<div className="h-full overflow-auto p-4">
+							<div className="mb-4 flex items-start justify-between gap-3">
+								<div className="min-w-0">
+									<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+										{selected.adapterTitle}
+									</p>
+									<h2 className="mb-0 mt-1 break-all font-mono text-xs font-medium leading-5 text-(--foreground)">
+										{selected.key}
+									</h2>
+								</div>
+								<StatusPill tone={selected.sensitive ? 'warning' : 'default'}>
+									{selected.valueType}
+								</StatusPill>
+							</div>
+							<dl className="mb-4">
+								<KeyValue label="Size" value={formatBytes(selected.bytes)} mono />
+								<KeyValue
+									label="Updated"
+									value={
+										selected.updatedAt
+											? formatRelativeTime(selected.updatedAt)
+											: 'Unknown'
+									}
+								/>
+								<KeyValue label="Writable" value={selected.editable ? 'Yes' : 'No'} />
+							</dl>
+							{selected.sensitive ? (
+								<div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
+									<div className="flex items-center gap-2 text-xs font-medium text-amber-200">
+										<EyeOff className="h-4 w-4" /> Encrypted value hidden
+									</div>
+									<p className="mb-0 mt-2 text-[11px] leading-5 text-amber-100/60">
+										The key is listed for diagnostics, but its value is never read or
+										transmitted to desktop.
+									</p>
+								</div>
+							) : selected.editable ? (
+								<TextField
+									fullWidth
+									value={draft}
+									onChange={(value) =>
+										setDraftState({
+											deviceId: selectedDevice?.info.id ?? null,
+											entryId: selected.id,
+											sourceValue: selectedSourceValue,
+											value,
+										})
+									}
+								>
+									<Label className="mb-2 text-[11px] text-(--muted)">Value</Label>
+									{selected.valueType === 'json' || draft.length > 80 ? (
+										<TextArea className="min-h-40 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-[11px] leading-5 text-(--foreground) outline-none focus:border-white/25" />
+									) : (
+										<Input className="h-9 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-[11px] text-(--foreground)" />
+									)}
+									<div className="mt-3 flex justify-end">
+										<ConfirmAction
+											confirmLabel="Write value"
+											description={`This will replace ${selected.key} in ${selected.adapterTitle}. The change is immediate and is not included in developer-state restore points.`}
+											isDisabled={
+												draft === (selected.valueText ?? '') ||
+												!canRunAction('storage', 'set')
+											}
+											onConfirm={() =>
+												void runAction(
+													'storage',
+													'set',
+													{ id: selected.id, valueText: draft },
+													'Storage value updated.'
+												)
+											}
+											title="Write this storage value?"
+											tone="warning"
+											triggerIcon={<Save className="h-3.5 w-3.5" />}
+											triggerLabel="Save on device"
+											triggerVariant="primary"
+										/>
+									</div>
+								</TextField>
+							) : (
+								<CodePreview label="Value" value={selected.valueText} maxHeight={300} />
+							)}
+							<div className="mt-5 border-t border-white/8 pt-4">
+								<div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+									<History className="h-3.5 w-3.5" /> Recent changes
+								</div>
+								{selectedEvents.length === 0 ? (
+									<p className="text-xs text-(--text-3)">
+										No captured changes for this key.
+									</p>
+								) : (
+									<div className="space-y-2">
+										{selectedEvents.map((event) => (
+											<div
+												className="rounded-md border border-white/8 bg-white/[0.025] p-3"
+												key={event.id}
+											>
+												<div className="flex items-center justify-between text-[10px]">
+													<StatusPill tone="info">{event.kind}</StatusPill>
+													<span className="font-mono text-(--text-3)">
+														{formatRelativeTime(event.at)}
+													</span>
+												</div>
+												<p className="mb-0 mt-2 truncate font-mono text-[10px] text-(--muted)">
+													{event.previousText ?? '∅'} → {event.nextText ?? '∅'}
+												</p>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+						</div>
+					) : (
+						<DetailPlaceholder label="Select a storage key to inspect it" />
+					)}
+				</aside>
+			</div>
+		</section>
+	);
+}

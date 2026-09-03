@@ -1,0 +1,493 @@
+import { Button } from '@heroui/react/button';
+import { Card } from '@heroui/react/card';
+import {
+	Activity,
+	Cpu,
+	Gauge,
+	MemoryStick,
+	Play,
+	Square,
+	TimerReset,
+} from 'lucide-react';
+import { useMemo } from 'react';
+import { PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
+import { formatDuration, formatPercent } from '@/lib/format';
+import { useDesktopRuntime } from '@/state/desktop-runtime';
+import type { PerformanceSample } from '../../shared/protocol';
+
+function average(values: number[]): number | undefined {
+	return values.length === 0
+		? undefined
+		: values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function sparklinePoints(
+	values: number[],
+	width: number,
+	height: number,
+	minValue?: number,
+	maxValue?: number
+): string {
+	if (values.length === 0) return '';
+	const min = minValue ?? Math.min(...values);
+	const max = maxValue ?? Math.max(...values);
+	const range = Math.max(1, max - min);
+	return values
+		.map((value, index) => {
+			const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+			const boundedValue = Math.max(min, Math.min(max, value));
+			const y = height - ((boundedValue - min) / range) * height;
+			return `${x.toFixed(1)},${y.toFixed(1)}`;
+		})
+		.join(' ');
+}
+
+function MetricCard({
+	label,
+	value,
+	suffix,
+	icon,
+	values,
+	tone = 'blue',
+	description,
+	maxValue,
+}: {
+	label: string;
+	value: string;
+	suffix?: string | undefined;
+	icon: React.ReactNode;
+	values: number[];
+	tone?: 'blue' | 'green' | 'amber' | 'violet';
+	description: string;
+	maxValue?: number;
+}) {
+	const colors = {
+		blue: { line: '#52a8ff', bg: 'bg-blue-400/10', text: 'text-blue-300' },
+		green: { line: '#45d483', bg: 'bg-emerald-400/10', text: 'text-emerald-300' },
+		amber: { line: '#f4b942', bg: 'bg-amber-400/10', text: 'text-amber-300' },
+		violet: { line: '#a78bfa', bg: 'bg-violet-400/10', text: 'text-violet-300' },
+	};
+	const color = colors[tone];
+	return (
+		<Card
+			className="relative overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
+			variant="secondary"
+		>
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+						{label}
+					</p>
+					<p className="mb-0 mt-2 font-mono text-2xl font-semibold tracking-[-0.045em] text-(--foreground)">
+						{value}
+						{suffix ? (
+							<span className="ml-1 text-xs font-normal text-(--text-3)">{suffix}</span>
+						) : null}
+					</p>
+				</div>
+				<div
+					className={`grid h-8 w-8 place-items-center rounded-md ${color.bg} ${color.text}`}
+				>
+					{icon}
+				</div>
+			</div>
+			<svg
+				aria-hidden="true"
+				className="mt-4 h-10 w-full overflow-visible"
+				viewBox="0 0 180 40"
+				preserveAspectRatio="none"
+			>
+				<line x1="0" x2="180" y1="39.5" y2="39.5" stroke="rgba(255,255,255,.08)" />
+				<polyline
+					fill="none"
+					points={sparklinePoints(values, 180, 36, 0, maxValue)}
+					stroke={color.line}
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="1.5"
+					vectorEffect="non-scaling-stroke"
+				/>
+			</svg>
+			<p className="mb-0 mt-2 text-[10px] leading-4 text-(--text-3)">{description}</p>
+		</Card>
+	);
+}
+
+function gradeTone(grade: string): 'success' | 'warning' | 'danger' | 'default' {
+	if (grade === 'healthy') return 'success';
+	if (grade === 'needsAttention') return 'warning';
+	if (grade === 'critical') return 'danger';
+	return 'default';
+}
+
+export function PerformancePanel() {
+	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const review = selectedDevice?.tools.performance;
+	const samples = review?.samples ?? [];
+	const latest = samples.at(-1);
+	const summary = review?.summary;
+	const routeStats = useMemo(() => {
+		const byRoute = new Map<string, PerformanceSample[]>();
+		for (const sample of samples) {
+			const route = sample.route ?? 'Unknown route';
+			const routeSamples = byRoute.get(route);
+			if (routeSamples) routeSamples.push(sample);
+			else byRoute.set(route, [sample]);
+		}
+		return [...byRoute.entries()]
+			.map(([route, routeSamples]) => ({
+				route,
+				samples: routeSamples.length,
+				jsFps: average(routeSamples.map((sample) => sample.jsFps)) ?? 0,
+				lag: average(routeSamples.map((sample) => sample.eventLoopLagMs)) ?? 0,
+				longFrames: routeSamples.reduce(
+					(total, sample) => total + sample.longFrames,
+					0
+				),
+			}))
+			.sort((left, right) => right.lag - left.lag);
+	}, [samples]);
+
+	return (
+		<section className="panel-root">
+			<PanelHeader
+				eyebrow="Review"
+				title="Performance"
+				description="Record an interaction window, inspect JS responsiveness, and include native UI, CPU, and memory channels when the device reports them."
+				meta={
+					<StatusPill tone={gradeTone(summary?.grade ?? 'idle')} dot>
+						{summary?.grade === 'needsAttention'
+							? 'Needs attention'
+							: (summary?.grade ?? 'idle')}
+					</StatusPill>
+				}
+				actions={
+					review?.isActive ? (
+						<Button
+							isDisabled={!canRunAction('performance', 'stop')}
+							size="sm"
+							variant="danger-soft"
+							onPress={() =>
+								void runAction('performance', 'stop', {}, 'Performance review stopped.')
+							}
+						>
+							<Square className="h-3 w-3 fill-current" /> Stop review
+						</Button>
+					) : (
+						<Button
+							isDisabled={!canRunAction('performance', 'start')}
+							size="sm"
+							variant="primary"
+							onPress={() =>
+								void runAction(
+									'performance',
+									'start',
+									{},
+									'Performance review started.'
+								)
+							}
+						>
+							<Play className="h-3.5 w-3.5 fill-current" /> Start review
+						</Button>
+					)
+				}
+			/>
+			{review?.error ? (
+				<div className="runtime-banner" role="alert">
+					<strong>Performance collector stopped</strong>
+					<span>{review.error}</span>
+				</div>
+			) : null}
+			{review && review.droppedSampleCount > 0 ? (
+				<PanelNotice title="Earlier performance samples were omitted.">
+					{review.droppedSampleCount} sample
+					{review.droppedSampleCount === 1 ? ' was' : 's were'} dropped by the on-device
+					or desktop capture budget. Charts and route rankings reflect the retained
+					window only.
+				</PanelNotice>
+			) : null}
+			<div className="panel-scroll p-5">
+				<div className="mb-4 grid grid-cols-4 gap-3 max-[1180px]:grid-cols-2">
+					<MetricCard
+						label="JS FPS"
+						value={latest ? Math.round(latest.jsFps).toString() : '—'}
+						suffix="fps"
+						icon={<Gauge className="h-4 w-4" />}
+						values={samples.slice(-60).map((sample) => sample.jsFps)}
+						maxValue={60}
+						description="Animation-frame cadence on the JavaScript runtime."
+					/>
+					<MetricCard
+						label="Event loop lag"
+						value={latest ? latest.eventLoopLagMs.toFixed(1) : '—'}
+						suffix="ms"
+						icon={<TimerReset className="h-4 w-4" />}
+						values={samples.slice(-60).map((sample) => sample.eventLoopLagMs)}
+						tone="amber"
+						description="Scheduler drift that reveals blocked JS interactions."
+					/>
+					<MetricCard
+						label="CPU"
+						value={formatPercent(latest?.cpuPercent)}
+						icon={<Cpu className="h-4 w-4" />}
+						values={samples
+							.slice(-60)
+							.flatMap((sample) =>
+								sample.cpuPercent === undefined ? [] : [sample.cpuPercent]
+							)}
+						maxValue={100}
+						tone="green"
+						description="Native process CPU when the host exposes it."
+					/>
+					<MetricCard
+						label="Memory"
+						value={latest?.memoryMb === undefined ? '—' : latest.memoryMb.toFixed(1)}
+						suffix={latest?.memoryMb === undefined ? undefined : 'MB'}
+						icon={<MemoryStick className="h-4 w-4" />}
+						values={samples
+							.slice(-60)
+							.flatMap((sample) =>
+								sample.memoryMb === undefined ? [] : [sample.memoryMb]
+							)}
+						tone="violet"
+						description="Resident memory when native instrumentation is installed."
+					/>
+				</div>
+
+				<div className="mb-4 grid grid-cols-[minmax(0,1.6fr)_minmax(320px,.8fr)] gap-4 max-[1120px]:grid-cols-1">
+					<Card
+						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
+						variant="secondary"
+					>
+						<Card.Header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+							<div>
+								<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
+									Interaction trace
+								</Card.Title>
+								<Card.Description className="mb-0 mt-1 text-[10px] text-(--text-3)">
+									JS FPS and event-loop lag over the current review
+								</Card.Description>
+							</div>
+							<span className="flex items-center gap-1.5 font-mono text-[10px] text-(--text-3)">
+								<span
+									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-red-400' : 'bg-white/20'}`}
+								/>
+								{review?.isActive ? 'Recording' : `${samples.length} samples`}
+							</span>
+						</Card.Header>
+						<Card.Content className="p-4">
+							<PerformanceTrace samples={samples.slice(-120)} />
+						</Card.Content>
+					</Card>
+					<Card
+						className="rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
+						variant="secondary"
+					>
+						<div className="mb-4 flex items-center gap-2">
+							<Activity className="h-4 w-4 text-blue-300" />
+							<h2 className="m-0 text-xs font-semibold text-(--foreground)">
+								Review summary
+							</h2>
+						</div>
+						<div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/8 bg-white/8">
+							{[
+								['Duration', formatDuration(summary?.durationMs)],
+								['Average JS FPS', summary ? summary.averageJsFps.toFixed(1) : '—'],
+								[
+									'P95 loop lag',
+									summary ? `${summary.p95EventLoopLagMs.toFixed(1)} ms` : '—',
+								],
+								['Long frames', summary?.longFrameCount ?? '—'],
+							].map(([label, value]) => (
+								<div className="bg-[#0a0a0a] p-3" key={label}>
+									<p className="m-0 text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+										{label}
+									</p>
+									<p className="mb-0 mt-1 font-mono text-sm text-(--foreground)">
+										{value}
+									</p>
+								</div>
+							))}
+						</div>
+						<div className="mt-4 rounded-md border border-blue-400/15 bg-blue-400/[0.05] p-3 text-[10px] leading-5 text-blue-100/65">
+							The built-in JS collector does not claim native UI FPS, CPU, or memory.
+							Those channels remain blank unless a native sampler reports them.
+						</div>
+					</Card>
+				</div>
+
+				<div className="grid grid-cols-[minmax(0,1fr)_minmax(420px,1.4fr)] gap-4 max-[1120px]:grid-cols-1">
+					<Card
+						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
+						variant="secondary"
+					>
+						<Card.Header className="border-b border-white/8 px-4 py-3">
+							<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
+								Route ranking
+							</Card.Title>
+						</Card.Header>
+						<Card.Content className="p-0">
+							{routeStats.length === 0 ? (
+								<p className="m-0 p-4 text-[10px] leading-5 text-(--text-3)">
+									Record an interaction to compare responsiveness by route.
+								</p>
+							) : (
+								routeStats.map((route) => (
+									<div
+										className="grid grid-cols-[minmax(0,1fr)_70px_70px] items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+										key={route.route}
+									>
+										<div className="min-w-0">
+											<p className="m-0 truncate font-mono text-[10px] text-(--foreground)">
+												{route.route}
+											</p>
+											<p className="mb-0 mt-1 text-[9px] text-(--text-3)">
+												{route.samples} samples · {route.longFrames} long frames
+											</p>
+										</div>
+										<span className="text-right font-mono text-[10px] text-(--muted)">
+											{route.jsFps.toFixed(1)} fps
+										</span>
+										<span
+											className={`text-right font-mono text-[10px] ${route.lag > 32 ? 'text-amber-300' : 'text-emerald-300'}`}
+										>
+											{route.lag.toFixed(1)} ms
+										</span>
+									</div>
+								))
+							)}
+						</Card.Content>
+					</Card>
+					<Card
+						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
+						variant="secondary"
+					>
+						<Card.Header className="border-b border-white/8 px-4 py-3">
+							<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
+								Latest samples
+							</Card.Title>
+						</Card.Header>
+						<Card.Content className="max-h-[340px] overflow-auto p-0">
+							<table className="w-full border-collapse text-left">
+								<thead className="sticky top-0 bg-[#0b0b0b] text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+									<tr>
+										<th className="px-4 py-2 font-medium">JS FPS</th>
+										<th className="px-3 py-2 font-medium">Loop lag</th>
+										<th className="px-3 py-2 font-medium">Max frame</th>
+										<th className="px-4 py-2 text-right font-medium">Long</th>
+									</tr>
+								</thead>
+								<tbody>
+									{samples.length === 0 ? (
+										<tr>
+											<td
+												className="px-4 py-6 text-center text-[10px] text-(--text-3)"
+												colSpan={4}
+											>
+												No samples recorded yet.
+											</td>
+										</tr>
+									) : (
+										samples
+											.slice(-20)
+											.reverse()
+											.map((sample) => (
+												<tr
+													className="border-t border-white/[0.06] font-mono text-[10px] text-(--muted)"
+													key={sample.id}
+												>
+													<td className="px-4 py-2.5 text-(--foreground)">
+														{sample.jsFps.toFixed(1)}
+													</td>
+													<td
+														className={`px-3 py-2.5 ${sample.eventLoopLagMs > 32 ? 'text-amber-300' : ''}`}
+													>
+														{sample.eventLoopLagMs.toFixed(1)} ms
+													</td>
+													<td className="px-3 py-2.5">
+														{sample.maxFrameMs.toFixed(1)} ms
+													</td>
+													<td className="px-4 py-2.5 text-right">
+														{sample.longFrames}
+													</td>
+												</tr>
+											))
+									)}
+								</tbody>
+							</table>
+						</Card.Content>
+					</Card>
+				</div>
+			</div>
+		</section>
+	);
+}
+
+function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
+	const width = 720;
+	const height = 190;
+	const jsPoints = sparklinePoints(
+		samples.map((sample) => sample.jsFps),
+		width,
+		height - 20,
+		0,
+		60
+	);
+	const lagPoints = sparklinePoints(
+		samples.map((sample) => sample.eventLoopLagMs),
+		width,
+		height - 20,
+		0,
+		Math.max(80, ...samples.map((sample) => sample.eventLoopLagMs))
+	);
+	return (
+		<div>
+			<div className="mb-3 flex items-center gap-4 text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+				<span className="flex items-center gap-1.5">
+					<span className="h-1.5 w-3 rounded-full bg-blue-400" /> JS FPS
+				</span>
+				<span className="flex items-center gap-1.5">
+					<span className="h-1.5 w-3 rounded-full bg-amber-400" /> Loop lag
+				</span>
+			</div>
+			<svg
+				aria-label="Performance trace"
+				className="h-[210px] w-full"
+				role="img"
+				viewBox={`0 0 ${width} ${height}`}
+				preserveAspectRatio="none"
+			>
+				{[0, 1, 2, 3, 4].map((line) => (
+					<line
+						key={line}
+						x1="0"
+						x2={width}
+						y1={(line / 4) * (height - 20)}
+						y2={(line / 4) * (height - 20)}
+						stroke="rgba(255,255,255,.07)"
+						strokeDasharray="3 5"
+					/>
+				))}
+				<polyline
+					fill="none"
+					points={lagPoints}
+					stroke="#f4b942"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeOpacity=".65"
+					strokeWidth="1.25"
+					vectorEffect="non-scaling-stroke"
+				/>
+				<polyline
+					fill="none"
+					points={jsPoints}
+					stroke="#52a8ff"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					strokeWidth="1.75"
+					vectorEffect="non-scaling-stroke"
+				/>
+			</svg>
+		</div>
+	);
+}

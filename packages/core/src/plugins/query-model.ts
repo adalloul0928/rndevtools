@@ -1,9 +1,27 @@
-import type { Mutation, Query, QueryKey } from '@tanstack/react-query';
-import { serializeValue } from '../core/serialize';
+import type { Mutation, Query } from '@tanstack/react-query';
+import { sanitizeDiagnosticValueWithMetadata } from '../core/redact';
+import { serializeValue, truncateText } from '../core/serialize';
+
+const queryDiagnosticIds = new WeakMap<object, string>();
+let nextQueryDiagnosticId = 1;
+
+/**
+ * Returns a session-local identifier without retaining TanStack Query's hash.
+ * Query hashes can contain raw query-key credentials, so they must never be
+ * copied into a diagnostic snapshot.
+ */
+export function queryDiagnosticId(query: Query): string {
+	const existing = queryDiagnosticIds.get(query);
+	if (existing) return existing;
+	const id = `query-${nextQueryDiagnosticId}`;
+	nextQueryDiagnosticId += 1;
+	queryDiagnosticIds.set(query, id);
+	return id;
+}
 
 export type QuerySnapshot = {
 	hash: string;
-	queryKey: QueryKey;
+	keySegments: readonly string[];
 	key: string;
 	status: string;
 	fetchStatus: string;
@@ -20,7 +38,7 @@ export type QuerySnapshot = {
 
 export type MutationSnapshot = {
 	id: number;
-	mutationKey?: QueryKey;
+	keySegments: readonly string[];
 	key: string;
 	status: string;
 	submittedAt: number;
@@ -35,23 +53,61 @@ export type MutationSnapshot = {
 export type QueryPluginSnapshot = {
 	queries: readonly QuerySnapshot[];
 	mutations: readonly MutationSnapshot[];
+	sourceQueryCount: number;
+	omittedQueryCount: number;
+	sourceMutationCount: number;
+	omittedMutationCount: number;
+	error?: string;
 };
+
+function serializedKey(value: unknown): {
+	text: string;
+	segments: readonly string[];
+	truncated: boolean;
+} {
+	const sanitizedResult = sanitizeDiagnosticValueWithMetadata(value);
+	const sanitized = sanitizedResult.value;
+	const key = serializeValue(sanitized, 16 * 1024);
+	const rawSegments = Array.isArray(sanitized) ? sanitized : [sanitized];
+	const segments = rawSegments
+		.slice(0, 32)
+		.map((segment) =>
+			typeof segment === 'string'
+				? truncateText(segment, 512)
+				: serializeValue(segment, 512),
+		);
+	return {
+		text: key.text,
+		segments: segments.map((segment) => segment.text.replace(/\s+/g, ' ')),
+		truncated:
+			sanitizedResult.truncated ||
+			key.truncated ||
+			rawSegments.length > 32 ||
+			segments.some((segment) => segment.truncated),
+	};
+}
 
 export function createQuerySnapshot(
 	query: Query,
 	captureData: boolean,
 	maxSnapshotBytes: number,
 ): QuerySnapshot {
-	const key = serializeValue(query.queryKey, 16 * 1024);
-	const data = captureData
-		? serializeValue(query.state.data, maxSnapshotBytes)
+	const key = serializedKey(query.queryKey);
+	const sanitizedData = captureData
+		? sanitizeDiagnosticValueWithMetadata(query.state.data)
 		: undefined;
-	const error = query.state.error
-		? serializeValue(query.state.error, maxSnapshotBytes)
+	const data = sanitizedData
+		? serializeValue(sanitizedData.value, maxSnapshotBytes)
+		: undefined;
+	const sanitizedError = query.state.error
+		? sanitizeDiagnosticValueWithMetadata(query.state.error)
+		: undefined;
+	const error = sanitizedError
+		? serializeValue(sanitizedError.value, maxSnapshotBytes)
 		: undefined;
 	return {
-		hash: query.queryHash,
-		queryKey: query.queryKey,
+		hash: queryDiagnosticId(query),
+		keySegments: key.segments,
 		key: key.text,
 		status: query.state.status,
 		fetchStatus: query.state.fetchStatus,
@@ -63,7 +119,12 @@ export function createQuerySnapshot(
 		fetchFailureCount: query.state.fetchFailureCount,
 		data: data?.text,
 		error: error?.text,
-		truncated: key.truncated || !!data?.truncated || !!error?.truncated,
+		truncated:
+			key.truncated ||
+			!!sanitizedData?.truncated ||
+			!!data?.truncated ||
+			!!sanitizedError?.truncated ||
+			!!error?.truncated,
 	};
 }
 
@@ -72,22 +133,30 @@ export function createMutationSnapshot<TData, TError, TVariables, TContext>(
 	captureData: boolean,
 	maxSnapshotBytes: number,
 ): MutationSnapshot {
-	const key = serializeValue(
+	const key = serializedKey(
 		mutation.options.mutationKey ?? ['anonymous mutation'],
-		16 * 1024,
 	);
-	const variables = captureData
-		? serializeValue(mutation.state.variables, maxSnapshotBytes)
+	const sanitizedVariables = captureData
+		? sanitizeDiagnosticValueWithMetadata(mutation.state.variables)
 		: undefined;
-	const data = captureData
-		? serializeValue(mutation.state.data, maxSnapshotBytes)
+	const variables = sanitizedVariables
+		? serializeValue(sanitizedVariables.value, maxSnapshotBytes)
 		: undefined;
-	const error = mutation.state.error
-		? serializeValue(mutation.state.error, maxSnapshotBytes)
+	const sanitizedData = captureData
+		? sanitizeDiagnosticValueWithMetadata(mutation.state.data)
+		: undefined;
+	const data = sanitizedData
+		? serializeValue(sanitizedData.value, maxSnapshotBytes)
+		: undefined;
+	const sanitizedError = mutation.state.error
+		? sanitizeDiagnosticValueWithMetadata(mutation.state.error)
+		: undefined;
+	const error = sanitizedError
+		? serializeValue(sanitizedError.value, maxSnapshotBytes)
 		: undefined;
 	return {
 		id: mutation.mutationId,
-		mutationKey: mutation.options.mutationKey,
+		keySegments: key.segments,
 		key: key.text,
 		status: mutation.state.status,
 		submittedAt: mutation.state.submittedAt,
@@ -98,25 +167,11 @@ export function createMutationSnapshot<TData, TError, TVariables, TContext>(
 		error: error?.text,
 		truncated:
 			key.truncated ||
+			!!sanitizedVariables?.truncated ||
 			!!variables?.truncated ||
+			!!sanitizedData?.truncated ||
 			!!data?.truncated ||
+			!!sanitizedError?.truncated ||
 			!!error?.truncated,
 	};
-}
-
-export function limitQuerySnapshotsByBytes<
-	T extends QuerySnapshot | MutationSnapshot,
->(values: readonly T[], budget: number): readonly T[] {
-	const retained: T[] = [];
-	let usedBytes = 0;
-	for (const value of values) {
-		const estimatedBytes = serializeValue(
-			{ ...value, queryKey: undefined, mutationKey: undefined },
-			Number.MAX_SAFE_INTEGER,
-		).estimatedBytes;
-		if (usedBytes + estimatedBytes > budget) continue;
-		retained.push(value);
-		usedBytes += estimatedBytes;
-	}
-	return retained;
 }

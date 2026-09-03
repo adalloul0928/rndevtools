@@ -11,6 +11,7 @@ import {
 	matchesNetworkSegment,
 	type NetworkEvent,
 	networkEventLabel,
+	networkReplayBlockReason,
 	networkRequestPath,
 	networkRowSubtitle,
 	networkStatusPresentation,
@@ -19,6 +20,7 @@ import {
 	responseBodySummaryText,
 	summarizeNetworkEvents,
 } from './network';
+import { defaultRedactBody } from './network-capture';
 
 function networkEvent(overrides: Partial<NetworkEvent> = {}): NetworkEvent {
 	return {
@@ -121,6 +123,41 @@ describe('createNetworkPlugin', () => {
 		dispose?.();
 	});
 
+	it('keeps diagnostic projection failures from changing fetch behavior', async () => {
+		const diagnostics = createNetworkPlugin({ captureBody: true });
+		const dispose = diagnostics.plugin.install?.();
+		const input = Object.create(null) as { url?: string };
+		Object.defineProperty(input, 'url', {
+			get() {
+				throw new Error('diagnostic URL getter failed');
+			},
+		});
+		const expectedResponse = Object.create(null) as Response;
+		Object.defineProperty(expectedResponse, 'headers', {
+			get() {
+				throw new Error('diagnostic headers getter failed');
+			},
+		});
+		const fetchImplementation = jest
+			.fn()
+			.mockResolvedValue(expectedResponse) as unknown as typeof fetch;
+
+		const actualResponse = await diagnostics.instrumentFetch(
+			fetchImplementation,
+		)(input as Request);
+		await flushCapture();
+
+		expect(actualResponse).toBe(expectedResponse);
+		expect(diagnostics.getEvents()[0]).toEqual(
+			expect.objectContaining({
+				state: 'success',
+				url: '[URL unavailable]',
+				responseBody: '[Body omitted: diagnostics capture failed]',
+			}),
+		);
+		dispose?.();
+	});
+
 	it('records pending requests immediately and redacts URLs and JSON bodies', async () => {
 		const diagnostics = createNetworkPlugin({ captureBody: true });
 		const dispose = diagnostics.plugin.install?.();
@@ -143,7 +180,7 @@ describe('createNetworkPlugin', () => {
 		expect(diagnostics.getEvents()).toEqual([
 			expect.objectContaining({ state: 'pending', method: 'POST' }),
 		]);
-		expect(diagnostics.getEvents()[0]?.url).toContain('token=%5BREDACTED%5D');
+		expect(diagnostics.getEvents()[0]?.url).toContain('token=[REDACTED]');
 
 		resolveFetch?.(response('{"session":"secret","ok":true}'));
 		await request;
@@ -157,6 +194,96 @@ describe('createNetworkPlugin', () => {
 			}),
 		);
 		expect(JSON.stringify(diagnostics.getEvents()[0])).not.toContain('secret');
+		dispose?.();
+	});
+
+	it('does not retain late response data after the collector is disposed', async () => {
+		const diagnostics = createNetworkPlugin({
+			captureBody: true,
+			captureUnknownLengthBodies: true,
+		});
+		const dispose = diagnostics.plugin.install?.();
+		let resolveFetch: ((value: Response) => void) | undefined;
+		const fetchImplementation = jest.fn(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve;
+				}),
+		) as unknown as typeof fetch;
+		const request = diagnostics.instrumentFetch(fetchImplementation)(
+			'https://example.test/private',
+		);
+
+		dispose?.();
+		expect(diagnostics.getEvents()[0]).toEqual(
+			expect.objectContaining({
+				state: 'aborted',
+				error: '[Capture stopped before response]',
+			}),
+		);
+		resolveFetch?.(response('{"token":"late-secret"}'));
+		await request;
+		await flushCapture();
+
+		expect(JSON.stringify(diagnostics.getEvents())).not.toContain(
+			'late-secret',
+		);
+		expect(diagnostics.getEvents()[0]?.state).toBe('aborted');
+	});
+
+	it('redacts relative URLs and bodies before applying the retained byte cap', async () => {
+		const diagnostics = createNetworkPlugin({
+			captureBody: true,
+			maxBodyBytes: 96,
+		});
+		const dispose = diagnostics.plugin.install?.();
+		const fetchImplementation = jest
+			.fn()
+			.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch;
+
+		await diagnostics.instrumentFetch(fetchImplementation)(
+			'/items?accessToken=url-secret&visible=yes',
+			{
+				method: 'POST',
+				body: JSON.stringify({
+					password: 'body-secret',
+					content: 'x'.repeat(500),
+				}),
+			},
+		);
+		await flushCapture();
+
+		const captured = JSON.stringify(diagnostics.getEvents()[0]);
+		expect(captured).toContain('[REDACTED]');
+		expect(captured).not.toContain('url-secret');
+		expect(captured).not.toContain('body-secret');
+		expect(diagnostics.getEvents()[0]?.requestSizeBytes).toBeLessThanOrEqual(
+			96,
+		);
+		dispose?.();
+	});
+
+	it('omits unsupported request body objects instead of serializing them', async () => {
+		const diagnostics = createNetworkPlugin({ captureBody: true });
+		const dispose = diagnostics.plugin.install?.();
+		const unsupportedBody = {
+			get privateValue() {
+				throw new Error('body getter must not run');
+			},
+		};
+		const fetchImplementation = jest
+			.fn()
+			.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch;
+
+		await diagnostics.instrumentFetch(fetchImplementation)(
+			'https://example.test',
+			{ method: 'POST', body: unsupportedBody as unknown as BodyInit },
+		);
+		await flushCapture();
+
+		expect(diagnostics.getEvents()[0]?.requestBody).toBe(
+			'[Unsupported request body omitted]',
+		);
 		dispose?.();
 	});
 
@@ -201,6 +328,96 @@ describe('createNetworkPlugin', () => {
 		dispose?.();
 		expect(globalThis.fetch).toBe(baseFetch);
 		globalThis.fetch = previousFetch;
+	});
+
+	it('composes multiple global fetch collectors and restores either disposal order', () => {
+		const previousFetch = globalThis.fetch;
+		const baseFetch = jest.fn() as unknown as typeof fetch;
+		try {
+			for (const disposeFirst of ['first', 'second'] as const) {
+				globalThis.fetch = baseFetch;
+				const first = createNetworkPlugin({ patchGlobalFetch: true });
+				const second = createNetworkPlugin({ patchGlobalFetch: true });
+				const disposeFirstPlugin = first.plugin.install?.();
+				const disposeSecondPlugin = second.plugin.install?.();
+				expect(globalThis.fetch).not.toBe(baseFetch);
+				if (disposeFirst === 'first') {
+					disposeFirstPlugin?.();
+					disposeSecondPlugin?.();
+				} else {
+					disposeSecondPlugin?.();
+					disposeFirstPlugin?.();
+				}
+				expect(globalThis.fetch).toBe(baseFetch);
+			}
+		} finally {
+			globalThis.fetch = previousFetch;
+		}
+	});
+
+	it('rolls back global fetch bookkeeping when patch installation fails', () => {
+		const previousDescriptor = Object.getOwnPropertyDescriptor(
+			globalThis,
+			'fetch',
+		);
+		const baseFetch = jest.fn() as unknown as typeof fetch;
+		try {
+			Object.defineProperty(globalThis, 'fetch', {
+				configurable: true,
+				enumerable: previousDescriptor?.enumerable ?? true,
+				get: () => baseFetch,
+				set: () => {
+					throw new Error('fetch is read-only');
+				},
+			});
+			const failed = createNetworkPlugin({ patchGlobalFetch: true });
+			expect(() => failed.plugin.install?.()).toThrow('fetch is read-only');
+
+			Object.defineProperty(globalThis, 'fetch', {
+				configurable: true,
+				enumerable: previousDescriptor?.enumerable ?? true,
+				value: baseFetch,
+				writable: true,
+			});
+			const recovered = createNetworkPlugin({ patchGlobalFetch: true });
+			const dispose = recovered.plugin.install?.();
+			expect(globalThis.fetch).not.toBe(baseFetch);
+			dispose?.();
+			expect(globalThis.fetch).toBe(baseFetch);
+		} finally {
+			if (previousDescriptor) {
+				Object.defineProperty(globalThis, 'fetch', previousDescriptor);
+			} else {
+				Reflect.deleteProperty(globalThis, 'fetch');
+			}
+		}
+	});
+
+	it('runs baseline redaction after host-provided redactors', async () => {
+		const diagnostics = createNetworkPlugin({
+			captureBody: true,
+			redactBody: () => '{"token":"private-body"}',
+			redactHeader: () => 'token=private-header',
+			redactUrl: () => 'https://example.test?token=private-url',
+			sourceLabel: 'email=person@example.com',
+		});
+		const dispose = diagnostics.plugin.install?.();
+		const fetchImplementation = jest
+			.fn()
+			.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch;
+
+		await diagnostics.instrumentFetch(fetchImplementation)(
+			'https://example.test?token=raw',
+			{ headers: { 'x-debug': 'value' }, body: 'value', method: 'POST' },
+		);
+		await flushCapture();
+
+		const captured = JSON.stringify(diagnostics.getEvents());
+		expect(captured).not.toContain('private-body');
+		expect(captured).not.toContain('private-header');
+		expect(captured).not.toContain('private-url');
+		expect(captured).not.toContain('person@example.com');
+		dispose?.();
 	});
 
 	it('omits unknown-length bodies by default without reporting a zero size', async () => {
@@ -258,6 +475,9 @@ describe('createNetworkPlugin', () => {
 	it('rejects invalid body bounds', () => {
 		expect(() => createNetworkPlugin({ maxBodyBytes: 0 })).toThrow(
 			'maxBodyBytes',
+		);
+		expect(() => createNetworkPlugin({ maxEvents: 10_001 })).toThrow(
+			'maxEvents cannot exceed',
 		);
 	});
 
@@ -363,6 +583,17 @@ describe('network presentation model', () => {
 		).toBe(true);
 		expect(
 			matchesNetworkSegment(networkEvent({ durationMs: 800 }), 'slow'),
+		).toBe(false);
+	});
+
+	it('hides the Metro dev server on an IPv6 loopback authority', () => {
+		// `URL.host` brackets IPv6, so splitting on the first colon used to yield
+		// '[' as the hostname and drop the port, leaving dev-server traffic visible.
+		expect(
+			isSystemNetworkEvent(networkEvent({ url: 'http://[::1]:8081/status' })),
+		).toBe(true);
+		expect(
+			isSystemNetworkEvent(networkEvent({ url: 'http://[::1]:443/v1/me' })),
 		).toBe(false);
 	});
 
@@ -569,5 +800,70 @@ describe('network presentation model', () => {
 		);
 		expect(command).toContain("-H 'content-type: application/json'");
 		expect(command).toContain(`--data '{"name":"Bench"}'`);
+	});
+
+	describe('replay safety', () => {
+		it('allows replay only when nothing was redacted or dropped', () => {
+			expect(
+				networkReplayBlockReason(
+					networkEvent({
+						method: 'POST',
+						requestBody: defaultRedactBody('{"sets":[1,2,3]}'),
+					}),
+				),
+			).toBeUndefined();
+		});
+
+		it('blocks replay when the projection dropped array entries', () => {
+			// The per-level entry cap silently shortens the array, so the projected
+			// body still parses as JSON and would otherwise look complete.
+			const body = defaultRedactBody(
+				JSON.stringify({ sets: Array.from({ length: 150 }, (_, i) => i) }),
+			);
+			expect(
+				JSON.parse(body.split('\n[Body truncated')[0] ?? '').sets,
+			).toHaveLength(100);
+			expect(
+				networkReplayBlockReason(
+					networkEvent({ method: 'POST', requestBody: body }),
+				),
+			).toBeDefined();
+		});
+
+		it('blocks replay when the projection hit its depth limit', () => {
+			let nested: Record<string, unknown> = { leaf: true };
+			for (let depth = 0; depth < 12; depth += 1) nested = { nested };
+			expect(
+				networkReplayBlockReason(
+					networkEvent({
+						method: 'POST',
+						requestBody: defaultRedactBody(JSON.stringify(nested)),
+					}),
+				),
+			).toBeDefined();
+		});
+
+		it('blocks replay of a body cut at the capture size limit', () => {
+			expect(
+				networkReplayBlockReason(
+					networkEvent({ method: 'POST', requestBody: '{"name":"Ben…' }),
+				),
+			).toBe(
+				'The captured request body was truncated at the capture size limit.',
+			);
+		});
+
+		it('blocks replay when a header or the URL was redacted', () => {
+			expect(
+				networkReplayBlockReason(
+					networkEvent({ requestHeaders: { authorization: '[REDACTED]' } }),
+				),
+			).toBe('One or more request headers were redacted.');
+			expect(
+				networkReplayBlockReason(
+					networkEvent({ url: 'https://example.test/items?token=[REDACTED]' }),
+				),
+			).toBe('The captured URL contains omitted or redacted data.');
+		});
 	});
 });

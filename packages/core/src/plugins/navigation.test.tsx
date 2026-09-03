@@ -7,6 +7,7 @@ import {
 import { Platform } from 'react-native';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
 import {
+	buildNavigationRoutePath,
 	createNavigationPlugin,
 	getPinnedRoutes,
 	inferNavigationRouteKind,
@@ -201,6 +202,27 @@ describe('createNavigationPlugin', () => {
 		expect(navigation.getStack()[0]?.visible).toBe(true);
 	});
 
+	it('keeps pinned routes when the route catalog has not resolved yet', () => {
+		const pluginId = 'navigation-empty-catalog';
+		const navigation = createNavigationPlugin({ id: pluginId });
+		navigation.updateRoutes([
+			{ id: 'home', path: '/home', kind: inferNavigationRouteKind('/home') },
+		]);
+		setRoutePinned('/home', true, pluginId);
+		expect(getPinnedRoutes(pluginId)).toEqual(['/home']);
+
+		// Expo Router reports a null sitemap until the root navigator mounts, so
+		// the host sends an empty inventory on every launch.
+		navigation.updateRoutes([]);
+		expect(getPinnedRoutes(pluginId)).toEqual(['/home']);
+
+		// A populated inventory that genuinely drops the route still prunes it.
+		navigation.updateRoutes([
+			{ id: 'other', path: '/other', kind: inferNavigationRouteKind('/other') },
+		]);
+		expect(getPinnedRoutes(pluginId)).toEqual([]);
+	});
+
 	it('records metadata changes and identifies grouped layout routes as layouts', () => {
 		const navigation = createNavigationPlugin();
 		navigation.record('/home', { metadata: { source: 'tab' } });
@@ -208,6 +230,99 @@ describe('createNavigationPlugin', () => {
 
 		expect(navigation.getEvents()).toHaveLength(2);
 		expect(inferNavigationRouteKind('(tabs)/_layout')).toBe('layout');
+	});
+
+	it('detaches and redacts retained route metadata and stack params', () => {
+		const navigation = createNavigationPlugin();
+		const metadata = { email: 'person@example.com', nested: { count: 1 } };
+		const params = { accessToken: 'secret', nested: { count: 2 } };
+		navigation.record('/profile/person@example.com', { metadata });
+		navigation.updateStack([
+			{ key: 'profile', name: 'profile', depth: 0, visible: true, params },
+		]);
+		metadata.nested.count = 9;
+		params.nested.count = 9;
+
+		expect(navigation.getEvents()[0]).toMatchObject({
+			route: '/profile/[REDACTED EMAIL]',
+			metadata: { email: '[REDACTED]', nested: { count: 1 } },
+		});
+		expect(navigation.getStack()[0]?.params).toMatchObject({
+			accessToken: '[REDACTED]',
+			nested: { count: 2 },
+		});
+	});
+
+	it('bounds route and stack inventories', () => {
+		const navigation = createNavigationPlugin({
+			maxRoutes: 2,
+			maxStackEntries: 1,
+		});
+		navigation.updateRoutes([
+			{ id: 'c', path: '/c', kind: 'static' },
+			{ id: 'a', path: '/a', kind: 'static' },
+			{ id: 'b', path: '/b', kind: 'static' },
+		]);
+		navigation.updateStack([
+			{ key: 'a', name: 'a', depth: 0, visible: true },
+			{ key: 'b', name: 'b', depth: 1, visible: false },
+		]);
+
+		expect(navigation.getRoutes().map((route) => route.path)).toEqual([
+			'/a',
+			'/b',
+		]);
+		expect(navigation.getStack()).toHaveLength(1);
+	});
+
+	it('does not invoke accessors while normalizing route diagnostics', () => {
+		const getter = jest.fn(() => '/unsafe');
+		const route = { id: 'unsafe', kind: 'static' } as Record<string, unknown>;
+		Object.defineProperty(route, 'path', {
+			enumerable: true,
+			get: getter,
+		});
+		const segmentList: string[] = [];
+		Object.defineProperty(segmentList, '0', {
+			enumerable: true,
+			get: getter,
+		});
+		segmentList.length = 1;
+		const navigation = createNavigationPlugin();
+
+		navigation.updateRoutes([route] as unknown as Parameters<
+			typeof navigation.updateRoutes
+		>[0]);
+		navigation.record('/safe', { segments: segmentList });
+
+		expect(getter).not.toHaveBeenCalled();
+		expect(navigation.getRoutes()).toEqual([]);
+		expect(navigation.getEvents()[0]).toMatchObject({ route: '/safe' });
+	});
+
+	it('caps navigation configuration at safe upper bounds', () => {
+		expect(() => createNavigationPlugin({ maxRoutes: 10_001 })).toThrow(
+			'maxRoutes cannot exceed',
+		);
+		expect(() => createNavigationPlugin({ maxEvents: 10_001 })).toThrow(
+			'maxEvents cannot exceed',
+		);
+	});
+
+	it('encodes dynamic and catch-all route values', () => {
+		expect(buildNavigationRoutePath('/users/[id]', { id: 'a/b c' })).toBe(
+			'/users/a%2Fb%20c',
+		);
+		expect(
+			buildNavigationRoutePath('/docs/[...slug]', {
+				slug: 'guide/a b',
+			}),
+		).toBe('/docs/guide/a%20b');
+		const getter = jest.fn(() => 'unsafe');
+		const values = {} as Record<string, string>;
+		Object.defineProperty(values, 'id', { enumerable: true, get: getter });
+		expect(buildNavigationRoutePath('/users/[id]', values)).toBe('/users/[id]');
+		expect(getter).not.toHaveBeenCalled();
 	});
 
 	it('defaults to the Screens title while keeping the navigation plugin id', () => {
@@ -239,16 +354,33 @@ describe('Screens panel', () => {
 		try {
 			const onNavigate = jest.fn();
 			const navigation = createNavigationPlugin({ onNavigate });
+			navigation.record('/plan');
 			navigation.updateRoutes([
 				{ id: 'block', path: '/plan/block/[blockId]', kind: 'dynamic' },
 			]);
+			navigation.updateStack([
+				{ key: 'plan', name: 'plan', depth: 0, visible: true },
+			]);
 
 			renderPanel(navigation.plugin);
-			fireEvent.press(screen.getByText('Block Id'));
+			expect(screen.getByText('Stack · 1')).toBeOnTheScreen();
+			fireEvent.press(screen.getByText('Pin screen'));
+			expect(getPinnedRoutes()).toContain('/plan/block/[blockId]');
+			const blockRoute = screen.getAllByText('Block Id')[0];
+			if (!blockRoute) throw new Error('Expected an Android route row.');
+			fireEvent.press(blockRoute);
 			fireEvent.changeText(screen.getByPlaceholderText('blockId'), 'blk_81');
 			fireEvent.press(screen.getByText('Go'));
 
 			expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
+			fireEvent.press(screen.getByText('Clear history'));
+			expect(navigation.getEvents()).toEqual([]);
+			expect(panelProps.actions.run).toHaveBeenCalledWith(
+				expect.objectContaining({
+					label: 'Clear navigation history',
+					confirmation: expect.objectContaining({ destructive: true }),
+				}),
+			);
 		} finally {
 			Object.defineProperty(Platform, 'OS', {
 				configurable: true,

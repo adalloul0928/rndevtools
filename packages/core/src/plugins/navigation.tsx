@@ -39,52 +39,66 @@ import {
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
+import { formatRelativeTime } from '../core/format';
 import { serializeValue } from '../core/serialize';
 import type {
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
-import { formatRelativeTime } from './query';
+import {
+	buildNavigationRoutePath,
+	DEFAULT_MAX_CATALOG_BYTES,
+	DEFAULT_MAX_ROUTES,
+	DEFAULT_MAX_STACK_ENTRIES,
+	getPinnedRoutes,
+	getScreensSessionStore,
+	MAX_NAVIGATION_CATALOG_BYTES,
+	MAX_NAVIGATION_EVENTS,
+	MAX_NAVIGATION_ROUTES,
+	MAX_NAVIGATION_STACK_ENTRIES,
+	type NavigationAction,
+	type NavigationEvent,
+	type NavigationRouteDescriptor,
+	type NavigationStackEntry,
+	navigationRouteDisplayName,
+	normalizeNavigationRecordOptions,
+	normalizeNavigationRoutes,
+	normalizeNavigationStack,
+	normalizeNavigationText,
+	positiveIntegerOption,
+	rememberParamValues,
+	routeGroupLabel,
+	routeMatches,
+	routeParamNames,
+	setRoutePinned,
+	stripGroupParens,
+	subscribePinnedRoutes,
+	truncateMiddleValue,
+} from './navigation-model';
 
-export type NavigationEvent = {
-	id: number;
-	at: number;
-	route: string;
-	segments?: readonly string[];
-	metadata?: Readonly<Record<string, unknown>>;
-};
-export type NavigationAction = {
-	id: string;
-	title: string;
-	run: () => unknown | Promise<unknown>;
-};
-export type NavigationRouteKind =
-	| 'static'
-	| 'dynamic'
-	| 'catchAll'
-	| 'layout'
-	| 'group'
-	| 'internal';
-export type NavigationRouteDescriptor = {
-	id: string;
-	path: string;
-	kind: NavigationRouteKind;
-	filename?: string;
-	isInitial?: boolean;
-	isInternal?: boolean;
-};
-export type NavigationStackEntry = {
-	key: string;
-	name: string;
-	path?: string;
-	depth: number;
-	visible: boolean;
-	params?: Readonly<Record<string, unknown>>;
-};
+export type {
+	NavigationAction,
+	NavigationEvent,
+	NavigationRouteDescriptor,
+	NavigationRouteKind,
+	NavigationStackEntry,
+} from './navigation-model';
+export {
+	buildNavigationRoutePath,
+	getPinnedRoutes,
+	inferNavigationRouteKind,
+	navigationRouteDisplayName,
+	setRoutePinned,
+	subscribePinnedRoutes,
+} from './navigation-model';
+
 export type NavigationPluginOptions = {
 	actions?: readonly NavigationAction[];
 	maxEvents?: number;
+	maxRoutes?: number;
+	maxStackEntries?: number;
+	maxCatalogBytes?: number;
 	title?: string;
 	id?: string;
 	description?: string;
@@ -116,134 +130,6 @@ export type NavigationPlugin = {
 	getStack: () => readonly NavigationStackEntry[];
 };
 
-type ScreensSessionState = {
-	pinnedPaths: readonly string[];
-	lastParamValues: Readonly<Record<string, string>>;
-};
-
-/**
- * Session-scoped pins and remembered dynamic-route param values. Module-level
- * so both survive panel re-mounts within an app session, and so hosts can
- * mirror pinned routes into pill quick actions.
- */
-const screensSessionStore = new ExternalStore<ScreensSessionState>({
-	pinnedPaths: [],
-	lastParamValues: {},
-});
-
-export function getPinnedRoutes(): readonly string[] {
-	return screensSessionStore.getSnapshot().pinnedPaths;
-}
-
-export function subscribePinnedRoutes(listener: () => void): () => void {
-	return screensSessionStore.subscribe(listener);
-}
-
-export function setRoutePinned(path: string, pinned: boolean): void {
-	const state = screensSessionStore.getSnapshot();
-	if (pinned === state.pinnedPaths.includes(path)) return;
-	screensSessionStore.set({
-		...state,
-		pinnedPaths: pinned
-			? [...state.pinnedPaths, path]
-			: state.pinnedPaths.filter((candidate) => candidate !== path),
-	});
-}
-
-function rememberParamValues(values: Readonly<Record<string, string>>): void {
-	const state = screensSessionStore.getSnapshot();
-	screensSessionStore.set({
-		...state,
-		lastParamValues: { ...state.lastParamValues, ...values },
-	});
-}
-
-function isParamSegment(segment: string): boolean {
-	return segment.startsWith('[') && segment.endsWith(']');
-}
-
-function paramNameFromSegment(segment: string): string {
-	return segment.replace(/^\[+\.{0,3}|\]+$/g, '');
-}
-
-function stripGroupParens(segment: string): string {
-	return segment.replace(/^\(+|\)+$/g, '');
-}
-
-/** Derives a human name from the last meaningful path segment. */
-export function navigationRouteDisplayName(path: string): string {
-	const segments = path
-		.split('/')
-		.filter(
-			(segment) => segment && segment !== 'index' && segment !== '_layout',
-		);
-	const last = segments.at(-1);
-	if (!last) return 'Root';
-	const words = paramNameFromSegment(stripGroupParens(last))
-		.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-		.split(/[-_.\s]+/)
-		.filter(Boolean);
-	if (words.length === 0) return 'Root';
-	return words
-		.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
-		.join(' ');
-}
-
-function routeGroupLabel(path: string): string {
-	const first = path.split('/').find((segment) => segment.length > 0);
-	if (!first) return 'ROOT';
-	const cleaned = paramNameFromSegment(stripGroupParens(first));
-	return cleaned ? cleaned.toUpperCase() : 'ROOT';
-}
-
-function routeParamNames(path: string): readonly string[] {
-	return path.split('/').filter(isParamSegment).map(paramNameFromSegment);
-}
-
-function buildRoutePath(
-	path: string,
-	values: Readonly<Record<string, string>>,
-): string {
-	return path
-		.split('/')
-		.map((segment) =>
-			isParamSegment(segment)
-				? (values[paramNameFromSegment(segment)] ?? segment)
-				: segment,
-		)
-		.join('/');
-}
-
-function routeMatches(path: string, needle: string): boolean {
-	if (!needle) return true;
-	return (
-		path.toLowerCase().includes(needle) ||
-		navigationRouteDisplayName(path).toLowerCase().includes(needle)
-	);
-}
-
-function truncateMiddleValue(value: string, maxLength = 18): string {
-	if (value.length <= maxLength) return value;
-	return `${value.slice(0, maxLength - 1)}…`;
-}
-
-export function inferNavigationRouteKind(
-	path: string,
-	isInternal = false,
-): NavigationRouteKind {
-	if (isInternal) return 'internal';
-	if (path.endsWith('/_layout') || path === '_layout') return 'layout';
-	if (path.includes('[...') || path.includes('[[...')) return 'catchAll';
-	if (path.includes('[')) return 'dynamic';
-	if (
-		path
-			.split('/')
-			.some((segment) => segment.startsWith('(') && segment.endsWith(')'))
-	)
-		return 'group';
-	return 'static';
-}
-
 const secondaryText = () => [
 	font({ textStyle: 'footnote' }),
 	foregroundStyle({ type: 'hierarchical', style: 'secondary' }),
@@ -269,8 +155,33 @@ export function createNavigationPlugin(
 ): NavigationPlugin {
 	const title = options.title ?? 'Screens';
 	const id = options.id ?? 'navigation';
+	const maxRoutes = positiveIntegerOption(
+		options.maxRoutes,
+		DEFAULT_MAX_ROUTES,
+		'maxRoutes',
+		MAX_NAVIGATION_ROUTES,
+	);
+	const maxStackEntries = positiveIntegerOption(
+		options.maxStackEntries,
+		DEFAULT_MAX_STACK_ENTRIES,
+		'maxStackEntries',
+		MAX_NAVIGATION_STACK_ENTRIES,
+	);
+	const maxCatalogBytes = positiveIntegerOption(
+		options.maxCatalogBytes,
+		DEFAULT_MAX_CATALOG_BYTES,
+		'maxCatalogBytes',
+		MAX_NAVIGATION_CATALOG_BYTES,
+	);
+	const maxEvents = positiveIntegerOption(
+		options.maxEvents,
+		100,
+		'maxEvents',
+		MAX_NAVIGATION_EVENTS,
+	);
+	const screensSessionStore = getScreensSessionStore(id);
 	const historyStore = new BoundedEventStore<NavigationEvent>({
-		maxEvents: options.maxEvents ?? 100,
+		maxEvents,
 		maxBytes: 512 * 1024,
 		estimateBytes: (event) => serializeValue(event, 64 * 1024).estimatedBytes,
 	});
@@ -370,6 +281,14 @@ export function createNavigationPlugin(
 			const key = `${path}:${param}`;
 			return paramDrafts[key] ?? session.lastParamValues[key] ?? '';
 		};
+		const runNavigation = (path: string) => {
+			if (!onNavigate) return;
+			void actions.run({
+				pluginId: id,
+				label: `Open ${navigationRouteDisplayName(path)}`,
+				action: () => onNavigate(path),
+			});
+		};
 
 		const navigateWithParams = (path: string) => {
 			const values: Record<string, string> = {};
@@ -379,6 +298,7 @@ export function createNavigationPlugin(
 				values[param] = value;
 			}
 			rememberParamValues(
+				screensSessionStore,
 				Object.fromEntries(
 					Object.entries(values).map(([param, value]) => [
 						`${path}:${param}`,
@@ -387,7 +307,7 @@ export function createNavigationPlugin(
 				),
 			);
 			setExpandedParamsKey(null);
-			onNavigate?.(buildRoutePath(path, values));
+			runNavigation(buildNavigationRoutePath(path, values));
 		};
 
 		const handleRouteTap = (path: string, expandKey: string) => {
@@ -410,12 +330,29 @@ export function createNavigationPlugin(
 				});
 				return;
 			}
-			onNavigate(path);
+			runNavigation(path);
 		};
 
 		const openDeepLink = () => {
 			const url = deepLink.trim();
-			if (url) onOpenDeepLink?.(url);
+			if (!url || !onOpenDeepLink) return;
+			void actions.run({
+				pluginId: id,
+				label: 'Open deep link',
+				action: () => onOpenDeepLink(url),
+			});
+		};
+		const clearHistory = () => {
+			void actions.run({
+				pluginId: id,
+				label: 'Clear navigation history',
+				confirmation: {
+					title: 'Clear navigation history?',
+					confirmLabel: 'Clear',
+					destructive: true,
+				},
+				action: historyStore.clear,
+			});
 		};
 
 		const renderParamEditorRow = (path: string) => {
@@ -519,7 +456,7 @@ export function createNavigationPlugin(
 						<SwipeActions.Actions edge="trailing">
 							<Button
 								label={pinned ? 'Unpin' : 'Pin'}
-								onPress={() => setRoutePinned(path, !pinned)}
+								onPress={() => setRoutePinned(path, !pinned, id)}
 							/>
 						</SwipeActions.Actions>
 					</SwipeActions>
@@ -537,6 +474,7 @@ export function createNavigationPlugin(
 			const canGo = params.every(
 				(param) => draftFor(path, param).trim().length > 0,
 			);
+			const pinned = session.pinnedPaths.includes(path);
 
 			return (
 				<Fragment key={expandKey}>
@@ -546,6 +484,11 @@ export function createNavigationPlugin(
 						onPress={
 							onNavigate ? () => handleRouteTap(path, expandKey) : undefined
 						}
+					/>
+					<AndroidPanelRow
+						detail={path}
+						label={pinned ? 'Unpin screen' : 'Pin screen'}
+						onPress={() => setRoutePinned(path, !pinned, id)}
 					/>
 					{expanded ? (
 						<View style={{ gap: 8, padding: 12 }}>
@@ -772,7 +715,7 @@ export function createNavigationPlugin(
 										// biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA
 										<Button
 											label="Clear history"
-											onPress={historyStore.clear}
+											onPress={clearHistory}
 											role="destructive"
 										/>
 									)}
@@ -811,6 +754,20 @@ export function createNavigationPlugin(
 								/>
 							) : null}
 						</AndroidPanelSection>
+						<AndroidPanelSection title={`Stack · ${stack.length}`}>
+							{stack.length === 0 ? (
+								<AndroidPanelRow label="No stack entries" />
+							) : (
+								stack.map((entry) => (
+									<AndroidPanelRow
+										key={entry.key}
+										label={entry.path ?? entry.name}
+										tone={entry.visible ? 'success' : 'default'}
+										value={entry.visible ? 'Visible' : 'Mounted'}
+									/>
+								))
+							)}
+						</AndroidPanelSection>
 						<AndroidPanelSection title="Pinned">
 							{visiblePinned.length === 0 ? (
 								<AndroidPanelRow
@@ -831,6 +788,20 @@ export function createNavigationPlugin(
 								)}
 							</AndroidPanelSection>
 						))}
+						{visibleRecents.length > 0 ? (
+							<AndroidPanelSection title="Recent">
+								{visibleRecents.map((event) =>
+									renderAndroidRouteRow(event.route, `recent:${event.id}`),
+								)}
+							</AndroidPanelSection>
+						) : null}
+						{visibleInternal.length > 0 ? (
+							<AndroidPanelSection title="Internal & layouts">
+								{visibleInternal.map((route) => (
+									<AndroidPanelRow key={route.id} label={route.path} />
+								))}
+							</AndroidPanelSection>
+						) : null}
 						{onOpenDeepLink ? (
 							<AndroidPanelSection title="Deep link">
 								<AndroidPanelSearch
@@ -856,6 +827,13 @@ export function createNavigationPlugin(
 										value={formatRelativeTime(event.at)}
 									/>
 								))}
+							{events.length > 0 ? (
+								<AndroidPanelRow
+									label="Clear history"
+									onPress={clearHistory}
+									tone="danger"
+								/>
+							) : null}
 						</AndroidPanelSection>
 					</AndroidPanelScroll>
 				)}
@@ -881,11 +859,11 @@ export function createNavigationPlugin(
 						pillQuickAction: {
 							systemImage: 'location.fill' as const,
 							openPanelLabel: title,
-							subscribe: subscribePinnedRoutes,
+							subscribe: (listener) => subscribePinnedRoutes(listener, id),
 							// Dynamic routes need their param editor; the menu's
 							// "Open …" item covers them.
 							options: () =>
-								getPinnedRoutes()
+								getPinnedRoutes(id)
 									.filter((path) => routeParamNames(path).length === 0)
 									.map((path) => ({
 										id: path,
@@ -898,26 +876,53 @@ export function createNavigationPlugin(
 				: {}),
 		},
 		record: (route, recordOptions) => {
+			const normalizedRoute = normalizeNavigationText(route);
+			if (!normalizedRoute) return;
+			const { segments, metadata } =
+				normalizeNavigationRecordOptions(recordOptions);
 			const previous = historyStore.getSnapshot().at(-1);
-			const segments = recordOptions?.segments;
 			if (
-				previous?.route === route &&
+				previous?.route === normalizedRoute &&
 				JSON.stringify(previous.segments) === JSON.stringify(segments) &&
-				serializeValue(previous.metadata).text ===
-					serializeValue(recordOptions?.metadata).text
+				serializeValue(previous.metadata).text === serializeValue(metadata).text
 			)
 				return;
 			historyStore.append({
 				id: nextId++,
 				at: Date.now(),
-				route,
+				route: normalizedRoute,
 				segments,
-				metadata: recordOptions?.metadata,
+				metadata,
 			});
 		},
-		updateRoutes: (routes) =>
-			routesStore.set([...routes].sort((a, b) => a.path.localeCompare(b.path))),
-		updateStack: (stack) => stackStore.set([...stack]),
+		updateRoutes: (routes) => {
+			const retained = normalizeNavigationRoutes(
+				routes,
+				maxRoutes,
+				maxCatalogBytes,
+			);
+			routesStore.set(retained);
+
+			// An empty inventory means the catalog has not resolved yet, not that
+			// every route disappeared. Expo Router's sitemap is null until the root
+			// navigator mounts, so pruning here would clear the operator's pins on
+			// each launch. Real removals still prune on the next populated update.
+			if (retained.length === 0) return;
+
+			const retainedPaths = new Set(retained.map((route) => route.path));
+			const session = screensSessionStore.getSnapshot();
+			const pinnedPaths = session.pinnedPaths.filter((path) =>
+				retainedPaths.has(path),
+			);
+			if (pinnedPaths.length !== session.pinnedPaths.length) {
+				screensSessionStore.set({ ...session, pinnedPaths });
+			}
+		},
+		updateStack: (stack) => {
+			stackStore.set(
+				normalizeNavigationStack(stack, maxStackEntries, maxCatalogBytes),
+			);
+		},
 		clear: historyStore.clear,
 		getEvents: historyStore.getSnapshot,
 		getRoutes: routesStore.getSnapshot,

@@ -1,4 +1,10 @@
-import { type ComponentType, lazy, type ReactNode, Suspense } from 'react';
+import {
+	type ComponentType,
+	lazy,
+	type ReactNode,
+	Suspense,
+	useState,
+} from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { PanelShell } from '../components/panel-shell';
 import { colors } from '../components/panel-ui';
@@ -54,9 +60,12 @@ export function createLazyCustomPlugin({
 	load,
 	...metadata
 }: LazyCustomPluginOptions): DevToolsPanelPlugin {
-	const LazyPanel = lazy(async () => ({ default: await load() }));
-
 	function LazyCustomPanel(props: DevToolsPanelProps) {
+		// Create the lazy type per mounted panel. The renderer's Retry action
+		// remounts this component, allowing a rejected dynamic import to run again.
+		const [LazyPanel] = useState(() =>
+			lazy(async () => ({ default: await load() })),
+		);
 		return (
 			<Suspense
 				fallback={

@@ -384,7 +384,7 @@ describe('NetworkPanel', () => {
 		dispose?.();
 	});
 
-	it('warns before a replay and never re-sends redacted credentials', async () => {
+	it('disables replay when any request credential was redacted', async () => {
 		const diagnostics = createNetworkPlugin();
 		const dispose = diagnostics.plugin.install?.();
 		const instrumented = diagnostics.instrumentFetch(
@@ -410,22 +410,14 @@ describe('NetworkPanel', () => {
 		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
 		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		fireEvent.press(screen.getByTestId('devtools-network-resend'));
 
-		await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-		const [, init] = (fetchMock as unknown as jest.Mock).mock.calls[0] as [
-			string,
-			RequestInit,
-		];
-		expect(init.headers).toEqual({ accept: 'application/json' });
-		expect(actions.run).toHaveBeenCalledWith(
-			expect.objectContaining({
-				label: 'Re-send request',
-				confirmation: expect.objectContaining({
-					destructive: true,
-					message: expect.stringContaining('1 header dropped'),
-				}),
-			}),
+		expect(screen.queryByTestId('devtools-network-resend')).toBeNull();
+		expect(
+			screen.getByText(/Re-send unavailable: One or more request headers/),
+		).toBeOnTheScreen();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(actions.run).not.toHaveBeenCalledWith(
+			expect.objectContaining({ label: 'Re-send request' }),
 		);
 
 		globalThis.fetch = previousFetch;

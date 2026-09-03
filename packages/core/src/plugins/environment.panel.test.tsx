@@ -100,4 +100,29 @@ describe('EnvironmentPanel', () => {
 		// Once in the failing check's expansion, once in the manifest listing.
 		expect(screen.getAllByText('android')).toHaveLength(2);
 	});
+
+	it('redacts sensitive environment entries', () => {
+		const plugin = createEnvironmentPlugin({
+			sections: [
+				{
+					title: 'Runtime',
+					values: { API_SECRET: 'do-not-render', MODE: 'development' },
+				},
+			],
+		});
+		const Panel = plugin.Panel;
+
+		render(
+			<Panel
+				actions={{ run: jest.fn(async () => true) }}
+				onBack={jest.fn()}
+				onClose={jest.fn()}
+				onPresentationModeChange={jest.fn()}
+				presentationMode="sheet"
+			/>,
+		);
+
+		expect(screen.getByText('[REDACTED]')).toBeOnTheScreen();
+		expect(screen.queryByText('do-not-render')).not.toBeOnTheScreen();
+	});
 });

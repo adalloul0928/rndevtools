@@ -1,0 +1,247 @@
+import { Button } from '@heroui/react/button';
+import { Eye, History, RefreshCw, ShieldCheck, Store } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import {
+	CodePreview,
+	EmptyPanel,
+	KeyValue,
+	PanelHeader,
+	PanelNotice,
+	SearchControl,
+	StatusPill,
+	Toolbar,
+} from '@/components/ui';
+import { formatClock, formatRelativeTime } from '@/lib/format';
+import { useDesktopRuntime } from '@/state/desktop-runtime';
+
+const MAX_RENDERED_CHANGES = 250;
+
+export function ZustandPanel() {
+	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const stores = selectedDevice?.tools.zustandStores ?? [];
+	const changes = selectedDevice?.tools.zustandChanges ?? [];
+	const summary = selectedDevice?.tools.zustandSummary;
+	const [query, setQuery] = useState('');
+	const [selectedId, setSelectedId] = useState<string | null>(stores[0]?.id ?? null);
+	const filtered = useMemo(() => {
+		const needle = query.trim().toLowerCase();
+		return stores.filter(
+			(store) =>
+				!needle ||
+				[
+					store.title,
+					store.description,
+					store.id,
+					store.keys.join(' '),
+					store.stateText,
+				]
+					.join(' ')
+					.toLowerCase()
+					.includes(needle)
+		);
+	}, [query, stores]);
+	const selected =
+		filtered.find((store) => store.id === selectedId) ?? filtered[0] ?? null;
+	const allSelectedChanges = changes
+		.filter((change) => selected && change.storeId === selected.id)
+		.sort((left, right) => right.at - left.at);
+	const selectedChanges = allSelectedChanges.slice(0, MAX_RENDERED_CHANGES);
+
+	return (
+		<section className="panel-root">
+			<PanelHeader
+				eyebrow="State"
+				title="Zustand"
+				description="Read-only projections from stores the app explicitly registered for diagnostics—never a blind global store crawl."
+				meta={
+					<span className="flex items-center gap-1.5 text-emerald-300">
+						<ShieldCheck className="h-3 w-3" /> Explicit registry · privacy-safe
+					</span>
+				}
+				actions={
+					<Button
+						isDisabled={!canRunAction('zustand', 'refresh')}
+						size="sm"
+						variant="secondary"
+						onPress={() =>
+							void runAction('zustand', 'refresh', {}, 'Zustand projections refreshed.')
+						}
+					>
+						<RefreshCw className="h-3.5 w-3.5" /> Refresh projection
+					</Button>
+				}
+			/>
+			<Toolbar>
+				<SearchControl
+					ariaLabel="Search Zustand stores"
+					placeholder="Store, key, projected value…"
+					value={query}
+					onChange={setQuery}
+				/>
+				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+					{stores.length} of {summary?.totalStoreCount ?? stores.length} registered
+					stores · {changes.length} changes
+				</span>
+			</Toolbar>
+			{summary && (summary.truncated || summary.error) ? (
+				<PanelNotice
+					title="Zustand projection incomplete."
+					tone={summary.error ? 'danger' : 'warning'}
+				>
+					{summary.error ??
+						`${summary.omittedStoreCount} ${summary.omittedStoreCount === 1 ? 'store was' : 'stores were'} omitted by the on-device safety budget.`}
+				</PanelNotice>
+			) : null}
+			{allSelectedChanges.length > selectedChanges.length ? (
+				<PanelNotice title="Change timeline rendering is bounded." tone="info">
+					Showing the newest {MAX_RENDERED_CHANGES} of {allSelectedChanges.length}{' '}
+					captured changes for this store.
+				</PanelNotice>
+			) : null}
+			<div className="zustand-layout grid min-h-0 flex-1 grid-cols-[300px_minmax(360px,1fr)_340px]">
+				<div className="panel-scroll border-r border-white/8 p-3">
+					{filtered.length === 0 ? (
+						<EmptyPanel
+							icon={<Store className="h-5 w-5" />}
+							title="No matching stores"
+							description="Only stores registered by the PUMPD host appear here."
+						/>
+					) : (
+						<div className="space-y-2">
+							{filtered.map((store) => (
+								<button
+									aria-pressed={selected?.id === store.id}
+									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === store.id ? 'border-white/18 bg-white/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+									key={store.id}
+									type="button"
+									onClick={() => setSelectedId(store.id)}
+								>
+									<div className="flex items-center justify-between gap-3">
+										<span className="truncate text-xs font-medium text-(--foreground)">
+											{store.title}
+										</span>
+										<StatusPill tone={store.error ? 'danger' : 'success'} dot>
+											{store.error ? 'Error' : 'Live'}
+										</StatusPill>
+									</div>
+									<p className="mb-0 mt-1.5 line-clamp-2 text-[10px] leading-4 text-(--text-3)">
+										{store.description ?? 'Explicit Zustand diagnostic projection'}
+									</p>
+									<div className="mt-3 flex items-center justify-between font-mono text-[9px] text-(--text-3)">
+										<span>{store.keys.length} keys</span>
+										<span>{formatRelativeTime(store.updatedAt)}</span>
+									</div>
+								</button>
+							))}
+						</div>
+					)}
+				</div>
+				<div className="panel-scroll border-r border-white/8 p-5">
+					{selected ? (
+						<>
+							<div className="mb-4 flex items-start justify-between gap-4">
+								<div>
+									<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+										Store projection
+									</p>
+									<h2 className="mb-0 mt-1 text-base font-semibold tracking-[-0.02em] text-(--foreground)">
+										{selected.title}
+									</h2>
+								</div>
+								<div className="flex items-center gap-1.5 text-[10px] text-(--text-3)">
+									<Eye className="h-3.5 w-3.5" /> Read only
+								</div>
+							</div>
+							<dl className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] px-3">
+								<KeyValue label="Registry id" value={selected.id} mono />
+								<KeyValue label="Projected keys" value={selected.keys.length} mono />
+								<KeyValue
+									label="Last change"
+									value={formatRelativeTime(selected.updatedAt)}
+								/>
+							</dl>
+							<CodePreview
+								label="Current projected state"
+								value={selected.stateText}
+								maxHeight={520}
+							/>
+							{selected.error ? (
+								<div
+									className="mt-4 rounded-md border border-red-400/20 bg-red-400/[0.06] p-3 text-xs text-red-300"
+									role="alert"
+								>
+									{selected.error}
+								</div>
+							) : null}
+							<div className="mt-4 flex flex-wrap gap-1.5">
+								{selected.keys.map((key) => (
+									<span
+										className="rounded border border-white/8 bg-white/[0.03] px-1.5 py-1 font-mono text-[9px] text-(--text-3)"
+										key={key}
+									>
+										{key}
+									</span>
+								))}
+							</div>
+						</>
+					) : (
+						<EmptyPanel
+							icon={<Store className="h-5 w-5" />}
+							title="Select a store"
+							description="Choose a visible projection to inspect its state and change history."
+						/>
+					)}
+				</div>
+				<aside className="zustand-timeline panel-scroll p-4">
+					<div className="mb-4 flex items-center justify-between">
+						<div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+							<History className="h-3.5 w-3.5" /> Change timeline
+						</div>
+						<span className="font-mono text-[9px] text-(--text-3)">
+							{selectedChanges.length}
+						</span>
+					</div>
+					{selectedChanges.length === 0 ? (
+						<p className="text-xs leading-5 text-(--text-3)">
+							No projected changes have been captured for this store.
+						</p>
+					) : (
+						<div className="space-y-2">
+							{selectedChanges.map((change) => (
+								<div
+									className="rounded-lg border border-white/8 bg-white/[0.025] p-3"
+									key={change.id}
+								>
+									<div className="flex items-center justify-between gap-2">
+										<span className="truncate text-[10px] font-medium text-(--foreground)">
+											{change.storeTitle}
+										</span>
+										<span className="font-mono text-[9px] text-(--text-3)">
+											{formatClock(change.at)}
+										</span>
+									</div>
+									<div className="mt-2 flex flex-wrap gap-1">
+										{change.changedKeys.length === 0 ? (
+											<StatusPill tone={change.error ? 'danger' : 'default'}>
+												{change.error ?? 'Projection refreshed'}
+											</StatusPill>
+										) : (
+											change.changedKeys.map((key) => (
+												<StatusPill key={key} tone="info">
+													{key}
+												</StatusPill>
+											))
+										)}
+									</div>
+									<pre className="mb-0 mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[9px] leading-4 text-(--text-3)">
+										{change.stateText}
+									</pre>
+								</div>
+							))}
+						</div>
+					)}
+				</aside>
+			</div>
+		</section>
+	);
+}

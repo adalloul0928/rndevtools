@@ -191,9 +191,22 @@ function renderPanel(plugin: QueryPlugin) {
 describe('createQuerySnapshot', () => {
 	it('formats query keys as readable breadcrumbs', () => {
 		expect(formatQueryKey(['workouts', 'today', { userId: 42 }])).toBe(
-			'workouts › today › { "userId": 42 }',
+			'workouts › today › { "userId": "[REDACTED]" }',
 		);
 		expect(formatQueryKey(undefined)).toBe('Anonymous mutation');
+	});
+
+	it('does not invoke query-key accessors or throw for revoked proxies', () => {
+		const getter = jest.fn(() => 'unsafe');
+		const queryKey: unknown[] = [];
+		Object.defineProperty(queryKey, '0', { enumerable: true, get: getter });
+		queryKey.length = 1;
+		const revoked = Proxy.revocable<unknown[]>([], {});
+		revoked.revoke();
+
+		expect(formatQueryKey(queryKey)).toBe('Anonymous mutation');
+		expect(formatQueryKey(revoked.proxy)).toBe('Anonymous mutation');
+		expect(getter).not.toHaveBeenCalled();
 	});
 
 	it('captures public query state and optional data', () => {
@@ -210,6 +223,39 @@ describe('createQuerySnapshot', () => {
 		expect(snapshot.status).toBe('success');
 		expect(snapshot.data).toContain('items');
 		expect(snapshot.dataUpdateCount).toBe(1);
+		queryClient.clear();
+	});
+
+	it('stores detached redacted query keys instead of live key references', () => {
+		const queryClient = new QueryClient();
+		const privateKey = { accessToken: 'private-key-value', page: 1 };
+		queryClient.setQueryData(['workouts', privateKey], { ok: true });
+		const query = queryClient.getQueryCache().getAll()[0];
+		if (!query) throw new Error('Expected cached query');
+
+		const snapshot = createQuerySnapshot(query, false, 1024);
+		privateKey.accessToken = 'changed-after-capture';
+
+		expect(snapshot).not.toHaveProperty('queryKey');
+		expect(snapshot.keySegments).toHaveLength(2);
+		expect(JSON.stringify(snapshot)).toContain('[REDACTED]');
+		expect(JSON.stringify(snapshot)).not.toContain('private-key-value');
+		expect(JSON.stringify(snapshot)).not.toContain('changed-after-capture');
+		queryClient.clear();
+	});
+
+	it('bounds individual query-key segments', () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(['workouts', 'x'.repeat(10_000)], { ok: true });
+		const query = queryClient.getQueryCache().getAll()[0];
+		if (!query) throw new Error('Expected cached query');
+
+		const snapshot = createQuerySnapshot(query, false, 1024);
+
+		expect(
+			new TextEncoder().encode(snapshot.keySegments[1]).byteLength,
+		).toBeLessThanOrEqual(512);
+		expect(snapshot.truncated).toBe(true);
 		queryClient.clear();
 	});
 });
@@ -241,6 +287,9 @@ describe('query panel formatting helpers', () => {
 			summarizeError('{"name":"ZodError","message":"expected number"}', null),
 		).toBe('ZodError: expected number');
 		expect(summarizeError('plain text\nsecond line', null)).toBe('plain text');
+		expect(summarizeError(undefined, new Error('token=private-token'))).toBe(
+			'Error: token=[REDACTED]',
+		);
 		expect(summarizeError(undefined, null)).toBeUndefined();
 	});
 });
@@ -263,6 +312,40 @@ describe('createQueryPlugin', () => {
 
 		expect(plugin.getSnapshot().queries).toHaveLength(2);
 		expect(plugin.getSnapshot().queries[0]?.data).toBeUndefined();
+		expect(plugin.getSnapshot()).toMatchObject({
+			sourceQueryCount: 10,
+			omittedQueryCount: 8,
+		});
+		expect(plugin.captureSnapshot().queries[0]?.data).toContain('payload');
+
+		dispose?.();
+		queryClient.clear();
+	});
+
+	it('retains the most recently updated queries when the cache exceeds its limit', () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(
+			['query', 'oldest'],
+			{ ok: true },
+			{ updatedAt: 10 },
+		);
+		queryClient.setQueryData(
+			['query', 'newest'],
+			{ ok: true },
+			{ updatedAt: 30 },
+		);
+		queryClient.setQueryData(
+			['query', 'middle'],
+			{ ok: true },
+			{ updatedAt: 20 },
+		);
+		const plugin = createQueryPlugin({ queryClient, maxQueries: 2 });
+		const dispose = plugin.install?.();
+
+		expect(
+			plugin.getSnapshot().queries.map((query) => query.keySegments[1]),
+		).toEqual(['newest', 'middle']);
+		expect(plugin.getSnapshot().omittedQueryCount).toBe(1);
 
 		dispose?.();
 		queryClient.clear();
@@ -290,6 +373,31 @@ describe('createQueryPlugin', () => {
 		);
 	});
 
+	it('runs targeted actions through opaque snapshot identifiers', async () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(
+			['private', { accessToken: 'never-retain-this' }],
+			{ ok: true },
+		);
+		const plugin = createQueryPlugin({ queryClient });
+		const dispose = plugin.install?.();
+		const snapshot = plugin.getSnapshot().queries[0];
+		if (!snapshot) throw new Error('Expected query snapshot');
+
+		expect(snapshot.hash).toMatch(/^query-\d+$/);
+		expect(snapshot.hash).not.toContain('never-retain-this');
+		await plugin.runQueryAction(snapshot.hash, 'invalidate');
+		expect(queryClient.getQueryCache().getAll()[0]?.state.isInvalidated).toBe(
+			true,
+		);
+		await expect(
+			plugin.runQueryAction('query-missing', 'invalidate'),
+		).rejects.toThrow('no longer available');
+
+		dispose?.();
+		queryClient.clear();
+	});
+
 	it('rejects invalid retention bounds', () => {
 		const queryClient = new QueryClient();
 		expect(() => createQueryPlugin({ queryClient, maxQueries: 0 })).toThrow(
@@ -298,6 +406,55 @@ describe('createQueryPlugin', () => {
 		expect(() =>
 			createQueryPlugin({ queryClient, maxStoreBytes: Number.NaN }),
 		).toThrow('maxStoreBytes');
+		expect(() => createQueryPlugin({ queryClient, maxQueries: 1_001 })).toThrow(
+			'maxQueries cannot exceed 1000',
+		);
+		expect(() =>
+			createQueryPlugin({ queryClient, maxMutations: 1_001 }),
+		).toThrow('maxMutations cannot exceed 1000');
+		expect(() =>
+			createQueryPlugin({ queryClient, maxSnapshotBytes: 1024 * 1024 + 1 }),
+		).toThrow('maxSnapshotBytes cannot exceed 1048576');
+		expect(() =>
+			createQueryPlugin({ queryClient, maxStoreBytes: 16 * 1024 * 1024 + 1 }),
+		).toThrow('maxStoreBytes cannot exceed 16777216');
+	});
+
+	it('contains cache refresh failures and recovers on the next refresh', () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(['ready'], true);
+		const plugin = createQueryPlugin({ queryClient });
+		const dispose = plugin.install?.();
+		const getAll = jest.spyOn(queryClient.getQueryCache(), 'getAll');
+		getAll.mockImplementationOnce(() => {
+			throw new Error('cache read failed');
+		});
+
+		expect(() => plugin.refresh()).not.toThrow();
+		expect(plugin.getSnapshot().error).toContain('cache read failed');
+		plugin.refresh();
+		expect(plugin.getSnapshot().error).toBeUndefined();
+
+		dispose?.();
+		queryClient.clear();
+	});
+
+	it('rejects unsupported runtime action values', async () => {
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(['ready'], true);
+		const plugin = createQueryPlugin({ queryClient });
+		const dispose = plugin.install?.();
+		const queryId = plugin.getSnapshot().queries[0]?.hash ?? '';
+
+		await expect(
+			plugin.runQueryAction(
+				queryId,
+				'remove' as Parameters<typeof plugin.runQueryAction>[1],
+			),
+		).rejects.toThrow('Unsupported query action');
+
+		dispose?.();
+		queryClient.clear();
 	});
 });
 
@@ -329,7 +486,8 @@ describe('QueryPanel', () => {
 		});
 		try {
 			const queryClient = new QueryClient();
-			const plugin = createQueryPlugin({ queryClient });
+			queryClient.setQueryData(['profile', 'detail'], { ready: true });
+			const plugin = createQueryPlugin({ queryClient, captureData: true });
 			const dispose = plugin.install?.();
 			const run = renderPanel(plugin);
 
@@ -347,8 +505,28 @@ describe('QueryPanel', () => {
 					confirmation: expect.objectContaining({ destructive: true }),
 				}),
 			);
+			run.mockClear();
+			fireEvent.press(screen.getByText('detail'));
+			expect(screen.getByText('Diagnostic ID')).toBeOnTheScreen();
+			expect(screen.getByText(/"ready": true/)).toBeOnTheScreen();
+			fireEvent.press(screen.getByText('Invalidate query'));
+			fireEvent.press(screen.getByText('Refetch query'));
+			fireEvent.press(screen.getByText('Remove query'));
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({ label: 'Invalidate query' }),
+			);
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({ label: 'Refetch query' }),
+			);
+			expect(run).toHaveBeenCalledWith(
+				expect.objectContaining({
+					label: 'Remove query',
+					confirmation: expect.objectContaining({ destructive: true }),
+				}),
+			);
 
 			dispose?.();
+			queryClient.clear();
 		} finally {
 			Object.defineProperty(Platform, 'OS', {
 				configurable: true,

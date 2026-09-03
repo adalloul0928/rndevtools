@@ -7,14 +7,24 @@
 	"sideEffects": false,
 	"exports": {
 		".": "./src/index.ts",
+		"./desktop-protocol": "./src/desktop-protocol.ts",
+		"./format": "./src/core/format.ts",
+		"./redact": "./src/core/redact.ts",
+		"./serialize": "./src/core/serialize.ts",
 		"./plugins": "./src/plugins/index.ts",
+		"./plugins/storage": "./src/plugins/storage.tsx",
+		"./plugins/network-presentation": "./src/plugins/network-presentation.ts",
 		"./package.json": "./package.json"
 	},
 	"scripts": {
 		"lint": "biome check src",
 		"typecheck": "tsc --noEmit",
+		"check:unused": "knip --treat-config-hints-as-errors",
+		"check:cycles": "knip --cycles --treat-config-hints-as-errors",
+		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "jest --runInBand",
-		"test:coverage": "jest --runInBand --coverage"
+		"test:coverage": "jest --runInBand --coverage",
+		"quality": "pnpm lint && pnpm typecheck && pnpm check:dead-code && pnpm test:run"
 	},
 	"peerDependencies": {
 		"@expo/material-symbols": ">=0.1 <1",
@@ -34,7 +44,7 @@
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.7",
+		"@biomejs/biome": "2.5.10",
 		"@expo/material-symbols": "0.1.1",
 		"@expo/ui": "57.0.11",
 		"@tanstack/react-query": "5.101.4",
@@ -44,6 +54,7 @@
 		"expo": "57.0.13",
 		"jest": "^29",
 		"jest-expo": "57.0.4",
+		"knip": "^6.32.2",
 		"react": "19.2.3",
 		"react-native": "0.86.2",
 		"react-native-gesture-handler": "2.32.0",

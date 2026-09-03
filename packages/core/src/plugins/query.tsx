@@ -24,8 +24,8 @@ import {
 	tag,
 	tint,
 } from '@expo/ui/swift-ui/modifiers';
-import type { QueryClient } from '@tanstack/react-query';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import type { Query, QueryClient } from '@tanstack/react-query';
+import { Fragment, useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import {
 	AndroidPanelRow,
@@ -33,13 +33,16 @@ import {
 	AndroidPanelSearch,
 	AndroidPanelSection,
 	AndroidPanelTabs,
+	AndroidPanelTextBlock,
 } from '../components/android-panel-ui';
-import { iosColor, PanelShell } from '../components/panel-shell';
+import { PanelShell } from '../components/panel-shell';
 import { ExternalStore } from '../core/external-store';
+import { formatRelativeTime } from '../core/format';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
-import { serializeValue } from '../core/serialize';
+import { diagnosticErrorText, sanitizeDiagnosticValue } from '../core/redact';
+import { createRefCountedInstaller } from '../core/ref-counted-installer';
+import { serializeValue, truncateText } from '../core/serialize';
 import type {
-	DevToolsActionConfirmation,
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsSystemImage,
@@ -47,10 +50,10 @@ import type {
 import {
 	createMutationSnapshot,
 	createQuerySnapshot,
-	limitQuerySnapshotsByBytes,
 	type MutationSnapshot,
 	type QueryPluginSnapshot,
 	type QuerySnapshot,
+	queryDiagnosticId,
 } from './query-model';
 
 export type {
@@ -81,156 +84,85 @@ export type QueryPluginOptions = {
 export type QueryPlugin = DevToolsPanelPlugin & {
 	refresh: () => void;
 	getSnapshot: () => QueryPluginSnapshot;
+	captureSnapshot: () => QueryPluginSnapshot;
+	runQueryAction: (
+		queryId: string,
+		action: 'invalidate' | 'refetch',
+	) => Promise<void>;
 };
 
-type InspectorTab = 'queries' | 'mutations';
-type QueryStatusKind = 'error' | 'fetching' | 'stale' | 'fresh';
-type RunQueryAction = (
-	label: string,
-	action: () => unknown | Promise<unknown>,
-	confirmation?: DevToolsActionConfirmation,
-) => void;
+const MAX_QUERY_ENTRIES = 1_000;
+const MAX_QUERY_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_QUERY_STORE_BYTES = 16 * 1024 * 1024;
 
-const palette = {
-	blue: iosColor('systemBlueColor', '#007AFF'),
-	gray: iosColor('systemGrayColor', '#8E8E93'),
-	green: iosColor('systemGreenColor', '#34C759'),
-	orange: iosColor('systemOrangeColor', '#FF9500'),
-	red: iosColor('systemRedColor', '#FF3B30'),
-	secondary: iosColor('secondaryLabelColor', 'rgba(60,60,67,0.6)'),
-};
-
-const statusDotColors = {
-	error: palette.red,
-	fetching: palette.blue,
-	fresh: palette.green,
-	stale: palette.orange,
-};
-
-const statusLabels: Record<QueryStatusKind, string> = {
-	error: 'error',
-	fetching: 'fetching…',
-	fresh: 'fresh',
-	stale: 'stale',
-};
-
-function queryStatusKind(
-	query: Pick<QuerySnapshot, 'fetchStatus' | 'isStale' | 'status'>,
-): QueryStatusKind {
-	if (query.status === 'error') return 'error';
-	if (query.fetchStatus === 'fetching' || query.status === 'pending') {
-		return 'fetching';
-	}
-	if (query.isStale) return 'stale';
-	return 'fresh';
-}
-
-function mutationDotColor(status: string) {
-	if (status === 'error') return palette.red;
-	if (status === 'pending') return palette.blue;
-	if (status === 'success') return palette.green;
-	return palette.gray;
-}
-
-function formatQueryKeySegment(part: unknown): string {
-	if (typeof part === 'string') return part;
-	if (
-		typeof part === 'number' ||
-		typeof part === 'boolean' ||
-		typeof part === 'bigint'
-	) {
-		return String(part);
-	}
-	return serializeValue(part, 256).text.replace(/\s+/g, ' ');
-}
-
-export function formatQueryKey(
-	queryKey: readonly unknown[] | undefined,
-): string {
-	if (!queryKey?.length) return 'Anonymous mutation';
-	return queryKey.map(formatQueryKeySegment).join(' › ');
-}
-
-/** Row title: every key segment after the grouping segment, ' · ' joined. */
-export function formatQueryKeyRemainder(
-	queryKey: readonly unknown[] | undefined,
-): string {
-	const [root, ...rest] = queryKey ?? [];
-	if (rest.length > 0) return rest.map(formatQueryKeySegment).join(' · ');
-	return formatQueryKeySegment(root);
-}
-
-export function groupQueriesByRoot(
-	queries: readonly QuerySnapshot[],
-): ReadonlyArray<{ segment: string; queries: readonly QuerySnapshot[] }> {
-	const groups = new Map<string, QuerySnapshot[]>();
-	for (const query of queries) {
-		const segment = String(query.queryKey[0]);
-		const group = groups.get(segment);
-		if (group) group.push(query);
-		else groups.set(segment, [query]);
-	}
-	return [...groups.entries()].map(([segment, grouped]) => ({
-		segment,
-		queries: grouped,
-	}));
-}
-
-export function formatRelativeTime(
-	timestamp: number,
-	now = Date.now(),
-): string | undefined {
-	if (!timestamp) return undefined;
-	const seconds = Math.floor(Math.max(0, now - timestamp) / 1000);
-	if (seconds < 1) return 'now';
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h`;
-	return `${Math.floor(hours / 24)}d`;
-}
-
-function firstLine(text: string): string {
-	const index = text.indexOf('\n');
-	return index === -1 ? text : text.slice(0, index);
-}
-
-function describeLiveError(error: unknown): string | undefined {
-	if (error instanceof Error) {
-		return error.name ? `${error.name}: ${error.message}` : error.message;
-	}
-	if (typeof error === 'string' && error) return error;
-	return undefined;
-}
-
-/** One-line error summary from the live error, else its serialized snapshot. */
-export function summarizeError(
-	serialized: string | undefined,
-	liveError: unknown,
-): string | undefined {
-	const live = describeLiveError(liveError);
-	if (live) return firstLine(live);
-	if (!serialized) return undefined;
-	try {
-		const parsed: unknown = JSON.parse(serialized);
-		if (parsed && typeof parsed === 'object') {
-			const record = parsed as { message?: unknown; name?: unknown };
-			const name = typeof record.name === 'string' ? record.name : undefined;
-			const message =
-				typeof record.message === 'string' ? record.message : undefined;
-			const joined = [name, message].filter(Boolean).join(': ');
-			if (joined) return firstLine(joined);
+function mostRecent<T>(
+	values: readonly T[],
+	limit: number,
+	timestamp: (value: T) => number,
+): readonly T[] {
+	const selected: Array<{ value: T; at: number }> = [];
+	for (const value of values) {
+		const candidateAt = timestamp(value);
+		const at = Number.isFinite(candidateAt) ? candidateAt : 0;
+		if (
+			selected.length === limit &&
+			at <= (selected[selected.length - 1]?.at ?? 0)
+		) {
+			continue;
 		}
-	} catch {
-		// Not JSON (for example truncated); fall through to the raw text.
+		let low = 0;
+		let high = selected.length;
+		while (low < high) {
+			const middle = Math.floor((low + high) / 2);
+			if ((selected[middle]?.at ?? 0) >= at) low = middle + 1;
+			else high = middle;
+		}
+		selected.splice(low, 0, { value, at });
+		if (selected.length > limit) selected.pop();
 	}
-	return firstLine(serialized);
+	return selected.map((entry) => entry.value);
 }
 
-function formatTimestamp(timestamp: number): string {
-	return timestamp ? new Date(timestamp).toISOString() : 'Never';
+function captureSnapshotsWithinBytes<
+	Input,
+	Snapshot extends QuerySnapshot | MutationSnapshot,
+>(
+	values: readonly Input[],
+	budget: number,
+	capture: (value: Input) => Snapshot,
+): readonly Snapshot[] {
+	const retained: Snapshot[] = [];
+	let usedBytes = 0;
+	for (const value of values) {
+		const remainingBytes = Math.max(0, Math.floor(budget - usedBytes));
+		if (remainingBytes === 0) break;
+		const snapshot = capture(value);
+		const serialized = serializeValue(snapshot, remainingBytes + 1);
+		if (serialized.truncated || serialized.estimatedBytes > remainingBytes) {
+			continue;
+		}
+		retained.push(snapshot);
+		usedBytes += serialized.estimatedBytes;
+	}
+	return retained;
 }
+
+import {
+	formatQueryKey,
+	formatQueryKeyRemainder,
+	formatTimestamp,
+	groupQueriesByRoot,
+	type InspectorTab,
+	mutationDotColor,
+	palette,
+	queryStatusKind,
+	type RunQueryAction,
+	statusDotColors,
+	statusLabels,
+	summarizeError,
+} from './query-presentation';
+
+export * from './query-presentation';
 
 function secondaryFootnote() {
 	return [font({ textStyle: 'footnote' }), foregroundColor(palette.secondary)];
@@ -289,63 +221,169 @@ export function createQueryPlugin({
 	assertPositiveInteger(maxMutations, 'maxMutations');
 	assertPositiveFinite(maxSnapshotBytes, 'maxSnapshotBytes');
 	assertPositiveFinite(maxStoreBytes, 'maxStoreBytes');
+	if (maxQueries > MAX_QUERY_ENTRIES) {
+		throw new Error(`maxQueries cannot exceed ${MAX_QUERY_ENTRIES}`);
+	}
+	if (maxMutations > MAX_QUERY_ENTRIES) {
+		throw new Error(`maxMutations cannot exceed ${MAX_QUERY_ENTRIES}`);
+	}
+	if (maxSnapshotBytes > MAX_QUERY_SNAPSHOT_BYTES) {
+		throw new Error(
+			`maxSnapshotBytes cannot exceed ${MAX_QUERY_SNAPSHOT_BYTES}`,
+		);
+	}
+	if (maxStoreBytes > MAX_QUERY_STORE_BYTES) {
+		throw new Error(`maxStoreBytes cannot exceed ${MAX_QUERY_STORE_BYTES}`);
+	}
 	const store = new ExternalStore<QueryPluginSnapshot>({
 		queries: [],
 		mutations: [],
+		sourceQueryCount: 0,
+		omittedQueryCount: 0,
+		sourceMutationCount: 0,
+		omittedMutationCount: 0,
 	});
-	let installCount = 0;
 	let installed = false;
-	let unsubscribeQuery: (() => void) | undefined;
-	let unsubscribeMutation: (() => void) | undefined;
 	let refreshQueued = false;
 
+	const buildSnapshot = (includeData: boolean): QueryPluginSnapshot => {
+		const queryBudget = Math.floor(maxStoreBytes / 2);
+		const mutationBudget = maxStoreBytes - queryBudget;
+		const allQueries = queryClient.getQueryCache().getAll();
+		const selectedQueries = mostRecent(
+			allQueries,
+			maxQueries,
+			// A query that has never resolved has dataUpdatedAt 0, so ranking on it
+			// alone drops in-flight and freshly-mounted queries first — exactly the
+			// ones being debugged. Rank those by when they started fetching.
+			(query) =>
+				Math.max(query.state.dataUpdatedAt, query.state.errorUpdatedAt) ||
+				(query.state.fetchStatus === 'fetching' ? Date.now() : 0),
+		);
+		const allMutations = queryClient.getMutationCache().getAll();
+		const selectedMutations = mostRecent(
+			allMutations,
+			maxMutations,
+			(mutation) => mutation.state.submittedAt,
+		);
+		const retainedQueries = captureSnapshotsWithinBytes(
+			selectedQueries,
+			queryBudget,
+			(query) =>
+				createQuerySnapshot(
+					query,
+					includeData && captureData,
+					maxSnapshotBytes,
+				),
+		);
+		const retainedMutations = captureSnapshotsWithinBytes(
+			selectedMutations,
+			mutationBudget,
+			(mutation) =>
+				createMutationSnapshot(
+					mutation,
+					includeData && captureData,
+					maxSnapshotBytes,
+				),
+		);
+		return {
+			queries: retainedQueries,
+			mutations: retainedMutations,
+			sourceQueryCount: allQueries.length,
+			omittedQueryCount: Math.max(
+				0,
+				allQueries.length - retainedQueries.length,
+			),
+			sourceMutationCount: allMutations.length,
+			omittedMutationCount: Math.max(
+				0,
+				allMutations.length - retainedMutations.length,
+			),
+		};
+	};
+	const captureSnapshot = (): QueryPluginSnapshot => buildSnapshot(true);
+	const reportSnapshotError = (error: unknown): void => {
+		store.set({
+			...store.getSnapshot(),
+			error: truncateText(diagnosticErrorText(error), 8 * 1024).text,
+		});
+	};
 	const refresh = () => {
 		refreshQueued = false;
 		if (!installed) return;
-		const queryBudget = Math.floor(maxStoreBytes / 2);
-		const mutationBudget = maxStoreBytes - queryBudget;
-		const queries = queryClient
-			.getQueryCache()
-			.getAll()
-			.slice()
-			.sort(
-				(left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt,
-			)
-			.slice(0, maxQueries)
-			.map((query) => createQuerySnapshot(query, false, maxSnapshotBytes));
-		const mutations = queryClient
-			.getMutationCache()
-			.getAll()
-			.slice()
-			.sort((left, right) => right.state.submittedAt - left.state.submittedAt)
-			.slice(0, maxMutations)
-			.map((mutation) =>
-				createMutationSnapshot(mutation, false, maxSnapshotBytes),
-			);
-		store.set({
-			queries: limitQuerySnapshotsByBytes(queries, queryBudget),
-			mutations: limitQuerySnapshotsByBytes(mutations, mutationBudget),
-		});
+		try {
+			store.set(buildSnapshot(false));
+		} catch (error) {
+			reportSnapshotError(error);
+		}
 	};
 	const scheduleRefresh = () => {
 		if (refreshQueued) return;
 		refreshQueued = true;
-		queueMicrotask(refresh);
+		try {
+			queueMicrotask(refresh);
+		} catch (error) {
+			refreshQueued = false;
+			reportSnapshotError(error);
+		}
 	};
 	const filtersFor = (query: QuerySnapshot) => ({
-		queryKey: query.queryKey,
-		exact: true,
+		predicate: (candidate: Query) =>
+			queryDiagnosticId(candidate) === query.hash,
 	});
+	const findLiveQuery = (queryId: string): Query | undefined =>
+		queryClient
+			.getQueryCache()
+			.getAll()
+			.find((candidate) => queryDiagnosticId(candidate) === queryId);
+	const runQueryAction: QueryPlugin['runQueryAction'] = async (
+		queryId,
+		action,
+	) => {
+		if (action !== 'invalidate' && action !== 'refetch') {
+			throw new Error('Unsupported query action.');
+		}
+		const query = findLiveQuery(queryId);
+		if (!query) throw new Error('Query is no longer available.');
+		const filters = { predicate: (candidate: Query) => candidate === query };
+		if (action === 'invalidate') {
+			await queryClient.invalidateQueries({ ...filters, refetchType: 'none' });
+		} else {
+			await queryClient.refetchQueries({ ...filters, type: 'all' });
+		}
+		refresh();
+	};
+	const install = createRefCountedInstaller(({ addCleanup }) => {
+		installed = true;
+		addCleanup(() => {
+			installed = false;
+			refreshQueued = false;
+		});
+		refresh();
+		addCleanup(queryClient.getQueryCache().subscribe(scheduleRefresh));
+		addCleanup(queryClient.getMutationCache().subscribe(scheduleRefresh));
+	});
+	const queryPreviews = (query: QuerySnapshot) => {
+		const liveQuery = findLiveQuery(query.hash);
+		return {
+			data:
+				captureData && liveQuery
+					? serializeValue(
+							sanitizeDiagnosticValue(liveQuery.state.data),
+							maxSnapshotBytes,
+						)
+					: undefined,
+			error: liveQuery?.state.error
+				? serializeValue(
+						sanitizeDiagnosticValue(liveQuery.state.error),
+						maxSnapshotBytes,
+					)
+				: undefined,
+		};
+	};
 
 	function QueryDetails({ query }: { query: QuerySnapshot }) {
-		const liveQuery = queryClient.getQueryCache().get(query.hash);
-		const data =
-			captureData && liveQuery
-				? serializeValue(liveQuery.state.data, maxSnapshotBytes)
-				: undefined;
-		const error = liveQuery?.state.error
-			? serializeValue(liveQuery.state.error, maxSnapshotBytes)
-			: undefined;
+		const { data, error } = queryPreviews(query);
 		return (
 			<>
 				<MetadataRow label="Hash" value={query.hash} />
@@ -363,6 +401,91 @@ export function createQueryPlugin({
 				<SnapshotPreview label="Data" text={data?.text} />
 				<SnapshotPreview isError label="Error" text={error?.text} />
 			</>
+		);
+	}
+
+	function AndroidQueryRow({
+		query,
+		runAction,
+	}: {
+		query: QuerySnapshot;
+		runAction: RunQueryAction;
+	}) {
+		const [expanded, setExpanded] = useState(false);
+		const { data, error } = expanded ? queryPreviews(query) : {};
+		return (
+			<Fragment>
+				<AndroidPanelRow
+					detail={`${query.fetchStatus} · ${query.observerCount} observers`}
+					label={formatQueryKeyRemainder(query.keySegments)}
+					onPress={() => setExpanded((current) => !current)}
+					tone={
+						query.status === 'error'
+							? 'danger'
+							: query.isStale
+								? 'warning'
+								: 'success'
+					}
+					value={expanded ? 'Hide' : query.status}
+				/>
+				{expanded ? (
+					<>
+						<AndroidPanelRow label="Diagnostic ID" value={query.hash} />
+						<AndroidPanelRow label="Status" value={query.status} />
+						<AndroidPanelRow label="Fetch status" value={query.fetchStatus} />
+						<AndroidPanelRow
+							label="Updated at"
+							value={formatTimestamp(query.dataUpdatedAt)}
+						/>
+						<AndroidPanelRow
+							label="Failure count"
+							value={String(query.fetchFailureCount)}
+						/>
+						{data ? (
+							<AndroidPanelTextBlock label="Data" value={data.text} />
+						) : null}
+						{error ? (
+							<AndroidPanelTextBlock
+								label="Error"
+								tone="danger"
+								value={error.text}
+							/>
+						) : null}
+						<AndroidPanelRow
+							label="Invalidate query"
+							onPress={() =>
+								runAction('Invalidate query', () =>
+									queryClient.invalidateQueries(filtersFor(query)),
+								)
+							}
+						/>
+						<AndroidPanelRow
+							label="Refetch query"
+							onPress={() =>
+								runAction('Refetch query', () =>
+									queryClient.refetchQueries(filtersFor(query)),
+								)
+							}
+						/>
+						<AndroidPanelRow
+							label="Remove query"
+							onPress={() =>
+								runAction(
+									'Remove query',
+									() => queryClient.removeQueries(filtersFor(query)),
+									{
+										title: 'Remove query?',
+										message: query.key,
+										confirmLabel: 'Remove',
+										destructive: true,
+									},
+								)
+							}
+							tone="danger"
+						/>
+					</>
+				) : null}
+			</Fragment>
 		);
 	}
 
@@ -398,7 +521,7 @@ export function createQueryPlugin({
 							/>
 							<VStack alignment="leading" spacing={2}>
 								<UIText modifiers={[font({ design: 'monospaced', size: 15 })]}>
-									{formatQueryKeyRemainder(query.queryKey)}
+									{formatQueryKeyRemainder(query.keySegments)}
 								</UIText>
 								<UIText modifiers={secondaryFootnote()}>
 									{`${query.observerCount} observer${query.observerCount === 1 ? '' : 's'} · ${statusLabels[kind]}`}
@@ -469,14 +592,23 @@ export function createQueryPlugin({
 			.find((candidate) => candidate.mutationId === mutation.id);
 		const variables =
 			captureData && liveMutation
-				? serializeValue(liveMutation.state.variables, maxSnapshotBytes)
+				? serializeValue(
+						sanitizeDiagnosticValue(liveMutation.state.variables),
+						maxSnapshotBytes,
+					)
 				: undefined;
 		const data =
 			captureData && liveMutation
-				? serializeValue(liveMutation.state.data, maxSnapshotBytes)
+				? serializeValue(
+						sanitizeDiagnosticValue(liveMutation.state.data),
+						maxSnapshotBytes,
+					)
 				: undefined;
 		const error = liveMutation?.state.error
-			? serializeValue(liveMutation.state.error, maxSnapshotBytes)
+			? serializeValue(
+					sanitizeDiagnosticValue(liveMutation.state.error),
+					maxSnapshotBytes,
+				)
 			: undefined;
 		return (
 			<>
@@ -498,6 +630,51 @@ export function createQueryPlugin({
 		);
 	}
 
+	function AndroidMutationRow({ mutation }: { mutation: MutationSnapshot }) {
+		const [expanded, setExpanded] = useState(false);
+		return (
+			<Fragment>
+				<AndroidPanelRow
+					detail={`${mutation.failureCount} failures${mutation.isPaused ? ' · paused' : ''}`}
+					label={formatQueryKey(mutation.keySegments)}
+					onPress={() => setExpanded((current) => !current)}
+					tone={mutation.status === 'error' ? 'danger' : 'default'}
+					value={expanded ? 'Hide' : mutation.status}
+				/>
+				{expanded ? (
+					<>
+						<AndroidPanelRow label="ID" value={String(mutation.id)} />
+						<AndroidPanelRow label="Status" value={mutation.status} />
+						<AndroidPanelRow
+							label="Submitted at"
+							value={formatTimestamp(mutation.submittedAt)}
+						/>
+						<AndroidPanelRow
+							label="Paused"
+							value={mutation.isPaused ? 'Yes' : 'No'}
+						/>
+						{mutation.variables ? (
+							<AndroidPanelTextBlock
+								label="Variables"
+								value={mutation.variables}
+							/>
+						) : null}
+						{mutation.data ? (
+							<AndroidPanelTextBlock label="Data" value={mutation.data} />
+						) : null}
+						{mutation.error ? (
+							<AndroidPanelTextBlock
+								label="Error"
+								tone="danger"
+								value={mutation.error}
+							/>
+						) : null}
+					</>
+				) : null}
+			</Fragment>
+		);
+	}
+
 	function MutationRow({ mutation }: { mutation: MutationSnapshot }) {
 		const [isExpanded, setIsExpanded] = useState(false);
 		return (
@@ -514,7 +691,7 @@ export function createQueryPlugin({
 						/>
 						<VStack alignment="leading" spacing={2}>
 							<UIText modifiers={[font({ design: 'monospaced', size: 15 })]}>
-								{formatQueryKey(mutation.mutationKey)}
+								{formatQueryKey(mutation.keySegments)}
 							</UIText>
 							<UIText modifiers={secondaryFootnote()}>
 								{`${mutation.failureCount} failure${mutation.failureCount === 1 ? '' : 's'}${mutation.isPaused ? ' · paused' : ''}`}
@@ -567,7 +744,11 @@ export function createQueryPlugin({
 		const errors = snapshot.queries.filter(
 			(query) => query.status === 'error',
 		).length;
-		const summary = `${snapshot.queries.length} CACHED · ${fetching} FETCHING · ${stale} STALE · ${errors} ${errors === 1 ? 'ERROR' : 'ERRORS'}`;
+		const capturedQueryCount =
+			snapshot.omittedQueryCount > 0
+				? `${snapshot.queries.length} OF ${snapshot.sourceQueryCount}`
+				: String(snapshot.queries.length);
+		const summary = `${capturedQueryCount} CACHED · ${fetching} FETCHING · ${stale} STALE · ${errors} ${errors === 1 ? 'ERROR' : 'ERRORS'}`;
 
 		return (
 			<PanelShell onBack={onBack} title={title}>
@@ -593,6 +774,13 @@ export function createQueryPlugin({
 									}
 								/>
 							</Section>
+							{snapshot.error ? (
+								<Section title="Capture unavailable">
+									<UIText modifiers={[foregroundColor(palette.red)]}>
+										{snapshot.error}
+									</UIText>
+								</Section>
+							) : null}
 							{tab === 'queries' ? (
 								<>
 									<Section
@@ -709,6 +897,15 @@ export function createQueryPlugin({
 							}
 							value={search}
 						/>
+						{snapshot.error ? (
+							<AndroidPanelSection title="Capture unavailable">
+								<AndroidPanelRow
+									detail={snapshot.error}
+									label="Query cache could not be refreshed"
+									tone="danger"
+								/>
+							</AndroidPanelSection>
+						) : null}
 						{tab === 'queries' ? (
 							<>
 								<AndroidPanelSection title={summary}>
@@ -722,18 +919,10 @@ export function createQueryPlugin({
 										title={`${group.segment} · ${group.queries.length}`}
 									>
 										{group.queries.map((query) => (
-											<AndroidPanelRow
+											<AndroidQueryRow
 												key={query.hash}
-												label={formatQueryKeyRemainder(query.queryKey)}
-												detail={`${query.fetchStatus} · ${query.observerCount} observers`}
-												tone={
-													query.status === 'error'
-														? 'danger'
-														: query.isStale
-															? 'warning'
-															: 'success'
-												}
-												value={query.status}
+												query={query}
+												runAction={runAction}
 											/>
 										))}
 									</AndroidPanelSection>
@@ -747,13 +936,7 @@ export function createQueryPlugin({
 									<AndroidPanelRow label="No mutations yet" />
 								) : (
 									visibleMutations.map((mutation) => (
-										<AndroidPanelRow
-											key={mutation.id}
-											label={formatQueryKey(mutation.mutationKey)}
-											detail={`${mutation.failureCount} failures${mutation.isPaused ? ' · paused' : ''}`}
-											tone={mutation.status === 'error' ? 'danger' : 'default'}
-											value={mutation.status}
-										/>
+										<AndroidMutationRow key={mutation.id} mutation={mutation} />
 									))
 								)}
 							</AndroidPanelSection>
@@ -801,30 +984,13 @@ export function createQueryPlugin({
 			tint: pluginTint,
 			section,
 			Panel: QueryPanel,
-			install: () => {
-				installCount += 1;
-				if (installCount === 1) {
-					installed = true;
-					refresh();
-					unsubscribeQuery = queryClient
-						.getQueryCache()
-						.subscribe(scheduleRefresh);
-					unsubscribeMutation = queryClient
-						.getMutationCache()
-						.subscribe(scheduleRefresh);
-				}
-				return () => {
-					installCount = Math.max(0, installCount - 1);
-					if (installCount === 0) {
-						installed = false;
-						unsubscribeQuery?.();
-						unsubscribeMutation?.();
-						unsubscribeQuery = undefined;
-						unsubscribeMutation = undefined;
-					}
-				};
-			},
+			install,
 		},
-		{ refresh, getSnapshot: store.getSnapshot },
+		{
+			refresh,
+			getSnapshot: store.getSnapshot,
+			captureSnapshot,
+			runQueryAction,
+		},
 	);
 }

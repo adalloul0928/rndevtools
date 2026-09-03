@@ -1,0 +1,72 @@
+import { Button } from '@heroui/react/button';
+import { Check, CircleX, X } from 'lucide-react';
+import type { ReactNode } from 'react';
+
+type Tone = 'default' | 'success' | 'warning' | 'danger' | 'info';
+
+export const statusToneClassName: Record<Tone, string> = {
+	default: 'border-white/10 bg-white/[0.045] text-(--muted)',
+	success: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
+	warning: 'border-amber-400/25 bg-amber-400/10 text-amber-300',
+	danger: 'border-red-400/25 bg-red-400/10 text-red-300',
+	info: 'border-blue-400/25 bg-blue-400/10 text-blue-300',
+};
+
+export function StatusPill({
+	children,
+	tone = 'default',
+	dot = false,
+	className = '',
+}: {
+	children: ReactNode;
+	tone?: Tone;
+	dot?: boolean;
+	className?: string;
+}) {
+	return (
+		<span
+			className={`inline-flex h-6 items-center gap-1.5 rounded-md border px-2 font-mono text-[10px] font-medium uppercase tracking-[0.04em] ${statusToneClassName[tone]} ${className}`}
+		>
+			{dot ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : null}
+			{children}
+		</span>
+	);
+}
+
+export function ActionNotice({
+	kind,
+	message,
+	onDismiss,
+}: {
+	kind: 'pending' | 'success' | 'error';
+	message: string;
+	onDismiss: () => void;
+}) {
+	const icon =
+		kind === 'success' ? (
+			<Check className="h-3.5 w-3.5" />
+		) : kind === 'error' ? (
+			<CircleX className="h-3.5 w-3.5" />
+		) : (
+			<span className="h-2 w-2 animate-pulse rounded-full bg-blue-300" />
+		);
+	return (
+		<div
+			aria-live={kind === 'error' ? 'assertive' : 'polite'}
+			className={`fixed bottom-5 right-5 z-50 flex min-w-[280px] max-w-[min(560px,calc(100vw-40px))] items-center gap-2 rounded-lg border px-3 py-2.5 text-xs shadow-2xl ${statusToneClassName[kind === 'success' ? 'success' : kind === 'error' ? 'danger' : 'info']}`}
+			role={kind === 'error' ? 'alert' : 'status'}
+		>
+			{icon}
+			<span className="min-w-0 flex-1 break-words">{message}</span>
+			<Button
+				aria-label="Dismiss"
+				className="h-6 min-w-6 rounded p-0 text-current"
+				isIconOnly
+				variant="ghost"
+				onPress={onDismiss}
+			>
+				<X className="h-3.5 w-3.5" />
+			</Button>
+		</div>
+	);
+}

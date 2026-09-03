@@ -1,9 +1,14 @@
 import { assertUniquePluginIds } from '../core/plugins';
+import { createComponentInspectorPlugin } from './component-inspector';
+import { createConsolePlugin } from './console';
 import { createEnvironmentPlugin } from './environment';
 import { createNavigationPlugin } from './navigation';
 import { createNetworkPlugin } from './network';
+import { createPerformancePlugin } from './performance';
 import { createQueryPlugin } from './query';
+import { createRestorePointsPlugin } from './restore-points';
 import { createStoragePlugin } from './storage';
+import { createZustandPlugin } from './zustand';
 
 jest.mock('@expo/ui/swift-ui', () => ({}));
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({}));
@@ -27,12 +32,29 @@ function builtInPlugins() {
 	const query = createQueryPlugin({ queryClient: queryClientStub });
 	const storage = createStoragePlugin({ adapters: [] });
 	const navigation = createNavigationPlugin({});
+	const consolePlugin = createConsolePlugin({
+		source: { subscribe: () => () => {} },
+	});
+	const zustand = createZustandPlugin({ stores: [] });
+	const restorePoints = createRestorePointsPlugin({ sources: [] });
+	const performance = createPerformancePlugin();
+	const components = createComponentInspectorPlugin({
+		source: {
+			getSnapshot: () => [],
+			subscribe: () => () => {},
+		},
+	});
 	const environment = createEnvironmentPlugin({
 		sections: [{ title: 'Application', values: { APP: 'pumpd' } }],
 	});
 	return [
+		consolePlugin.plugin,
 		network.plugin,
 		query,
+		zustand.plugin,
+		restorePoints.plugin,
+		performance.plugin,
+		components.plugin,
 		storage.plugin,
 		navigation.plugin,
 		environment,
@@ -54,8 +76,13 @@ describe('built-in diagnostic panels', () => {
 	it('keeps stable ids the host and persistence rely on', () => {
 		const ids = builtInPlugins().map((plugin) => plugin.id);
 		expect(ids).toEqual([
+			'console',
 			'network',
 			'queries',
+			'zustand',
+			'restore-points',
+			'performance',
+			'components',
 			'storage',
 			'navigation',
 			'environment',

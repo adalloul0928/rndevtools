@@ -1,8 +1,15 @@
 import {
-	serializeValue,
-	truncateText,
-	utf8ByteLength,
-} from '../core/serialize';
+	isSensitiveDiagnosticKey,
+	redactDiagnosticText,
+	sanitizeDiagnosticValueWithMetadata,
+} from '../core/redact';
+import { truncateText, utf8ByteLength } from '../core/serialize';
+
+const MAX_CAPTURED_HEADERS = 100;
+const MAX_HEADER_NAME_BYTES = 1024;
+const MAX_HEADER_VALUE_BYTES = 8 * 1024;
+
+export { formatBytes as formatNetworkBytes } from '../core/format';
 
 export type NetworkEventState = 'pending' | 'success' | 'error' | 'aborted';
 
@@ -31,46 +38,50 @@ export type NetworkBodyContext = {
 	url: string;
 };
 
-const DEFAULT_SENSITIVE_FIELD =
-	/authorization|cookie|token|secret|password|passcode|session|api[-_]?key/i;
-
 export function defaultRedactHeader(name: string, value: string): string {
-	return DEFAULT_SENSITIVE_FIELD.test(name) ? '[REDACTED]' : value;
+	return isSensitiveDiagnosticKey(name)
+		? '[REDACTED]'
+		: redactDiagnosticText(value);
 }
 
 export function defaultRedactUrl(rawUrl: string): string {
+	const isAbsolute = /^[a-z][a-z\d+.-]*:/i.test(rawUrl);
+	const isProtocolRelative = rawUrl.startsWith('//');
 	try {
-		const url = new URL(rawUrl);
+		const url = new URL(rawUrl, 'https://devtools.invalid');
+		if (url.username) url.username = '[REDACTED]';
+		if (url.password) url.password = '[REDACTED]';
 		for (const name of url.searchParams.keys()) {
-			if (DEFAULT_SENSITIVE_FIELD.test(name)) {
+			if (isSensitiveDiagnosticKey(name)) {
 				url.searchParams.set(name, '[REDACTED]');
 			}
 		}
-		return url.toString();
+		const redacted = isAbsolute
+			? url.toString()
+			: isProtocolRelative
+				? `//${url.host}${url.pathname}${url.search}${url.hash}`
+				: `${url.pathname}${url.search}${url.hash}`;
+		return redactDiagnosticText(redacted);
 	} catch {
-		return rawUrl;
+		return redactDiagnosticText(rawUrl);
 	}
 }
 
-function redactJson(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(redactJson);
-	if (!value || typeof value !== 'object') return value;
-	return Object.fromEntries(
-		Object.entries(value).map(([key, entry]) => [
-			key,
-			DEFAULT_SENSITIVE_FIELD.test(key) ? '[REDACTED]' : redactJson(entry),
-		]),
-	);
-}
+/**
+ * The diagnostic projection drops object/array entries past its per-level cap
+ * and nesting past its depth limit. Those losses leave no in-band evidence, so
+ * a projected body that still parses as JSON would otherwise look complete to
+ * both the panel and the replay guard. Append an explicit trailer instead.
+ */
+const BODY_TRUNCATION_MARKER = '[Body truncated by diagnostic capture]';
 
 export function defaultRedactBody(body: string): string {
 	try {
-		return JSON.stringify(redactJson(JSON.parse(body)), null, 2);
+		const projection = sanitizeDiagnosticValueWithMetadata(JSON.parse(body));
+		const text = JSON.stringify(projection.value, null, 2);
+		return projection.truncated ? `${text}\n${BODY_TRUNCATION_MARKER}` : text;
 	} catch {
-		return body.replace(
-			/((?:token|secret|password|session|api[-_]?key)=)[^&\s]+/gi,
-			'$1[REDACTED]',
-		);
+		return redactDiagnosticText(body);
 	}
 }
 
@@ -79,12 +90,23 @@ export function headersRecord(
 	redact: (name: string, value: string) => string,
 ): Record<string, string> {
 	if (!headersInit) return {};
-	const output: Record<string, string> = {};
+	const output = Object.create(null) as Record<string, string>;
+	let capturedCount = 0;
 	new Headers(headersInit).forEach((value, name) => {
+		if (capturedCount >= MAX_CAPTURED_HEADERS) return;
+		capturedCount += 1;
+		const safeName = truncateText(name, MAX_HEADER_NAME_BYTES).text;
 		try {
-			output[name] = redact(name, value);
+			const customValue = redact(name, value);
+			output[safeName] =
+				typeof customValue === 'string'
+					? truncateText(
+							defaultRedactHeader(name, customValue),
+							MAX_HEADER_VALUE_BYTES,
+						).text
+					: '[REDACTION FAILED]';
 		} catch {
-			output[name] = '[REDACTION FAILED]';
+			output[safeName] = '[REDACTION FAILED]';
 		}
 	});
 	return output;
@@ -132,9 +154,18 @@ function bodyFromInit(
 		return truncateText(body.toString(), maxBytes).text;
 	}
 	if (typeof FormData !== 'undefined' && body instanceof FormData) {
-		return '[FormData]';
+		return '[FormData omitted]';
 	}
-	return serializeValue(body, maxBytes).text;
+	if (typeof Blob !== 'undefined' && body instanceof Blob) {
+		return `[Binary body omitted: ${body.type || 'Blob'}]`;
+	}
+	if (
+		typeof ArrayBuffer !== 'undefined' &&
+		(body instanceof ArrayBuffer || ArrayBuffer.isView(body))
+	) {
+		return '[Binary body omitted]';
+	}
+	return '[Unsupported request body omitted]';
 }
 
 export function textBytes(value: string | undefined): number | undefined {
@@ -144,7 +175,7 @@ export function textBytes(value: string | undefined): number | undefined {
 export function parseContentLength(value: string | null): number | undefined {
 	if (value === null || value.trim() === '') return undefined;
 	const parsed = Number(value);
-	return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+	return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 export function parseNetworkUrl(rawUrl: string): {
@@ -156,7 +187,7 @@ export function parseNetworkUrl(rawUrl: string): {
 } {
 	try {
 		const url = new URL(rawUrl);
-		const query: Record<string, string | string[]> = {};
+		const query = Object.create(null) as Record<string, string | string[]>;
 		for (const [key, value] of url.searchParams.entries()) {
 			const current = query[key];
 			query[key] =
@@ -184,17 +215,11 @@ export function parseNetworkUrl(rawUrl: string): {
 	}
 }
 
-export function formatNetworkBytes(bytes: number | undefined): string {
-	if (bytes === undefined) return '—';
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export async function captureRequestBody(
 	input: RequestInfo | URL,
 	init: RequestInit | undefined,
 	maxBytes: number,
+	captureUnknownLengthBodies: boolean,
 ): Promise<string | undefined> {
 	const initializedBody = bodyFromInit(init?.body, maxBytes);
 	if (initializedBody !== undefined) return initializedBody;
@@ -202,6 +227,17 @@ export async function captureRequestBody(
 		return undefined;
 	}
 	if (input.method === 'GET' || input.method === 'HEAD') return undefined;
+	// `Content-Length` is a forbidden request header, so a `Request` built from a
+	// body never carries one. Without the same opt-in the response path uses,
+	// every `fetch(new Request(url, { body }))` would report an omitted body —
+	// which `UNSAFE_REPLAY_MARKER` then reads as redacted data and blocks replay.
+	const contentLength = parseContentLength(input.headers.get('content-length'));
+	if (contentLength === undefined && !captureUnknownLengthBodies) {
+		return '[Body omitted: unknown content length]';
+	}
+	if (contentLength !== undefined && contentLength > maxBytes) {
+		return `[Body omitted: ${contentLength} bytes]`;
+	}
 	try {
 		return truncateText(await input.clone().text(), maxBytes).text;
 	} catch {
@@ -220,12 +256,20 @@ export async function captureResponseBody(
 	if (contentLength !== undefined && contentLength > maxBytes) {
 		return { body: `[Body omitted: ${contentLength} bytes]` };
 	}
-	const contentType = response.headers.get('content-type') ?? '';
+	const contentType = (
+		response.headers.get('content-type') ?? ''
+	).toLowerCase();
 	if (
 		contentType.startsWith('image/') ||
 		contentType.startsWith('audio/') ||
 		contentType.startsWith('video/') ||
-		contentType.includes('application/octet-stream')
+		contentType.startsWith('font/') ||
+		contentType.includes('application/octet-stream') ||
+		contentType.includes('application/pdf') ||
+		contentType.includes('application/zip') ||
+		contentType.includes('application/gzip') ||
+		contentType.includes('application/x-protobuf') ||
+		contentType.includes('multipart/form-data')
 	) {
 		return {
 			body: `[Binary body omitted: ${contentType || 'unknown content type'}]`,

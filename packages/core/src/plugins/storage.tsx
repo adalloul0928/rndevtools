@@ -8,26 +8,20 @@ import {
 	Label,
 	LabeledContent,
 	List,
-	Picker,
 	Section,
 	Spacer,
 	TextField,
 	Text as UIText,
-	useNativeState,
 	VStack,
 } from '@expo/ui/swift-ui';
 import {
 	autocorrectionDisabled,
 	font,
 	foregroundStyle,
-	lineLimit,
-	listRowBackground,
 	listStyle,
-	pickerStyle,
 	refreshable,
-	tag,
 } from '@expo/ui/swift-ui/modifiers';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { Fragment, useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, PlatformColor } from 'react-native';
 import {
 	AndroidPanelRow,
@@ -39,26 +33,21 @@ import {
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
-import { assertPositiveFinite } from '../core/options';
+import { formatBytes, formatRelativeTime } from '../core/format';
+import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
 import { serializeValue } from '../core/serialize';
 import type {
-	DevToolsActionConfirmation,
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
-import { formatNetworkBytes } from './network-capture';
-import { formatRelativeTime } from './query';
 import {
 	type DevToolsStorageAdapter,
-	isStorageEntryEditable,
-	parseStorageDraft,
+	normalizeStorageConfiguration,
 	type StorageAdapterSnapshot,
 	type StorageChangeEvent,
-	type StorageEntrySnapshot,
 	type StorageKeyRule,
 	type StorageSnapshot,
-	type StorageValidationResult,
 	snapshotStorageAdapter,
 	validateStorageSnapshot,
 } from './storage-model';
@@ -70,6 +59,7 @@ export type {
 	StorageEntrySnapshot,
 	StorageKeyRule,
 	StorageSnapshot,
+	StorageSnapshotLimits,
 	StorageValidationResult,
 } from './storage-model';
 export {
@@ -82,6 +72,9 @@ export type StoragePluginOptions = {
 	adapters: readonly DevToolsStorageAdapter[];
 	rules?: readonly StorageKeyRule[];
 	maxValueBytes?: number;
+	maxEntriesPerAdapter?: number;
+	maxAdapterBytes?: number;
+	maxTotalBytes?: number;
 	maxEvents?: number;
 	title?: string;
 	id?: string;
@@ -98,406 +91,39 @@ export type StoragePlugin = {
 	clearEvents: () => void;
 };
 
-/** Plain uppercased section header (SwiftUI headers strip interactivity). */
-function SectionInfoHeader({ title }: { title: string }) {
-	return (
-		<UIText
-			modifiers={[
-				font({ textStyle: 'footnote' }),
-				foregroundStyle('secondary'),
-			]}
-		>
-			{title.toUpperCase()}
-		</UIText>
-	);
-}
+const MAX_VALUE_BYTES = 1024 * 1024;
+const MAX_ENTRIES_PER_ADAPTER = 10_000;
+const MAX_ADAPTER_BYTES = 16 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const MAX_STORAGE_EVENTS = 10_000;
 
-type StorageTab = 'stores' | 'activity';
-
-type RunStorageMutation = (
-	label: string,
-	mutation: () => void | Promise<void>,
-	confirmation?: DevToolsActionConfirmation,
-) => void;
-
-function describeValueLength(chars: number): string {
-	if (chars >= 1024) return formatNetworkBytes(chars);
-	return chars === 1 ? '1 char' : `${chars} chars`;
-}
-
-function countStorageChars(adapter: StorageAdapterSnapshot): number {
-	return adapter.entries.reduce(
-		(sum, entry) => sum + (entry.value?.length ?? 0),
-		0,
-	);
-}
-
-function pluralizeKeys(count: number): string {
-	return count === 1 ? '1 key' : `${count} keys`;
-}
-
-function storageKeyPrefix(key: string): string {
-	const separator = key.search(/[/.]/);
-	return separator > 0 ? key.slice(0, separator) : 'other';
-}
-
-function storageKeyTail(key: string): string {
-	const separator = key.search(/[/.]/);
-	return separator > 0 ? key.slice(separator + 1) : key;
-}
-
-type StorageKeyGroup = {
-	prefix: string;
-	entries: StorageEntrySnapshot[];
-};
-
-function groupStorageEntries(
-	entries: readonly StorageEntrySnapshot[],
-): StorageKeyGroup[] {
-	const groups = new Map<string, StorageEntrySnapshot[]>();
-	for (const entry of entries) {
-		const prefix = storageKeyPrefix(entry.key);
-		const group = groups.get(prefix);
-		if (group) group.push(entry);
-		else groups.set(prefix, [entry]);
-	}
-	return [...groups.entries()].map(([prefix, grouped]) => ({
-		prefix,
-		entries: grouped,
-	}));
-}
-
-function describeStorageGroup(group: StorageKeyGroup): string {
-	const chars = group.entries.reduce(
-		(sum, entry) => sum + (entry.value?.length ?? 0),
-		0,
-	);
-	const size = chars >= 1024 ? ` · ${formatNetworkBytes(chars)}` : '';
-	return `${group.prefix} · ${pluralizeKeys(group.entries.length)}${size}`;
-}
-
-function describeAdapterSnapshot(adapter: StorageAdapterSnapshot): string {
-	if (adapter.error) return `Unavailable · ${adapter.error}`;
-	const parts = [adapter.description, pluralizeKeys(adapter.entries.length)];
-	if (adapter.sensitive) parts.push('values hidden');
-	else {
-		const chars = countStorageChars(adapter);
-		if (chars > 0) parts.push(formatNetworkBytes(chars));
-	}
-	return parts.filter(Boolean).join(' · ');
-}
-
-function describeStorageEntry(entry: StorageEntrySnapshot): string {
-	if (entry.valueHidden) return 'Value protected';
-	if (entry.readError) return `Read failed · ${entry.readError}`;
-	if (entry.binary) return 'Binary value · editing disabled';
-	const sized =
-		entry.valueType === 'string' ||
-		entry.valueType === 'object' ||
-		entry.valueType === 'array';
-	const size = sized
-		? ` · ${describeValueLength(entry.value?.length ?? 0)}`
-		: '';
-	const truncated = entry.truncated ? ' · too large to edit' : '';
-	return `${entry.valueType ?? 'unknown'}${size}${truncated}`;
-}
-
-function describeValidationIssue(result: StorageValidationResult): string {
-	if (result.status === 'typeMismatch') {
-		return `Expected ${result.expectedType}, found ${result.actualType ?? 'unknown'}`;
-	}
-	return 'Missing';
-}
-
-const storageEventPresentation: Record<
-	StorageChangeEvent['type'],
-	{ verb: string; systemImage: DevToolsSystemImage; color: string }
-> = {
-	added: { verb: 'Added', systemImage: 'plus', color: 'systemGreenColor' },
-	updated: { verb: 'Updated', systemImage: 'pencil', color: 'systemBlueColor' },
-	removed: { verb: 'Deleted', systemImage: 'minus', color: 'systemRedColor' },
-};
-
-function describeStorageEvent(event: StorageChangeEvent): string {
-	const parts = [event.adapterTitle, new Date(event.at).toLocaleTimeString()];
-	if (event.valueHidden) parts.push('value never read');
-	else {
-		const value = event.value ?? event.previousValue;
-		if (value !== undefined) parts.push(describeValueLength(value.length));
-	}
-	return parts.join(' · ');
-}
-
-function StorageTabPicker({
-	selection,
-	onChange,
-}: {
-	selection: StorageTab;
-	onChange: (tab: StorageTab) => void;
-}) {
-	return (
-		<Section>
-			<Picker
-				label="Storage view"
-				modifiers={[pickerStyle('segmented'), listRowBackground('clear')]}
-				onSelectionChange={onChange}
-				selection={selection}
-			>
-				<UIText modifiers={[tag('stores')]}>Stores</UIText>
-				<UIText modifiers={[tag('activity')]}>Activity</UIText>
-			</Picker>
-		</Section>
-	);
-}
-
-/** Verb-tinted icon row shared by recent activity and the activity log. */
-function StorageEventLabel({
-	event,
-	detail,
-}: {
-	event: StorageChangeEvent;
-	detail: string;
-}) {
-	const presentation = storageEventPresentation[event.type];
-	return (
-		<Label
-			color={PlatformColor(presentation.color)}
-			systemImage={presentation.systemImage}
-		>
-			<VStack alignment="leading" spacing={2}>
-				<UIText>
-					<UIText>{`${presentation.verb} `}</UIText>
-					<UIText
-						modifiers={[font({ design: 'monospaced', textStyle: 'footnote' })]}
-					>
-						{event.key}
-					</UIText>
-				</UIText>
-				<UIText
-					modifiers={[
-						font({ textStyle: 'footnote' }),
-						foregroundStyle('secondary'),
-					]}
-				>
-					{detail}
-				</UIText>
-			</VStack>
-		</Label>
-	);
-}
-
-/** Activity row; updated events expand to a previous/current diff. */
-function ActivityEventRow({ event }: { event: StorageChangeEvent }) {
-	const row = (
-		<StorageEventLabel detail={describeStorageEvent(event)} event={event} />
-	);
-	const hasDiff =
-		event.type === 'updated' &&
-		!event.valueHidden &&
-		(event.previousValue !== undefined || event.value !== undefined);
-	if (!hasDiff) return row;
-	return (
-		<DisclosureGroup>
-			<DisclosureGroup.Label>{row}</DisclosureGroup.Label>
-			{event.previousValue !== undefined ? (
-				<UIText
-					modifiers={[
-						font({ design: 'monospaced', textStyle: 'footnote' }),
-						foregroundStyle(PlatformColor('systemRedColor')),
-						lineLimit(4),
-					]}
-				>
-					{`- ${event.previousValue}`}
-				</UIText>
-			) : null}
-			{event.value !== undefined ? (
-				<UIText
-					modifiers={[
-						font({ design: 'monospaced', textStyle: 'footnote' }),
-						foregroundStyle(PlatformColor('systemGreenColor')),
-						lineLimit(4),
-					]}
-				>
-					{`+ ${event.value}`}
-				</UIText>
-			) : null}
-		</DisclosureGroup>
-	);
-}
-
-/**
- * Expanded key detail: full key, value editor (when the entry is safely
- * editable), and destructive delete. Mounted only while expanded so the
- * draft reseeds from the snapshot on every expansion.
- */
-function StorageEntryDetails({
-	adapter,
-	entry,
-	runMutation,
-}: {
-	adapter: DevToolsStorageAdapter;
-	entry: StorageEntrySnapshot;
-	runMutation: RunStorageMutation;
-}) {
-	const [draft, setDraft] = useState(entry.value ?? '');
-	const draftSeed = useNativeState(entry.value ?? '');
-	const canEdit = isStorageEntryEditable(adapter, entry);
-	return (
-		<>
-			<UIText
-				modifiers={[
-					font({ design: 'monospaced', textStyle: 'footnote' }),
-					foregroundStyle('secondary'),
-				]}
-			>
-				{entry.key}
-			</UIText>
-			{entry.valueHidden ? (
-				<UIText
-					modifiers={[
-						font({ textStyle: 'footnote' }),
-						foregroundStyle('secondary'),
-					]}
-				>
-					This store exposes key metadata only. Its values are never read.
-				</UIText>
-			) : canEdit ? (
-				<TextField
-					axis="vertical"
-					modifiers={[
-						font({ design: 'monospaced', textStyle: 'footnote' }),
-						autocorrectionDisabled(),
-						lineLimit(8),
-					]}
-					onTextChange={setDraft}
-					placeholder="Value"
-					text={draftSeed}
-				/>
-			) : entry.value !== undefined ? (
-				<UIText
-					modifiers={[
-						font({ design: 'monospaced', textStyle: 'footnote' }),
-						lineLimit(8),
-					]}
-				>
-					{entry.value}
-				</UIText>
-			) : null}
-			{canEdit ? (
-				<Button
-					label="Save"
-					onPress={() => {
-						runMutation('Save storage value', () => {
-							const parsed = adapter.parseValue
-								? adapter.parseValue(entry.key, draft, entry.valueType ?? '')
-								: parseStorageDraft(draft, entry.valueType ?? '');
-							return adapter.setValue?.(entry.key, parsed);
-						});
-					}}
-				/>
-			) : null}
-			{adapter.removeValue ? (
-				// biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA
-				<Button
-					label="Delete key"
-					onPress={() =>
-						runMutation(
-							'Delete storage value',
-							() => adapter.removeValue?.(entry.key),
-							{
-								title: 'Delete storage value?',
-								message: entry.key,
-								confirmLabel: 'Delete',
-								destructive: true,
-							},
-						)
-					}
-					role="destructive"
-				/>
-			) : null}
-		</>
-	);
-}
-
-/** Key row in the store browser: mono tail, type · size, small-value badge. */
-function StorageEntryRow({
-	adapter,
-	entry,
-	expanded,
-	onExpandedChange,
-	runMutation,
-}: {
-	adapter: DevToolsStorageAdapter;
-	entry: StorageEntrySnapshot;
-	expanded: boolean;
-	onExpandedChange: (expanded: boolean) => void;
-	runMutation: RunStorageMutation;
-}) {
-	const smallValue =
-		!entry.valueHidden &&
-		!entry.readError &&
-		!entry.binary &&
-		!entry.truncated &&
-		entry.value !== undefined &&
-		entry.value.length <= 24
-			? entry.valueType === 'string'
-				? `"${entry.value}"`
-				: entry.value
-			: undefined;
-	return (
-		<DisclosureGroup
-			isExpanded={expanded}
-			onIsExpandedChange={onExpandedChange}
-		>
-			<DisclosureGroup.Label>
-				<HStack spacing={10}>
-					<VStack alignment="leading" spacing={2}>
-						<UIText
-							modifiers={[
-								font({ design: 'monospaced', textStyle: 'subheadline' }),
-							]}
-						>
-							{storageKeyTail(entry.key)}
-						</UIText>
-						<UIText
-							modifiers={[
-								font({ textStyle: 'footnote' }),
-								foregroundStyle('secondary'),
-							]}
-						>
-							{describeStorageEntry(entry)}
-						</UIText>
-					</VStack>
-					<Spacer />
-					{smallValue !== undefined ? (
-						<UIText
-							modifiers={[
-								font({ design: 'monospaced', textStyle: 'footnote' }),
-								foregroundStyle('secondary'),
-								lineLimit(1),
-							]}
-						>
-							{smallValue}
-						</UIText>
-					) : null}
-				</HStack>
-			</DisclosureGroup.Label>
-			{expanded ? (
-				<StorageEntryDetails
-					adapter={adapter}
-					entry={entry}
-					key={`details:${entry.value ?? ''}`}
-					runMutation={runMutation}
-				/>
-			) : null}
-		</DisclosureGroup>
-	);
-}
+import {
+	ActivityEventRow,
+	AndroidStorageEntryDetails,
+	countStorageChars,
+	describeAdapterSnapshot,
+	describeStorageEntry,
+	describeStorageEvent,
+	describeStorageGroup,
+	describeValidationIssue,
+	describeValueLength,
+	groupStorageEntries,
+	pluralizeKeys,
+	type RunStorageMutation,
+	SectionInfoHeader,
+	StorageEntryRow,
+	StorageEventLabel,
+	type StorageTab,
+	StorageTabPicker,
+} from './storage-panel-components';
 
 export function createStoragePlugin({
 	adapters,
 	rules = [],
 	maxValueBytes = 256 * 1024,
+	maxEntriesPerAdapter = 500,
+	maxAdapterBytes = 2 * 1024 * 1024,
+	maxTotalBytes = 4 * 1024 * 1024,
 	maxEvents = 200,
 	title = 'Storage',
 	id = 'storage',
@@ -506,6 +132,30 @@ export function createStoragePlugin({
 	systemImage = 'externaldrive.fill',
 }: StoragePluginOptions): StoragePlugin {
 	assertPositiveFinite(maxValueBytes, 'maxValueBytes');
+	assertPositiveInteger(maxEntriesPerAdapter, 'maxEntriesPerAdapter');
+	assertPositiveFinite(maxAdapterBytes, 'maxAdapterBytes');
+	assertPositiveFinite(maxTotalBytes, 'maxTotalBytes');
+	assertPositiveInteger(maxEvents, 'maxEvents');
+	if (maxValueBytes > MAX_VALUE_BYTES) {
+		throw new Error(`maxValueBytes cannot exceed ${MAX_VALUE_BYTES}`);
+	}
+	if (maxEntriesPerAdapter > MAX_ENTRIES_PER_ADAPTER) {
+		throw new Error(
+			`maxEntriesPerAdapter cannot exceed ${MAX_ENTRIES_PER_ADAPTER}`,
+		);
+	}
+	if (maxAdapterBytes > MAX_ADAPTER_BYTES) {
+		throw new Error(`maxAdapterBytes cannot exceed ${MAX_ADAPTER_BYTES}`);
+	}
+	if (maxTotalBytes > MAX_TOTAL_BYTES) {
+		throw new Error(`maxTotalBytes cannot exceed ${MAX_TOTAL_BYTES}`);
+	}
+	if (maxEvents > MAX_STORAGE_EVENTS) {
+		throw new Error(`maxEvents cannot exceed ${MAX_STORAGE_EVENTS}`);
+	}
+	const configuration = normalizeStorageConfiguration(adapters, rules);
+	adapters = configuration.adapters;
+	rules = configuration.rules;
 	const store = new ExternalStore<StorageSnapshot>({
 		loading: false,
 		adapters: [],
@@ -522,13 +172,24 @@ export function createStoragePlugin({
 	const adapterBaselines = new Set<string>();
 	let refreshInFlight: Promise<void> | undefined;
 	let refreshRequested = false;
+	const stopLoading = (): void => {
+		const snapshot = store.getSnapshot();
+		if (snapshot.loading) store.set({ ...snapshot, loading: false });
+	};
 
 	const recordChanges = (previous: StorageSnapshot, next: StorageSnapshot) => {
 		for (const adapter of next.adapters) {
 			const oldAdapter = previous.adapters.find(
 				(candidate) => candidate.id === adapter.id,
 			);
-			if (adapter.error || oldAdapter?.error) continue;
+			if (
+				adapter.error ||
+				oldAdapter?.error ||
+				adapter.truncated ||
+				oldAdapter?.truncated
+			) {
+				continue;
+			}
 			if (!adapterBaselines.has(adapter.id)) {
 				adapterBaselines.add(adapter.id);
 				continue;
@@ -578,9 +239,16 @@ export function createStoragePlugin({
 
 	const performRefresh = async (generation: number): Promise<void> => {
 		store.set({ ...store.getSnapshot(), loading: true });
-		const snapshots = await Promise.all(
-			adapters.map((adapter) => snapshotStorageAdapter(adapter, maxValueBytes)),
-		);
+		const snapshots: StorageAdapterSnapshot[] = [];
+		let remainingBytes = maxTotalBytes;
+		for (const adapter of adapters) {
+			const snapshot = await snapshotStorageAdapter(adapter, maxValueBytes, {
+				maxEntries: maxEntriesPerAdapter,
+				maxSnapshotBytes: Math.min(maxAdapterBytes, remainingBytes),
+			});
+			snapshots.push(snapshot);
+			remainingBytes = Math.max(0, remainingBytes - snapshot.estimatedBytes);
+		}
 		if (generation !== lifecycleGeneration) return;
 		const next = { loading: false, adapters: snapshots };
 		recordChanges(store.getSnapshot(), next);
@@ -609,13 +277,18 @@ export function createStoragePlugin({
 		if (refreshRequested) return;
 		refreshRequested = true;
 		const scheduledGeneration = lifecycleGeneration;
-		queueMicrotask(() => {
-			if (scheduledGeneration !== lifecycleGeneration || installCount === 0) {
-				refreshRequested = false;
-				return;
-			}
-			void refresh();
-		});
+		try {
+			queueMicrotask(() => {
+				if (scheduledGeneration !== lifecycleGeneration || installCount === 0) {
+					refreshRequested = false;
+					return;
+				}
+				void refresh();
+			});
+		} catch {
+			refreshRequested = false;
+			stopLoading();
+		}
 	};
 
 	function StoragePanel({ onBack, actions }: DevToolsPanelProps) {
@@ -663,7 +336,9 @@ export function createStoragePlugin({
 		);
 		const failing = validation.filter(
 			(result) =>
-				result.status === 'missing' || result.status === 'typeMismatch',
+				result.status === 'missing' ||
+				result.status === 'typeMismatch' ||
+				result.status === 'notCaptured',
 		);
 
 		const openStore = (adapterId: string) => {
@@ -774,13 +449,32 @@ export function createStoragePlugin({
 										</UIText>
 									</Section>
 								) : null}
+								{browsing.snapshot.truncated ? (
+									<Section>
+										<Label
+											color={PlatformColor('systemOrangeColor')}
+											systemImage="exclamationmark.triangle.fill"
+											title="Snapshot limited"
+										/>
+										<UIText
+											modifiers={[
+												font({ textStyle: 'footnote' }),
+												foregroundStyle('secondary'),
+											]}
+										>
+											{`${browsing.snapshot.omittedKeyCount} ${browsing.snapshot.omittedKeyCount === 1 ? 'key was' : 'keys were'} omitted by the safe capture limits.`}
+										</UIText>
+									</Section>
+								) : null}
 								{groups.length === 0 ? (
 									<Section>
 										<ContentUnavailableView
 											description={
 												needle
 													? `No keys match "${search.trim()}".`
-													: 'This store is empty.'
+													: browsing.snapshot.truncated
+														? 'No keys fit within the safe capture limits.'
+														: 'This store is empty.'
 											}
 											systemImage={needle ? 'magnifyingglass' : 'externaldrive'}
 											title={needle ? 'No matching keys' : 'No keys'}
@@ -827,7 +521,7 @@ export function createStoragePlugin({
 										<SectionInfoHeader
 											title={
 												totalChars > 0
-													? `On this device · ${formatNetworkBytes(totalChars)}`
+													? `On this device · ${formatBytes(totalChars)}`
 													: 'On this device'
 											}
 										/>
@@ -994,25 +688,85 @@ export function createStoragePlugin({
 									placeholder={`Search ${pluralizeKeys(browsing.snapshot.entries.length)}`}
 									value={search}
 								/>
+								{browsing.snapshot.error || browsing.snapshot.truncated ? (
+									<AndroidPanelSection title="Capture status">
+										{browsing.snapshot.error ? (
+											<AndroidPanelRow
+												detail={browsing.snapshot.error}
+												label="Store unavailable"
+												tone="warning"
+											/>
+										) : null}
+										{browsing.snapshot.truncated ? (
+											<AndroidPanelRow
+												detail={`${browsing.snapshot.omittedKeyCount} ${browsing.snapshot.omittedKeyCount === 1 ? 'key was' : 'keys were'} omitted by the safe capture limits.`}
+												label="Snapshot limited"
+												tone="warning"
+											/>
+										) : null}
+									</AndroidPanelSection>
+								) : null}
+								{groups.length === 0 ? (
+									<AndroidPanelSection title="Keys">
+										<AndroidPanelRow
+											detail={
+												needle
+													? `No keys match "${search.trim()}".`
+													: browsing.snapshot.truncated
+														? 'No keys fit within the safe capture limits.'
+														: 'This store is empty.'
+											}
+											label={needle ? 'No matching keys' : 'No keys'}
+										/>
+									</AndroidPanelSection>
+								) : null}
 								{groups.map((group) => (
 									<AndroidPanelSection
 										key={group.prefix}
 										title={`${group.prefix} · ${describeStorageGroup(group)}`}
 									>
-										{group.entries.map((entry) => (
-											<AndroidPanelRow
-												key={entry.key}
-												label={entry.key}
-												detail={describeStorageEntry(entry)}
-												value={
-													entry.valueHidden
-														? 'Protected'
-														: (entry.value ?? 'Empty')
-												}
-											/>
-										))}
+										{group.entries.map((entry) => {
+											const expanded = expandedKey === entry.key;
+											return (
+												<Fragment key={entry.key}>
+													<AndroidPanelRow
+														detail={describeStorageEntry(entry)}
+														label={entry.key}
+														onPress={() =>
+															setExpandedKey(expanded ? null : entry.key)
+														}
+														value={expanded ? 'Hide' : 'Inspect'}
+													/>
+													{expanded ? (
+														<AndroidStorageEntryDetails
+															adapter={browsing.adapter}
+															entry={entry}
+															key={`details:${entry.value ?? ''}`}
+															runMutation={runMutation}
+														/>
+													) : null}
+												</Fragment>
+											);
+										})}
 									</AndroidPanelSection>
 								))}
+								<AndroidPanelSection title="Actions">
+									<AndroidPanelRow
+										label={
+											snapshot.loading ? 'Refreshing…' : 'Refresh snapshot'
+										}
+										onPress={
+											snapshot.loading
+												? undefined
+												: () =>
+														void actions.run({
+															pluginId: id,
+															label: 'Refresh storage snapshot',
+															action: refresh,
+														})
+										}
+									/>
+								</AndroidPanelSection>
 							</>
 						) : (
 							<>
@@ -1027,6 +781,13 @@ export function createStoragePlugin({
 								{tab === 'stores' ? (
 									<>
 										<AndroidPanelSection title="Stores">
+											{snapshot.adapters.length === 0 ? (
+												<AndroidPanelRow
+													label={
+														snapshot.loading ? 'Loading stores…' : 'No stores'
+													}
+												/>
+											) : null}
 											{snapshot.adapters.map((adapter) => (
 												<AndroidPanelRow
 													key={adapter.id}
@@ -1103,12 +864,35 @@ export function createStoragePlugin({
 			installCount += 1;
 			if (installCount === 1) {
 				lifecycleGeneration += 1;
+				const installedGeneration = lifecycleGeneration;
 				void refresh();
 				const installedSubscriptions: Array<() => void> = [];
 				try {
 					for (const adapter of adapters) {
 						if (adapter.subscribe) {
-							installedSubscriptions.push(adapter.subscribe(scheduleRefresh));
+							const subscription = {
+								active: true,
+								dispose: undefined as (() => void) | undefined,
+							};
+							installedSubscriptions.push(() => {
+								subscription.active = false;
+								subscription.dispose?.();
+							});
+							const unsubscribe = adapter.subscribe(() => {
+								if (
+									!subscription.active ||
+									installCount === 0 ||
+									installedGeneration !== lifecycleGeneration
+								)
+									return;
+								scheduleRefresh();
+							});
+							if (typeof unsubscribe !== 'function') {
+								throw new Error(
+									`Storage adapter ${adapter.id} did not return an unsubscribe function.`,
+								);
+							}
+							subscription.dispose = unsubscribe;
 						}
 					}
 					subscriptions = installedSubscriptions;
@@ -1122,10 +906,14 @@ export function createStoragePlugin({
 					}
 					installCount = 0;
 					lifecycleGeneration += 1;
+					stopLoading();
 					throw error;
 				}
 			}
+			let referenceActive = true;
 			return () => {
+				if (!referenceActive) return;
+				referenceActive = false;
 				installCount = Math.max(0, installCount - 1);
 				if (installCount === 0) {
 					lifecycleGeneration += 1;
@@ -1138,6 +926,8 @@ export function createStoragePlugin({
 					}
 					subscriptions = [];
 					refreshRequested = false;
+					adapterBaselines.clear();
+					stopLoading();
 				}
 			};
 		},

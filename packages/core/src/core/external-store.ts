@@ -100,13 +100,23 @@ export class BoundedEventStore<T> {
 	};
 
 	#emit(): void {
-		for (const listener of this.#listeners) listener();
+		for (const listener of [...this.#listeners]) {
+			try {
+				listener();
+			} catch {
+				// A diagnostics observer must never interrupt the instrumented app.
+			}
+		}
 	}
 
 	#eventBytes(event: T): number {
-		const estimate = this.#estimateBytes(event);
-		if (!Number.isFinite(estimate)) return this.#maxBytes + 1;
-		return Math.max(0, Math.ceil(estimate));
+		try {
+			const estimate = this.#estimateBytes(event);
+			if (!Number.isFinite(estimate)) return this.#maxBytes + 1;
+			return Math.max(0, Math.ceil(estimate));
+		} catch {
+			return this.#maxBytes + 1;
+		}
 	}
 }
 
@@ -120,7 +130,13 @@ export class ExternalStore<T> {
 
 	set(snapshot: T): void {
 		this.#snapshot = snapshot;
-		for (const listener of this.#listeners) listener();
+		for (const listener of [...this.#listeners]) {
+			try {
+				listener();
+			} catch {
+				// A diagnostics observer must never interrupt the instrumented app.
+			}
+		}
 	}
 
 	getSnapshot = (): T => this.#snapshot;

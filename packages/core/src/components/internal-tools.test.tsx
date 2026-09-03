@@ -356,4 +356,52 @@ describe('InternalTools', () => {
 		});
 		expect(secondStorage.setItem).toHaveBeenCalledTimes(1);
 	});
+
+	it('reports synchronous persistence reads without crashing the host', async () => {
+		const error = new Error('storage unavailable');
+		const onError = jest.fn();
+		const storage = {
+			getItem: jest.fn(() => {
+				throw error;
+			}),
+			setItem: jest.fn(),
+		};
+
+		render(
+			<InternalTools
+				enabled
+				onError={onError}
+				persistence={{ storage }}
+				plugins={[plugin]}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+
+		expect(onError).toHaveBeenCalledWith(error, { kind: 'persistence' });
+		expect(storage.setItem).not.toHaveBeenCalled();
+		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
+	});
+
+	it('does not overwrite malformed persisted state with defaults', async () => {
+		const onError = jest.fn();
+		const storage = {
+			getItem: jest.fn(() => '{not valid json'),
+			setItem: jest.fn(),
+		};
+
+		render(
+			<InternalTools
+				enabled
+				onError={onError}
+				persistence={{ storage }}
+				plugins={[plugin]}
+			/>,
+		);
+		await act(async () => Promise.resolve());
+
+		expect(onError).toHaveBeenCalledWith(expect.any(Error), {
+			kind: 'persistence',
+		});
+		expect(storage.setItem).not.toHaveBeenCalled();
+	});
 });

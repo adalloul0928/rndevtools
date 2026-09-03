@@ -17,6 +17,14 @@ export class PluginInstallerRegistry {
 		this.onError = onError;
 	}
 
+	private reportError(error: unknown, pluginId: string): void {
+		try {
+			this.onError?.(error, pluginId);
+		} catch {
+			// Host reporters are outside the collector lifecycle boundary.
+		}
+	}
+
 	update(enabled: boolean, plugins: readonly DevToolsPlugin[]): void {
 		const nextInstallers = new Map(
 			enabled
@@ -37,9 +45,13 @@ export class PluginInstallerRegistry {
 		for (const [id, install] of nextInstallers) {
 			if (this.installed.has(id)) continue;
 			try {
-				this.installed.set(id, { install, dispose: install() });
+				const dispose = install();
+				if (typeof dispose !== 'function') {
+					throw new Error('Plugin installer did not return a disposer.');
+				}
+				this.installed.set(id, { install, dispose });
 			} catch (error) {
-				this.onError?.(error, id);
+				this.reportError(error, id);
 			}
 		}
 	}
@@ -57,7 +69,7 @@ export class PluginInstallerRegistry {
 		try {
 			plugin.dispose();
 		} catch (error) {
-			this.onError?.(error, id);
+			this.reportError(error, id);
 		}
 	}
 }
