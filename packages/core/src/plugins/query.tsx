@@ -17,6 +17,7 @@ import {
 import {
 	autocorrectionDisabled,
 	badge,
+	disabled,
 	font,
 	foregroundColor,
 	listStyle,
@@ -55,6 +56,11 @@ import {
 	type QuerySnapshot,
 	queryDiagnosticId,
 } from './query-model';
+import type {
+	ActiveQuerySimulation,
+	QuerySimulationController,
+	QuerySimulationMode,
+} from './query-simulation';
 
 export type {
 	MutationSnapshot,
@@ -65,9 +71,21 @@ export {
 	createMutationSnapshot,
 	createQuerySnapshot,
 } from './query-model';
+export {
+	type ActiveQuerySimulation,
+	createQuerySimulationController,
+	QUERY_SIMULATION_MODES,
+	type QuerySimulationController,
+	type QuerySimulationFamilyAdapter,
+	type QuerySimulationFamilySnapshot,
+	type QuerySimulationLease,
+	type QuerySimulationMode,
+	type QuerySimulationSnapshot,
+} from './query-simulation';
 
 export type QueryPluginOptions = {
 	queryClient: QueryClient;
+	simulation?: QuerySimulationController;
 	captureData?: boolean;
 	maxQueries?: number;
 	maxMutations?: number;
@@ -89,11 +107,22 @@ export type QueryPlugin = DevToolsPanelPlugin & {
 		queryId: string,
 		action: 'invalidate' | 'refetch',
 	) => Promise<void>;
+	runSimulation: (
+		familyId: string,
+		mode: QuerySimulationMode,
+	) => Promise<ActiveQuerySimulation>;
+	clearSimulation: (receiptId?: string) => Promise<void>;
 };
 
 const MAX_QUERY_ENTRIES = 1_000;
 const MAX_QUERY_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_QUERY_STORE_BYTES = 16 * 1024 * 1024;
+const QUERY_SIMULATION_LABELS: Readonly<Record<QuerySimulationMode, string>> = {
+	loading: 'Loading',
+	error: 'Error',
+	paused: 'Paused',
+	offline: 'Offline',
+};
 
 function mostRecent<T>(
 	values: readonly T[],
@@ -205,6 +234,7 @@ function SnapshotPreview({
 
 export function createQueryPlugin({
 	queryClient,
+	simulation,
 	captureData = false,
 	maxQueries = 100,
 	maxMutations = 100,
@@ -242,6 +272,7 @@ export function createQueryPlugin({
 		omittedQueryCount: 0,
 		sourceMutationCount: 0,
 		omittedMutationCount: 0,
+		...(simulation ? { simulation: simulation.getSnapshot() } : {}),
 	});
 	let installed = false;
 	let refreshQueued = false;
@@ -299,6 +330,7 @@ export function createQueryPlugin({
 				0,
 				allMutations.length - retainedMutations.length,
 			),
+			...(simulation ? { simulation: simulation.getSnapshot() } : {}),
 		};
 	};
 	const captureSnapshot = (): QueryPluginSnapshot => buildSnapshot(true);
@@ -362,6 +394,12 @@ export function createQueryPlugin({
 		refresh();
 		addCleanup(queryClient.getQueryCache().subscribe(scheduleRefresh));
 		addCleanup(queryClient.getMutationCache().subscribe(scheduleRefresh));
+		if (simulation) {
+			addCleanup(simulation.subscribe(scheduleRefresh));
+			addCleanup(() => {
+				void simulation.clear();
+			});
+		}
 	});
 	const queryPreviews = (query: QuerySnapshot) => {
 		const liveQuery = findLiveQuery(query.hash);
@@ -737,6 +775,29 @@ export function createQueryPlugin({
 		const runAction: RunQueryAction = (label, action, confirmation) => {
 			void actions.run({ pluginId: id, label, action, confirmation });
 		};
+		const simulationSnapshot = snapshot.simulation;
+		const activeSimulation = simulationSnapshot?.active;
+		const [selectedFamilyId, setSelectedFamilyId] = useState(
+			simulationSnapshot?.active?.familyId ??
+				simulationSnapshot?.families[0]?.id ??
+				'',
+		);
+		const selectedFamily =
+			simulationSnapshot?.families.find(
+				(candidate) => candidate.id === selectedFamilyId,
+			) ?? simulationSnapshot?.families[0];
+		const runSimulation = (mode: QuerySimulationMode): void => {
+			if (!simulation || !selectedFamily) return;
+			runAction(`Simulate query ${mode}`, () =>
+				simulation.apply(selectedFamily.id, mode),
+			);
+		};
+		const clearActiveSimulation = (): void => {
+			if (!simulation || !activeSimulation) return;
+			runAction('Reset query simulation', () =>
+				simulation.clear(activeSimulation.receiptId),
+			);
+		};
 		const fetching = snapshot.queries.filter(
 			(query) => query.fetchStatus === 'fetching',
 		).length;
@@ -755,6 +816,61 @@ export function createQueryPlugin({
 				{Platform.OS === 'ios' ? (
 					<Host style={{ flex: 1 }}>
 						<List modifiers={[listStyle('insetGrouped')]}>
+							{simulationSnapshot && selectedFamily ? (
+								<Section
+									title={
+										simulationSnapshot.active
+											? 'Simulation active'
+											: 'Simulation'
+									}
+								>
+									{simulationSnapshot.active ? (
+										<UIText modifiers={[foregroundColor(palette.orange)]}>
+											{`${simulationSnapshot.active.familyLabel} · ${QUERY_SIMULATION_LABELS[simulationSnapshot.active.mode]}`}
+										</UIText>
+									) : null}
+									{simulationSnapshot.families.length > 1 ? (
+										<Picker
+											onSelectionChange={(selection) =>
+												setSelectedFamilyId(String(selection))
+											}
+											selection={selectedFamily.id}
+										>
+											{simulationSnapshot.families.map((family) => (
+												<UIText key={family.id} modifiers={[tag(family.id)]}>
+													{family.label}
+												</UIText>
+											))}
+										</Picker>
+									) : (
+										<UIText modifiers={secondaryFootnote()}>
+											{selectedFamily.description ?? selectedFamily.label}
+										</UIText>
+									)}
+									{selectedFamily.modes.map((mode) => (
+										<Fragment key={mode.mode}>
+											<Button
+												label={`Simulate ${QUERY_SIMULATION_LABELS[mode.mode]}`}
+												modifiers={
+													mode.supported ? undefined : [disabled(true)]
+												}
+												onPress={() => runSimulation(mode.mode)}
+											/>
+											{!mode.supported && mode.reason ? (
+												<UIText modifiers={secondaryFootnote()}>
+													{mode.reason}
+												</UIText>
+											) : null}
+										</Fragment>
+									))}
+									{simulationSnapshot.active ? (
+										<Button
+											label="Reset simulation"
+											onPress={clearActiveSimulation}
+										/>
+									) : null}
+								</Section>
+							) : null}
 							<Section>
 								<Picker
 									modifiers={[pickerStyle('segmented')]}
@@ -897,6 +1013,45 @@ export function createQueryPlugin({
 							}
 							value={search}
 						/>
+						{simulationSnapshot && selectedFamily ? (
+							<AndroidPanelSection
+								title={
+									simulationSnapshot.active
+										? 'Simulation active'
+										: `Simulation · ${selectedFamily.label}`
+								}
+							>
+								{simulationSnapshot.active ? (
+									<AndroidPanelRow
+										detail="Only the registered host adapter is affected."
+										label={simulationSnapshot.active.familyLabel}
+										tone="warning"
+										value={
+											QUERY_SIMULATION_LABELS[simulationSnapshot.active.mode]
+										}
+									/>
+								) : null}
+								{selectedFamily.modes.map((mode) => (
+									<AndroidPanelRow
+										detail={mode.supported ? undefined : mode.reason}
+										key={mode.mode}
+										label={`Simulate ${QUERY_SIMULATION_LABELS[mode.mode]}`}
+										onPress={
+											mode.supported
+												? () => runSimulation(mode.mode)
+												: undefined
+										}
+										value={mode.supported ? 'Available' : 'Unsupported'}
+									/>
+								))}
+								{simulationSnapshot.active ? (
+									<AndroidPanelRow
+										label="Reset simulation"
+										onPress={clearActiveSimulation}
+									/>
+								) : null}
+							</AndroidPanelSection>
+						) : null}
 						{snapshot.error ? (
 							<AndroidPanelSection title="Capture unavailable">
 								<AndroidPanelRow
@@ -975,6 +1130,41 @@ export function createQueryPlugin({
 		);
 	}
 
+	const simulationQuickAction = simulation
+		? {
+				options: () => {
+					const snapshot = simulation.getSnapshot();
+					if (snapshot.active) {
+						const active = snapshot.active;
+						return [
+							{
+								id: `reset:${active.receiptId}`,
+								label: `Reset ${active.familyLabel} ${active.mode}`,
+								action: () => simulation.clear(active.receiptId),
+							},
+						];
+					}
+					const family = snapshot.families[0];
+					return (
+						family?.modes
+							.filter((mode) => mode.supported)
+							.map((mode) => ({
+								id: `${family.id}:${mode.mode}`,
+								label: `${family.label} · ${QUERY_SIMULATION_LABELS[mode.mode]}`,
+								action: () => simulation.apply(family.id, mode.mode),
+							})) ?? []
+					);
+				},
+				getSelectedOptionId: () => {
+					const active = simulation.getSnapshot().active;
+					return active ? `reset:${active.receiptId}` : null;
+				},
+				getIsHighlighted: () => simulation.getSnapshot().active !== undefined,
+				openPanelLabel: 'Query simulation',
+				subscribe: simulation.subscribe,
+			}
+		: undefined;
+
 	return Object.assign(
 		{
 			id,
@@ -985,12 +1175,31 @@ export function createQueryPlugin({
 			section,
 			Panel: QueryPanel,
 			install,
+			...(simulationQuickAction
+				? { pillQuickAction: simulationQuickAction }
+				: {}),
 		},
 		{
 			refresh,
 			getSnapshot: store.getSnapshot,
 			captureSnapshot,
 			runQueryAction,
+			runSimulation: (familyId: string, mode: QuerySimulationMode) => {
+				if (!simulation) {
+					return Promise.reject(
+						new Error('Query simulation is not configured by this host.'),
+					);
+				}
+				return simulation.apply(familyId, mode);
+			},
+			clearSimulation: (receiptId?: string) => {
+				if (!simulation) {
+					return Promise.reject(
+						new Error('Query simulation is not configured by this host.'),
+					);
+				}
+				return simulation.clear(receiptId);
+			},
 		},
 	);
 }

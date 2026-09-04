@@ -28,6 +28,8 @@ import {
 	AndroidPanelTextBlock,
 } from '../components/android-panel-ui';
 import { formatBytes } from '../core/format';
+import { sanitizeDiagnosticValue } from '../core/redact';
+import { serializeValue } from '../core/serialize';
 import type { DevToolsActionConfirmation, DevToolsSystemImage } from '../types';
 import {
 	type DevToolsStorageAdapter,
@@ -125,6 +127,7 @@ export function describeAdapterSnapshot(
 		? `${adapter.entries.length} of ${adapter.totalKeyCount} keys`
 		: pluralizeKeys(adapter.entries.length);
 	const parts = [adapter.description, keyCount];
+	if (adapter.keyDiscovery === 'registered') parts.push('registered keys only');
 	if (adapter.truncated) parts.push('snapshot limited');
 	if (adapter.sensitive) parts.push('values hidden');
 	else {
@@ -238,15 +241,18 @@ export function StorageEventLabel({
 }
 
 /** Activity row; updated events expand to a previous/current diff. */
-export function ActivityEventRow({ event }: { event: StorageChangeEvent }) {
+export function ActivityEventRow({
+	event,
+	onBookmark,
+	onUndo,
+}: {
+	event: StorageChangeEvent;
+	onBookmark?: () => void;
+	onUndo?: () => void;
+}) {
 	const row = (
 		<StorageEventLabel detail={describeStorageEvent(event)} event={event} />
 	);
-	const hasDiff =
-		event.type === 'updated' &&
-		!event.valueHidden &&
-		(event.previousValue !== undefined || event.value !== undefined);
-	if (!hasDiff) return row;
 	return (
 		<DisclosureGroup>
 			<DisclosureGroup.Label>{row}</DisclosureGroup.Label>
@@ -272,6 +278,20 @@ export function ActivityEventRow({ event }: { event: StorageChangeEvent }) {
 					{`+ ${event.value}`}
 				</UIText>
 			) : null}
+			{event.structuralDiff?.map((entry) => (
+				<UIText key={`${entry.path}:${entry.kind}`}>
+					{`${entry.kind} ${entry.path}`}
+				</UIText>
+			))}
+			{onBookmark ? (
+				<Button
+					label={event.bookmarked ? 'Remove bookmark' : 'Bookmark change'}
+					onPress={onBookmark}
+				/>
+			) : null}
+			{event.undoAvailable && onUndo ? (
+				<Button label="Undo change" onPress={onUndo} />
+			) : null}
 		</DisclosureGroup>
 	);
 }
@@ -291,6 +311,7 @@ function StorageEntryDetails({
 	runMutation: RunStorageMutation;
 }) {
 	const [draft, setDraft] = useState(entry.value ?? '');
+	const [revealed, setRevealed] = useState<string | null>(null);
 	const draftSeed = useNativeState(entry.value ?? '');
 	const canEdit = isStorageEntryEditable(adapter, entry);
 	return (
@@ -304,14 +325,44 @@ function StorageEntryDetails({
 				{entry.key}
 			</UIText>
 			{entry.valueHidden ? (
-				<UIText
-					modifiers={[
-						font({ textStyle: 'footnote' }),
-						foregroundStyle('secondary'),
-					]}
-				>
-					This store exposes key metadata only. Its values are never read.
-				</UIText>
+				<>
+					<UIText
+						modifiers={[
+							font({ textStyle: 'footnote' }),
+							foregroundStyle('secondary'),
+						]}
+					>
+						{entry.requiresAuthentication
+							? 'This value requires local device authentication and is never captured.'
+							: entry.revealable && adapter.revealValue
+								? 'This store exposes key metadata only. Its values are never captured.'
+								: 'This store exposes key metadata only. Its values are never read.'}
+					</UIText>
+					{revealed ? <UIText>{revealed}</UIText> : null}
+					{entry.revealable && adapter.revealValue ? (
+						<Button
+							label={revealed ? 'Hide revealed value' : 'Reveal on this device'}
+							onPress={() => {
+								if (revealed) return setRevealed(null);
+								runMutation(
+									'Reveal protected storage value',
+									async () => {
+										const value = await adapter.revealValue?.(entry.key);
+										setRevealed(
+											serializeValue(sanitizeDiagnosticValue(value), 16 * 1024)
+												.text,
+										);
+									},
+									{
+										title: 'Reveal protected value?',
+										message: `${entry.key}\n\nThe value is shown only on this device and is never sent to the desktop app.`,
+										confirmLabel: 'Reveal',
+									},
+								);
+							}}
+						/>
+					) : null}
+				</>
 			) : canEdit ? (
 				<TextField
 					axis="vertical"
@@ -347,7 +398,7 @@ function StorageEntryDetails({
 					}}
 				/>
 			) : null}
-			{adapter.removeValue ? (
+			{adapter.removeValue && (adapter.capabilities?.deletable ?? true) ? (
 				// biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA
 				<Button
 					label="Delete key"
@@ -455,12 +506,48 @@ export function AndroidStorageEntryDetails({
 	runMutation: RunStorageMutation;
 }) {
 	const [draft, setDraft] = useState(entry.value ?? '');
+	const [revealed, setRevealed] = useState<string | null>(null);
 	const canEdit = isStorageEntryEditable(adapter, entry);
 	return (
 		<>
 			<AndroidPanelTextBlock label="Full key" value={entry.key} />
 			{entry.valueHidden ? (
-				<AndroidPanelRow label="Value protected" />
+				<>
+					<AndroidPanelRow
+						detail={
+							entry.requiresAuthentication
+								? 'Requires local authentication'
+								: 'Metadata only'
+						}
+						label="Value protected"
+					/>
+					{revealed ? (
+						<AndroidPanelTextBlock label="Revealed locally" value={revealed} />
+					) : null}
+					{entry.revealable && adapter.revealValue ? (
+						<AndroidPanelRow
+							label={revealed ? 'Hide revealed value' : 'Reveal on this device'}
+							onPress={() => {
+								if (revealed) return setRevealed(null);
+								runMutation(
+									'Reveal protected storage value',
+									async () => {
+										const value = await adapter.revealValue?.(entry.key);
+										setRevealed(
+											serializeValue(sanitizeDiagnosticValue(value), 16 * 1024)
+												.text,
+										);
+									},
+									{
+										title: 'Reveal protected value?',
+										message: `${entry.key}\n\nThe value is shown only on this device and is never sent to the desktop app.`,
+										confirmLabel: 'Reveal',
+									},
+								);
+							}}
+						/>
+					) : null}
+				</>
 			) : canEdit ? (
 				<AndroidPanelSearch
 					onChangeText={setDraft}
@@ -483,7 +570,7 @@ export function AndroidStorageEntryDetails({
 					}
 				/>
 			) : null}
-			{adapter.removeValue ? (
+			{adapter.removeValue && (adapter.capabilities?.deletable ?? true) ? (
 				<AndroidPanelRow
 					label="Delete key"
 					onPress={() =>

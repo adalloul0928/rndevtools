@@ -4,11 +4,20 @@ import {
 	type DataGridColumn,
 	type DataGridSelection,
 } from '@heroui-pro/react/data-grid';
+import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	matchesNetworkSegment,
 	type NetworkSegment,
 } from '@pumpd/devtools/plugins/network-presentation';
-import { CirclePause, CirclePlay, Radio, Trash2 } from 'lucide-react';
+import {
+	ChevronDown,
+	CirclePause,
+	CirclePlay,
+	Radio,
+	Trash2,
+	Wifi,
+	WifiOff,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
 	CodePreview,
@@ -17,6 +26,7 @@ import {
 	EmptyPanel,
 	KeyValue,
 	PanelHeader,
+	PanelNotice,
 	SearchControl,
 	StatusPill,
 	Toolbar,
@@ -32,6 +42,17 @@ import type { NetworkEntry } from '../../shared/protocol';
 // surface.
 type NetworkFilter = NetworkSegment;
 type DetailTab = 'overview' | 'headers' | 'request' | 'response';
+
+const NETWORK_PROFILES = [
+	{ id: 'offline', name: 'Offline' },
+	{ id: 'edge', name: 'Edge' },
+	{ id: '3g', name: '3G' },
+	{ id: 'lte', name: 'LTE' },
+	{ id: 'wifi', name: 'Wi-Fi' },
+	{ id: 'dsl', name: 'DSL' },
+	{ id: 'very-bad', name: 'Very Bad Network' },
+] as const;
+type NetworkProfileId = (typeof NETWORK_PROFILES)[number]['id'];
 
 function methodTone(method: string): string {
 	if (method === 'GET') return 'border-blue-400/25 bg-blue-400/10 text-blue-300';
@@ -73,12 +94,23 @@ export function NetworkPanel() {
 	const [filter, setFilter] = useState<NetworkFilter>('all');
 	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
 	const [detailTab, setDetailTab] = useState<DetailTab>('overview');
+	const currentProfile = selectedDevice?.tools.networkProfile;
+	const [profileId, setProfileId] = useState<NetworkProfileId>(
+		currentProfile?.id === 'none' || !currentProfile?.id
+			? 'lte'
+			: (currentProfile.id as NetworkProfileId)
+	);
 	const paused = pausedEntries !== null;
 	useEffect(() => {
 		if (pausedSnapshot && pausedSnapshot.deviceId !== deviceId) {
 			setPausedSnapshot(null);
 		}
 	}, [deviceId, pausedSnapshot]);
+	useEffect(() => {
+		if (currentProfile?.id && currentProfile.id !== 'none') {
+			setProfileId(currentProfile.id);
+		}
+	}, [currentProfile?.id]);
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -259,10 +291,71 @@ export function NetworkPanel() {
 						</Button>
 					))}
 				</div>
-				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+				<span className="sim-toolbar-separator" />
+				<div className="sim-toolbar-field">
+					<span>Fetch profile</span>
+					<NativeSelect className="sim-filter-select" fullWidth={false}>
+						<NativeSelect.Trigger
+							aria-label="Instrumented fetch network profile"
+							value={profileId}
+							onChange={(event) =>
+								setProfileId(event.currentTarget.value as NetworkProfileId)
+							}
+						>
+							{NETWORK_PROFILES.map((profile) => (
+								<NativeSelect.Option key={profile.id} value={profile.id}>
+									{profile.name}
+								</NativeSelect.Option>
+							))}
+							<NativeSelect.Indicator>
+								<ChevronDown className="h-3 w-3" />
+							</NativeSelect.Indicator>
+						</NativeSelect.Trigger>
+					</NativeSelect>
+				</div>
+				<Button
+					isDisabled={!canRunAction('network', 'setProfile')}
+					size="sm"
+					variant="secondary"
+					onPress={() =>
+						void runAction(
+							'network',
+							'setProfile',
+							{ profileId },
+							`${NETWORK_PROFILES.find((profile) => profile.id === profileId)?.name ?? profileId} fetch profile applied.`
+						)
+					}
+				>
+					<Wifi className="h-3.5 w-3.5" /> Set
+				</Button>
+				<Button
+					isDisabled={
+						!canRunAction('network', 'clearProfile') || !currentProfile?.active
+					}
+					size="sm"
+					variant="ghost"
+					onPress={() =>
+						void runAction(
+							'network',
+							'clearProfile',
+							{},
+							'Instrumented fetch profile cleared.'
+						)
+					}
+				>
+					<WifiOff className="h-3.5 w-3.5" /> Clear
+				</Button>
+				<span className="ml-auto shrink-0 font-mono text-[10px] text-(--text-3)">
 					{filtered.length} of {entries.length} requests
 				</span>
 			</Toolbar>
+			<PanelNotice title="App-scoped network simulation." tone="info">
+				{currentProfile?.active
+					? `${currentProfile.name} is active for instrumented PUMPD fetch only. `
+					: 'No network profile is currently active. '}
+				Profiles do not change Simulator-wide networking, native SDK traffic,
+				WebSockets, or requests from other apps.
+			</PanelNotice>
 
 			<div className="split-panel">
 				<div className="min-w-0 overflow-hidden">

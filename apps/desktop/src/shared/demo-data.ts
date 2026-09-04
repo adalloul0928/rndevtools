@@ -1,10 +1,17 @@
 import {
+	DEFAULT_SCENARIO_USER_LIMIT,
+	parseScenarioDocumentJson,
+	SCENARIO_DOCUMENT_MAX_BYTES,
+	type ScenarioDefinition,
+} from '@pumpd/devtools/scenario-model';
+import {
 	createEmptyDeviceTools,
 	type DesktopAction,
 	type DeviceSession,
 	type DeviceTools,
 	type PerformanceReview,
 	type PerformanceSample,
+	type ScenarioDefinitionSummary,
 } from './protocol';
 
 const DEMO_DEVICE_ID = 'pumpd-demo-ios';
@@ -274,6 +281,16 @@ function demoTools(now: number): DeviceTools {
 				kind: 'updated',
 				previousText: '{"showDebugBadges":false}',
 				nextText: '{"showDebugBadges":true}',
+				undoAvailable: true,
+				undoStatus: 'available',
+				structuralDiff: [
+					{
+						path: '$.showDebugBadges',
+						kind: 'changed',
+						previousText: 'false',
+						nextText: 'true',
+					},
+				],
 			},
 		],
 		storageSummary: {
@@ -350,6 +367,39 @@ function demoTools(now: number): DeviceTools {
 			omittedMutationCount: 0,
 			truncated: false,
 		},
+		querySimulation: {
+			families: [
+				{
+					id: 'all-pumpd-queries',
+					label: 'All PUMPD queries',
+					description:
+						'Uses the supported TanStack Query online manager; native SDKs and non-query traffic are unaffected.',
+					modes: [
+						{
+							mode: 'loading',
+							supported: false,
+							reason:
+								'No presentation adapter is registered to force loading without mutating private query state.',
+						},
+						{
+							mode: 'error',
+							supported: false,
+							reason:
+								'No presentation adapter is registered to force an error without mutating private query state.',
+						},
+						{ mode: 'paused', supported: true },
+						{ mode: 'offline', supported: true },
+					],
+				},
+			],
+			active: {
+				familyId: 'all-pumpd-queries',
+				familyLabel: 'All PUMPD queries',
+				mode: 'offline',
+				receiptId: 'query-simulation-demo',
+				startedAt: now - 5_000,
+			},
+		},
 		routes: [
 			{
 				id: 'route-tabs',
@@ -397,12 +447,19 @@ function demoTools(now: number): DeviceTools {
 				id: 'route-event-3',
 				at: now - 35_000,
 				route: '/workout/active',
-				metadataText: '{"source":"quick-start"}',
+				transitionId: 'navigation-transition-3',
+				phase: 'focused',
+				source: 'app',
+				durationMs: 118,
 			},
 			{
 				id: 'route-event-2',
 				at: now - 81_000,
 				route: '/(tabs)',
+				transitionId: 'navigation-transition-2',
+				phase: 'focused',
+				source: 'app',
+				durationMs: 74,
 			},
 		],
 		environment: [
@@ -479,6 +536,12 @@ function demoTools(now: number): DeviceTools {
 					'elapsedSeconds',
 				],
 				updatedAt: now - 2_500,
+				capabilities: {
+					writable: false,
+					resettable: false,
+					persisted: true,
+					restorable: false,
+				},
 			},
 			{
 				id: 'rest-timer',
@@ -488,6 +551,12 @@ function demoTools(now: number): DeviceTools {
 					'{\n  "status": "running",\n  "durationSeconds": 120,\n  "remainingSeconds": 48,\n  "isVisible": true\n}',
 				keys: ['status', 'durationSeconds', 'remainingSeconds', 'isVisible'],
 				updatedAt: now - 1_000,
+				capabilities: {
+					writable: false,
+					resettable: false,
+					persisted: true,
+					restorable: false,
+				},
 			},
 			{
 				id: 'dev-menu',
@@ -502,6 +571,12 @@ function demoTools(now: number): DeviceTools {
 					'customFlags',
 				],
 				updatedAt: now - 42_000,
+				capabilities: {
+					writable: true,
+					resettable: true,
+					persisted: true,
+					restorable: true,
+				},
 			},
 		],
 		zustandChanges: [
@@ -522,6 +597,8 @@ function demoTools(now: number): DeviceTools {
 				stateText: '{"completedSets":11,"pendingSetCount":13}',
 			},
 		],
+		zustandStateSnapshots: [],
+		zustandMutationReceipts: [],
 		zustandSummary: {
 			totalStoreCount: 3,
 			omittedStoreCount: 0,
@@ -544,6 +621,95 @@ function demoTools(now: number): DeviceTools {
 				],
 			},
 		],
+		restoreReceipts: [
+			{
+				id: 'restore-receipt-demo',
+				pointId: 'restore-before-empty-state',
+				pointLabel: 'Before empty-state QA',
+				startedAt: now - 90_000,
+				completedAt: now - 89_800,
+				status: 'complete',
+				sourceResults: [
+					{
+						sourceId: 'developer-overrides',
+						sourceTitle: 'Developer overrides',
+						preflight: 'passed',
+						apply: 'succeeded',
+						rollback: 'not-needed',
+					},
+				],
+			},
+		],
+		scenarios: [
+			{
+				id: 'pumpd.powerUser',
+				version: 1,
+				definitionToken: 'demo-power-user-v1',
+				name: 'John',
+				description: 'Power-user training history and active plan fixtures.',
+				bundled: true,
+				variables: [],
+				preconditionCount: 0,
+				steps: [
+					{
+						id: 'developer-overrides',
+						type: 'developer-overrides',
+						label: 'Apply John persona',
+					},
+					{ id: 'home-route', type: 'navigation', label: 'Open Home' },
+				],
+			},
+			{
+				id: 'pumpd.freshUser',
+				version: 1,
+				definitionToken: 'demo-fresh-user-v1',
+				name: 'Sarah',
+				description: 'Fresh-user fixtures for onboarding and empty states.',
+				bundled: true,
+				variables: [],
+				preconditionCount: 0,
+				steps: [
+					{
+						id: 'developer-overrides',
+						type: 'developer-overrides',
+						label: 'Apply Sarah persona',
+					},
+					{ id: 'home-route', type: 'navigation', label: 'Open Home' },
+				],
+			},
+		],
+		scenarioRuntime: { running: false },
+		scenarioReceipts: [],
+		identitySession: {
+			running: false,
+			history: [
+				{
+					id: 'identity-history-demo',
+					startedAt: now - 720_000,
+					stoppedAt: now - 540_000,
+					actor: { kind: 'account', label: 'Original account' },
+					target: { kind: 'persona', label: 'Sarah', personaId: 'visual' },
+					status: 'stopped',
+				},
+			],
+			personas: [
+				{
+					id: 'fresh',
+					label: 'Maya',
+					note: 'Onboarded · no block yet',
+				},
+				{
+					id: 'power',
+					label: 'John',
+					note: 'Onboarded · full workout history',
+				},
+				{
+					id: 'visual',
+					label: 'Sarah',
+					note: 'Onboarded · visual regression history',
+				},
+			],
+		},
 		performance: samplePerformance(now),
 		components: [
 			{
@@ -597,11 +763,27 @@ function demoTools(now: number): DeviceTools {
 				isFocused: true,
 			},
 		],
+		componentRenders: [
+			{
+				id: 'demo-render-1',
+				targetId: 'feedback-set-row',
+				at: now - 9_500,
+				phase: 'update',
+				actualDuration: 5.8,
+				baseDuration: 11.4,
+				startTime: 1_024,
+				commitTime: 1_031,
+				renderCount: 4,
+				cause: 'unknown',
+				changedKeys: [],
+			},
+		],
 		componentSummary: {
 			sourceTargetCount: 3,
 			omittedTargetCount: 0,
 			truncated: false,
 		},
+		cameraFixture: { active: false },
 		diagnostics: [
 			{
 				id: 'diag-ready',
@@ -638,13 +820,27 @@ export function createDemoDevice(now = Date.now()): DeviceSession {
 				'network.clear',
 				'console.clear',
 				'storage.write',
+				'storage.undo',
+				'storage.bookmark',
 				'query.refetch',
 				'query.invalidate',
+				'query.simulate',
+				'query.clearSimulation',
 				'routes.navigate',
 				'zustand.refresh',
+				'zustand.capture',
+				'zustand.patch',
+				'zustand.jump',
 				'restore.capture',
 				'restore.restore',
 				'restore.remove',
+				'scenarios.execute',
+				'scenarios.undo',
+				'scenarios.discardRecovery',
+				'scenarios.import',
+				'scenarios.remove',
+				'identity.start',
+				'identity.stop',
 				'performance.review',
 				'components.refresh',
 				'components.highlight',
@@ -662,6 +858,68 @@ export function createDemoDevice(now = Date.now()): DeviceSession {
 function payloadString(action: DesktopAction, key: string): string | undefined {
 	const value = action.payload[key];
 	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function scenarioSummary(definition: ScenarioDefinition): ScenarioDefinitionSummary {
+	return {
+		id: definition.id,
+		version: definition.version,
+		definitionToken: `demo-import-${definition.id}-${definition.version}-${Math.random().toString(36).slice(2, 14)}`,
+		name: definition.name,
+		...(definition.description ? { description: definition.description } : {}),
+		bundled: false,
+		variables: definition.variables.map(({ options, ...variable }) => ({
+			...variable,
+			...(options ? { options: [...options] } : {}),
+		})),
+		preconditionCount: definition.preconditions.length,
+		steps: definition.steps.map((step) => ({
+			id: step.id,
+			type: step.type,
+			...(step.label ? { label: step.label } : {}),
+		})),
+	};
+}
+
+function importedDemoScenarios(
+	current: readonly ScenarioDefinitionSummary[],
+	json: string,
+	mode: unknown
+): readonly ScenarioDefinitionSummary[] {
+	if (mode !== 'replace' && mode !== 'merge') {
+		throw new Error('Scenario import mode is invalid.');
+	}
+	const imported = parseScenarioDocumentJson(json).scenarios.map(scenarioSummary);
+	const bundled = current.filter((scenario) => scenario.bundled);
+	const user = current.filter((scenario) => !scenario.bundled);
+	const bundledIds = new Set(bundled.map((scenario) => scenario.id));
+	for (const scenario of imported) {
+		if (bundledIds.has(scenario.id)) {
+			throw new Error(`Imported scenario conflicts with bundled id: ${scenario.id}`);
+		}
+	}
+	let nextUser: readonly ScenarioDefinitionSummary[];
+	if (mode === 'replace') {
+		nextUser = imported;
+	} else {
+		const userIds = new Set(user.map((scenario) => scenario.id));
+		for (const scenario of imported) {
+			if (userIds.has(scenario.id)) {
+				throw new Error(`Imported scenario id already exists: ${scenario.id}`);
+			}
+		}
+		nextUser = [...user, ...imported];
+	}
+	if (nextUser.length > DEFAULT_SCENARIO_USER_LIMIT) {
+		throw new Error('Imported scenarios exceed the user scenario-count limit.');
+	}
+	if (
+		new TextEncoder().encode(JSON.stringify(nextUser)).byteLength >
+		SCENARIO_DOCUMENT_MAX_BYTES
+	) {
+		throw new Error('Imported scenarios exceed the user scenario byte limit.');
+	}
+	return [...bundled, ...nextUser];
 }
 
 export function applyDemoAction(
@@ -701,7 +959,33 @@ export function applyDemoAction(
 			kind: 'updated',
 			previousText,
 			nextText: valueText,
+			undoAvailable: true,
+			undoStatus: 'available',
 		});
+		return next;
+	}
+	if (action.tool === 'storage' && action.command === 'bookmark') {
+		const id = payloadString(action, 'id');
+		const event = next.tools.storageEvents.find((candidate) => candidate.id === id);
+		if (!event) throw new Error('Storage history entry was not found.');
+		event.bookmarked = !event.bookmarked;
+		return next;
+	}
+	if (action.tool === 'storage' && action.command === 'undo') {
+		const id = payloadString(action, 'id');
+		const event = next.tools.storageEvents.find((candidate) => candidate.id === id);
+		if (!event?.undoAvailable || event.previousText === undefined) {
+			throw new Error('Storage history entry cannot be undone.');
+		}
+		const entry = next.tools.storage.find(
+			(candidate) =>
+				candidate.adapterId === event.adapterId && candidate.key === event.key
+		);
+		if (!entry?.editable) throw new Error('Storage value cannot be restored.');
+		entry.valueText = event.previousText;
+		entry.bytes = new TextEncoder().encode(event.previousText).byteLength;
+		event.undoAvailable = false;
+		event.undoStatus = 'succeeded';
 		return next;
 	}
 	if (action.tool === 'query' && ['invalidate', 'refetch'].includes(action.command)) {
@@ -729,7 +1013,11 @@ export function applyDemoAction(
 			id: `route-event-${now}`,
 			at: now,
 			route: path,
-			metadataText: '{"source":"desktop"}',
+			transitionId: `navigation-transition-${now}`,
+			phase: 'focused',
+			source: 'desktop',
+			correlationId: action.actionId,
+			durationMs: 96,
 		});
 		return next;
 	}
@@ -754,6 +1042,26 @@ export function applyDemoAction(
 		});
 		return next;
 	}
+	if (action.tool === 'restore' && action.command === 'resetBaseline') {
+		next.tools.restoreReceipts.unshift({
+			id: `restore-receipt-${now}`,
+			pointId: 'baseline',
+			pointLabel: 'Reset to baseline',
+			startedAt: now,
+			completedAt: now + 50,
+			status: 'complete',
+			sourceResults: [
+				{
+					sourceId: 'safe-standard-preferences',
+					sourceTitle: 'Safe standard preferences',
+					preflight: 'passed',
+					apply: 'succeeded',
+					rollback: 'not-needed',
+				},
+			],
+		});
+		return next;
+	}
 	if (action.tool === 'restore' && action.command === 'remove') {
 		const id = payloadString(action, 'id');
 		next.tools.restorePoints = next.tools.restorePoints.filter(
@@ -761,11 +1069,58 @@ export function applyDemoAction(
 		);
 		return next;
 	}
+	if (action.tool === 'restore' && action.command === 'rename') {
+		const id = payloadString(action, 'id');
+		const label = payloadString(action, 'label');
+		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		if (!point || !label) throw new Error('Restore point was not found.');
+		point.label = label;
+		return next;
+	}
+	if (action.tool === 'restore' && action.command === 'duplicate') {
+		const id = payloadString(action, 'id');
+		const label = payloadString(action, 'label');
+		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		if (!point || !label) throw new Error('Restore point was not found.');
+		next.tools.restorePoints.unshift({
+			...point,
+			id: `restore-${now}`,
+			label,
+			createdAt: now,
+			sources: point.sources.map((source) => ({ ...source })),
+		});
+		return next;
+	}
 	if (action.tool === 'restore' && action.command === 'restore') {
 		const id = payloadString(action, 'id');
-		if (!next.tools.restorePoints.some((point) => point.id === id)) {
+		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		if (!point) {
 			throw new Error('Restore point was not found.');
 		}
+		const sourceIds = Array.isArray(action.payload.sourceIds)
+			? new Set(
+					action.payload.sourceIds.filter(
+						(value): value is string => typeof value === 'string'
+					)
+				)
+			: new Set(point.sources.map((source) => source.id));
+		next.tools.restoreReceipts.unshift({
+			id: `restore-receipt-${now}`,
+			pointId: point.id,
+			pointLabel: point.label,
+			startedAt: now,
+			completedAt: now + 75,
+			status: 'complete',
+			sourceResults: point.sources
+				.filter((source) => sourceIds.has(source.id))
+				.map((source) => ({
+					sourceId: source.id,
+					sourceTitle: source.title,
+					preflight: 'passed',
+					apply: 'succeeded',
+					rollback: 'not-needed',
+				})),
+		});
 		next.tools.diagnostics.unshift({
 			id: `diag-restore-${now}`,
 			at: now,
@@ -773,6 +1128,160 @@ export function applyDemoAction(
 			scope: 'restore',
 			message: `Restored explicit developer state from ${id}.`,
 		});
+		return next;
+	}
+	if (action.tool === 'scenarios' && action.command === 'execute') {
+		if (next.tools.scenarioRuntime.active) {
+			throw new Error('Undo the active scenario before running another one.');
+		}
+		const id = payloadString(action, 'id');
+		const scenario = next.tools.scenarios.find((candidate) => candidate.id === id);
+		if (
+			!scenario ||
+			action.payload.version !== scenario.version ||
+			action.payload.definitionToken !== scenario.definitionToken
+		) {
+			throw new Error(
+				'The scenario definition changed after confirmation. Review it and try again.'
+			);
+		}
+		const receiptId = `scenario-receipt-${now}`;
+		next.tools.scenarioRuntime = {
+			running: false,
+			active: {
+				receiptId,
+				scenarioId: scenario.id,
+				scenarioVersion: scenario.version,
+				scenarioName: scenario.name,
+				activatedAt: now,
+				stepCount: scenario.steps.length,
+				privileged: false,
+				warnings: [],
+				recoveryRequired: false,
+			},
+		};
+		next.tools.scenarioReceipts.unshift({
+			id: receiptId,
+			scenarioId: scenario.id,
+			scenarioVersion: scenario.version,
+			scenarioName: scenario.name,
+			startedAt: now,
+			completedAt: now + 80,
+			status: 'complete',
+			stepResults: scenario.steps.map((step) => ({
+				stepId: step.id,
+				stepType: step.type,
+				label: step.label ?? step.id,
+				preflight: 'passed',
+				apply: 'succeeded',
+				rollback: 'not-needed',
+				reversible: true,
+			})),
+		});
+		return next;
+	}
+	if (action.tool === 'scenarios' && action.command === 'undo') {
+		const active = next.tools.scenarioRuntime.active;
+		if (!active) {
+			throw new Error('No scenario is active.');
+		}
+		if (action.payload.receiptId !== active.receiptId) {
+			throw new Error(
+				'The active scenario changed after confirmation. Review it and try again.'
+			);
+		}
+		next.tools.scenarioRuntime = { running: false };
+		return next;
+	}
+	if (action.tool === 'scenarios' && action.command === 'remove') {
+		const id = payloadString(action, 'id');
+		const scenario = next.tools.scenarios.find((candidate) => candidate.id === id);
+		if (
+			!scenario ||
+			scenario.bundled ||
+			action.payload.version !== scenario.version ||
+			action.payload.definitionToken !== scenario.definitionToken
+		) {
+			throw new Error('Only user scenarios can be removed.');
+		}
+		next.tools.scenarios = next.tools.scenarios.filter(
+			(candidate) => candidate.id !== id
+		);
+		return next;
+	}
+	if (action.tool === 'scenarios' && action.command === 'import') {
+		const json = payloadString(action, 'json');
+		if (!json) throw new Error('Scenario document is required.');
+		const imported = importedDemoScenarios(
+			next.tools.scenarios,
+			json,
+			action.payload.mode
+		);
+		next.tools.scenarios = [...imported];
+		next.tools.diagnostics.unshift({
+			id: `diag-scenario-import-${now}`,
+			at: now,
+			level: 'info',
+			scope: 'scenarios',
+			message: `Imported user scenario document in ${String(action.payload.mode)} mode.`,
+		});
+		return next;
+	}
+	if (action.tool === 'identity' && action.command === 'start') {
+		if (next.tools.scenarioRuntime.active) {
+			throw new Error('Undo the active scenario before changing its test identity.');
+		}
+		const personaId = payloadString(action, 'personaId');
+		const persona = next.tools.identitySession.personas.find(
+			(candidate) => candidate.id === personaId
+		);
+		if (!persona) throw new Error('Test identity was not found.');
+		const previous = next.tools.identitySession.active;
+		if (previous?.target.personaId === persona.id) return next;
+		if (previous) {
+			next.tools.identitySession.history = next.tools.identitySession.history.map(
+				(entry) =>
+					entry.id === previous.historyId
+						? { ...entry, stoppedAt: now, status: 'stopped' as const }
+						: entry
+			);
+		}
+		const actor = previous?.actor ?? {
+			kind: 'account' as const,
+			label: 'Original account',
+		};
+		const target = {
+			kind: 'persona' as const,
+			label: persona.label,
+			personaId: persona.id,
+		};
+		const historyId = `identity-${now}`;
+		next.tools.identitySession.active = {
+			historyId,
+			startedAt: now,
+			actor,
+			target,
+			status: 'active',
+		};
+		next.tools.identitySession.history = [
+			{ id: historyId, startedAt: now, actor, target, status: 'active' as const },
+			...next.tools.identitySession.history,
+		].slice(0, 20);
+		return next;
+	}
+	if (action.tool === 'identity' && action.command === 'stop') {
+		if (next.tools.scenarioRuntime.active) {
+			throw new Error('Undo the active scenario to restore its test identity.');
+		}
+		const active = next.tools.identitySession.active;
+		if (!active) throw new Error('No test identity is active.');
+		next.tools.identitySession.history = next.tools.identitySession.history.map(
+			(entry) =>
+				entry.id === active.historyId
+					? { ...entry, stoppedAt: now, status: 'stopped' as const }
+					: entry
+		);
+		next.tools.identitySession.active = undefined;
 		return next;
 	}
 	if (action.tool === 'performance' && action.command === 'start') {
@@ -830,6 +1339,134 @@ export function applyDemoAction(
 			message: `Refreshed ${next.tools.zustandStores.length} explicit Zustand projections.`,
 		});
 		for (const store of next.tools.zustandStores) store.updatedAt = now;
+		return next;
+	}
+	if (action.tool === 'zustand' && action.command === 'capture') {
+		const storeId = payloadString(action, 'storeId');
+		const store = next.tools.zustandStores.find(
+			(candidate) => candidate.id === storeId
+		);
+		if (!store?.capabilities.restorable) {
+			throw new Error('Store has no complete rollback adapter.');
+		}
+		next.tools.zustandStateSnapshots.push({
+			id: `zustand-state-${action.actionId}`,
+			storeId: store.id,
+			storeTitle: store.title,
+			createdAt: now,
+			stateText: store.stateText,
+			stateBytes: new TextEncoder().encode(store.stateText).byteLength,
+			truncated: false,
+		});
+		return next;
+	}
+	if (action.tool === 'zustand' && action.command === 'patch') {
+		const storeId = payloadString(action, 'storeId');
+		const patchText = payloadString(action, 'patchText');
+		const store = next.tools.zustandStores.find(
+			(candidate) => candidate.id === storeId
+		);
+		if (!store?.capabilities.restorable || !patchText) {
+			throw new Error('Store does not accept reversible patches.');
+		}
+		const current: unknown = JSON.parse(store.stateText);
+		const patch: unknown = JSON.parse(patchText);
+		if (
+			!current ||
+			typeof current !== 'object' ||
+			Array.isArray(current) ||
+			!patch ||
+			typeof patch !== 'object' ||
+			Array.isArray(patch)
+		) {
+			throw new Error('Patch and projected state must be JSON objects.');
+		}
+		const changedKeys = Object.keys(patch);
+		const previousText = store.stateText;
+		store.stateText = JSON.stringify({ ...current, ...patch }, null, 2);
+		store.keys = Object.keys(JSON.parse(store.stateText));
+		store.updatedAt = now;
+		const snapshotId = `zustand-state-after-${action.actionId}`;
+		next.tools.zustandStateSnapshots.push({
+			id: `zustand-state-before-${action.actionId}`,
+			storeId: store.id,
+			storeTitle: store.title,
+			createdAt: now,
+			stateText: previousText,
+			stateBytes: new TextEncoder().encode(previousText).byteLength,
+			truncated: false,
+		});
+		next.tools.zustandStateSnapshots.push({
+			id: snapshotId,
+			storeId: store.id,
+			storeTitle: store.title,
+			createdAt: now,
+			stateText: store.stateText,
+			stateBytes: new TextEncoder().encode(store.stateText).byteLength,
+			truncated: false,
+		});
+		next.tools.zustandMutationReceipts.push({
+			id: `zustand-mutation-${action.actionId}`,
+			storeId: store.id,
+			kind: 'patch',
+			status: 'succeeded',
+			startedAt: now,
+			completedAt: now,
+			changedKeys,
+			correlationId: action.actionId,
+			snapshotId,
+		});
+		next.tools.zustandChanges.push({
+			id: `zustand-change-${action.actionId}`,
+			at: now,
+			storeId: store.id,
+			storeTitle: store.title,
+			changedKeys,
+			stateText: store.stateText,
+		});
+		return next;
+	}
+	if (action.tool === 'zustand' && action.command === 'jump') {
+		const storeId = payloadString(action, 'storeId');
+		const snapshotId = payloadString(action, 'snapshotId');
+		const store = next.tools.zustandStores.find(
+			(candidate) => candidate.id === storeId
+		);
+		const snapshot = next.tools.zustandStateSnapshots.find(
+			(candidate) => candidate.id === snapshotId && candidate.storeId === storeId
+		);
+		if (!store?.capabilities.restorable || !snapshot) {
+			throw new Error('State snapshot is unavailable for this store.');
+		}
+		const previous = JSON.parse(store.stateText) as Record<string, unknown>;
+		const restored = JSON.parse(snapshot.stateText) as Record<string, unknown>;
+		store.stateText = snapshot.stateText;
+		store.keys = Object.keys(restored);
+		store.updatedAt = now;
+		const changedKeys = [
+			...new Set([...Object.keys(previous), ...Object.keys(restored)]),
+		]
+			.filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(restored[key]))
+			.sort();
+		next.tools.zustandMutationReceipts.push({
+			id: `zustand-mutation-${action.actionId}`,
+			storeId: store.id,
+			kind: 'jump',
+			status: 'succeeded',
+			startedAt: now,
+			completedAt: now,
+			changedKeys,
+			correlationId: action.actionId,
+			snapshotId: snapshot.id,
+		});
+		next.tools.zustandChanges.push({
+			id: `zustand-change-${action.actionId}`,
+			at: now,
+			storeId: store.id,
+			storeTitle: store.title,
+			changedKeys,
+			stateText: store.stateText,
+		});
 		return next;
 	}
 

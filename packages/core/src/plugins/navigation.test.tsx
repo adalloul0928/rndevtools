@@ -3,14 +3,17 @@ import {
 	fireEvent,
 	render,
 	screen,
+	waitFor,
 } from '@testing-library/react-native';
 import { Platform } from 'react-native';
+import { DevtoolsEventStore } from '../core/event-store';
 import type { DevToolsPanelPlugin, DevToolsPanelProps } from '../types';
 import {
 	buildNavigationRoutePath,
 	createNavigationPlugin,
 	getPinnedRoutes,
 	inferNavigationRouteKind,
+	type NavigationTransitionContext,
 	navigationRouteDisplayName,
 	setRoutePinned,
 	subscribePinnedRoutes,
@@ -173,6 +176,133 @@ afterEach(() => {
 });
 
 describe('createNavigationPlugin', () => {
+	it('tracks requested, committed, and focused route transitions with one correlation', async () => {
+		let at = 100;
+		const eventStore = new DevtoolsEventStore({
+			maxEvents: 20,
+			maxBytes: 64 * 1024,
+			now: () => at,
+		});
+		const navigation = createNavigationPlugin({
+			eventStore,
+			now: () => at,
+			onNavigate: jest.fn(),
+		});
+
+		await navigation.navigate('/profile', {
+			correlationId: 'desktop-action-17',
+			source: 'desktop',
+		});
+		at = 125;
+		navigation.record('/profile');
+		at = 140;
+		navigation.updateStack([
+			{
+				key: 'profile',
+				name: 'profile',
+				path: '/profile',
+				depth: 0,
+				visible: true,
+			},
+		]);
+
+		expect(navigation.getTransitions()).toEqual([
+			expect.objectContaining({
+				phase: 'requested',
+				route: '/profile',
+				source: 'desktop',
+				correlationId: 'desktop-action-17',
+			}),
+			expect.objectContaining({ phase: 'committed', durationMs: 25 }),
+			expect.objectContaining({ phase: 'focused', durationMs: 40 }),
+		]);
+		expect(eventStore.getSnapshot().events.map((event) => event.kind)).toEqual([
+			'transition-requested',
+			'transition-committed',
+			'transition-focused',
+		]);
+		expect(
+			eventStore.getSnapshot().events.map((event) => event.correlationId),
+		).toEqual(['desktop-action-17', 'desktop-action-17', 'desktop-action-17']);
+	});
+
+	it('tracks direct app navigation as requested, committed, then focused', () => {
+		let at = 200;
+		const navigation = createNavigationPlugin({ now: () => at });
+
+		navigation.record('/home');
+		at = 215;
+		navigation.updateStack([
+			{
+				key: 'home',
+				name: 'home',
+				path: '/home',
+				depth: 0,
+				visible: true,
+			},
+		]);
+
+		expect(
+			navigation.getTransitions().map((transition) => transition.phase),
+		).toEqual(['requested', 'committed', 'focused']);
+		expect(navigation.getTransitions().at(-1)?.durationMs).toBe(15);
+	});
+
+	it('fails rejected navigation and does not invoke context accessors', async () => {
+		const getter = jest.fn(() => 'desktop');
+		const context = {} as NavigationTransitionContext;
+		Object.defineProperty(context, 'source', { enumerable: true, get: getter });
+		const navigation = createNavigationPlugin({
+			onNavigate: jest.fn(async () => {
+				throw new Error('router rejected');
+			}),
+		});
+
+		await expect(navigation.navigate('/blocked', context)).rejects.toThrow(
+			'router rejected',
+		);
+		expect(getter).not.toHaveBeenCalled();
+		expect(navigation.getTransitions()).toEqual([
+			expect.objectContaining({ phase: 'requested', source: 'panel' }),
+			expect.objectContaining({
+				phase: 'failed',
+				error: 'router rejected',
+			}),
+		]);
+	});
+
+	it('rejects stale transition failures and clears all navigation diagnostics', () => {
+		const navigation = createNavigationPlugin();
+		const transitionId = navigation.beginTransition('/settings');
+		navigation.failTransition(transitionId, new Error('cancelled'));
+		expect(() => navigation.failTransition(transitionId, 'again')).toThrow(
+			'no longer pending',
+		);
+		navigation.record('/settings');
+		navigation.clear();
+		expect(navigation.getEvents()).toEqual([]);
+		expect(navigation.getTransitions()).toEqual([]);
+	});
+
+	it('bounds pending transitions and fails the oldest request', () => {
+		const navigation = createNavigationPlugin({ maxEvents: 2 });
+		const first = navigation.beginTransition('/first');
+		navigation.beginTransition('/second');
+		navigation.beginTransition('/third');
+
+		expect(navigation.getTransitions()).toEqual([
+			expect.objectContaining({
+				phase: 'failed',
+				route: '/first',
+				error: expect.stringContaining('pending transition limit'),
+			}),
+			expect.objectContaining({ phase: 'requested', route: '/third' }),
+		]);
+		expect(() => navigation.failTransition(first, 'late failure')).toThrow(
+			'no longer pending',
+		);
+	});
+
 	it('records route changes and deduplicates identical consecutive routes', () => {
 		const navigation = createNavigationPlugin();
 		navigation.record('/home', { segments: ['(tabs)', 'home'] });
@@ -510,7 +640,7 @@ describe('Screens panel', () => {
 		).not.toBeOnTheScreen();
 	});
 
-	it('opens deep links and filters route rows by search', () => {
+	it('opens deep links and filters route rows by search', async () => {
 		const onOpenDeepLink = jest.fn();
 		const navigation = createNavigationPlugin({
 			onNavigate: jest.fn(),
@@ -531,6 +661,11 @@ describe('Screens panel', () => {
 		);
 		fireEvent.press(screen.getByLabelText('Open'));
 		expect(onOpenDeepLink).toHaveBeenCalledWith('pumpd://train');
+		await waitFor(() =>
+			expect(
+				navigation.getTransitions().map((transition) => transition.phase),
+			).toEqual(['requested', 'committed']),
+		);
 
 		expect(screen.getByText('/(onboarding)')).toBeOnTheScreen();
 		fireEvent.changeText(

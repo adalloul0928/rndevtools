@@ -4,15 +4,12 @@ import { useCallback, useEffect, useMemo } from 'react';
 import {
 	Platform,
 	PlatformColor,
+	Pressable,
 	StyleSheet,
 	useWindowDimensions,
 	View,
 } from 'react-native';
-import {
-	Gesture,
-	GestureDetector,
-	RectButton,
-} from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
 	ReduceMotion,
 	useAnimatedStyle,
@@ -152,7 +149,7 @@ export function FloatingLauncher({
 	return (
 		<GestureDetector gesture={dragGesture}>
 			<Animated.View style={[styles.positioner, animatedStyle]}>
-				<RectButton
+				<Pressable
 					accessibilityLabel={label}
 					accessibilityRole="button"
 					onPress={onOpen}
@@ -183,7 +180,7 @@ export function FloatingLauncher({
 							</View>
 						)}
 					</View>
-				</RectButton>
+				</Pressable>
 			</Animated.View>
 		</GestureDetector>
 	);

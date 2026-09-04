@@ -1,7 +1,12 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"entry": ["scripts/before-build.cjs!", "scripts/after-pack.cjs!"],
-	"project": ["src/**/*.{ts,tsx}!", "src/**/*.css!", "scripts/**/*.cjs!", "*.ts!"],
+	"project": [
+		"src/**/*.{ts,tsx}!",
+		"src/**/*.css!",
+		"scripts/**/*.{cjs,mjs}!",
+		"*.ts!"
+	],
 	"paths": {
 		"@/*": ["./src/renderer/*"],
 		"@main/*": ["./src/main/*"],

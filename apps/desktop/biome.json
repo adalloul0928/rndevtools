@@ -1,12 +1,13 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+	"root": false,
 	"files": {
 		"includes": [
 			"src/**/*.ts",
 			"src/**/*.tsx",
 			"src/**/*.css",
 			"src/**/*.html",
-			"scripts/**/*.cjs",
+			"scripts/**/*.{cjs,mjs}",
 			"*.json",
 			"*.ts",
 			"*.tsx"

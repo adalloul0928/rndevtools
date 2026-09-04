@@ -1,6 +1,7 @@
 import type { Mutation, Query } from '@tanstack/react-query';
 import { sanitizeDiagnosticValueWithMetadata } from '../core/redact';
 import { serializeValue, truncateText } from '../core/serialize';
+import type { QuerySimulationSnapshot } from './query-simulation';
 
 const queryDiagnosticIds = new WeakMap<object, string>();
 let nextQueryDiagnosticId = 1;
@@ -57,6 +58,7 @@ export type QueryPluginSnapshot = {
 	omittedQueryCount: number;
 	sourceMutationCount: number;
 	omittedMutationCount: number;
+	simulation?: QuerySimulationSnapshot;
 	error?: string;
 };
 

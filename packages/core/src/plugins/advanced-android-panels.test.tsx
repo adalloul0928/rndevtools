@@ -122,13 +122,22 @@ describe('advanced Android diagnostic panels', () => {
 	});
 
 	it('renders Zustand projections and changes without SwiftUI', () => {
+		let state = { count: 1 };
 		const diagnostics = createZustandPlugin({
 			stores: [
 				{
 					id: 'counter',
 					title: 'Counter',
-					getInspectableState: () => ({ count: 1 }),
+					getInspectableState: () => state,
 					subscribe: () => () => {},
+					validatePatch: (patch) => patch,
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+					},
+					reset: () => {
+						state = { count: 0 };
+					},
+					restorable: true,
 				},
 			],
 		});
@@ -138,6 +147,9 @@ describe('advanced Android diagnostic panels', () => {
 
 		expect(screen.getByText('Stores · 1')).toBeOnTheScreen();
 		expect(screen.getByText('Counter')).toBeOnTheScreen();
+		expect(screen.getByText('Apply validated patch')).toBeOnTheScreen();
+		expect(screen.getByText('Capture state')).toBeOnTheScreen();
+		expect(screen.getByText('Reset store')).toBeOnTheScreen();
 		dispose?.();
 	});
 

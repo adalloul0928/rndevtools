@@ -124,16 +124,19 @@ export function EmptyPanel({
 	title,
 	description,
 	action,
+	compact = false,
 }: {
 	icon?: ReactNode;
 	title: string;
 	description: string;
 	action?: ReactNode;
+	compact?: boolean;
 }) {
 	return (
 		<EmptyState
-			className="mx-auto min-h-[360px] max-w-md justify-center text-center"
-			size="lg"
+			className={`mx-auto max-w-md justify-center text-center ${compact ? '' : 'min-h-[360px]'}`}
+			size={compact ? 'sm' : 'lg'}
+			style={compact ? { minHeight: '100%' } : undefined}
 		>
 			<EmptyState.Header>
 				{icon ? <EmptyState.Media variant="icon">{icon}</EmptyState.Media> : null}
@@ -260,13 +263,19 @@ export function ConfirmAction({
 	isDisabled?: boolean;
 }) {
 	const Icon = tone === 'danger' ? CircleX : AlertTriangle;
+	if (isDisabled) {
+		return (
+			<Button isDisabled size="sm" variant={triggerVariant}>
+				{triggerIcon}
+				{triggerLabel}
+			</Button>
+		);
+	}
 	return (
 		<AlertDialog>
-			<AlertDialog.Trigger>
-				<Button isDisabled={isDisabled} size="sm" variant={triggerVariant}>
-					{triggerIcon}
-					{triggerLabel}
-				</Button>
+			<AlertDialog.Trigger className={`button button--sm button--${triggerVariant}`}>
+				{triggerIcon}
+				{triggerLabel}
 			</AlertDialog.Trigger>
 			<AlertDialog.Backdrop className="bg-black/70 backdrop-blur-sm">
 				<AlertDialog.Container className="border border-white/12 bg-[#0b0b0b] shadow-2xl">

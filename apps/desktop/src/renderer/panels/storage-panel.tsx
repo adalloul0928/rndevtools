@@ -8,7 +8,15 @@ import {
 	type DataGridColumn,
 	type DataGridSelection,
 } from '@heroui-pro/react/data-grid';
-import { Database, EyeOff, History, Save, ShieldCheck } from 'lucide-react';
+import {
+	Bookmark,
+	Database,
+	EyeOff,
+	History,
+	RotateCcw,
+	Save,
+	ShieldCheck,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
 	CodePreview,
@@ -338,6 +346,58 @@ export function StoragePanel() {
 												<p className="mb-0 mt-2 truncate font-mono text-[10px] text-(--muted)">
 													{event.previousText ?? '∅'} → {event.nextText ?? '∅'}
 												</p>
+												{event.structuralDiff?.length ? (
+													<div className="mt-2 space-y-1 border-t border-white/8 pt-2">
+														{event.structuralDiff.slice(0, 8).map((diff) => (
+															<p
+																className="m-0 truncate font-mono text-[10px] text-(--text-3)"
+																key={`${diff.path}:${diff.kind}`}
+															>
+																{diff.kind} {diff.path}
+															</p>
+														))}
+													</div>
+												) : null}
+												<div className="mt-2 flex justify-end gap-2">
+													<Button
+														className="h-7 px-2 text-[10px]"
+														isDisabled={!canRunAction('storage', 'bookmark')}
+														size="sm"
+														variant="ghost"
+														onPress={() =>
+															void runAction(
+																'storage',
+																'bookmark',
+																{ id: event.id },
+																event.bookmarked
+																	? 'Storage bookmark removed.'
+																	: 'Storage change bookmarked.'
+															)
+														}
+													>
+														<Bookmark className="h-3 w-3" />{' '}
+														{event.bookmarked ? 'Unbookmark' : 'Bookmark'}
+													</Button>
+													{event.undoAvailable ? (
+														<ConfirmAction
+															confirmLabel="Undo change"
+															description="Restore the bounded previous value captured on the device."
+															isDisabled={!canRunAction('storage', 'undo')}
+															onConfirm={() =>
+																void runAction(
+																	'storage',
+																	'undo',
+																	{ id: event.id },
+																	'Storage change undone.'
+																)
+															}
+															title="Undo this storage change?"
+															triggerIcon={<RotateCcw className="h-3 w-3" />}
+															triggerLabel="Undo"
+															triggerVariant="secondary"
+														/>
+													) : null}
+												</div>
 											</div>
 										))}
 									</div>

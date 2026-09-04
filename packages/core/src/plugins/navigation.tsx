@@ -38,8 +38,10 @@ import {
 } from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
+import type { DevtoolsEventStore } from '../core/event-store';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { formatRelativeTime } from '../core/format';
+import { diagnosticErrorText } from '../core/redact';
 import { serializeValue } from '../core/serialize';
 import type {
 	DevToolsPanelPlugin,
@@ -61,11 +63,15 @@ import {
 	type NavigationEvent,
 	type NavigationRouteDescriptor,
 	type NavigationStackEntry,
+	type NavigationTransitionContext,
+	type NavigationTransitionEvent,
+	type NavigationTransitionPhase,
 	navigationRouteDisplayName,
 	normalizeNavigationRecordOptions,
 	normalizeNavigationRoutes,
 	normalizeNavigationStack,
 	normalizeNavigationText,
+	normalizeNavigationTransitionContext,
 	positiveIntegerOption,
 	rememberParamValues,
 	routeGroupLabel,
@@ -83,12 +89,14 @@ export type {
 	NavigationRouteDescriptor,
 	NavigationRouteKind,
 	NavigationStackEntry,
+	NavigationTransitionContext,
 } from './navigation-model';
 export {
 	buildNavigationRoutePath,
 	getPinnedRoutes,
 	inferNavigationRouteKind,
 	navigationRouteDisplayName,
+	routeParamNames,
 	setRoutePinned,
 	subscribePinnedRoutes,
 } from './navigation-model';
@@ -109,9 +117,13 @@ export type NavigationPluginOptions = {
 	 * Jump handler: the host closes the tools and routes to the given path.
 	 * When absent the panel renders route rows without tap navigation.
 	 */
-	onNavigate?: (path: string) => void;
+	onNavigate?: (path: string) => unknown | Promise<unknown>;
 	/** Opens a raw deep link URL. When absent the deep link section is hidden. */
-	onOpenDeepLink?: (url: string) => void;
+	onOpenDeepLink?: (url: string) => unknown | Promise<unknown>;
+	/** Optional shared, metadata-only timeline owned by the host. */
+	eventStore?: DevtoolsEventStore;
+	/** Injectable monotonic wall clock for deterministic hosts and tests. */
+	now?: () => number;
 };
 export type NavigationPlugin = {
 	plugin: DevToolsPanelPlugin;
@@ -124,8 +136,18 @@ export type NavigationPlugin = {
 	) => void;
 	updateRoutes: (routes: readonly NavigationRouteDescriptor[]) => void;
 	updateStack: (stack: readonly NavigationStackEntry[]) => void;
+	beginTransition: (
+		route: string,
+		context?: NavigationTransitionContext,
+	) => string;
+	failTransition: (transitionId: string, error: unknown) => void;
+	navigate: (
+		route: string,
+		context?: NavigationTransitionContext,
+	) => Promise<void>;
 	clear: () => void;
 	getEvents: () => readonly NavigationEvent[];
+	getTransitions: () => readonly NavigationTransitionEvent[];
 	getRoutes: () => readonly NavigationRouteDescriptor[];
 	getStack: () => readonly NavigationStackEntry[];
 };
@@ -185,17 +207,208 @@ export function createNavigationPlugin(
 		maxBytes: 512 * 1024,
 		estimateBytes: (event) => serializeValue(event, 64 * 1024).estimatedBytes,
 	});
+	const transitionStore = new BoundedEventStore<NavigationTransitionEvent>({
+		maxEvents,
+		maxBytes: 512 * 1024,
+		estimateBytes: (event) => serializeValue(event, 64 * 1024).estimatedBytes,
+	});
 	const routesStore = new ExternalStore<readonly NavigationRouteDescriptor[]>(
 		[],
 	);
 	const stackStore = new ExternalStore<readonly NavigationStackEntry[]>([]);
+	const now = options.now ?? Date.now;
 	let nextId = 1;
+	let nextTransitionId = 1;
+	type PendingTransition = {
+		transitionId: string;
+		route: string;
+		requestedAt: number;
+		committedAt?: number;
+		source: NavigationTransitionEvent['source'];
+		correlationId?: string;
+	};
+	const pendingTransitions = new Map<string, PendingTransition>();
+
+	const appendTransition = (
+		pending: PendingTransition,
+		phase: NavigationTransitionPhase,
+		at: number,
+		extra: Readonly<{ durationMs?: number; error?: string }> = {},
+	): void => {
+		const event: NavigationTransitionEvent = Object.freeze({
+			id: `${pending.transitionId}:${phase}`,
+			transitionId: pending.transitionId,
+			at,
+			phase,
+			route: pending.route,
+			source: pending.source,
+			...(pending.correlationId
+				? { correlationId: pending.correlationId }
+				: {}),
+			...(extra.durationMs === undefined
+				? {}
+				: { durationMs: extra.durationMs }),
+			...(extra.error ? { error: extra.error } : {}),
+		});
+		transitionStore.append(event);
+		try {
+			options.eventStore?.append({
+				source: 'navigation',
+				kind: `transition-${phase}`,
+				level: phase === 'failed' ? 'error' : 'info',
+				title: `Navigation ${phase}`,
+				summary: pending.route,
+				...(pending.correlationId
+					? { correlationId: pending.correlationId }
+					: {}),
+				resourceRef: {
+					toolId: 'routes',
+					resourceId: pending.transitionId,
+				},
+				attributes: {
+					phase,
+					source: pending.source,
+					...(extra.durationMs === undefined
+						? {}
+						: { durationMs: extra.durationMs }),
+				},
+			});
+		} catch {
+			// Shared diagnostics cannot interrupt application navigation.
+		}
+	};
+
+	const transitionTimestamp = (): number => {
+		const value = now();
+		if (!Number.isSafeInteger(value) || value < 0) {
+			throw new Error(
+				'Navigation transition clock returned an invalid timestamp.',
+			);
+		}
+		return value;
+	};
+
+	const failPendingTransition = (
+		pending: PendingTransition,
+		error: unknown,
+	): void => {
+		if (!pendingTransitions.has(pending.transitionId)) return;
+		const at = transitionTimestamp();
+		appendTransition(pending, 'failed', at, {
+			durationMs: Math.max(0, at - pending.requestedAt),
+			error: normalizeNavigationText(diagnosticErrorText(error)),
+		});
+		pendingTransitions.delete(pending.transitionId);
+	};
+
+	const prunePendingTransitions = (at: number): void => {
+		for (const pending of pendingTransitions.values()) {
+			if (at - pending.requestedAt <= 30_000) continue;
+			appendTransition(pending, 'failed', at, {
+				durationMs: Math.max(0, at - pending.requestedAt),
+				error: 'Timed out waiting for the requested route to focus.',
+			});
+			pendingTransitions.delete(pending.transitionId);
+		}
+	};
+
+	const makeRoomForPendingTransition = (at: number): void => {
+		prunePendingTransitions(at);
+		while (pendingTransitions.size >= maxEvents) {
+			const oldest = pendingTransitions.values().next().value as
+				| PendingTransition
+				| undefined;
+			if (!oldest) break;
+			appendTransition(oldest, 'failed', at, {
+				durationMs: Math.max(0, at - oldest.requestedAt),
+				error: 'Superseded because the pending transition limit was reached.',
+			});
+			pendingTransitions.delete(oldest.transitionId);
+		}
+	};
+
+	const commitPendingTransition = (
+		pending: PendingTransition,
+		at: number,
+	): void => {
+		if (pending.committedAt !== undefined) return;
+		pending.committedAt = at;
+		appendTransition(pending, 'committed', at, {
+			durationMs: Math.max(0, at - pending.requestedAt),
+		});
+	};
+
+	const beginTransition = (
+		routeValue: string,
+		contextValue?: NavigationTransitionContext,
+	): string => {
+		const route = normalizeNavigationText(routeValue);
+		if (!route) throw new Error('Navigation transition route is required.');
+		const context = normalizeNavigationTransitionContext(contextValue);
+		const at = transitionTimestamp();
+		makeRoomForPendingTransition(at);
+		const transitionId = `navigation-transition-${nextTransitionId++}`;
+		const pending: PendingTransition = {
+			transitionId,
+			route,
+			requestedAt: at,
+			source: context.source ?? 'app',
+			...(context.correlationId
+				? { correlationId: context.correlationId }
+				: {}),
+		};
+		pendingTransitions.set(transitionId, pending);
+		appendTransition(pending, 'requested', at);
+		return transitionId;
+	};
+
+	const failTransition = (transitionIdValue: string, error: unknown): void => {
+		const transitionId = normalizeNavigationText(transitionIdValue);
+		const pending = pendingTransitions.get(transitionId);
+		if (!pending) {
+			throw new Error('Navigation transition is no longer pending.');
+		}
+		failPendingTransition(pending, error);
+	};
+
+	const navigate = async (
+		route: string,
+		context?: NavigationTransitionContext,
+	): Promise<void> => {
+		if (!options.onNavigate) {
+			throw new Error('Navigation is not configured by this host.');
+		}
+		const normalizedContext = normalizeNavigationTransitionContext(context);
+		const transitionId = beginTransition(route, {
+			...(normalizedContext.correlationId
+				? { correlationId: normalizedContext.correlationId }
+				: {}),
+			source: normalizedContext.source ?? 'panel',
+		});
+		try {
+			await options.onNavigate(normalizeNavigationText(route));
+		} catch (error) {
+			failTransition(transitionId, error);
+			throw error;
+		}
+	};
+
+	const clearNavigationDiagnostics = (): void => {
+		historyStore.clear();
+		transitionStore.clear();
+		pendingTransitions.clear();
+	};
 
 	function ScreensPanel({ onBack, actions }: DevToolsPanelProps) {
 		const events = useSyncExternalStore(
 			historyStore.subscribe,
 			historyStore.getSnapshot,
 			historyStore.getServerSnapshot,
+		);
+		const transitions = useSyncExternalStore(
+			transitionStore.subscribe,
+			transitionStore.getSnapshot,
+			transitionStore.getServerSnapshot,
 		);
 		const routes = useSyncExternalStore(
 			routesStore.subscribe,
@@ -236,6 +449,19 @@ export function createNavigationPlugin(
 				? `${current.segments.map(stripGroupParens).join(' › ')} — `
 				: ''
 		}${mountedCount} mounted, ${visibleCount} visible`;
+		const recentTransitions = [...transitions].reverse().slice(0, 20);
+		const transitionDetail = (
+			transition: NavigationTransitionEvent,
+		): string => {
+			const duration =
+				transition.durationMs === undefined
+					? ''
+					: ` · ${transition.durationMs} ms`;
+			const correlation = transition.correlationId
+				? ` · ${transition.correlationId}`
+				: '';
+			return `${transition.source}${duration}${correlation}`;
+		};
 
 		// The sitemap can expose the same path twice (e.g. a group root and its
 		// index route); one jump row per path is enough.
@@ -286,7 +512,7 @@ export function createNavigationPlugin(
 			void actions.run({
 				pluginId: id,
 				label: `Open ${navigationRouteDisplayName(path)}`,
-				action: () => onNavigate(path),
+				action: () => navigate(path, { source: 'panel' }),
 			});
 		};
 
@@ -339,7 +565,20 @@ export function createNavigationPlugin(
 			void actions.run({
 				pluginId: id,
 				label: 'Open deep link',
-				action: () => onOpenDeepLink(url),
+				action: async () => {
+					const transitionId = beginTransition(url, { source: 'deep-link' });
+					try {
+						await onOpenDeepLink(url);
+						const pending = pendingTransitions.get(transitionId);
+						if (pending) {
+							commitPendingTransition(pending, transitionTimestamp());
+							pendingTransitions.delete(transitionId);
+						}
+					} catch (error) {
+						failTransition(transitionId, error);
+						throw error;
+					}
+				},
 			});
 		};
 		const clearHistory = () => {
@@ -351,7 +590,7 @@ export function createNavigationPlugin(
 					confirmLabel: 'Clear',
 					destructive: true,
 				},
-				action: historyStore.clear,
+				action: clearNavigationDiagnostics,
 			});
 		};
 
@@ -694,6 +933,27 @@ export function createNavigationPlugin(
 									</HStack>
 								</Section>
 							) : null}
+							<Section title={`Transitions · ${transitions.length}`}>
+								{recentTransitions.length === 0 ? (
+									<UIText modifiers={secondaryText()}>
+										No navigation transitions
+									</UIText>
+								) : (
+									recentTransitions.map((transition) => (
+										<VStack alignment="leading" key={transition.id} spacing={2}>
+											<UIText>{`${transition.phase} · ${transition.route}`}</UIText>
+											<UIText modifiers={secondaryText()}>
+												{`${transitionDetail(transition)} · ${formatRelativeTime(transition.at)}`}
+											</UIText>
+											{transition.error ? (
+												<UIText modifiers={secondaryText()}>
+													{transition.error}
+												</UIText>
+											) : null}
+										</VStack>
+									))
+								)}
+							</Section>
 							<Section>
 								<DisclosureGroup
 									isExpanded={historyExpanded}
@@ -815,6 +1075,20 @@ export function createNavigationPlugin(
 								/>
 							</AndroidPanelSection>
 						) : null}
+						<AndroidPanelSection title={`Transitions · ${transitions.length}`}>
+							{recentTransitions.length === 0 ? (
+								<AndroidPanelRow label="No navigation transitions" />
+							) : (
+								recentTransitions.map((transition) => (
+									<AndroidPanelRow
+										detail={transition.error ?? transitionDetail(transition)}
+										key={transition.id}
+										label={`${transition.phase} · ${navigationRouteDisplayName(transition.route)}`}
+										value={formatRelativeTime(transition.at)}
+									/>
+								))
+							)}
+						</AndroidPanelSection>
 						<AndroidPanelSection title={`History · ${events.length}`}>
 							{[...events]
 								.reverse()
@@ -869,7 +1143,7 @@ export function createNavigationPlugin(
 										id: path,
 										label: navigationRouteDisplayName(path),
 										systemImage: 'arrow.up.forward' as const,
-										action: () => onNavigate(path),
+										action: () => navigate(path, { source: 'panel' }),
 									})),
 						},
 					}
@@ -881,15 +1155,40 @@ export function createNavigationPlugin(
 			const { segments, metadata } =
 				normalizeNavigationRecordOptions(recordOptions);
 			const previous = historyStore.getSnapshot().at(-1);
-			if (
+			const duplicate =
 				previous?.route === normalizedRoute &&
 				JSON.stringify(previous.segments) === JSON.stringify(segments) &&
-				serializeValue(previous.metadata).text === serializeValue(metadata).text
-			)
-				return;
+				serializeValue(previous.metadata).text ===
+					serializeValue(metadata).text;
+			const at = transitionTimestamp();
+			prunePendingTransitions(at);
+			let pending = [...pendingTransitions.values()].find(
+				(candidate) =>
+					candidate.route === normalizedRoute &&
+					candidate.committedAt === undefined,
+			);
+			if (!pending && duplicate) return;
+			if (!pending) {
+				makeRoomForPendingTransition(at);
+				const transitionId = `navigation-transition-${nextTransitionId++}`;
+				pending = {
+					transitionId,
+					route: normalizedRoute,
+					requestedAt: at,
+					source: 'app',
+				};
+				pendingTransitions.set(transitionId, pending);
+			}
+			if (pending.committedAt === undefined) {
+				if (pending.requestedAt === at && pending.source === 'app') {
+					appendTransition(pending, 'requested', at);
+				}
+				commitPendingTransition(pending, at);
+			}
+			if (duplicate) return;
 			historyStore.append({
 				id: nextId++,
-				at: Date.now(),
+				at,
 				route: normalizedRoute,
 				segments,
 				metadata,
@@ -919,12 +1218,35 @@ export function createNavigationPlugin(
 			}
 		},
 		updateStack: (stack) => {
-			stackStore.set(
-				normalizeNavigationStack(stack, maxStackEntries, maxCatalogBytes),
+			const normalized = normalizeNavigationStack(
+				stack,
+				maxStackEntries,
+				maxCatalogBytes,
 			);
+			stackStore.set(normalized);
+			const visiblePaths = new Set(
+				normalized
+					.filter((entry) => entry.visible && entry.path)
+					.map((entry) => entry.path as string),
+			);
+			if (visiblePaths.size === 0) return;
+			const at = transitionTimestamp();
+			prunePendingTransitions(at);
+			for (const pending of [...pendingTransitions.values()]) {
+				if (!visiblePaths.has(pending.route)) continue;
+				commitPendingTransition(pending, at);
+				appendTransition(pending, 'focused', at, {
+					durationMs: Math.max(0, at - pending.requestedAt),
+				});
+				pendingTransitions.delete(pending.transitionId);
+			}
 		},
-		clear: historyStore.clear,
+		beginTransition,
+		failTransition,
+		navigate,
+		clear: clearNavigationDiagnostics,
 		getEvents: historyStore.getSnapshot,
+		getTransitions: transitionStore.getSnapshot,
 		getRoutes: routesStore.getSnapshot,
 		getStack: stackStore.getSnapshot,
 	};

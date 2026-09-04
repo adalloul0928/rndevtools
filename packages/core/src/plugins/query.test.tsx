@@ -1,9 +1,10 @@
 import { QueryClient } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import {
 	createMutationSnapshot,
 	createQueryPlugin,
+	createQuerySimulationController,
 	createQuerySnapshot,
 	formatQueryKey,
 	formatQueryKeyRemainder,
@@ -164,6 +165,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	autocorrectionDisabled: () => ({ autocorrectionDisabled: true }),
 	badge: (value: unknown) => ({ badge: value }),
+	disabled: (value: unknown) => ({ disabled: value }),
 	font: (value: unknown) => ({ font: value }),
 	foregroundColor: (value: unknown) => ({ foregroundColor: value }),
 	frame: (value: unknown) => ({ frame: value }),
@@ -454,6 +456,59 @@ describe('createQueryPlugin', () => {
 		).rejects.toThrow('Unsupported query action');
 
 		dispose?.();
+		queryClient.clear();
+	});
+
+	it('projects host-owned simulation state and delegates typed operations', async () => {
+		const release = jest.fn();
+		const simulation = createQuerySimulationController([
+			{
+				id: 'all',
+				label: 'All queries',
+				operations: { offline: () => ({ release }) },
+				unsupportedReasons: {
+					loading: 'Loading requires an explicit presentation adapter.',
+				},
+			},
+		]);
+		const queryClient = new QueryClient();
+		const plugin = createQueryPlugin({ queryClient, simulation });
+		const dispose = plugin.install?.();
+		const run = renderPanel(plugin);
+
+		expect(
+			screen.getByText('Loading requires an explicit presentation adapter.'),
+		).toBeOnTheScreen();
+		fireEvent.press(screen.getByLabelText('Simulate Offline'));
+		expect(run).toHaveBeenCalledWith(
+			expect.objectContaining({ label: 'Simulate query offline' }),
+		);
+
+		let active: Awaited<ReturnType<typeof plugin.runSimulation>> | undefined;
+		await act(async () => {
+			active = await plugin.runSimulation('all', 'offline');
+		});
+		if (!active) throw new Error('Expected active simulation');
+		expect(plugin.getSnapshot().simulation?.active).toEqual(active);
+		const receiptId = active.receiptId;
+		await act(async () => {
+			await plugin.clearSimulation(receiptId);
+		});
+		expect(release).toHaveBeenCalledTimes(1);
+
+		dispose?.();
+		queryClient.clear();
+	});
+
+	it('rejects simulation commands when the host did not register an adapter', async () => {
+		const queryClient = new QueryClient();
+		const plugin = createQueryPlugin({ queryClient });
+		await expect(plugin.runSimulation('all', 'offline')).rejects.toThrow(
+			'not configured',
+		);
+		await expect(plugin.clearSimulation('receipt')).rejects.toThrow(
+			'not configured',
+		);
 		queryClient.clear();
 	});
 });

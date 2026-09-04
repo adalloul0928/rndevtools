@@ -62,5 +62,11 @@ describe('desktop URL boundaries', () => {
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).not.toContain('localhost');
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).not.toContain('127.0.0.1');
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).not.toContain("'unsafe-eval'");
+		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).toContain(
+			"img-src 'self' data: blob: pumpd-capture:"
+		);
+		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).toContain(
+			'media-src pumpd-capture:'
+		);
 	});
 });

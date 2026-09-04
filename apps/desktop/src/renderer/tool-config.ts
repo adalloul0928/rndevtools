@@ -1,6 +1,7 @@
 import {
 	Activity,
 	BoxSelect,
+	Camera,
 	Database,
 	FileClock,
 	Logs,
@@ -10,6 +11,8 @@ import {
 	Settings2,
 	Store,
 	TerminalSquare,
+	UserRoundCheck,
+	Workflow,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { DeviceSession, ToolId } from '../shared/protocol';
@@ -71,6 +74,18 @@ export const toolGroups: ToolGroup[] = [
 				icon: FileClock,
 				count: (device) => device?.tools.restorePoints.length,
 			},
+			{
+				id: 'scenarios',
+				label: 'Scenarios',
+				icon: Workflow,
+				count: (device) => device?.tools.scenarios.length,
+			},
+			{
+				id: 'identity',
+				label: 'Test identities',
+				icon: UserRoundCheck,
+				count: (device) => (device?.tools.identitySession.active ? 1 : undefined),
+			},
 		],
 	},
 	{
@@ -96,6 +111,12 @@ export const toolGroups: ToolGroup[] = [
 				label: 'Components',
 				icon: BoxSelect,
 				count: (device) => device?.tools.components.length,
+			},
+			{
+				id: 'camera',
+				label: 'Camera fixtures',
+				icon: Camera,
+				count: (device) => (device?.tools.cameraFixture.active ? 1 : 0),
 			},
 			{
 				id: 'performance',

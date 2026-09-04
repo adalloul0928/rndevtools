@@ -3,6 +3,7 @@ import { createDemoDevice } from './demo-data';
 import {
 	createEmptyDeviceTools,
 	DESKTOP_PROTOCOL_VERSION,
+	DESKTOP_SUPPORTED_PROTOCOL_VERSIONS,
 	desktopBootstrapSchema,
 	deviceHelloMessageSchema,
 	deviceSnapshotMessageSchema,
@@ -35,7 +36,158 @@ describe('redaction stays inside the advertised text bounds', () => {
 });
 
 describe('desktop IPC and device schemas', () => {
+	it('defaults Zustand mutation fields for legacy snapshots', () => {
+		const tools = createEmptyDeviceTools();
+		const {
+			zustandStateSnapshots: _stateSnapshots,
+			zustandMutationReceipts: _receipts,
+			...legacyTools
+		} = tools;
+		const parsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: {
+				...legacyTools,
+				zustandStores: [
+					{
+						id: 'legacy-store',
+						title: 'Legacy store',
+						stateText: '{}',
+						keys: [],
+						updatedAt: Date.now(),
+					},
+				],
+			},
+		});
+
+		expect(parsed.tools.zustandStateSnapshots).toEqual([]);
+		expect(parsed.tools.zustandMutationReceipts).toEqual([]);
+		expect(parsed.tools.zustandStores[0]?.capabilities).toEqual({
+			writable: false,
+			resettable: false,
+			persisted: false,
+			restorable: false,
+		});
+	});
+
+	it('accepts both supported hello versions and v2 process metadata', () => {
+		expect(DESKTOP_SUPPORTED_PROTOCOL_VERSIONS).toEqual([1, 2]);
+		const legacy = deviceHelloMessageSchema.parse({
+			type: 'hello',
+			protocolVersion: 1,
+			device: {
+				id: 'legacy-device',
+				name: 'Legacy device',
+				platform: 'ios',
+				capabilities: [],
+			},
+		});
+		expect(legacy.protocolVersion).toBe(1);
+
+		const current = deviceHelloMessageSchema.parse({
+			type: 'hello',
+			protocolVersion: 2,
+			device: {
+				id: 'simulator-device',
+				name: 'Simulator device',
+				platform: 'simulator',
+				simulatorUdid: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+				bundleIdentifier: 'com.example.app',
+				processId: 1234,
+				capabilities: [],
+			},
+		});
+		expect(current.device).toMatchObject({
+			simulatorUdid: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+			bundleIdentifier: 'com.example.app',
+			processId: 1234,
+		});
+	});
+
+	it('accepts bounded component hierarchy diagnostics without raw style objects', () => {
+		const tools = createEmptyDeviceTools();
+		const component = {
+			id: 'row-instance-1',
+			targetId: 'exercise-row',
+			parentId: 'list-instance',
+			depth: 2,
+			zIndex: 4,
+			name: 'Exercise row',
+			kind: 'component',
+			sourceFiles: [],
+			instanceTruncated: false,
+			bounds: { x: 10, y: 20, width: 100, height: 44 },
+			isFocused: true,
+			styleText: '{"display":"flex"}',
+			styleTruncated: false,
+			actions: ['activate'] as const,
+			screenHash: 'screen-12345678',
+		};
+		const message = {
+			type: 'snapshot' as const,
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: {
+				...tools,
+				components: [component],
+				componentRenders: [
+					{
+						id: 'render-1',
+						targetId: 'row-instance-1',
+						at: Date.now(),
+						phase: 'update' as const,
+						actualDuration: 4.2,
+						baseDuration: 8,
+						startTime: 100,
+						commitTime: 105,
+						renderCount: 3,
+						cause: 'unknown' as const,
+						changedKeys: [],
+					},
+				],
+				componentSummary: {
+					...tools.componentSummary,
+					registrationDiagnostics: [
+						{
+							code: 'duplicate-target-id' as const,
+							targetId: 'exercise-row',
+							instanceIds: ['row-instance-1', 'row-instance-2'],
+							message: '2 mounted instances share this target id.',
+						},
+					],
+				},
+			},
+		};
+
+		const parsed = deviceSnapshotMessageSchema.parse(message);
+		expect(parsed.tools.components[0]).toMatchObject({
+			targetId: 'exercise-row',
+			parentId: 'list-instance',
+			depth: 2,
+			zIndex: 4,
+		});
+		expect(parsed.tools.componentSummary.registrationDiagnostics).toHaveLength(1);
+		expect(parsed.tools.componentRenders).toEqual([
+			expect.objectContaining({
+				id: 'render-1',
+				targetId: 'row-instance-1',
+				cause: 'unknown',
+			}),
+		]);
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				...message,
+				tools: {
+					...message.tools,
+					components: [{ ...component, styles: { display: 'flex' } }],
+				},
+			})
+		).toThrow();
+	});
+
 	it('accepts the complete browser-preview bootstrap', () => {
+		const demo = createDemoDevice();
 		expect(
 			desktopBootstrapSchema.parse({
 				state: {
@@ -47,7 +199,7 @@ describe('desktop IPC and device schemas', () => {
 						access: 'loopback',
 						urls: ['ws://127.0.0.1:47931/device'],
 					},
-					devices: [createDemoDevice()],
+					devices: [demo],
 					diagnostics: [],
 				},
 				platform: 'browser',
@@ -59,6 +211,56 @@ describe('desktop IPC and device schemas', () => {
 				},
 			})
 		).toMatchObject({ platform: 'browser' });
+		expect(demo.tools.querySimulation?.active).toMatchObject({
+			familyId: 'all-pumpd-queries',
+			mode: 'offline',
+		});
+	});
+
+	it('rejects inconsistent query simulation snapshots', () => {
+		const demo = createDemoDevice();
+		const simulation = demo.tools.querySimulation;
+		if (!simulation) throw new Error('Expected demo query simulation');
+		const family = simulation.families[0];
+		if (!family) throw new Error('Expected demo query family');
+
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				type: 'snapshot',
+				sequence: 1,
+				sentAt: Date.now(),
+				tools: {
+					...createEmptyDeviceTools(),
+					querySimulation: {
+						families: [
+							{
+								...family,
+								modes: family.modes.map(() => family.modes[0]),
+							},
+						],
+						active: simulation.active,
+					},
+				},
+			})
+		).toThrow('every mode once');
+
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				type: 'snapshot',
+				sequence: 2,
+				sentAt: Date.now(),
+				tools: {
+					...createEmptyDeviceTools(),
+					querySimulation: {
+						...simulation,
+						active: {
+							...simulation.active,
+							familyId: 'missing-family',
+						},
+					},
+				},
+			})
+		).toThrow('supported family mode');
 	});
 
 	it('rejects unadvertised capability names', () => {
@@ -102,6 +304,237 @@ describe('desktop IPC and device schemas', () => {
 				},
 			})
 		).toThrow('Header maps');
+	});
+
+	it('accepts rich logger metadata while retaining legacy console rows', () => {
+		const parsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: {
+				...createEmptyDeviceTools(),
+				console: [
+					{
+						id: 'legacy',
+						at: 100,
+						level: 'info',
+						message: 'Legacy row',
+					},
+					{
+						id: 'rich',
+						at: 250,
+						firstAt: 200,
+						lastAt: 250,
+						level: 'error',
+						message: 'Request failed',
+						scope: 'network.request',
+						correlationId: 'request-42',
+						groupId: 'network-error',
+						repeatCount: 2,
+						errorName: 'NetworkError',
+						errorStack: 'NetworkError: request failed',
+						sourceLocation: { file: 'client.ts', line: 42, column: 7 },
+					},
+				],
+			},
+		});
+		expect(parsed.tools.console[0]?.repeatCount).toBeUndefined();
+		expect(parsed.tools.console[1]).toMatchObject({
+			repeatCount: 2,
+			scope: 'network.request',
+			correlationId: 'request-42',
+		});
+	});
+
+	it('accepts correlated navigation phases and rejects invalid duration data', () => {
+		const tools = createEmptyDeviceTools();
+		const parsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: {
+				...tools,
+				routeEvents: [
+					{
+						id: 'route-transition-1-focused',
+						at: 500,
+						route: '/profile',
+						transitionId: 'navigation-transition-1',
+						phase: 'focused',
+						source: 'desktop',
+						correlationId: 'desktop-action-7',
+						durationMs: 42,
+					},
+				],
+			},
+		});
+		expect(parsed.tools.routeEvents[0]).toMatchObject({
+			phase: 'focused',
+			source: 'desktop',
+			correlationId: 'desktop-action-7',
+			durationMs: 42,
+		});
+
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				type: 'snapshot',
+				sequence: 2,
+				sentAt: Date.now(),
+				tools: {
+					...tools,
+					routeEvents: [
+						{
+							id: 'bad-route-transition',
+							at: 500,
+							route: '/profile',
+							phase: 'focused',
+							durationMs: -1,
+						},
+					],
+				},
+			})
+		).toThrow();
+	});
+
+	it('defaults legacy camera state and rejects inconsistent fixture metadata', () => {
+		const legacy = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: { ...createEmptyDeviceTools(), cameraFixture: undefined },
+		});
+		expect(legacy.tools.cameraFixture).toEqual({ active: false });
+
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				type: 'snapshot',
+				sequence: 2,
+				sentAt: Date.now(),
+				tools: {
+					...createEmptyDeviceTools(),
+					cameraFixture: {
+						active: true,
+						kind: 'video',
+						mimeType: 'image/png',
+						bytes: 512,
+						width: 100,
+						height: 100,
+						durationMs: 1_000,
+					},
+				},
+			})
+		).toThrow('Camera fixture metadata');
+	});
+
+	it('accepts bounded scenario state and defaults it for legacy snapshots', () => {
+		const empty = createEmptyDeviceTools();
+		const {
+			scenarios: _scenarios,
+			scenarioRuntime: _runtime,
+			scenarioReceipts: _receipts,
+			...legacy
+		} = empty;
+		const legacyParsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: legacy,
+		});
+		expect(legacyParsed.tools.scenarios).toEqual([]);
+		expect(legacyParsed.tools.scenarioRuntime).toEqual({ running: false });
+		expect(legacyParsed.tools.scenarioReceipts).toEqual([]);
+
+		const parsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 2,
+			sentAt: Date.now(),
+			tools: {
+				...empty,
+				scenarios: [
+					{
+						id: 'pumpd.persona',
+						version: 1,
+						definitionToken: 'definition-1',
+						name: 'Persona',
+						bundled: true,
+						variables: [],
+						preconditionCount: 0,
+						steps: [{ id: 'route', type: 'navigation' }],
+					},
+				],
+				scenarioRuntime: {
+					running: false,
+					active: {
+						receiptId: 'receipt-1',
+						scenarioId: 'pumpd.persona',
+						scenarioVersion: 1,
+						scenarioName: 'Persona',
+						activatedAt: Date.now(),
+						stepCount: 1,
+						privileged: false,
+						warnings: [],
+						recoveryRequired: false,
+					},
+				},
+			},
+		});
+		expect(parsed.tools.scenarioRuntime.active?.scenarioId).toBe('pumpd.persona');
+	});
+
+	it('accepts only redacted identity sessions and defaults legacy snapshots', () => {
+		const empty = createEmptyDeviceTools();
+		const { identitySession: _identitySession, ...legacy } = empty;
+		const legacyParsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 1,
+			sentAt: Date.now(),
+			tools: legacy,
+		});
+		expect(legacyParsed.tools.identitySession).toEqual({
+			running: false,
+			history: [],
+			personas: [],
+		});
+
+		const tools = {
+			...empty,
+			identitySession: {
+				running: false,
+				active: {
+					historyId: 'identity-1',
+					startedAt: Date.now(),
+					actor: { kind: 'account', label: 'Original account' },
+					target: { kind: 'persona', label: 'John', personaId: 'power' },
+					status: 'active',
+				},
+				history: [],
+				personas: [{ id: 'power', label: 'John', note: 'Power user' }],
+			},
+		};
+		const parsed = deviceSnapshotMessageSchema.parse({
+			type: 'snapshot',
+			sequence: 2,
+			sentAt: Date.now(),
+			tools,
+		});
+		expect(parsed.tools.identitySession.active?.target.personaId).toBe('power');
+		expect(() =>
+			deviceSnapshotMessageSchema.parse({
+				type: 'snapshot',
+				sequence: 3,
+				sentAt: Date.now(),
+				tools: {
+					...tools,
+					identitySession: {
+						...tools.identitySession,
+						active: {
+							...tools.identitySession.active,
+							accessToken: 'must-never-cross-the-broker',
+						},
+					},
+				},
+			})
+		).toThrow();
 	});
 
 	it('redacts headers and environment values using their sensitive field names', () => {
@@ -232,6 +665,14 @@ describe('desktop IPC and device schemas', () => {
 						kind: 'updated',
 						previousText: 'before-secret',
 						nextText: 'after-secret',
+						structuralDiff: [
+							{
+								path: '$.token',
+								kind: 'changed',
+								previousText: 'before-secret',
+								nextText: 'after-secret',
+							},
+						],
 					},
 				],
 			},
@@ -252,6 +693,7 @@ describe('desktop IPC and device schemas', () => {
 		expect(parsed.tools.storage?.[1]?.valueText).toBeUndefined();
 		expect(parsed.tools.storageEvents?.[0]?.previousText).toBeUndefined();
 		expect(parsed.tools.storageEvents?.[0]?.nextText).toBeUndefined();
+		expect(parsed.tools.storageEvents?.[0]?.structuralDiff).toBeUndefined();
 	});
 
 	it('redacts diagnostic strings while preserving explicit pairing URLs', () => {

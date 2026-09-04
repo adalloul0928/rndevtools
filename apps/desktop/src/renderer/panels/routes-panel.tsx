@@ -19,13 +19,20 @@ import {
 } from '@/components/ui';
 import { formatClock, formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
-import type { RouteEntry } from '../../shared/protocol';
+import type { RouteEntry, RouteEvent } from '../../shared/protocol';
 
 const MAX_RENDERED_ROUTES = 500;
 const MAX_RENDERED_ROUTE_EVENTS = 250;
 
 function routeCanNavigate(route: RouteEntry): boolean {
 	return route.kind === 'static' || route.kind === 'group';
+}
+
+function transitionTone(event: RouteEvent): 'default' | 'success' | 'danger' | 'info' {
+	if (event.phase === 'failed') return 'danger';
+	if (event.phase === 'focused') return 'success';
+	if (event.phase === 'requested') return 'info';
+	return 'default';
 }
 
 export function RoutesPanel() {
@@ -208,16 +215,37 @@ export function RoutesPanel() {
 										key={event.id}
 									>
 										<div className="flex items-center justify-between gap-3">
-											<span className="truncate font-mono text-[10px] text-(--foreground)">
-												{event.route}
-											</span>
+											<div className="flex min-w-0 items-center gap-2">
+												{event.phase ? (
+													<StatusPill tone={transitionTone(event)}>
+														{event.phase}
+													</StatusPill>
+												) : null}
+												<span className="truncate font-mono text-[10px] text-(--foreground)">
+													{event.route}
+												</span>
+											</div>
 											<span className="shrink-0 font-mono text-[9px] text-(--text-3)">
 												{formatClock(event.at)}
 											</span>
 										</div>
 										<p className="mb-0 mt-1 text-[9px] text-(--text-3)">
-											{formatRelativeTime(event.at)}
+											{[
+												event.source,
+												event.durationMs === undefined
+													? undefined
+													: `${event.durationMs} ms`,
+												event.correlationId,
+												formatRelativeTime(event.at),
+											]
+												.filter(Boolean)
+												.join(' · ')}
 										</p>
+										{event.error ? (
+											<p className="mb-0 mt-2 text-[10px] leading-4 text-red-300">
+												{event.error}
+											</p>
+										) : null}
 									</div>
 								))}
 							</div>

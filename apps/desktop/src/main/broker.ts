@@ -5,10 +5,10 @@ import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import type { Duplex } from 'node:stream';
 import { URL } from 'node:url';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import { redactDiagnosticText } from '@pumpd/devtools/redact';
 import { truncateText } from '@pumpd/devtools/serialize';
-import { type RawData, WebSocket, WebSocketServer } from 'ws';
-import { applyDemoAction, createDemoDevice, tickDemoDevice } from '../shared/demo-data';
+import { WebSocket, WebSocketServer } from 'ws';
+import { createDemoDevice, tickDemoDevice } from '../shared/demo-data';
 import {
 	createEmptyDeviceTools,
 	DEFAULT_BROKER_HOST,
@@ -21,9 +21,14 @@ import {
 	type DeviceMessage,
 	type DeviceSession,
 	type DiagnosticEntry,
-	desktopActionCapability,
-	deviceMessageSchema,
 } from '../shared/protocol';
+import { BrokerActionRouter } from './broker-actions';
+import {
+	brokerRawDataByteLength,
+	parseBrokerDeviceMessage,
+	safeBrokerErrorText,
+} from './broker-inbound';
+import { projectBrokerState } from './broker-state';
 
 const MAX_DIAGNOSTICS = 500;
 const MAX_DIAGNOSTIC_SCOPE_LENGTH = 256;
@@ -40,8 +45,6 @@ const MESSAGE_RATE_WINDOW_MS = 1_000;
 const STATE_EMIT_INTERVAL_MS = 100;
 const MAX_PORT_ATTEMPTS = 10;
 const HELLO_TIMEOUT_MS = 5_000;
-const ACTION_TIMEOUT_MS = 8_000;
-const LONG_ACTION_TIMEOUT_MS = 30_000;
 const DEVICE_STALE_MS = 15_000;
 const OFFLINE_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MIN_BROKER_TOKEN_LENGTH = 16;
@@ -53,13 +56,6 @@ type RemoteSession = {
 	device: DeviceSession;
 	socket?: WebSocket;
 	snapshotWireBytes: number;
-};
-
-type PendingAction = {
-	deviceId: string;
-	resolve: (result: DesktopActionResult) => void;
-	timer: NodeJS.Timeout;
-	timedOut: boolean;
 };
 
 type DesktopBrokerLimits = {
@@ -97,10 +93,6 @@ function positiveIntegerLimit(value: number | undefined, fallback: number): numb
 
 function diagnosticId(now: number, sequence: number): string {
 	return `broker-${now}-${sequence}`;
-}
-
-function safeErrorText(error: unknown): string {
-	return truncateText(diagnosticErrorText(error), MAX_DIAGNOSTIC_MESSAGE_BYTES).text;
 }
 
 function socketAddress(request: IncomingMessage): string {
@@ -214,31 +206,6 @@ function tokensMatch(expected: string, received: string | null): boolean {
 	);
 }
 
-function actionTimeout(action: DesktopAction): number {
-	if (
-		action.tool === 'restore' ||
-		(action.tool === 'query' && action.command === 'refetch')
-	) {
-		return LONG_ACTION_TIMEOUT_MS;
-	}
-	return ACTION_TIMEOUT_MS;
-}
-
-function parseMessage(raw: RawData): DeviceMessage {
-	const text = Array.isArray(raw)
-		? Buffer.concat(raw).toString('utf8')
-		: raw instanceof ArrayBuffer
-			? Buffer.from(raw).toString('utf8')
-			: raw.toString('utf8');
-	return deviceMessageSchema.parse(JSON.parse(text));
-}
-
-function rawDataByteLength(raw: RawData): number {
-	return Array.isArray(raw)
-		? raw.reduce((total, chunk) => total + chunk.byteLength, 0)
-		: raw.byteLength;
-}
-
 function closeUpgrade(socket: Duplex, status: number, message: string): void {
 	socket.write(
 		`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`
@@ -254,10 +221,10 @@ export class DesktopBroker {
 	readonly #configurationError: string | undefined;
 	readonly #now: () => number;
 	readonly #limits: DesktopBrokerLimits;
+	readonly #actionRouter: BrokerActionRouter;
 	readonly #listeners = new Set<BrokerListener>();
 	readonly #sessions = new Map<string, RemoteSession>();
 	readonly #diagnostics: DiagnosticEntry[] = [];
-	readonly #pendingActions = new Map<string, PendingAction>();
 	#httpServer: HttpServer | undefined;
 	#webSocketServer: WebSocketServer | undefined;
 	#maintenanceTimer: NodeJS.Timeout | undefined;
@@ -302,6 +269,12 @@ export class DesktopBroker {
 				DEFAULT_BROKER_LIMITS.maxRetainedSnapshotWireBytes
 			),
 		};
+		this.#actionRouter = new BrokerActionRouter({
+			getSession: (deviceId) => this.#sessions.get(deviceId),
+			now: this.#now,
+			record: (level, scope, message) => this.#record(level, scope, message),
+			emit: () => this.#emit(),
+		});
 		this.#token = options.token?.trim() || undefined;
 		this.#allowWildcardBind = options.allowWildcardBind === true;
 		this.#configurationError = !isValidBrokerHost(this.#host)
@@ -328,8 +301,7 @@ export class DesktopBroker {
 
 	getState = (): DesktopState => {
 		this.#expireOfflineSessions();
-		return {
-			protocolVersion: DESKTOP_PROTOCOL_VERSION,
+		return projectBrokerState({
 			broker: {
 				status: this.#status,
 				host: this.#host,
@@ -340,16 +312,9 @@ export class DesktopBroker {
 					: [],
 				error: this.#error,
 			},
-			devices: [...this.#sessions.values()]
-				.map((session) => session.device)
-				.sort((left, right) => {
-					const rank = { online: 0, simulated: 1, offline: 2 } as const;
-					return (
-						rank[left.status] - rank[right.status] || right.lastSeenAt - left.lastSeenAt
-					);
-				}),
-			diagnostics: [...this.#diagnostics],
-		};
+			sessions: this.#sessions.values(),
+			diagnostics: this.#diagnostics,
+		});
 	};
 
 	subscribe(listener: BrokerListener): () => void {
@@ -409,7 +374,7 @@ export class DesktopBroker {
 						: '';
 				if (code !== 'EADDRINUSE' || attempt === MAX_PORT_ATTEMPTS - 1) {
 					this.#status = 'error';
-					this.#error = safeErrorText(error);
+					this.#error = safeBrokerErrorText(error);
 					this.#record('error', 'broker', `Failed to start: ${this.#error}`);
 					this.#emit();
 					return;
@@ -428,11 +393,7 @@ export class DesktopBroker {
 		await this.#startPromise?.catch(() => undefined);
 		this.#stopMaintenanceTicker();
 		this.#cancelScheduledEmit();
-		for (const [actionId, pending] of this.#pendingActions) {
-			clearTimeout(pending.timer);
-			pending.resolve({ actionId, ok: false, error: 'Broker stopped.' });
-		}
-		this.#pendingActions.clear();
+		this.#actionRouter.stop();
 		for (const session of this.#sessions.values()) {
 			session.socket?.close(1001, 'Desktop app shutting down');
 		}
@@ -442,118 +403,8 @@ export class DesktopBroker {
 		this.#emit();
 	}
 
-	async dispatchAction(action: DesktopAction): Promise<DesktopActionResult> {
-		const session = this.#sessions.get(action.deviceId);
-		if (!session) {
-			return { actionId: action.actionId, ok: false, error: 'Device was not found.' };
-		}
-		const capability = desktopActionCapability(action.tool, action.command);
-		if (!capability || !session.device.info.capabilities.includes(capability)) {
-			return {
-				actionId: action.actionId,
-				ok: false,
-				error: `Device does not advertise ${capability ?? `${action.tool}.${action.command}`}.`,
-			};
-		}
-
-		if (session.device.status === 'simulated') {
-			try {
-				session.device = applyDemoAction(session.device, action, this.#now());
-				this.#record('info', action.tool, `Demo action completed: ${action.command}.`);
-				this.#emit();
-				return { actionId: action.actionId, ok: true };
-			} catch (error) {
-				return {
-					actionId: action.actionId,
-					ok: false,
-					error: safeErrorText(error),
-				};
-			}
-		}
-
-		const socket = session.socket;
-		if (!socket || socket.readyState !== WebSocket.OPEN) {
-			return { actionId: action.actionId, ok: false, error: 'Device is offline.' };
-		}
-		if (this.#pendingActions.has(action.actionId)) {
-			return {
-				actionId: action.actionId,
-				ok: false,
-				error: 'An action with this identifier is already pending.',
-			};
-		}
-		if (
-			[...this.#pendingActions.values()].some(
-				(pending) => pending.deviceId === action.deviceId
-			)
-		) {
-			return {
-				actionId: action.actionId,
-				ok: false,
-				error: 'Another action is already pending for this device.',
-			};
-		}
-
-		return new Promise((resolve) => {
-			const timer = setTimeout(() => {
-				const pending = this.#pendingActions.get(action.actionId);
-				if (pending) pending.timedOut = true;
-				resolve({
-					actionId: action.actionId,
-					ok: false,
-					error:
-						'Device did not acknowledge the action in time. Its outcome is unknown; reconnect the device before sending another action.',
-				});
-				this.#record(
-					'warn',
-					action.tool,
-					`Action ${action.actionId} timed out; the device must acknowledge it or reconnect before more actions are accepted.`
-				);
-				this.#emit();
-			}, actionTimeout(action));
-			this.#pendingActions.set(action.actionId, {
-				deviceId: action.deviceId,
-				resolve,
-				timer,
-				timedOut: false,
-			});
-			try {
-				socket.send(JSON.stringify({ type: 'action', action }), (error) => {
-					if (!error) return;
-					const pending = this.#pendingActions.get(action.actionId);
-					if (!pending || pending.deviceId !== action.deviceId) return;
-					const errorText = safeErrorText(error);
-					clearTimeout(pending.timer);
-					this.#pendingActions.delete(action.actionId);
-					pending.resolve({
-						actionId: action.actionId,
-						ok: false,
-						error: `Action could not be sent: ${errorText}`,
-					});
-					this.#record(
-						'warn',
-						action.tool,
-						`Action ${action.actionId} could not be sent: ${errorText}`
-					);
-					this.#emit();
-				});
-			} catch (error) {
-				const errorText = safeErrorText(error);
-				clearTimeout(timer);
-				this.#pendingActions.delete(action.actionId);
-				resolve({
-					actionId: action.actionId,
-					ok: false,
-					error: `Action could not be sent: ${errorText}`,
-				});
-				this.#record(
-					'warn',
-					action.tool,
-					`Action ${action.actionId} could not be sent: ${errorText}`
-				);
-				this.#emit();
-			}
-		});
+	dispatchAction(action: DesktopAction): Promise<DesktopActionResult> {
+		return this.#actionRouter.dispatch(action);
 	}
 
 	async #listen(port: number): Promise<void> {
@@ -672,7 +523,7 @@ export class DesktopBroker {
 				return;
 			}
 			this.#status = 'error';
-			this.#error = safeErrorText(error);
+			this.#error = safeBrokerErrorText(error);
 			this.#record('error', scope, `Broker server failed: ${this.#error}`);
 			this.#stopMaintenanceTicker();
 			void this.#closeServers().finally(() => this.#emit());
@@ -701,7 +552,7 @@ export class DesktopBroker {
 				rateWindowMessageCount = 0;
 				rateWindowMessageBytes = 0;
 			}
-			const messageBytes = rawDataByteLength(raw);
+			const messageBytes = brokerRawDataByteLength(raw);
 			rateWindowMessageCount += 1;
 			rateWindowMessageBytes += messageBytes;
 			if (
@@ -719,12 +570,12 @@ export class DesktopBroker {
 			}
 			let message: DeviceMessage;
 			try {
-				message = parseMessage(raw);
+				message = parseBrokerDeviceMessage(raw);
 			} catch (error) {
 				this.#record(
 					'warn',
 					'protocol',
-					`Rejected invalid device message: ${safeErrorText(error)}`
+					`Rejected invalid device message: ${safeBrokerErrorText(error)}`
 				);
 				socket.close(1008, 'invalid protocol message');
 				this.#scheduleEmit();
@@ -761,7 +612,7 @@ export class DesktopBroker {
 			delete session.socket;
 			session.device.status = 'offline';
 			session.device.lastSeenAt = this.#now();
-			this.#rejectPendingActionsForDevice(
+			this.#actionRouter.rejectDevice(
 				deviceId,
 				'Device disconnected before acknowledging the action.'
 			);
@@ -806,7 +657,7 @@ export class DesktopBroker {
 			return undefined;
 		}
 		if (existing?.socket && existing.socket !== socket) {
-			this.#rejectPendingActionsForDevice(
+			this.#actionRouter.rejectDevice(
 				info.id,
 				'Device reconnected before acknowledging the action.'
 			);
@@ -866,28 +717,7 @@ export class DesktopBroker {
 			return;
 		}
 		if (message.type === 'action-result') {
-			const pending = this.#pendingActions.get(message.actionId);
-			if (!pending || pending.deviceId !== deviceId) return;
-			clearTimeout(pending.timer);
-			this.#pendingActions.delete(message.actionId);
-			if (pending.timedOut) {
-				this.#record(
-					'info',
-					'action',
-					`Late acknowledgement received for ${message.actionId}; device actions are unblocked.`
-				);
-				this.#emit();
-			}
-			pending.resolve({
-				actionId: message.actionId,
-				ok: message.ok,
-				error: message.error
-					? truncateText(
-							redactDiagnosticText(message.error),
-							MAX_DIAGNOSTIC_MESSAGE_BYTES
-						).text
-					: undefined,
-			});
+			this.#actionRouter.handleResult(deviceId, message);
 		}
 	}
 
@@ -934,15 +764,6 @@ export class DesktopBroker {
 		if (!session) return false;
 		this.#releaseSnapshot(session);
 		return this.#sessions.delete(deviceId);
-	}
-
-	#rejectPendingActionsForDevice(deviceId: string, error: string): void {
-		for (const [actionId, pending] of this.#pendingActions) {
-			if (pending.deviceId !== deviceId) continue;
-			clearTimeout(pending.timer);
-			this.#pendingActions.delete(actionId);
-			pending.resolve({ actionId, ok: false, error });
-		}
 	}
 
 	#record(level: DiagnosticEntry['level'], scope: string, message: string): void {

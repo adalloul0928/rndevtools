@@ -2,7 +2,16 @@ import { Button } from '@heroui/react/button';
 import { Input } from '@heroui/react/input';
 import { Label } from '@heroui/react/label';
 import { TextField } from '@heroui/react/textfield';
-import { ArchiveRestore, Camera, Clock3, ShieldCheck, Trash2 } from 'lucide-react';
+import {
+	ArchiveRestore,
+	Camera,
+	Check,
+	Clock3,
+	Copy,
+	Pencil,
+	ShieldCheck,
+	Trash2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
 	CodePreview,
@@ -17,20 +26,34 @@ import { useDesktopRuntime } from '@/state/desktop-runtime';
 export function RestorePanel() {
 	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
 	const rawPoints = selectedDevice?.tools.restorePoints ?? [];
+	const restoreReceipts = selectedDevice?.tools.restoreReceipts ?? [];
 	const points = useMemo(
 		() => [...rawPoints].sort((left, right) => right.createdAt - left.createdAt),
 		[rawPoints]
 	);
 	const [label, setLabel] = useState('Before desktop changes');
 	const [selectedId, setSelectedId] = useState<string | null>(points[0]?.id ?? null);
+	const [sourceSelections, setSourceSelections] = useState<
+		Readonly<Record<string, readonly string[]>>
+	>({});
+	const [pointLabels, setPointLabels] = useState<Readonly<Record<string, string>>>({});
 	const selected = points.find((point) => point.id === selectedId) ?? points[0] ?? null;
+	const selectedSourceIds = selected
+		? (sourceSelections[selected.id] ?? selected.sources.map((source) => source.id))
+		: [];
+	const selectedReceipts = selected
+		? restoreReceipts
+				.filter((receipt) => receipt.pointId === selected.id)
+				.sort((left, right) => right.completedAt - left.completedAt)
+		: [];
+	const pointLabelDraft = selected ? (pointLabels[selected.id] ?? selected.label) : '';
 
 	return (
 		<section className="panel-root">
 			<PanelHeader
 				eyebrow="State"
 				title="Restore Points"
-				description="Capture and roll back only state sources the app explicitly declares as safe to restore."
+				description="Persist, selectively restore, and roll back only state sources the app explicitly declares as safe."
 				meta={
 					<span className="flex items-center gap-1.5 text-emerald-300">
 						<ShieldCheck className="h-3 w-3" /> Rollback guarded · explicit sources
@@ -49,7 +72,7 @@ export function RestorePanel() {
 									New checkpoint
 								</h2>
 								<p className="mb-0 mt-0.5 text-[10px] text-(--text-3)">
-									Developer overrides only
+									Explicit safe sources only
 								</p>
 							</div>
 						</div>
@@ -81,6 +104,25 @@ export function RestorePanel() {
 						>
 							<Camera className="h-3.5 w-3.5" /> Capture current state
 						</Button>
+						<div className="mt-2 flex justify-end">
+							<ConfirmAction
+								triggerLabel="Reset explicit baselines"
+								title="Reset explicit sources to baseline?"
+								description="Only sources that explicitly implement a baseline reset will change. PUMPD captures rollback data before the first mutation."
+								confirmLabel="Reset safely"
+								isDisabled={!canRunAction('restore', 'resetBaseline')}
+								tone="warning"
+								triggerVariant="secondary"
+								onConfirm={() =>
+									void runAction(
+										'restore',
+										'resetBaseline',
+										{},
+										'Explicit sources reset to baseline.'
+									)
+								}
+							/>
+						</div>
 					</div>
 					<div className="mb-2 flex items-center justify-between px-1">
 						<span className="text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
@@ -141,13 +183,63 @@ export function RestorePanel() {
 									<h2 className="m-0 text-xl font-semibold tracking-[-0.035em] text-(--foreground)">
 										{selected.label}
 									</h2>
+									<TextField
+										className="mt-2"
+										value={pointLabelDraft}
+										onChange={(value) =>
+											setPointLabels((current) => ({
+												...current,
+												[selected.id]: value,
+											}))
+										}
+									>
+										<Label className="sr-only">Restore point label</Label>
+										<Input
+											className="h-8 w-72 rounded-md border border-white/10 bg-black/30 px-2 text-xs text-(--foreground)"
+											maxLength={120}
+										/>
+									</TextField>
 								</div>
-								<div className="flex gap-2">
+								<div className="flex flex-wrap justify-end gap-2">
+									<Button
+										isDisabled={
+											!pointLabelDraft.trim() ||
+											pointLabelDraft.trim() === selected.label ||
+											!canRunAction('restore', 'rename')
+										}
+										size="sm"
+										variant="tertiary"
+										onPress={() =>
+											void runAction(
+												'restore',
+												'rename',
+												{ id: selected.id, label: pointLabelDraft.trim() },
+												'Restore point renamed.'
+											)
+										}
+									>
+										<Pencil className="h-3.5 w-3.5" /> Rename
+									</Button>
+									<Button
+										isDisabled={!canRunAction('restore', 'duplicate')}
+										size="sm"
+										variant="tertiary"
+										onPress={() =>
+											void runAction(
+												'restore',
+												'duplicate',
+												{ id: selected.id, label: `${selected.label} copy` },
+												'Restore point duplicated.'
+											)
+										}
+									>
+										<Copy className="h-3.5 w-3.5" /> Duplicate
+									</Button>
 									<ConfirmAction
 										triggerLabel="Delete"
 										triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
 										title="Delete this restore point?"
-										description="The snapshot will be removed from this in-memory diagnostics session. This cannot be undone."
+										description="The persisted snapshot will be removed from PUMPD's dedicated devtools namespace. This cannot be undone."
 										confirmLabel="Delete point"
 										isDisabled={!canRunAction('restore', 'remove')}
 										onConfirm={() => {
@@ -166,14 +258,17 @@ export function RestorePanel() {
 										triggerVariant="secondary"
 										tone="warning"
 										title="Restore explicit developer state?"
-										description="PUMPD captures rollback data before applying declared sources in order. If a source fails, it attempts to restore every source already touched. User data, authentication, and secure storage are outside this snapshot."
+										description={`PUMPD will preflight ${selectedSourceIds.length} selected source${selectedSourceIds.length === 1 ? '' : 's'}, include required dependencies, capture rollback data, then apply in dependency order. User data, authentication, and secure storage remain excluded.`}
 										confirmLabel="Restore safely"
-										isDisabled={!canRunAction('restore', 'restore')}
+										isDisabled={
+											selectedSourceIds.length === 0 ||
+											!canRunAction('restore', 'restore')
+										}
 										onConfirm={() =>
 											void runAction(
 												'restore',
 												'restore',
-												{ id: selected.id },
+												{ id: selected.id, sourceIds: selectedSourceIds },
 												'Explicit developer state restored.'
 											)
 										}
@@ -202,37 +297,86 @@ export function RestorePanel() {
 										Lifetime
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
-										Session
+										Persistent
 									</p>
 								</div>
 							</div>
 							<div className="space-y-4">
-								{selected.sources.map((source) => (
-									<div
-										className="rounded-lg border border-white/8 bg-white/[0.02] p-4"
-										key={source.id}
-									>
-										<div className="mb-3 flex items-center justify-between gap-3">
-											<div>
-												<h3 className="m-0 text-xs font-semibold text-(--foreground)">
-													{source.title}
-												</h3>
-												<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
-													{source.id}
-												</p>
+								{selected.sources.map((source) => {
+									const isSelected = selectedSourceIds.includes(source.id);
+									return (
+										<div
+											className={`rounded-lg border p-4 ${isSelected ? 'border-emerald-400/20 bg-emerald-400/[0.035]' : 'border-white/8 bg-white/[0.02] opacity-60'}`}
+											key={source.id}
+										>
+											<div className="mb-3 flex items-center justify-between gap-3">
+												<div>
+													<h3 className="m-0 text-xs font-semibold text-(--foreground)">
+														{source.title}
+													</h3>
+													<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+														{source.id}
+													</p>
+												</div>
+												<div className="flex items-center gap-2">
+													<StatusPill tone={isSelected ? 'success' : 'default'}>
+														{formatBytes(source.bytes)}
+													</StatusPill>
+													<Button
+														aria-pressed={isSelected}
+														size="sm"
+														variant="tertiary"
+														onPress={() =>
+															setSourceSelections((current) => ({
+																...current,
+																[selected.id]: isSelected
+																	? selectedSourceIds.filter((id) => id !== source.id)
+																	: [...selectedSourceIds, source.id],
+															}))
+														}
+													>
+														{isSelected ? <Check className="h-3.5 w-3.5" /> : null}
+														{isSelected ? 'Included' : 'Include'}
+													</Button>
+												</div>
 											</div>
-											<StatusPill tone="success">
-												{formatBytes(source.bytes)}
-											</StatusPill>
+											<CodePreview
+												label="Canonical JSON preview"
+												value={source.preview}
+												maxHeight={320}
+											/>
 										</div>
-										<CodePreview
-											label="Canonical JSON preview"
-											value={source.preview}
-											maxHeight={320}
-										/>
-									</div>
-								))}
+									);
+								})}
 							</div>
+							{selectedReceipts[0] ? (
+								<div className="mt-5 rounded-lg border border-white/8 bg-white/[0.02] p-4">
+									<div className="mb-3 flex items-center justify-between">
+										<h3 className="m-0 text-xs font-semibold text-(--foreground)">
+											Latest transaction
+										</h3>
+										<StatusPill
+											tone={
+												selectedReceipts[0].status === 'complete'
+													? 'success'
+													: selectedReceipts[0].status === 'needs-attention'
+														? 'danger'
+														: 'warning'
+											}
+										>
+											{selectedReceipts[0].status}
+										</StatusPill>
+									</div>
+									<div className="space-y-1 text-[10px] text-(--text-3)">
+										{selectedReceipts[0].sourceResults.map((result) => (
+											<p className="m-0" key={result.sourceId}>
+												{result.sourceTitle}: preflight {result.preflight}, apply{' '}
+												{result.apply}, rollback {result.rollback}
+											</p>
+										))}
+									</div>
+								</div>
+							) : null}
 							<div className="mt-5 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.05] p-4">
 								<div className="flex items-center gap-2 text-xs font-medium text-emerald-200">
 									<ShieldCheck className="h-4 w-4" /> Restore safety boundary

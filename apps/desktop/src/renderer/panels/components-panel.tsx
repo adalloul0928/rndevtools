@@ -1,10 +1,18 @@
 import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
+import { Input } from '@heroui/react/input';
+import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
+	BadgeCheck,
 	BoxSelect,
+	ChevronDown,
+	Clock3,
 	Crosshair,
 	FileCode2,
 	Focus,
+	Keyboard,
+	MousePointerClick,
+	Move,
 	RefreshCw,
 	ShieldCheck,
 } from 'lucide-react';
@@ -23,6 +31,13 @@ import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { ComponentTarget } from '../../shared/protocol';
 
 const MAX_RENDERED_TARGETS = 250;
+
+export function canMutateSemanticTarget(
+	target: Pick<ComponentTarget, 'isFocused'> | null,
+	screenHash: string | undefined
+): boolean {
+	return target?.isFocused === true && Boolean(screenHash);
+}
 
 function boundsStyle(
 	bounds: NonNullable<ComponentTarget['bounds']>,
@@ -44,9 +59,14 @@ function boundsStyle(
 export function ComponentsPanel() {
 	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
 	const targets = selectedDevice?.tools.components ?? [];
+	const renderEvents = selectedDevice?.tools.componentRenders ?? [];
 	const summary = selectedDevice?.tools.componentSummary;
 	const [query, setQuery] = useState('');
 	const [selectedId, setSelectedId] = useState<string | null>(targets[0]?.id ?? null);
+	const [textInput, setTextInput] = useState('');
+	const [scrollDirection, setScrollDirection] = useState<
+		'up' | 'down' | 'left' | 'right'
+	>('down');
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
 		return targets.filter(
@@ -54,11 +74,17 @@ export function ComponentsPanel() {
 				!needle ||
 				[
 					target.name,
+					target.targetId,
+					target.parentId,
 					target.kind,
 					target.feature,
 					target.route,
 					target.testID,
 					target.targetKey,
+					target.accessibilityLabel,
+					target.accessibilityHint,
+					target.accessibilityRole,
+					target.accessibilityValue,
 					...target.sourceFiles,
 				]
 					.join(' ')
@@ -71,6 +97,19 @@ export function ComponentsPanel() {
 		visibleTargets.find((target) => target.id === selectedId) ??
 		visibleTargets[0] ??
 		null;
+	const selectedRenderEvents = useMemo(
+		() =>
+			selected
+				? renderEvents
+						.filter((event) => event.targetId === selected.id)
+						.slice(-20)
+						.reverse()
+				: [],
+		[renderEvents, selected]
+	);
+	const currentScreenHash = selected?.screenHash ?? summary?.screenHash;
+	const semanticActions = selected?.actions ?? [];
+	const semanticMutationEnabled = canMutateSemanticTarget(selected, currentScreenHash);
 	const shortenedInstanceCount = targets.filter(
 		(target) => target.instanceTruncated
 	).length;
@@ -129,6 +168,10 @@ export function ComponentsPanel() {
 					onChange={setQuery}
 				/>
 				<div className="ml-auto flex items-center gap-3 font-mono text-[10px] text-(--text-3)">
+					<span title={currentScreenHash ?? 'Not reported'}>
+						Screen {currentScreenHash ? currentScreenHash.slice(0, 10) : 'v1 / unknown'}
+					</span>
+					<span className="text-white/15">/</span>
 					<span>
 						{targets.length} of {summary?.sourceTargetCount ?? targets.length}{' '}
 						registered
@@ -146,6 +189,14 @@ export function ComponentsPanel() {
 						`${summary.omittedTargetCount} ${summary.omittedTargetCount === 1 ? 'target was' : 'targets were'} invalid, duplicated, or omitted by the on-device safety budget.`}
 				</PanelNotice>
 			) : null}
+			{(summary?.registrationDiagnostics?.length ?? 0) > 0 ? (
+				<PanelNotice title="Component registration needs attention." tone="warning">
+					{(summary?.registrationDiagnostics ?? [])
+						.slice(0, 5)
+						.map((diagnostic) => diagnostic.message)
+						.join(' ')}
+				</PanelNotice>
+			) : null}
 			{shortenedInstanceCount > 0 ? (
 				<PanelNotice title="Some instance projections were shortened.">
 					{shortenedInstanceCount} safe instance projection
@@ -157,6 +208,12 @@ export function ComponentsPanel() {
 				<PanelNotice title="Desktop target rendering is bounded." tone="info">
 					Search covers all {filtered.length} matching targets; the list and coordinate
 					map render the first {MAX_RENDERED_TARGETS} to keep inspection responsive.
+				</PanelNotice>
+			) : null}
+			{selected && semanticActions.length === 0 ? (
+				<PanelNotice title="Semantic actions are not advertised." tone="info">
+					This snapshot remains fully inspectable, but it may come from a v1 client or a
+					target that did not opt into activate, focus, text, or scroll actions.
 				</PanelNotice>
 			) : null}
 			<div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(320px,.9fr)_minmax(360px,1.1fr)] max-[1160px]:grid-cols-[280px_minmax(320px,1fr)]">
@@ -267,12 +324,33 @@ export function ComponentsPanel() {
 								<Card.Content className="px-3 py-0">
 									<dl>
 										<KeyValue label="Kind" value={selected.kind} />
+										<KeyValue label="Instance ID" value={selected.id} mono />
+										<KeyValue
+											label="Target ID"
+											value={selected.targetId ?? selected.id}
+											mono
+										/>
+										<KeyValue
+											label="Parent instance"
+											value={selected.parentId ?? '—'}
+											mono
+										/>
+										<KeyValue
+											label="Depth / z-index"
+											value={`${selected.depth ?? 0} / ${selected.zIndex ?? 0}`}
+											mono
+										/>
 										<KeyValue label="Feature" value={selected.feature ?? '—'} mono />
 										<KeyValue label="Route" value={selected.route ?? '—'} mono />
 										<KeyValue label="Test ID" value={selected.testID ?? '—'} mono />
 										<KeyValue
 											label="Target key"
 											value={selected.targetKey ?? '—'}
+											mono
+										/>
+										<KeyValue
+											label="Screen hash"
+											value={currentScreenHash ?? 'Not reported (v1 snapshot)'}
 											mono
 										/>
 										<KeyValue
@@ -287,6 +365,49 @@ export function ComponentsPanel() {
 									</dl>
 								</Card.Content>
 							</Card>
+							{selectedRenderEvents.length > 0 ? (
+								<Card
+									className="mb-4 rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
+									variant="secondary"
+								>
+									<Card.Header className="border-b border-white/8 px-3 py-2.5">
+										<Card.Title className="flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+											<Clock3 className="h-3.5 w-3.5" /> Recent renders
+										</Card.Title>
+									</Card.Header>
+									<Card.Content className="space-y-2 px-3 py-3">
+										{selectedRenderEvents.map((event) => (
+											<div
+												className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
+												key={event.id}
+											>
+												<div className="min-w-0">
+													<p className="m-0 truncate text-[10px] font-medium text-(--foreground)">
+														{event.phase} · {event.cause}
+													</p>
+													<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+														Render #{event.renderCount} · base{' '}
+														{event.baseDuration.toFixed(1)} ms
+													</p>
+												</div>
+												<StatusPill
+													tone={event.actualDuration >= 16 ? 'warning' : 'success'}
+												>
+													{event.actualDuration.toFixed(1)} ms
+												</StatusPill>
+											</div>
+										))}
+									</Card.Content>
+								</Card>
+							) : null}
+							{selected.styleText ? (
+								<CodePreview
+									label={
+										selected.styleTruncated ? 'Safe styles · shortened' : 'Safe styles'
+									}
+									value={selected.styleText}
+								/>
+							) : null}
 							<Button
 								className="mb-4"
 								fullWidth
@@ -308,6 +429,213 @@ export function ComponentsPanel() {
 									? 'Highlight on device'
 									: 'Target is not currently visible'}
 							</Button>
+							<Card
+								className="mb-4 rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
+								variant="secondary"
+							>
+								<Card.Header className="border-b border-white/8 px-3 py-2.5">
+									<Card.Title className="flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+										<BadgeCheck className="h-3.5 w-3.5" /> Accessibility semantics
+									</Card.Title>
+								</Card.Header>
+								<Card.Content className="px-3 py-0">
+									<dl>
+										<KeyValue
+											label="Label"
+											value={selected.accessibilityLabel ?? '—'}
+										/>
+										<KeyValue label="Hint" value={selected.accessibilityHint ?? '—'} />
+										<KeyValue
+											label="Role"
+											value={selected.accessibilityRole ?? '—'}
+											mono
+										/>
+										<KeyValue
+											label="Value"
+											value={selected.accessibilityValue ?? '—'}
+										/>
+										<KeyValue
+											label="State"
+											value={
+												selected.accessibilityState
+													? JSON.stringify(selected.accessibilityState)
+													: '—'
+											}
+											mono
+										/>
+									</dl>
+								</Card.Content>
+							</Card>
+							<section className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
+								<div className="mb-3 flex items-center justify-between gap-3">
+									<div>
+										<p className="m-0 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+											Semantic actions
+										</p>
+										<p className="mb-0 mt-1 text-[9px] leading-4 text-(--text-3)">
+											{selected.isFocused
+												? 'Every mutation is bound to the exact current screen hash.'
+												: "Open this target's route before using semantic mutations."}
+										</p>
+									</div>
+									<StatusPill tone={currentScreenHash ? 'success' : 'warning'}>
+										{currentScreenHash ? 'Snapshot bound' : 'Hash required'}
+									</StatusPill>
+								</div>
+								<div className="flex flex-wrap gap-2">
+									<Button
+										isDisabled={
+											!semanticMutationEnabled ||
+											!semanticActions.includes('activate') ||
+											!canRunAction('components', 'activate')
+										}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runAction(
+												'components',
+												'activate',
+												{ id: selected.id, screenHash: currentScreenHash },
+												`Activated ${selected.name}.`
+											)
+										}
+									>
+										<MousePointerClick className="h-3.5 w-3.5" /> Activate
+									</Button>
+									<Button
+										isDisabled={
+											!semanticMutationEnabled ||
+											!semanticActions.includes('focus') ||
+											!canRunAction('components', 'focus')
+										}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runAction(
+												'components',
+												'focus',
+												{ id: selected.id, screenHash: currentScreenHash },
+												`Focused ${selected.name}.`
+											)
+										}
+									>
+										<Focus className="h-3.5 w-3.5" /> Focus
+									</Button>
+									<Button
+										isDisabled={
+											!currentScreenHash ||
+											!canRunAction('components', 'waitForElement')
+										}
+										size="sm"
+										variant="ghost"
+										onPress={() =>
+											void runAction(
+												'components',
+												'waitForElement',
+												{ id: selected.id, timeoutMs: 3_000 },
+												`${selected.name} appeared.`
+											)
+										}
+									>
+										<Clock3 className="h-3.5 w-3.5" /> Wait for element
+									</Button>
+									<Button
+										isDisabled={
+											!currentScreenHash ||
+											!canRunAction('components', 'waitForScreenChange')
+										}
+										size="sm"
+										variant="ghost"
+										onPress={() =>
+											void runAction(
+												'components',
+												'waitForScreenChange',
+												{ screenHash: currentScreenHash, timeoutMs: 3_000 },
+												'Screen changed.'
+											)
+										}
+									>
+										<Clock3 className="h-3.5 w-3.5" /> Wait for change
+									</Button>
+								</div>
+								<div className="mt-3 flex gap-2">
+									<Input
+										aria-label={`Text for ${selected.name}`}
+										placeholder="Text to enter (empty clears)"
+										value={textInput}
+										onChange={(event) => setTextInput(event.currentTarget.value)}
+									/>
+									<Button
+										isDisabled={
+											!semanticMutationEnabled ||
+											!semanticActions.includes('setText') ||
+											!canRunAction('components', 'setText')
+										}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runAction(
+												'components',
+												'setText',
+												{
+													id: selected.id,
+													screenHash: currentScreenHash,
+													text: textInput,
+												},
+												`Updated text for ${selected.name}.`
+											)
+										}
+									>
+										<Keyboard className="h-3.5 w-3.5" /> Set text
+									</Button>
+								</div>
+								<div className="mt-2 flex gap-2">
+									<NativeSelect className="sim-filter-select" fullWidth={false}>
+										<NativeSelect.Trigger
+											aria-label="Scroll direction"
+											value={scrollDirection}
+											onChange={(event) =>
+												setScrollDirection(
+													event.currentTarget.value as typeof scrollDirection
+												)
+											}
+										>
+											{(['up', 'down', 'left', 'right'] as const).map((direction) => (
+												<NativeSelect.Option key={direction} value={direction}>
+													{direction}
+												</NativeSelect.Option>
+											))}
+											<NativeSelect.Indicator>
+												<ChevronDown className="h-3 w-3" />
+											</NativeSelect.Indicator>
+										</NativeSelect.Trigger>
+									</NativeSelect>
+									<Button
+										isDisabled={
+											!semanticMutationEnabled ||
+											!semanticActions.includes('scroll') ||
+											!canRunAction('components', 'scroll')
+										}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runAction(
+												'components',
+												'scroll',
+												{
+													id: selected.id,
+													screenHash: currentScreenHash,
+													direction: scrollDirection,
+													amount: 0.75,
+												},
+												`Scrolled ${selected.name} ${scrollDirection}.`
+											)
+										}
+									>
+										<Move className="h-3.5 w-3.5" /> Scroll 75%
+									</Button>
+								</div>
+							</section>
 							<div className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
 								<div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
 									<FileCode2 className="h-3.5 w-3.5" /> Source

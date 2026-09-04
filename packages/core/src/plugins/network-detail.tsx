@@ -80,25 +80,45 @@ function HeaderRows({
 
 export function NetworkEventDetail({
 	actions,
+	captureReplaySession,
 	event,
 	listTitle,
 	maxBodyBytes,
 	onBack,
 	pluginId,
+	replayEnabled,
 }: {
 	actions: DevToolsActionServices;
+	captureReplaySession: () => () => Readonly<{
+		init: RequestInit;
+		url: string;
+	}>;
 	event: NetworkEvent;
 	listTitle: string;
 	maxBodyBytes: number;
 	onBack: () => void;
 	pluginId: string;
+	replayEnabled: boolean;
 }) {
 	const { label } = networkEventLabel(event);
 	const status = networkStatusPresentation(event);
 	const path = networkRequestPath(event.url);
 	const requestHeaderEntries = Object.entries(event.requestHeaders);
 	const responseHeaderEntries = Object.entries(event.responseHeaders ?? {});
-	const replayBlockReason = networkReplayBlockReason(event);
+	const replayBlockReason = replayEnabled
+		? networkReplayBlockReason(event)
+		: 'Request replay is disabled by this host.';
+	const timingRows: readonly (readonly [string, number])[] = (
+		[
+			['Synthetic latency', event.timing?.latencyDelayMs],
+			['Synthetic upload', event.timing?.uploadDelayMs],
+			['Transport / response', event.timing?.transportMs],
+			['Synthetic download', event.timing?.downloadDelayMs],
+			['Total', event.timing?.totalMs],
+		] as const
+	).flatMap(([label, milliseconds]) =>
+		milliseconds === undefined ? [] : [[label, milliseconds] as const],
+	);
 	// Pretty-printing can chew through 256 KB bodies; cache per event so live
 	// capture ticks don't re-parse while the detail is open.
 	const requestBody = useMemo(
@@ -121,6 +141,12 @@ export function NetworkEventDetail({
 					).text,
 		[event],
 	);
+	const requestBodySummary =
+		event.requestBody === undefined
+			? event.bodyCaptureEnabled === false
+				? 'Not captured'
+				: 'Empty'
+			: formatNetworkBytes(event.requestSizeBytes);
 	const shareEvent = () => {
 		shareDiagnosticContent({
 			title: `${event.method} ${path}`,
@@ -134,27 +160,30 @@ export function NetworkEventDetail({
 	};
 	const resendRequest = () => {
 		if (replayBlockReason) return;
-		const headers = Object.fromEntries(requestHeaderEntries);
+		let resolveReplayRequest: () => Readonly<{
+			init: RequestInit;
+			url: string;
+		}>;
+		try {
+			resolveReplayRequest = captureReplaySession();
+		} catch {
+			return;
+		}
+		const confirmationMethod = event.method;
+		const confirmationHost = parseNetworkUrl(event.url).host;
 		void actions.run({
 			pluginId,
 			label: 'Re-send request',
 			confirmation: {
 				title: 'Re-send this request?',
-				message: `A real ${event.method} goes to ${parseNetworkUrl(event.url).host}. The request has no detected redaction placeholders, but the response can still differ from the captured one.`,
+				message: `A real ${confirmationMethod} goes to ${confirmationHost}. The request has no detected redaction placeholders, but the response can still differ from the captured one.`,
 				confirmLabel: 'Re-send',
-				destructive: MUTATING_METHODS.has(event.method),
+				destructive: MUTATING_METHODS.has(confirmationMethod),
 			},
 			action: async () => {
-				const init: RequestInit = { method: event.method, headers };
-				if (
-					event.requestBody !== undefined &&
-					event.method !== 'GET' &&
-					event.method !== 'HEAD'
-				) {
-					init.body = event.requestBody;
-				}
+				const replayRequest = resolveReplayRequest();
 				// The instrumented global fetch captures the replay as a new event.
-				await globalThis.fetch(event.url, init);
+				await globalThis.fetch(replayRequest.url, replayRequest.init);
 			},
 		});
 	};
@@ -203,6 +232,19 @@ export function NetworkEventDetail({
 							<LabeledContent label="Source">
 								<UIText>{event.source}</UIText>
 							</LabeledContent>
+							<LabeledContent label="Profile">
+								<UIText>{event.simulationProfileId ?? 'none'}</UIText>
+							</LabeledContent>
+							<LabeledContent label="Cache evidence">
+								<UIText>{event.cacheStatus ?? 'unknown'}</UIText>
+							</LabeledContent>
+							{event.correlationId ? (
+								<LabeledContent label="Correlation ID">
+									<UIText modifiers={[monoSmall()]}>
+										{event.correlationId}
+									</UIText>
+								</LabeledContent>
+							) : null}
 							{event.error ? (
 								<LabeledContent label="Error">
 									<UIText
@@ -215,6 +257,24 @@ export function NetworkEventDetail({
 								</LabeledContent>
 							) : null}
 						</Section>
+						{timingRows.length > 0 ? (
+							<Section
+								footer={
+									<UIText>
+										Transport / response combines native connection and server
+										work because fetch does not expose DNS, connect, TLS, or
+										TTFB phases.
+									</UIText>
+								}
+								title="Timing"
+							>
+								{timingRows.map(([label, milliseconds]) => (
+									<LabeledContent key={label} label={label}>
+										<UIText>{formatNetworkDuration(milliseconds)}</UIText>
+									</LabeledContent>
+								))}
+							</Section>
+						) : null}
 						<Section title="Request">
 							<VStack alignment="leading" spacing={3}>
 								<UIText modifiers={secondarySmall()}>URL</UIText>
@@ -228,11 +288,7 @@ export function NetworkEventDetail({
 								<HeaderRows entries={requestHeaderEntries} />
 							</DisclosureGroup>
 							<LabeledContent label="Body">
-								<UIText>
-									{event.requestBody === undefined
-										? 'Empty'
-										: formatNetworkBytes(event.requestSizeBytes)}
-								</UIText>
+								<UIText>{requestBodySummary}</UIText>
 							</LabeledContent>
 							{requestBody !== undefined ? (
 								<UIText modifiers={[monoSmall(), textSelection(true)]}>
@@ -243,7 +299,7 @@ export function NetworkEventDetail({
 						<Section
 							footer={
 								<UIText>
-									{`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are truncated at capture time.`}
+									{`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are omitted rather than retained.`}
 								</UIText>
 							}
 							title="Response"
@@ -310,6 +366,20 @@ export function NetworkEventDetail({
 							value={`↑ ${formatNetworkBytes(event.requestSizeBytes)} · ↓ ${formatNetworkBytes(event.responseSizeBytes)}`}
 						/>
 						<AndroidPanelRow label="Source" value={event.source} />
+						<AndroidPanelRow
+							label="Profile"
+							value={event.simulationProfileId ?? 'none'}
+						/>
+						<AndroidPanelRow
+							label="Cache evidence"
+							value={event.cacheStatus ?? 'unknown'}
+						/>
+						{event.correlationId ? (
+							<AndroidPanelTextBlock
+								label="Correlation ID"
+								value={event.correlationId}
+							/>
+						) : null}
 						{event.error ? (
 							<AndroidPanelTextBlock
 								label="Error"
@@ -318,6 +388,20 @@ export function NetworkEventDetail({
 							/>
 						) : null}
 					</AndroidPanelSection>
+					{timingRows.length > 0 ? (
+						<AndroidPanelSection
+							footer="Transport / response combines native connection and server work because fetch does not expose DNS, connect, TLS, or TTFB phases."
+							title="Timing"
+						>
+							{timingRows.map(([label, milliseconds]) => (
+								<AndroidPanelRow
+									key={label}
+									label={label}
+									value={formatNetworkDuration(milliseconds)}
+								/>
+							))}
+						</AndroidPanelSection>
+					) : null}
 					<AndroidPanelSection title="Request">
 						<AndroidPanelTextBlock label="URL" value={path} />
 						<AndroidPanelRow
@@ -327,21 +411,14 @@ export function NetworkEventDetail({
 						{requestHeaderEntries.map(([name, value]) => (
 							<AndroidPanelTextBlock key={name} label={name} value={value} />
 						))}
-						<AndroidPanelRow
-							label="Body"
-							value={
-								event.requestBody === undefined
-									? 'Empty'
-									: formatNetworkBytes(event.requestSizeBytes)
-							}
-						/>
+						<AndroidPanelRow label="Body" value={requestBodySummary} />
 						{requestBody !== undefined ? (
 							<AndroidPanelTextBlock label="Payload" value={requestBody} />
 						) : null}
 					</AndroidPanelSection>
 					<AndroidPanelSection
 						title="Response"
-						footer={`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are truncated at capture time.`}
+						footer={`Bodies over ${Math.round(maxBodyBytes / 1024)} KB are omitted rather than retained.`}
 					>
 						<AndroidPanelRow
 							label="Headers"

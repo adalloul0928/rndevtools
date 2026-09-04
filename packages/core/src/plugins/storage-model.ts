@@ -8,14 +8,35 @@ import {
 	utf8ByteLength,
 } from '../core/serialize';
 
+export type StorageAdapterCapabilities = Readonly<{
+	enumerable: boolean;
+	readable: boolean;
+	writable: boolean;
+	deletable: boolean;
+	clearable: boolean;
+	sensitive: boolean;
+	requiresAuthentication: boolean;
+}>;
+
+export type StorageRegisteredKey = Readonly<{
+	key: string;
+	description?: string;
+	requiresAuthentication?: boolean;
+	/** Values stay metadata-only unless the application opts this exact key in. */
+	revealable?: boolean;
+}>;
+
 export type DevToolsStorageAdapter = {
 	id: string;
 	title: string;
 	description?: string;
+	capabilities?: Partial<StorageAdapterCapabilities>;
+	registeredKeys?: readonly StorageRegisteredKey[];
 	sensitive?: boolean;
 	revealValues?: boolean;
-	getAllKeys: () => readonly string[] | Promise<readonly string[]>;
+	getAllKeys?: () => readonly string[] | Promise<readonly string[]>;
 	getValue?: (key: string) => unknown | Promise<unknown>;
+	revealValue?: (key: string) => unknown | Promise<unknown>;
 	setValue?: (key: string, value: unknown) => void | Promise<void>;
 	parseValue?: (key: string, draft: string, valueType: string) => unknown;
 	removeValue?: (key: string) => void | Promise<void>;
@@ -25,6 +46,9 @@ export type DevToolsStorageAdapter = {
 
 export type StorageEntrySnapshot = {
 	key: string;
+	description?: string;
+	requiresAuthentication?: boolean;
+	revealable?: boolean;
 	value?: string;
 	valueType?: string;
 	truncated: boolean;
@@ -39,6 +63,8 @@ export type StorageAdapterSnapshot = {
 	title: string;
 	description?: string;
 	sensitive: boolean;
+	capabilities?: StorageAdapterCapabilities;
+	keyDiscovery?: 'enumerated' | 'registered';
 	entries: readonly StorageEntrySnapshot[];
 	totalKeyCount: number;
 	omittedKeyCount: number;
@@ -138,6 +164,7 @@ function dataField(record: object, key: string): unknown {
 type StorageAdapterFunctionKey =
 	| 'getAllKeys'
 	| 'getValue'
+	| 'revealValue'
 	| 'setValue'
 	| 'parseValue'
 	| 'removeValue'
@@ -162,6 +189,89 @@ function optionalBoolean(record: object, key: string): boolean | undefined {
 		throw new Error(`Storage configuration field ${key} must be a boolean.`);
 	}
 	return value as boolean | undefined;
+}
+
+function storageCapabilities(
+	adapter: Pick<
+		DevToolsStorageAdapter,
+		| 'capabilities'
+		| 'clear'
+		| 'getAllKeys'
+		| 'getValue'
+		| 'removeValue'
+		| 'sensitive'
+		| 'setValue'
+	>,
+): StorageAdapterCapabilities {
+	const declared = adapter.capabilities ?? {};
+	return {
+		enumerable: declared.enumerable ?? adapter.getAllKeys !== undefined,
+		readable: declared.readable ?? adapter.getValue !== undefined,
+		writable: declared.writable ?? adapter.setValue !== undefined,
+		deletable: declared.deletable ?? adapter.removeValue !== undefined,
+		clearable: declared.clearable ?? adapter.clear !== undefined,
+		sensitive: declared.sensitive ?? adapter.sensitive === true,
+		requiresAuthentication: declared.requiresAuthentication ?? false,
+	};
+}
+
+function registeredStorageKeys(
+	value: unknown,
+): readonly StorageRegisteredKey[] {
+	if (value === undefined) return [];
+	return denseArrayValues(
+		value,
+		'Registered storage keys',
+		MAX_STORAGE_KEY_CANDIDATES,
+	).map((candidate) => {
+		if (!candidate || typeof candidate !== 'object') {
+			throw new Error('Registered storage keys must be objects.');
+		}
+		const key = dataField(candidate, 'key');
+		const description = dataField(candidate, 'description');
+		const requiresAuthentication = dataField(
+			candidate,
+			'requiresAuthentication',
+		);
+		const revealable = dataField(candidate, 'revealable');
+		if (
+			typeof key !== 'string' ||
+			key.length === 0 ||
+			utf8ByteLength(key) > MAX_STORAGE_KEY_BYTES
+		) {
+			throw new Error('Registered storage keys must be 1–65536 bytes.');
+		}
+		if (
+			description !== undefined &&
+			(typeof description !== 'string' ||
+				description.length > MAX_STORAGE_TEXT_LENGTH)
+		) {
+			throw new Error(
+				'Registered storage key descriptions cannot exceed 4096 characters.',
+			);
+		}
+		if (
+			requiresAuthentication !== undefined &&
+			typeof requiresAuthentication !== 'boolean'
+		) {
+			throw new Error(
+				'Registered storage key authentication must be a boolean.',
+			);
+		}
+		if (revealable !== undefined && typeof revealable !== 'boolean') {
+			throw new Error(
+				'Registered storage key revealability must be a boolean.',
+			);
+		}
+		return {
+			key,
+			...(typeof description === 'string' ? { description } : {}),
+			...(requiresAuthentication === true
+				? { requiresAuthentication: true }
+				: {}),
+			...(revealable === true ? { revealable: true } : {}),
+		};
+	});
 }
 
 /** Validates and detaches extension-owned storage configuration. */
@@ -203,15 +313,59 @@ export function normalizeStorageConfiguration(
 			);
 		}
 		const getAllKeys = optionalFunction(candidate, 'getAllKeys');
-		if (!getAllKeys) {
-			throw new Error('Storage adapters require a getAllKeys function.');
-		}
 		const getValue = optionalFunction(candidate, 'getValue');
+		const revealValue = optionalFunction(candidate, 'revealValue');
 		const setValue = optionalFunction(candidate, 'setValue');
 		const parseValue = optionalFunction(candidate, 'parseValue');
 		const removeValue = optionalFunction(candidate, 'removeValue');
 		const clear = optionalFunction(candidate, 'clear');
 		const subscribe = optionalFunction(candidate, 'subscribe');
+		const capabilitiesValue = dataField(candidate, 'capabilities');
+		if (
+			capabilitiesValue !== undefined &&
+			(!capabilitiesValue || typeof capabilitiesValue !== 'object')
+		) {
+			throw new Error('Storage adapter capabilities must be an object.');
+		}
+		const capabilities = storageCapabilities({
+			capabilities:
+				capabilitiesValue && typeof capabilitiesValue === 'object'
+					? {
+							enumerable: optionalBoolean(capabilitiesValue, 'enumerable'),
+							readable: optionalBoolean(capabilitiesValue, 'readable'),
+							writable: optionalBoolean(capabilitiesValue, 'writable'),
+							deletable: optionalBoolean(capabilitiesValue, 'deletable'),
+							clearable: optionalBoolean(capabilitiesValue, 'clearable'),
+							sensitive: optionalBoolean(capabilitiesValue, 'sensitive'),
+							requiresAuthentication: optionalBoolean(
+								capabilitiesValue,
+								'requiresAuthentication',
+							),
+						}
+					: undefined,
+			clear,
+			getAllKeys,
+			getValue,
+			removeValue,
+			sensitive: optionalBoolean(candidate, 'sensitive'),
+			setValue,
+		});
+		const registeredKeys = registeredStorageKeys(
+			dataField(candidate, 'registeredKeys'),
+		);
+		if (!capabilities.enumerable && registeredKeys.length === 0) {
+			throw new Error(
+				'Non-enumerable storage adapters require registered keys.',
+			);
+		}
+		if (capabilities.enumerable && !getAllKeys) {
+			throw new Error('Enumerable storage adapters require getAllKeys.');
+		}
+		if (registeredKeys.some((entry) => entry.revealable) && !revealValue) {
+			throw new Error(
+				'Revealable registered storage keys require a revealValue function.',
+			);
+		}
 		return {
 			id,
 			title,
@@ -222,8 +376,11 @@ export function normalizeStorageConfiguration(
 			...(optionalBoolean(candidate, 'revealValues') === true
 				? { revealValues: true }
 				: {}),
-			getAllKeys,
+			capabilities,
+			...(registeredKeys.length > 0 ? { registeredKeys } : {}),
+			...(getAllKeys ? { getAllKeys } : {}),
 			...(getValue ? { getValue } : {}),
+			...(revealValue ? { revealValue } : {}),
 			...(setValue ? { setValue } : {}),
 			...(parseValue ? { parseValue } : {}),
 			...(removeValue ? { removeValue } : {}),
@@ -320,9 +477,91 @@ export type StorageChangeEvent = {
 	key: string;
 	type: 'added' | 'updated' | 'removed';
 	previousValue?: string;
+	previousValueType?: string;
 	value?: string;
+	valueType?: string;
 	valueHidden: boolean;
+	structuralDiff?: readonly StorageStructuralDiffEntry[];
+	bookmarked?: boolean;
+	undoAvailable?: boolean;
+	undoExpiresAt?: number;
+	undoStatus?: 'available' | 'expired' | 'succeeded' | 'failed';
 };
+
+export type StorageStructuralDiffEntry = Readonly<{
+	path: string;
+	kind: 'added' | 'changed' | 'removed';
+	previousValue?: string;
+	value?: string;
+}>;
+
+const MAX_STRUCTURAL_DIFF_ENTRIES = 200;
+const MAX_STRUCTURAL_DIFF_DEPTH = 16;
+
+function diffPreview(value: unknown): string {
+	return serializeValue(
+		sanitizeDiagnosticValueWithMetadata(value).value,
+		4 * 1024,
+	).text;
+}
+
+/** Produces a bounded, redacted JSON-path diff for storage history presentation. */
+export function diffStorageValues(
+	previousText: string | undefined,
+	valueText: string | undefined,
+): readonly StorageStructuralDiffEntry[] {
+	let previous: unknown = previousText;
+	let value: unknown = valueText;
+	try {
+		if (previousText !== undefined) previous = JSON.parse(previousText);
+	} catch {}
+	try {
+		if (valueText !== undefined) value = JSON.parse(valueText);
+	} catch {}
+	const entries: StorageStructuralDiffEntry[] = [];
+	const visit = (
+		left: unknown,
+		right: unknown,
+		path: string,
+		depth: number,
+	): void => {
+		if (entries.length >= MAX_STRUCTURAL_DIFF_ENTRIES || Object.is(left, right))
+			return;
+		if (
+			depth < MAX_STRUCTURAL_DIFF_DEPTH &&
+			left !== null &&
+			right !== null &&
+			typeof left === 'object' &&
+			typeof right === 'object' &&
+			!Array.isArray(left) &&
+			!Array.isArray(right)
+		) {
+			const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+			for (const key of [...keys].sort()) {
+				visit(
+					(left as Record<string, unknown>)[key],
+					(right as Record<string, unknown>)[key],
+					`${path}.${key}`,
+					depth + 1,
+				);
+			}
+			return;
+		}
+		entries.push({
+			path,
+			kind:
+				left === undefined
+					? 'added'
+					: right === undefined
+						? 'removed'
+						: 'changed',
+			...(left === undefined ? {} : { previousValue: diffPreview(left) }),
+			...(right === undefined ? {} : { value: diffPreview(right) }),
+		});
+	};
+	visit(previous, value, '$', 0);
+	return entries;
+}
 
 function storageValueType(value: unknown): string {
 	if (Array.isArray(value)) return 'array';
@@ -394,6 +633,7 @@ export function isStorageEntryEditable(
 		!entry.readError &&
 		!entry.binary &&
 		isEditableValueType(entry.valueType) &&
+		(adapter.capabilities?.writable ?? true) &&
 		!!adapter.setValue
 	);
 }
@@ -429,8 +669,14 @@ export async function snapshotStorageAdapter(
 		maxSnapshotBytes: Number.MAX_SAFE_INTEGER,
 	},
 ): Promise<StorageAdapterSnapshot> {
+	const capabilities = storageCapabilities(adapter);
+	const registeredKeys = new Map(
+		(adapter.registeredKeys ?? []).map((entry) => [entry.key, entry]),
+	);
 	try {
-		const rawKeys = await adapter.getAllKeys();
+		const rawKeys = capabilities.enumerable
+			? await adapter.getAllKeys?.()
+			: [...registeredKeys.keys()];
 		if (!Array.isArray(rawKeys)) {
 			throw new Error('Storage adapter returned an invalid key list.');
 		}
@@ -470,19 +716,34 @@ export async function snapshotStorageAdapter(
 		const keys = [...new Set(validKeys)].sort((left, right) =>
 			left.localeCompare(right),
 		);
-		const valueHidden =
-			adapter.sensitive === true && adapter.revealValues !== true;
+		const valueHidden = capabilities.sensitive && adapter.revealValues !== true;
 		const candidateKeys = keys.slice(0, limits.maxEntries);
 		const entries: StorageEntrySnapshot[] = [];
 		let estimatedBytes = 0;
 		for (const key of candidateKeys) {
+			const registration = registeredKeys.get(key);
+			const requiresAuthentication =
+				registration?.requiresAuthentication === true ||
+				capabilities.requiresAuthentication === true;
+			const revealable =
+				registration?.revealable === true && adapter.revealValue !== undefined;
 			const metadataBytes = utf8ByteLength(key) + 256;
 			const remainingBytes = limits.maxSnapshotBytes - estimatedBytes;
 			if (remainingBytes < metadataBytes) continue;
 
 			let entry: StorageEntrySnapshot;
-			if (valueHidden || !adapter.getValue) {
-				entry = { key, truncated: false, valueHidden: true, binary: false };
+			if (valueHidden || !capabilities.readable || !adapter.getValue) {
+				entry = {
+					key,
+					...(registration?.description
+						? { description: registration.description }
+						: {}),
+					...(requiresAuthentication ? { requiresAuthentication: true } : {}),
+					...(revealable ? { revealable: true } : {}),
+					truncated: false,
+					valueHidden: true,
+					binary: false,
+				};
 			} else {
 				try {
 					const value = await adapter.getValue(key);
@@ -501,6 +762,11 @@ export async function snapshotStorageAdapter(
 							: serializeValue(sanitized?.value, valueBudget);
 					entry = {
 						key,
+						...(registration?.description
+							? { description: registration.description }
+							: {}),
+						...(requiresAuthentication ? { requiresAuthentication: true } : {}),
+						...(revealable ? { revealable: true } : {}),
 						value: serialized.text,
 						valueType: storageValueType(value),
 						truncated: serialized.truncated || sanitized?.truncated === true,
@@ -511,6 +777,11 @@ export async function snapshotStorageAdapter(
 				} catch (error) {
 					entry = {
 						key,
+						...(registration?.description
+							? { description: registration.description }
+							: {}),
+						...(requiresAuthentication ? { requiresAuthentication: true } : {}),
+						...(revealable ? { revealable: true } : {}),
 						value: '[Read failed]',
 						truncated: false,
 						valueHidden: false,
@@ -533,7 +804,9 @@ export async function snapshotStorageAdapter(
 			id: adapter.id,
 			title: adapter.title,
 			description: adapter.description,
-			sensitive: adapter.sensitive ?? false,
+			sensitive: capabilities.sensitive,
+			capabilities,
+			keyDiscovery: capabilities.enumerable ? 'enumerated' : 'registered',
 			entries,
 			totalKeyCount: keys.length,
 			omittedKeyCount,
@@ -545,7 +818,9 @@ export async function snapshotStorageAdapter(
 			id: adapter.id,
 			title: adapter.title,
 			description: adapter.description,
-			sensitive: adapter.sensitive ?? false,
+			sensitive: capabilities.sensitive,
+			capabilities,
+			keyDiscovery: capabilities.enumerable ? 'enumerated' : 'registered',
 			entries: [],
 			totalKeyCount: 0,
 			omittedKeyCount: 0,

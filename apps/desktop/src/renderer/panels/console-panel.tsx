@@ -4,7 +4,14 @@ import {
 	type DataGridColumn,
 	type DataGridSelection,
 } from '@heroui-pro/react/data-grid';
-import { Braces, Copy, ShieldCheck, TerminalSquare, Trash2 } from 'lucide-react';
+import {
+	Bookmark,
+	Braces,
+	Copy,
+	ShieldCheck,
+	TerminalSquare,
+	Trash2,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
 	CodePreview,
@@ -33,7 +40,8 @@ function levelTone(
 }
 
 function exportLine(entry: ConsoleEntry): string {
-	return `[${new Date(entry.at).toISOString()}] ${entry.level.toUpperCase()}${entry.source ? ` [${entry.source}]` : ''} ${entry.message}${entry.attributesText ? `\n${entry.attributesText}` : ''}`;
+	const repeatCount = entry.repeatCount ?? 1;
+	return `[${new Date(entry.at).toISOString()}] ${entry.level.toUpperCase()}${entry.scope ? ` [${entry.scope}]` : entry.source ? ` [${entry.source}]` : ''} ${entry.message}${repeatCount > 1 ? ` (repeated ${repeatCount}x)` : ''}${entry.errorStack ? `\n${entry.errorStack}` : ''}${entry.attributesText ? `\n${entry.attributesText}` : ''}`;
 }
 
 export function ConsolePanel() {
@@ -41,6 +49,8 @@ export function ConsolePanel() {
 	const entries = selectedDevice?.tools.console ?? [];
 	const [query, setQuery] = useState('');
 	const [level, setLevel] = useState<ConsoleLevel>('all');
+	const [bookmarksOnly, setBookmarksOnly] = useState(false);
+	const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(new Set());
 	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
 
 	const filtered = useMemo(() => {
@@ -48,15 +58,25 @@ export function ConsolePanel() {
 		return entries
 			.filter(
 				(entry) =>
+					(!bookmarksOnly || bookmarkedIds.has(entry.id)) &&
 					(level === 'all' || entry.level === level) &&
 					(!needle ||
-						[entry.message, entry.attributesText, entry.source, entry.level]
+						[
+							entry.message,
+							entry.attributesText,
+							entry.source,
+							entry.scope,
+							entry.correlationId,
+							entry.errorName,
+							entry.errorStack,
+							entry.level,
+						]
 							.join(' ')
 							.toLowerCase()
 							.includes(needle))
 			)
 			.sort((left, right) => right.at - left.at);
-	}, [entries, level, query]);
+	}, [bookmarkedIds, bookmarksOnly, entries, level, query]);
 	const selected =
 		filtered.find((entry) => entry.id === selectedId) ?? filtered[0] ?? null;
 	const [lastCopy, setLastCopy] = useState<{
@@ -76,6 +96,26 @@ export function ConsolePanel() {
 		const timer = window.setTimeout(() => setLastCopy(null), 1_800);
 		return () => window.clearTimeout(timer);
 	}, [lastCopy]);
+	useEffect(() => {
+		setBookmarkedIds(new Set());
+		setBookmarksOnly(false);
+		// Bookmarks are intentionally session-local to the selected device.
+		if (selectedDevice?.info.id === undefined) setSelectedId(null);
+	}, [selectedDevice?.info.id]);
+	useEffect(() => {
+		const retained = new Set(entries.map((entry) => entry.id));
+		setBookmarkedIds(
+			(previous) => new Set([...previous].filter((id) => retained.has(id)))
+		);
+	}, [entries]);
+	const toggleBookmark = (id: string): void => {
+		setBookmarkedIds((previous) => {
+			const next = new Set(previous);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
 	const levelCounts = useMemo(() => {
 		const counts = { debug: 0, info: 0, warn: 0, error: 0 };
 		for (const entry of entries) counts[entry.level] += 1;
@@ -109,7 +149,9 @@ export function ConsolePanel() {
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
 						<div className="truncate font-mono text-[11px] text-(--foreground)">
+							{bookmarkedIds.has(entry.id) ? '★ ' : ''}
 							{entry.message}
+							{(entry.repeatCount ?? 1) > 1 ? ` ×${entry.repeatCount}` : ''}
 						</div>
 						{entry.attributesText ? (
 							<div className="mt-0.5 truncate font-mono text-[10px] text-(--text-3)">
@@ -125,12 +167,12 @@ export function ConsolePanel() {
 				width: 140,
 				cell: (entry) => (
 					<span className="truncate text-[11px] text-(--muted)">
-						{entry.source ?? 'application'}
+						{entry.scope ?? entry.source ?? 'application'}
 					</span>
 				),
 			},
 		],
-		[]
+		[bookmarkedIds]
 	);
 
 	function onSelectionChange(selection: DataGridSelection): void {
@@ -207,6 +249,15 @@ export function ConsolePanel() {
 						</Button>
 					))}
 				</div>
+				<Button
+					aria-pressed={bookmarksOnly}
+					className="h-7 rounded-md px-2.5 text-[11px]"
+					size="sm"
+					variant={bookmarksOnly ? 'secondary' : 'ghost'}
+					onPress={() => setBookmarksOnly((value) => !value)}
+				>
+					<Bookmark className="h-3.5 w-3.5" /> Bookmarks {bookmarkedIds.size}
+				</Button>
 				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
 					{filtered.length} events
 				</span>
@@ -246,17 +297,51 @@ export function ConsolePanel() {
 									{formatClock(selected.at)}
 								</span>
 							</div>
+							<Button
+								className="mb-3"
+								size="sm"
+								variant={bookmarkedIds.has(selected.id) ? 'secondary' : 'ghost'}
+								onPress={() => toggleBookmark(selected.id)}
+							>
+								<Bookmark className="h-3.5 w-3.5" />
+								{bookmarkedIds.has(selected.id) ? 'Remove bookmark' : 'Bookmark'}
+							</Button>
 							<h2 className="m-0 font-mono text-[13px] font-medium leading-6 text-(--foreground)">
 								{selected.message}
 							</h2>
 							<dl className="mb-4 mt-4">
 								<KeyValue label="Source" value={selected.source ?? 'application'} />
+								<KeyValue label="Scope" value={selected.scope ?? '—'} />
+								<KeyValue
+									label="Repeats"
+									value={String(selected.repeatCount ?? 1)}
+									mono
+								/>
+								<KeyValue
+									label="Correlation"
+									value={selected.correlationId ?? '—'}
+									mono
+								/>
 								<KeyValue
 									label="Timestamp"
 									value={new Date(selected.at).toISOString()}
 									mono
 								/>
+								{selected.sourceLocation ? (
+									<KeyValue
+										label="Location"
+										value={`${selected.sourceLocation.file}${selected.sourceLocation.line ? `:${selected.sourceLocation.line}` : ''}${selected.sourceLocation.column ? `:${selected.sourceLocation.column}` : ''}`}
+										mono
+									/>
+								) : null}
 							</dl>
+							{selected.errorStack ? (
+								<CodePreview
+									label={selected.errorName ?? 'Sanitized error stack'}
+									value={selected.errorStack}
+									maxHeight={260}
+								/>
+							) : null}
 							{selected.attributesText ? (
 								<CodePreview
 									label="Sanitized attributes"

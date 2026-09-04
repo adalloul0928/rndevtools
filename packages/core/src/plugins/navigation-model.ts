@@ -10,6 +10,37 @@ export type NavigationEvent = {
 	metadata?: Readonly<Record<string, unknown>>;
 };
 
+export type NavigationTransitionPhase =
+	| 'requested'
+	| 'committed'
+	| 'focused'
+	| 'failed';
+
+type NavigationTransitionSource =
+	| 'app'
+	| 'panel'
+	| 'desktop'
+	| 'scenario'
+	| 'restore'
+	| 'deep-link';
+
+export type NavigationTransitionContext = Readonly<{
+	correlationId?: string;
+	source?: NavigationTransitionSource;
+}>;
+
+export type NavigationTransitionEvent = Readonly<{
+	id: string;
+	transitionId: string;
+	at: number;
+	phase: NavigationTransitionPhase;
+	route: string;
+	source: NavigationTransitionSource;
+	correlationId?: string;
+	durationMs?: number;
+	error?: string;
+}>;
+
 export type NavigationAction = {
 	id: string;
 	title: string;
@@ -59,6 +90,14 @@ const MAX_METADATA_BYTES = 16 * 1024;
 const MAX_PINNED_ROUTES = 32;
 const MAX_REMEMBERED_PARAMS = 100;
 const MAX_PARAM_VALUE_BYTES = 1024;
+const NAVIGATION_TRANSITION_SOURCES = new Set<NavigationTransitionSource>([
+	'app',
+	'panel',
+	'desktop',
+	'scenario',
+	'restore',
+	'deep-link',
+]);
 
 /** Session state is shared by the panel and its pill quick actions. */
 const screensSessionStores = new Map<
@@ -215,6 +254,25 @@ export function normalizeNavigationRecordOptions(value: unknown): {
 	return {
 		...(segments.length > 0 ? { segments } : {}),
 		...(metadata === undefined ? {} : { metadata }),
+	};
+}
+
+export function normalizeNavigationTransitionContext(
+	value: unknown,
+): NavigationTransitionContext {
+	if (value === undefined) return {};
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+	const rawCorrelationId = ownDataValue(value, 'correlationId');
+	const rawSource = ownDataValue(value, 'source');
+	const correlationId = normalizeNavigationText(rawCorrelationId);
+	const source = NAVIGATION_TRANSITION_SOURCES.has(
+		rawSource as NavigationTransitionSource,
+	)
+		? (rawSource as NavigationTransitionSource)
+		: undefined;
+	return {
+		...(correlationId ? { correlationId } : {}),
+		...(source ? { source } : {}),
 	};
 }
 

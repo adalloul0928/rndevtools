@@ -3,12 +3,14 @@ import {
 	fireEvent,
 	render,
 	screen,
+	waitFor,
 	within,
 } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import type { DevToolsActionRequest, DevToolsPanelProps } from '../types';
 import {
 	createStoragePlugin,
+	diffStorageValues,
 	isStorageEntryEditable,
 	parseStorageDraft,
 	validateStorageSnapshot,
@@ -551,6 +553,66 @@ describe('storage panel UI', () => {
 		expect(screen.queryByText('Delete key')).not.toBeOnTheScreen();
 		expect(readSecure).not.toHaveBeenCalled();
 	});
+
+	it('requires an explicit local confirmation before revealing an opted-in key', async () => {
+		const revealValue = jest.fn(async () => 'local-secret');
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'secure',
+					title: 'Secure Storage',
+					capabilities: { enumerable: false, readable: true, sensitive: true },
+					registeredKeys: [{ key: 'persona', revealable: true }],
+					revealValue,
+				},
+			],
+		});
+		await storage.refresh();
+		const { props, run } = createPanelProps();
+		render(<storage.plugin.Panel {...props} />);
+
+		fireEvent.press(screen.getByText('Secure Storage'));
+		fireEvent.press(screen.getByText('persona'));
+		expect(revealValue).not.toHaveBeenCalled();
+		await act(async () => {
+			fireEvent.press(screen.getByText('Reveal on this device'));
+		});
+
+		expect(run).toHaveBeenCalledWith(
+			expect.objectContaining({
+				label: 'Reveal protected storage value',
+				confirmation: expect.objectContaining({
+					title: 'Reveal protected value?',
+					confirmLabel: 'Reveal',
+				}),
+			}),
+		);
+		expect(revealValue).toHaveBeenCalledWith('persona');
+		expect(screen.getByText('"local-secret"')).toBeOnTheScreen();
+	});
+
+	it('does not offer reveal for a metadata-only registered key', async () => {
+		const revealValue = jest.fn(async () => 'encryption-secret');
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'secure',
+					title: 'Secure Storage',
+					capabilities: { enumerable: false, readable: true, sensitive: true },
+					registeredKeys: [{ key: 'encryption-key' }],
+					revealValue,
+				},
+			],
+		});
+		await storage.refresh();
+		const { props } = createPanelProps();
+		render(<storage.plugin.Panel {...props} />);
+
+		fireEvent.press(screen.getByText('Secure Storage'));
+		fireEvent.press(screen.getByText('encryption-key'));
+		expect(screen.queryByText('Reveal on this device')).not.toBeOnTheScreen();
+		expect(revealValue).not.toHaveBeenCalled();
+	});
 });
 
 describe('createStoragePlugin', () => {
@@ -1048,6 +1110,40 @@ describe('createStoragePlugin', () => {
 		expect(storage.getSnapshot().loading).toBe(false);
 		expect(storage.getSnapshot().adapters).toEqual([]);
 	});
+
+	it('clears snapshots, history, bookmarks, and undo authority at the final lifecycle boundary', async () => {
+		let value = 'first';
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					getAllKeys: () => ['key'],
+					getValue: () => value,
+					setValue: (_key, next) => {
+						value = String(next);
+					},
+				},
+			],
+		});
+		const dispose = storage.plugin.install?.();
+		await storage.refresh();
+		value = 'second';
+		await storage.refresh();
+		const event = storage.getEvents()[0];
+		storage.toggleEventBookmark(event?.id ?? -1);
+		expect(storage.getEvents()[0]?.bookmarked).toBe(true);
+
+		dispose?.();
+
+		expect(storage.getSnapshot()).toEqual({ loading: false, adapters: [] });
+		expect(storage.getEvents()).toEqual([]);
+		expect(await storage.undoEvent(event?.id ?? -1)).toBe(false);
+		const secondDispose = storage.plugin.install?.();
+		await storage.refresh();
+		expect(storage.getEvents()).toEqual([]);
+		secondDispose?.();
+	});
 });
 
 describe('storage snapshot key accounting', () => {
@@ -1072,5 +1168,209 @@ describe('storage snapshot key accounting', () => {
 		expect(adapter?.totalKeyCount).toBe(2);
 		expect(adapter?.omittedKeyCount).toBe(0);
 		expect(adapter?.truncated).toBe(false);
+	});
+});
+
+describe('storage adapter capabilities and history', () => {
+	it('uses explicit keys for non-enumerable stores without claiming they are empty', async () => {
+		const getValue = jest.fn();
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'secure-store',
+					title: 'SecureStore',
+					capabilities: {
+						enumerable: false,
+						readable: true,
+						sensitive: true,
+						requiresAuthentication: true,
+					},
+					registeredKeys: [
+						{ key: 'biometric-token', requiresAuthentication: true },
+					],
+					getValue,
+				},
+			],
+		});
+
+		await storage.refresh();
+		const adapter = storage.getSnapshot().adapters[0];
+		expect(adapter).toMatchObject({
+			keyDiscovery: 'registered',
+			totalKeyCount: 1,
+			capabilities: { enumerable: false, requiresAuthentication: true },
+		});
+		expect(adapter?.entries[0]).toMatchObject({
+			key: 'biometric-token',
+			requiresAuthentication: true,
+			valueHidden: true,
+		});
+		expect(getValue).not.toHaveBeenCalled();
+	});
+
+	it('rejects non-enumerable adapters without an explicit key manifest', () => {
+		expect(() =>
+			createStoragePlugin({
+				adapters: [
+					{
+						id: 'secure-store',
+						title: 'SecureStore',
+						capabilities: { enumerable: false },
+					},
+				],
+			}),
+		).toThrow('require registered keys');
+	});
+
+	it('rejects revealable keys without an explicit reveal implementation', () => {
+		expect(() =>
+			createStoragePlugin({
+				adapters: [
+					{
+						id: 'secure-store',
+						title: 'SecureStore',
+						capabilities: { enumerable: false },
+						registeredKeys: [{ key: 'credential', revealable: true }],
+					},
+				],
+			}),
+		).toThrow('require a revealValue function');
+	});
+
+	it('builds a bounded structural JSON diff', () => {
+		expect(
+			diffStorageValues(
+				'{"profile":{"name":"before","count":1}}',
+				'{"profile":{"name":"after","enabled":true}}',
+			),
+		).toEqual([
+			{ path: '$.profile.count', kind: 'removed', previousValue: '1' },
+			{ path: '$.profile.enabled', kind: 'added', value: 'true' },
+			{
+				path: '$.profile.name',
+				kind: 'changed',
+				previousValue: '"before"',
+				value: '"after"',
+			},
+		]);
+	});
+
+	it('bookmarks and undoes a reversible write', async () => {
+		const values = new Map([['theme', 'light']]);
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'settings',
+					title: 'Settings',
+					getAllKeys: () => [...values.keys()],
+					getValue: (key) => values.get(key),
+					setValue: (key, value) => {
+						values.set(key, String(value));
+					},
+					removeValue: (key) => {
+						values.delete(key);
+					},
+				},
+			],
+		});
+		await storage.refresh();
+		values.set('theme', 'dark');
+		await storage.refresh();
+		const event = storage.getEvents()[0];
+		expect(event).toMatchObject({ type: 'updated', undoAvailable: true });
+		storage.toggleEventBookmark(event?.id ?? -1);
+		expect(storage.getEvents()[0]?.bookmarked).toBe(true);
+		expect(await storage.undoEvent(event?.id ?? -1)).toBe(true);
+		expect(values.get('theme')).toBe('light');
+		expect(
+			storage.getEvents().find(({ id }) => id === event?.id)?.undoStatus,
+		).toBe('succeeded');
+	});
+
+	it('allows only one in-flight undo for an event', async () => {
+		let value = 'light';
+		let releaseWrite: (() => void) | undefined;
+		const setValue = jest.fn(
+			(_key: string, next: unknown) =>
+				new Promise<void>((resolve) => {
+					releaseWrite = () => {
+						value = String(next);
+						resolve();
+					};
+				}),
+		);
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'settings',
+					title: 'Settings',
+					getAllKeys: () => ['theme'],
+					getValue: () => value,
+					setValue,
+				},
+			],
+		});
+		await storage.refresh();
+		value = 'dark';
+		await storage.refresh();
+		const event = storage.getEvents()[0];
+
+		const firstUndo = storage.undoEvent(event?.id ?? -1);
+		expect(await storage.undoEvent(event?.id ?? -1)).toBe(false);
+		await waitFor(() => expect(setValue).toHaveBeenCalledTimes(1));
+		releaseWrite?.();
+		expect(await firstUndo).toBe(true);
+		expect(value).toBe('light');
+	});
+
+	it('refuses stale undo when the current value no longer matches the event', async () => {
+		let value = 'light';
+		const setValue = jest.fn();
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'settings',
+					title: 'Settings',
+					getAllKeys: () => ['theme'],
+					getValue: () => value,
+					setValue,
+				},
+			],
+		});
+		await storage.refresh();
+		value = 'dark';
+		await storage.refresh();
+		const event = storage.getEvents()[0];
+		value = 'blue';
+
+		expect(await storage.undoEvent(event?.id ?? -1)).toBe(false);
+		expect(setValue).not.toHaveBeenCalled();
+		expect(
+			storage.getEvents().find((candidate) => candidate.id === event?.id),
+		).toMatchObject({ undoAvailable: false, undoStatus: 'failed' });
+	});
+
+	it('never offers undo from a redacted previous value', async () => {
+		let value = { accessToken: 'first-secret', ready: true };
+		const setValue = jest.fn();
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'settings',
+					title: 'Settings',
+					getAllKeys: () => ['session'],
+					getValue: () => value,
+					setValue,
+				},
+			],
+		});
+		await storage.refresh();
+		value = { accessToken: 'second-secret', ready: false };
+		await storage.refresh();
+		const event = storage.getEvents()[0];
+		expect(event).toMatchObject({ type: 'updated', undoAvailable: false });
+		expect(event?.previousValue).not.toContain('first-secret');
+		expect(await storage.undoEvent(event?.id ?? -1)).toBe(false);
+		expect(setValue).not.toHaveBeenCalled();
 	});
 });

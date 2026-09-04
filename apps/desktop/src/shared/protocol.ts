@@ -6,6 +6,7 @@ import {
 	PUMPD_DESKTOP_ACTION_CAPABILITIES,
 	PUMPD_DESKTOP_PROTOCOL_VERSION,
 	PUMPD_DESKTOP_SNAPSHOT_LIMITS,
+	PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS,
 	PUMPD_DESKTOP_TOOL_IDS,
 	parseDesktopDeviceAction,
 } from '@pumpd/devtools/desktop-protocol';
@@ -13,6 +14,8 @@ import { isSensitiveDiagnosticKey, redactDiagnosticText } from '@pumpd/devtools/
 import { z } from 'zod';
 
 export const DESKTOP_PROTOCOL_VERSION = PUMPD_DESKTOP_PROTOCOL_VERSION;
+export const DESKTOP_SUPPORTED_PROTOCOL_VERSIONS =
+	PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS;
 export const DEFAULT_BROKER_HOST = '127.0.0.1';
 export const DEFAULT_BROKER_PORT = 47931;
 
@@ -39,6 +42,16 @@ function redactWithinLength(value: string, maxLength: number): string {
 }
 
 const identifierSchema = z.string().trim().min(1).max(256);
+const networkSimulationProfileIds = [
+	'none',
+	'offline',
+	'edge',
+	'3g',
+	'lte',
+	'wifi',
+	'dsl',
+	'very-bad',
+] as const;
 const rawShortTextSchema = z.string().max(SHORT_TEXT_MAX_LENGTH);
 const shortTextSchema = rawShortTextSchema.transform((value) =>
 	redactWithinLength(value, SHORT_TEXT_MAX_LENGTH)
@@ -66,6 +79,15 @@ const toolIdSchema = z.enum(PUMPD_DESKTOP_TOOL_IDS);
 export type ToolId = z.infer<typeof toolIdSchema>;
 
 const devicePlatformSchema = z.enum(['ios', 'android', 'web', 'simulator', 'unknown']);
+const simulatorUdidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const bundleIdentifierSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(255)
+	.regex(/^[A-Za-z0-9][A-Za-z0-9.-]*$/);
 const deviceInfoObjectSchema = z.strictObject({
 	id: identifierSchema,
 	name: shortTextSchema,
@@ -76,6 +98,9 @@ const deviceInfoObjectSchema = z.strictObject({
 	buildVersion: shortTextSchema.optional(),
 	runtimeVersion: shortTextSchema.optional(),
 	variant: shortTextSchema.optional(),
+	simulatorUdid: simulatorUdidSchema.optional(),
+	bundleIdentifier: bundleIdentifierSchema.optional(),
+	processId: z.number().int().positive().max(2_147_483_647).optional(),
 	viewport: z
 		.strictObject({
 			width: z.number().finite().positive(),
@@ -121,10 +146,25 @@ export type NetworkEntry = z.infer<typeof networkEntrySchema>;
 const consoleEntrySchema = z.strictObject({
 	id: identifierSchema,
 	at: timestampSchema,
+	firstAt: timestampSchema.optional(),
+	lastAt: timestampSchema.optional(),
 	level: z.enum(['debug', 'info', 'warn', 'error']),
 	message: longTextSchema,
 	attributesText: longTextSchema.optional(),
 	source: shortTextSchema.optional(),
+	scope: shortTextSchema.optional(),
+	correlationId: identifierSchema.optional(),
+	groupId: identifierSchema.optional(),
+	repeatCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+	errorName: shortTextSchema.optional(),
+	errorStack: longTextSchema.optional(),
+	sourceLocation: z
+		.strictObject({
+			file: longTextSchema,
+			line: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+			column: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+		})
+		.optional(),
 });
 export type ConsoleEntry = z.infer<typeof consoleEntrySchema>;
 
@@ -171,6 +211,20 @@ const storageEventSchema = z.strictObject({
 	kind: z.enum(['added', 'updated', 'removed']),
 	previousText: longTextSchema.optional(),
 	nextText: longTextSchema.optional(),
+	bookmarked: z.boolean().optional(),
+	undoAvailable: z.boolean().optional(),
+	undoStatus: z.enum(['available', 'expired', 'succeeded', 'failed']).optional(),
+	structuralDiff: z
+		.array(
+			z.strictObject({
+				path: shortTextSchema,
+				kind: z.enum(['added', 'changed', 'removed']),
+				previousText: shortTextSchema.optional(),
+				nextText: shortTextSchema.optional(),
+			})
+		)
+		.max(200)
+		.optional(),
 });
 const boundedCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
@@ -220,6 +274,87 @@ const querySummarySchema = z.strictObject({
 	omittedMutationCount: boundedCountSchema,
 	truncated: z.boolean(),
 });
+const querySimulationModeSchema = z.enum(['loading', 'error', 'paused', 'offline']);
+const querySimulationSchema = z
+	.strictObject({
+		families: z
+			.array(
+				z.strictObject({
+					id: identifierSchema,
+					label: shortTextSchema,
+					description: longTextSchema.optional(),
+					modes: z
+						.array(
+							z.strictObject({
+								mode: querySimulationModeSchema,
+								supported: z.boolean(),
+								reason: longTextSchema.optional(),
+							})
+						)
+						.length(4),
+				})
+			)
+			.min(1)
+			.max(50),
+		active: z
+			.strictObject({
+				familyId: identifierSchema,
+				familyLabel: shortTextSchema,
+				mode: querySimulationModeSchema,
+				receiptId: identifierSchema,
+				startedAt: timestampSchema,
+			})
+			.optional(),
+	})
+	.superRefine((simulation, context) => {
+		const familyIds = new Set<string>();
+		for (const [familyIndex, family] of simulation.families.entries()) {
+			if (familyIds.has(family.id)) {
+				context.addIssue({
+					code: 'custom',
+					message: 'Query simulation family IDs must be unique.',
+					path: ['families', familyIndex, 'id'],
+				});
+			}
+			familyIds.add(family.id);
+			const modes = new Set(family.modes.map((mode) => mode.mode));
+			if (modes.size !== querySimulationModeSchema.options.length) {
+				context.addIssue({
+					code: 'custom',
+					message: 'Query simulation families must describe every mode once.',
+					path: ['families', familyIndex, 'modes'],
+				});
+			}
+			for (const [modeIndex, mode] of family.modes.entries()) {
+				if (!mode.supported && !mode.reason) {
+					context.addIssue({
+						code: 'custom',
+						message: 'Unsupported query simulation modes require a reason.',
+						path: ['families', familyIndex, 'modes', modeIndex, 'reason'],
+					});
+				}
+			}
+		}
+		if (simulation.active) {
+			const activeFamily = simulation.families.find(
+				(family) => family.id === simulation.active?.familyId
+			);
+			const activeMode = activeFamily?.modes.find(
+				(mode) => mode.mode === simulation.active?.mode
+			);
+			if (
+				!activeFamily ||
+				!activeMode?.supported ||
+				activeFamily.label !== simulation.active.familyLabel
+			) {
+				context.addIssue({
+					code: 'custom',
+					message: 'Active query simulation must reference a supported family mode.',
+					path: ['active'],
+				});
+			}
+		}
+	});
 const routeEntrySchema = z.strictObject({
 	id: identifierSchema,
 	path: longTextSchema,
@@ -237,7 +372,16 @@ const routeEventSchema = z.strictObject({
 	at: timestampSchema,
 	route: longTextSchema,
 	metadataText: longTextSchema.optional(),
+	transitionId: identifierSchema.optional(),
+	phase: z.enum(['requested', 'committed', 'focused', 'failed']).optional(),
+	source: z
+		.enum(['app', 'panel', 'desktop', 'scenario', 'restore', 'deep-link'])
+		.optional(),
+	correlationId: identifierSchema.optional(),
+	durationMs: z.number().finite().nonnegative().optional(),
+	error: longTextSchema.optional(),
 });
+export type RouteEvent = z.infer<typeof routeEventSchema>;
 const environmentEntrySchema = z
 	.strictObject({
 		id: identifierSchema,
@@ -259,6 +403,19 @@ const zustandStoreSchema = z.strictObject({
 	stateText: longTextSchema,
 	keys: z.array(shortTextSchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storageKeys),
 	updatedAt: timestampSchema,
+	capabilities: z
+		.strictObject({
+			writable: z.boolean(),
+			resettable: z.boolean(),
+			persisted: z.boolean(),
+			restorable: z.boolean(),
+		})
+		.default({
+			writable: false,
+			resettable: false,
+			persisted: false,
+			restorable: false,
+		}),
 	error: longTextSchema.optional(),
 });
 const zustandChangeSchema = z.strictObject({
@@ -270,6 +427,33 @@ const zustandChangeSchema = z.strictObject({
 		.array(shortTextSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChangedKeys),
 	stateText: longTextSchema,
+	error: longTextSchema.optional(),
+});
+const zustandStateSnapshotSchema = z.strictObject({
+	id: identifierSchema,
+	storeId: identifierSchema,
+	storeTitle: shortTextSchema,
+	createdAt: timestampSchema,
+	stateText: longTextSchema,
+	stateBytes: z
+		.number()
+		.int()
+		.nonnegative()
+		.max(1024 * 1024),
+	truncated: z.boolean(),
+});
+const zustandMutationReceiptSchema = z.strictObject({
+	id: identifierSchema,
+	storeId: identifierSchema,
+	kind: z.enum(['patch', 'reset', 'jump']),
+	status: z.enum(['succeeded', 'failed', 'rolled-back', 'needs-attention']),
+	startedAt: timestampSchema,
+	completedAt: timestampSchema,
+	changedKeys: z
+		.array(shortTextSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChangedKeys),
+	correlationId: identifierSchema.optional(),
+	snapshotId: identifierSchema.optional(),
 	error: longTextSchema.optional(),
 });
 const zustandSummarySchema = z.strictObject({
@@ -291,6 +475,27 @@ const restorePointSchema = z.strictObject({
 	estimatedBytes: z.number().int().nonnegative(),
 	sources: z
 		.array(restoreSourceSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreSources),
+});
+const restoreSourceResultSchema = z.strictObject({
+	sourceId: identifierSchema,
+	sourceTitle: shortTextSchema,
+	preflight: z.enum(['pending', 'passed', 'failed']),
+	apply: z.enum(['not-run', 'succeeded', 'failed']),
+	rollback: z.enum(['not-needed', 'succeeded', 'failed']),
+	error: longTextSchema.optional(),
+	rollbackError: longTextSchema.optional(),
+});
+const restoreReceiptSchema = z.strictObject({
+	id: identifierSchema,
+	pointId: identifierSchema,
+	pointLabel: shortTextSchema,
+	startedAt: timestampSchema,
+	completedAt: timestampSchema,
+	status: z.enum(['complete', 'preflight-failed', 'rolled-back', 'needs-attention']),
+	error: longTextSchema.optional(),
+	sourceResults: z
+		.array(restoreSourceResultSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreSources),
 });
 const performanceSampleSchema = z.strictObject({
@@ -331,8 +536,161 @@ const performanceReviewSchema = z.strictObject({
 });
 export type PerformanceReview = z.infer<typeof performanceReviewSchema>;
 
+const scenarioPrimitiveSchema = z.union([
+	z.string().max(16 * 1024),
+	z.number().finite(),
+	z.boolean(),
+	z.null(),
+]);
+const scenarioStepTypeSchema = z.enum([
+	'network-profile',
+	'storage-write',
+	'zustand-write',
+	'query-simulation',
+	'developer-overrides',
+	'impersonation',
+	'navigation',
+	'custom-action',
+]);
+const scenarioVariableSchema = z
+	.strictObject({
+		id: identifierSchema,
+		label: shortTextSchema,
+		type: z.enum(['string', 'number', 'boolean']),
+		required: z.boolean(),
+		defaultValue: scenarioPrimitiveSchema.optional(),
+		options: z.array(scenarioPrimitiveSchema).max(50).optional(),
+	})
+	.refine(
+		(variable) =>
+			variable.defaultValue === undefined ||
+			typeof variable.defaultValue === variable.type,
+		{ message: 'Scenario variable defaults must match their declared type.' }
+	);
+const scenarioDefinitionSummarySchema = z.strictObject({
+	id: identifierSchema,
+	version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	definitionToken: identifierSchema,
+	name: shortTextSchema,
+	description: z
+		.string()
+		.max(16 * 1024)
+		.optional(),
+	bundled: z.boolean(),
+	variables: z
+		.array(scenarioVariableSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioVariables),
+	preconditionCount: boundedCountSchema,
+	steps: z
+		.array(
+			z.strictObject({
+				id: identifierSchema,
+				type: scenarioStepTypeSchema,
+				label: shortTextSchema.optional(),
+			})
+		)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioSteps),
+});
+export type ScenarioDefinitionSummary = z.infer<typeof scenarioDefinitionSummarySchema>;
+const activeScenarioSchema = z.strictObject({
+	receiptId: identifierSchema,
+	scenarioId: identifierSchema,
+	scenarioVersion: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	scenarioName: shortTextSchema,
+	activatedAt: timestampSchema,
+	stepCount: boundedCountSchema,
+	privileged: z.boolean(),
+	warnings: z.array(shortTextSchema).max(100),
+	recoveryRequired: z.boolean(),
+});
+const scenarioRuntimeSchema = z.strictObject({
+	running: z.boolean(),
+	recoveryError: longTextSchema.optional(),
+	active: activeScenarioSchema.optional(),
+});
+const scenarioStepReceiptSchema = z.strictObject({
+	stepId: identifierSchema,
+	stepType: scenarioStepTypeSchema,
+	label: shortTextSchema,
+	preflight: z.enum(['pending', 'passed', 'failed']),
+	apply: z.enum(['not-run', 'succeeded', 'failed']),
+	rollback: z.enum(['not-needed', 'succeeded', 'failed']),
+	reversible: z.boolean().optional(),
+	privileged: z.boolean().optional(),
+	warnings: z.array(shortTextSchema).max(100).optional(),
+	summary: shortTextSchema.optional(),
+	error: longTextSchema.optional(),
+	rollbackError: longTextSchema.optional(),
+});
+const scenarioReceiptSchema = z.strictObject({
+	id: identifierSchema,
+	scenarioId: identifierSchema,
+	scenarioVersion: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	scenarioName: shortTextSchema,
+	startedAt: timestampSchema,
+	completedAt: timestampSchema,
+	status: z.enum(['complete', 'preflight-failed', 'rolled-back', 'needs-attention']),
+	error: longTextSchema.optional(),
+	stepResults: z
+		.array(scenarioStepReceiptSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioSteps),
+});
+
+const identitySchema = z
+	.strictObject({
+		kind: z.enum(['signed-out', 'account', 'persona']),
+		label: shortTextSchema,
+		personaId: identifierSchema.optional(),
+	})
+	.refine(
+		(identity) =>
+			identity.kind === 'persona'
+				? identity.personaId !== undefined
+				: identity.personaId === undefined,
+		{ message: 'Only persona identities may include a persona identifier.' }
+	);
+const identitySessionSchema = z.strictObject({
+	running: z.boolean(),
+	active: z
+		.strictObject({
+			historyId: identifierSchema,
+			startedAt: timestampSchema,
+			actor: identitySchema,
+			target: identitySchema,
+			status: z.enum(['active', 'needs-attention']),
+			error: longTextSchema.optional(),
+		})
+		.optional(),
+	history: z
+		.array(
+			z.strictObject({
+				id: identifierSchema,
+				startedAt: timestampSchema,
+				stoppedAt: timestampSchema.optional(),
+				actor: identitySchema,
+				target: identitySchema,
+				status: z.enum(['active', 'stopped', 'needs-attention']),
+				error: longTextSchema.optional(),
+			})
+		)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.identityHistory),
+	personas: z
+		.array(
+			z.strictObject({
+				id: identifierSchema,
+				label: shortTextSchema,
+				note: shortTextSchema,
+			})
+		)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.identityPersonas),
+});
+
 const componentTargetSchema = z.strictObject({
 	id: identifierSchema,
+	targetId: identifierSchema.optional(),
+	parentId: identifierSchema.optional(),
+	depth: z.number().int().min(0).max(100).optional(),
+	zIndex: z.number().finite().min(-100_000).max(100_000).optional(),
 	name: shortTextSchema,
 	kind: shortTextSchema,
 	feature: optionalTextSchema,
@@ -353,15 +711,130 @@ const componentTargetSchema = z.strictObject({
 		})
 		.nullable(),
 	isFocused: z.boolean(),
+	accessibilityLabel: optionalTextSchema,
+	accessibilityHint: optionalTextSchema,
+	accessibilityRole: optionalTextSchema,
+	accessibilityValue: optionalTextSchema,
+	accessibilityState: z
+		.record(shortTextSchema, z.union([z.boolean(), shortTextSchema]))
+		.refine((state) => Object.keys(state).length <= 50, {
+			message: 'Accessibility state cannot contain more than 50 fields.',
+		})
+		.optional(),
+	styleText: longTextSchema.optional(),
+	styleTruncated: z.boolean().optional(),
+	// Snapshot frames do not repeat the negotiated hello version. Keep these
+	// optional so supported v1 sessions continue through the same bounded parser.
+	actions: z
+		.array(z.enum(['activate', 'focus', 'setText', 'scroll']))
+		.max(4)
+		.optional(),
+	screenHash: identifierSchema.optional(),
 });
 export type ComponentTarget = z.infer<typeof componentTargetSchema>;
+
+const componentRenderSchema = z.strictObject({
+	id: identifierSchema,
+	targetId: identifierSchema,
+	at: timestampSchema,
+	phase: z.enum(['mount', 'update', 'nested-update']),
+	actualDuration: z.number().finite().nonnegative().max(60_000),
+	baseDuration: z.number().finite().nonnegative().max(60_000),
+	startTime: timestampSchema,
+	commitTime: timestampSchema,
+	renderCount: z.number().int().positive().max(1_000_000_000),
+	cause: z.enum(['mount', 'props', 'tracked-state', 'parent', 'unknown']),
+	changedKeys: z.array(shortTextSchema).max(20),
+});
 
 const componentSummarySchema = z.strictObject({
 	sourceTargetCount: boundedCountSchema,
 	omittedTargetCount: boundedCountSchema,
 	truncated: z.boolean(),
+	screenHash: identifierSchema.optional(),
+	registrationDiagnostics: z
+		.array(
+			z.strictObject({
+				code: z.enum(['duplicate-target-id', 'orphan-parent', 'invalid-hierarchy']),
+				targetId: identifierSchema,
+				instanceIds: z
+					.array(identifierSchema)
+					.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.components),
+				message: longTextSchema,
+			})
+		)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.componentDiagnostics)
+		.optional(),
 	error: longTextSchema.optional(),
 });
+const cameraFixtureSchema = z
+	.strictObject({
+		active: z.boolean(),
+		kind: z.enum(['still', 'qr', 'video', 'unavailable', 'error']).optional(),
+		label: shortTextSchema.optional(),
+		mimeType: z
+			.enum(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'])
+			.optional(),
+		bytes: z
+			.number()
+			.int()
+			.nonnegative()
+			.max(384 * 1024)
+			.optional(),
+		width: z.number().int().positive().max(16_384).optional(),
+		height: z.number().int().positive().max(16_384).optional(),
+		durationMs: z
+			.number()
+			.int()
+			.positive()
+			.max(10 * 60 * 1_000)
+			.optional(),
+	})
+	.refine(
+		(fixture) => {
+			const details = [
+				fixture.kind,
+				fixture.label,
+				fixture.mimeType,
+				fixture.bytes,
+				fixture.width,
+				fixture.height,
+				fixture.durationMs,
+			];
+			if (!fixture.active) return details.every((value) => value === undefined);
+			if (!fixture.kind) return false;
+			if (fixture.kind === 'unavailable' || fixture.kind === 'error') {
+				return (
+					fixture.mimeType === undefined &&
+					fixture.bytes === undefined &&
+					fixture.width === undefined &&
+					fixture.height === undefined &&
+					fixture.durationMs === undefined
+				);
+			}
+			const hasMedia =
+				fixture.mimeType !== undefined &&
+				fixture.bytes !== undefined &&
+				fixture.bytes > 0 &&
+				fixture.width !== undefined &&
+				fixture.height !== undefined;
+			if (!hasMedia) return false;
+			if (fixture.kind === 'video') {
+				return (
+					(fixture.mimeType === 'video/mp4' ||
+						fixture.mimeType === 'video/quicktime') &&
+					fixture.durationMs !== undefined
+				);
+			}
+			return (
+				(fixture.mimeType === 'image/jpeg' ||
+					fixture.mimeType === 'image/png' ||
+					fixture.mimeType === 'image/webp') &&
+				fixture.durationMs === undefined
+			);
+		},
+		{ message: 'Camera fixture metadata is inconsistent.' }
+	);
 const diagnosticEntrySchema = z.strictObject({
 	id: identifierSchema,
 	at: timestampSchema,
@@ -373,6 +846,14 @@ export type DiagnosticEntry = z.infer<typeof diagnosticEntrySchema>;
 
 const deviceToolsObjectSchema = z.strictObject({
 	network: z.array(networkEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.network),
+	networkProfile: z
+		.strictObject({
+			id: z.enum(networkSimulationProfileIds),
+			name: shortTextSchema,
+			active: z.boolean(),
+			scope: z.literal('instrumented-fetch'),
+		})
+		.optional(),
 	console: z.array(consoleEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.console),
 	storage: z.array(storageEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storage),
 	storageEvents: z
@@ -382,6 +863,7 @@ const deviceToolsObjectSchema = z.strictObject({
 	queries: z.array(queryEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.queries),
 	mutations: z.array(mutationEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.mutations),
 	querySummary: querySummarySchema,
+	querySimulation: querySimulationSchema.optional(),
 	routes: z.array(routeEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routes),
 	routeEvents: z.array(routeEventSchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routeEvents),
 	environment: z
@@ -393,15 +875,46 @@ const deviceToolsObjectSchema = z.strictObject({
 	zustandChanges: z
 		.array(zustandChangeSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChanges),
+	zustandStateSnapshots: z
+		.array(zustandStateSnapshotSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandStateSnapshots)
+		.default([]),
+	zustandMutationReceipts: z
+		.array(zustandMutationReceiptSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandMutationReceipts)
+		.default([]),
 	zustandSummary: zustandSummarySchema,
 	restorePoints: z
 		.array(restorePointSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restorePoints),
+	restoreReceipts: z
+		.array(restoreReceiptSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreReceipts)
+		.default([]),
+	scenarios: z
+		.array(scenarioDefinitionSummarySchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarios)
+		.default([]),
+	scenarioRuntime: scenarioRuntimeSchema.default({ running: false }),
+	scenarioReceipts: z
+		.array(scenarioReceiptSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioReceipts)
+		.default([]),
+	identitySession: identitySessionSchema.default({
+		running: false,
+		history: [],
+		personas: [],
+	}),
 	performance: performanceReviewSchema,
 	components: z
 		.array(componentTargetSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.components),
+	componentRenders: z
+		.array(componentRenderSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.componentRenders)
+		.default([]),
 	componentSummary: componentSummarySchema,
+	cameraFixture: cameraFixtureSchema.default({ active: false }),
 	diagnostics: z
 		.array(diagnosticEntrySchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.diagnostics),
@@ -428,11 +941,16 @@ function scrubSensitiveStorage(
 				editable: false,
 			};
 		}),
-		storageEvents: tools.storageEvents.map((event) =>
-			sensitiveAdapterIds.has(event.adapterId)
-				? { ...event, previousText: undefined, nextText: undefined }
-				: event
-		),
+		storageEvents: tools.storageEvents.map((event) => ({
+			...event,
+			...(sensitiveAdapterIds.has(event.adapterId)
+				? { previousText: undefined, nextText: undefined, structuralDiff: undefined }
+				: {
+						structuralDiff: event.structuralDiff
+							? [...event.structuralDiff]
+							: undefined,
+					}),
+		})),
 	};
 }
 
@@ -466,12 +984,19 @@ export function createEmptyDeviceTools(): DeviceTools {
 		environment: [],
 		zustandStores: [],
 		zustandChanges: [],
+		zustandStateSnapshots: [],
+		zustandMutationReceipts: [],
 		zustandSummary: {
 			totalStoreCount: 0,
 			omittedStoreCount: 0,
 			truncated: false,
 		},
 		restorePoints: [],
+		restoreReceipts: [],
+		scenarios: [],
+		scenarioRuntime: { running: false },
+		scenarioReceipts: [],
+		identitySession: { running: false, history: [], personas: [] },
 		performance: {
 			isActive: false,
 			startedAt: null,
@@ -490,11 +1015,15 @@ export function createEmptyDeviceTools(): DeviceTools {
 			},
 		},
 		components: [],
+		componentRenders: [],
 		componentSummary: {
 			sourceTargetCount: 0,
 			omittedTargetCount: 0,
 			truncated: false,
+			screenHash: 'empty',
+			registrationDiagnostics: [],
 		},
+		cameraFixture: { active: false },
 		diagnostics: [],
 	};
 }
@@ -530,7 +1059,10 @@ export type DesktopState = z.infer<typeof desktopStateSchema>;
 
 export const deviceHelloMessageSchema = z.strictObject({
 	type: z.literal('hello'),
-	protocolVersion: z.literal(DESKTOP_PROTOCOL_VERSION),
+	protocolVersion: z.union([
+		z.literal(DESKTOP_SUPPORTED_PROTOCOL_VERSIONS[0]),
+		z.literal(DESKTOP_SUPPORTED_PROTOCOL_VERSIONS[1]),
+	]),
 	device: deviceInfoSchema,
 });
 

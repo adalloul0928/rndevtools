@@ -1,5 +1,15 @@
 import { Button } from '@heroui/react/button';
-import { Eye, History, RefreshCw, ShieldCheck, Store } from 'lucide-react';
+import { TextArea } from '@heroui/react/textarea';
+import {
+	Camera,
+	Eye,
+	History,
+	RefreshCw,
+	RotateCcw,
+	Save,
+	ShieldCheck,
+	Store,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
 	CodePreview,
@@ -20,9 +30,12 @@ export function ZustandPanel() {
 	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
 	const stores = selectedDevice?.tools.zustandStores ?? [];
 	const changes = selectedDevice?.tools.zustandChanges ?? [];
+	const stateSnapshots = selectedDevice?.tools.zustandStateSnapshots ?? [];
+	const mutationReceipts = selectedDevice?.tools.zustandMutationReceipts ?? [];
 	const summary = selectedDevice?.tools.zustandSummary;
 	const [query, setQuery] = useState('');
 	const [selectedId, setSelectedId] = useState<string | null>(stores[0]?.id ?? null);
+	const [patchDrafts, setPatchDrafts] = useState<Record<string, string>>({});
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
 		return stores.filter(
@@ -46,16 +59,24 @@ export function ZustandPanel() {
 		.filter((change) => selected && change.storeId === selected.id)
 		.sort((left, right) => right.at - left.at);
 	const selectedChanges = allSelectedChanges.slice(0, MAX_RENDERED_CHANGES);
+	const selectedSnapshots = stateSnapshots
+		.filter((snapshot) => selected && snapshot.storeId === selected.id)
+		.sort((left, right) => right.createdAt - left.createdAt);
+	const selectedReceipts = mutationReceipts
+		.filter((receipt) => selected && receipt.storeId === selected.id)
+		.sort((left, right) => right.completedAt - left.completedAt)
+		.slice(0, 20);
+	const patchDraft = selected ? (patchDrafts[selected.id] ?? '{}') : '{}';
 
 	return (
 		<section className="panel-root">
 			<PanelHeader
 				eyebrow="State"
 				title="Zustand"
-				description="Read-only projections from stores the app explicitly registered for diagnostics—never a blind global store crawl."
+				description="Explicit privacy-safe projections, with validated reversible edits only for stores that opt in—never a blind global store crawl."
 				meta={
 					<span className="flex items-center gap-1.5 text-emerald-300">
-						<ShieldCheck className="h-3 w-3" /> Explicit registry · privacy-safe
+						<ShieldCheck className="h-3 w-3" /> Explicit registry · rollback verified
 					</span>
 				}
 				actions={
@@ -121,7 +142,11 @@ export function ZustandPanel() {
 											{store.title}
 										</span>
 										<StatusPill tone={store.error ? 'danger' : 'success'} dot>
-											{store.error ? 'Error' : 'Live'}
+											{store.error
+												? 'Error'
+												: store.capabilities.restorable
+													? 'Reversible'
+													: 'Read only'}
 										</StatusPill>
 									</div>
 									<p className="mb-0 mt-1.5 line-clamp-2 text-[10px] leading-4 text-(--text-3)">
@@ -149,7 +174,8 @@ export function ZustandPanel() {
 									</h2>
 								</div>
 								<div className="flex items-center gap-1.5 text-[10px] text-(--text-3)">
-									<Eye className="h-3.5 w-3.5" /> Read only
+									<Eye className="h-3.5 w-3.5" />{' '}
+									{selected.capabilities.restorable ? 'Reversible edits' : 'Read only'}
 								</div>
 							</div>
 							<dl className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] px-3">
@@ -158,6 +184,10 @@ export function ZustandPanel() {
 								<KeyValue
 									label="Last change"
 									value={formatRelativeTime(selected.updatedAt)}
+								/>
+								<KeyValue
+									label="Persistence"
+									value={selected.capabilities.persisted ? 'Persisted' : 'Memory only'}
 								/>
 							</dl>
 							<CodePreview
@@ -171,6 +201,97 @@ export function ZustandPanel() {
 									role="alert"
 								>
 									{selected.error}
+								</div>
+							) : null}
+							{selected.capabilities.restorable ? (
+								<div className="mt-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
+									<div className="mb-2 flex items-center justify-between gap-3">
+										<span className="text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+											Validated JSON patch
+										</span>
+										<Button
+											isDisabled={!canRunAction('zustand', 'capture')}
+											size="sm"
+											variant="secondary"
+											onPress={() =>
+												void runAction(
+													'zustand',
+													'capture',
+													{ storeId: selected.id },
+													'Zustand state captured.'
+												)
+											}
+										>
+											<Camera className="h-3.5 w-3.5" /> Capture state
+										</Button>
+									</div>
+									<TextArea
+										aria-label={`JSON patch for ${selected.title}`}
+										className="min-h-32 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-[11px] leading-5 text-(--foreground) outline-none focus:border-white/25"
+										value={patchDraft}
+										onChange={(event) => {
+											if (!selected) return;
+											const value = event.currentTarget.value;
+											setPatchDrafts((current) => ({
+												...current,
+												[selected.id]: value,
+											}));
+										}}
+									/>
+									<div className="mt-3 flex justify-end">
+										<Button
+											isDisabled={
+												!canRunAction('zustand', 'patch') || !patchDraft.trim()
+											}
+											size="sm"
+											variant="primary"
+											onPress={() =>
+												void runAction(
+													'zustand',
+													'patch',
+													{ storeId: selected.id, patchText: patchDraft },
+													'Zustand patch applied and verified.'
+												)
+											}
+										>
+											<Save className="h-3.5 w-3.5" /> Apply patch
+										</Button>
+									</div>
+									{selectedSnapshots.length > 0 ? (
+										<div className="mt-4 border-t border-white/8 pt-3">
+											<p className="mb-2 mt-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+												Captured states
+											</p>
+											<div className="space-y-2">
+												{selectedSnapshots.slice(0, 5).map((snapshot) => (
+													<div
+														className="flex items-center justify-between gap-3 rounded border border-white/8 px-2.5 py-2"
+														key={snapshot.id}
+													>
+														<span className="font-mono text-[9px] text-(--text-3)">
+															{formatClock(snapshot.createdAt)} · {snapshot.stateBytes}{' '}
+															B
+														</span>
+														<Button
+															isDisabled={!canRunAction('zustand', 'jump')}
+															size="sm"
+															variant="secondary"
+															onPress={() =>
+																void runAction(
+																	'zustand',
+																	'jump',
+																	{ storeId: selected.id, snapshotId: snapshot.id },
+																	'Zustand state restored and verified.'
+																)
+															}
+														>
+															<RotateCcw className="h-3.5 w-3.5" /> Restore
+														</Button>
+													</div>
+												))}
+											</div>
+										</div>
+									) : null}
 								</div>
 							) : null}
 							<div className="mt-4 flex flex-wrap gap-1.5">
@@ -240,6 +361,41 @@ export function ZustandPanel() {
 							))}
 						</div>
 					)}
+					{selectedReceipts.length > 0 ? (
+						<div className="mt-5 border-t border-white/8 pt-4">
+							<div className="mb-3 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+								Mutation receipts
+							</div>
+							<div className="space-y-2">
+								{selectedReceipts.map((receipt) => (
+									<div
+										className="rounded-lg border border-white/8 bg-white/[0.025] p-3"
+										key={receipt.id}
+									>
+										<div className="flex items-center justify-between gap-2">
+											<span className="text-[10px] font-medium text-(--foreground)">
+												{receipt.kind}
+											</span>
+											<StatusPill
+												tone={receipt.status === 'succeeded' ? 'success' : 'danger'}
+											>
+												{receipt.status}
+											</StatusPill>
+										</div>
+										<p className="mb-0 mt-2 font-mono text-[9px] text-(--text-3)">
+											{formatClock(receipt.completedAt)} ·{' '}
+											{receipt.changedKeys.join(', ') || 'no projected changes'}
+										</p>
+										{receipt.error ? (
+											<p className="mb-0 mt-2 text-[10px] leading-4 text-red-300">
+												{receipt.error}
+											</p>
+										) : null}
+									</div>
+								))}
+							</div>
+						</div>
+					) : null}
 				</aside>
 			</div>
 		</section>

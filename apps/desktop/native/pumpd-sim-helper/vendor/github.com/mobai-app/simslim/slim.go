@@ -1,0 +1,158 @@
+package simslim
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Reporter receives human-readable progress lines. A nil Reporter is a no-op,
+// so non-interactive callers can ignore progress entirely.
+type Reporter func(string)
+
+func (r Reporter) report(msg string) {
+	if r != nil {
+		r(msg)
+	}
+}
+
+// ensure brings the device to exactly the desired disabled state and boots it.
+// The disabled overrides persist in the device's launchd DB, so once set a slim
+// device comes up slim in a single boot; a reboot only happens when the state
+// actually changes. A non-empty profile is rejected before boot on runtimes
+// without persistent overrides. Each slow phase reports progress so the caller
+// can show the user that a multi-minute reconfigure is still working.
+func ensure(ctx context.Context, set, udid string, desired map[string]bool, report Reporter) (changed bool, err error) {
+	if len(desired) > 0 {
+		d, err := FindDevice(ctx, udid, set)
+		if err != nil {
+			return false, err
+		}
+		if !persistentOverridesSupported(d.OSVersion) {
+			return false, fmt.Errorf("iOS %s runtime cannot persist launchd disable overrides across reboot; simslim requires iOS 18.5 or newer", d.OSVersion)
+		}
+	}
+	report.report("Booting the simulator (a first boot can take up to a minute)...")
+	if err := BootAndWait(ctx, set, udid); err != nil {
+		return false, err
+	}
+	current, err := readDisabled(ctx, set, udid)
+	if err != nil {
+		return false, err
+	}
+	toDisable, toEnable := delta(current, desired, managedSet())
+	if len(toDisable) == 0 && len(toEnable) == 0 {
+		return false, nil
+	}
+	if len(toDisable) > 0 {
+		report.report(fmt.Sprintf("Disabling %d background services...", len(toDisable)))
+	}
+	if len(toEnable) > 0 {
+		report.report(fmt.Sprintf("Re-enabling %d background services...", len(toEnable)))
+	}
+	if err := applyDelta(ctx, set, udid, toDisable, toEnable, report); err != nil {
+		return true, err
+	}
+	report.report("Rebooting the simulator to apply the changes...")
+	if err := Shutdown(ctx, set, udid); err != nil {
+		return true, fmt.Errorf("shutdown before reboot: %w", err)
+	}
+	if err := WaitShutdown(ctx, set, udid, ShutdownTimeout); err != nil {
+		return true, err
+	}
+	if err := BootAndWait(ctx, set, udid); err != nil {
+		return true, err
+	}
+	after, err := readDisabled(ctx, set, udid)
+	if err != nil {
+		return true, err
+	}
+	if lost := countLost(after, desired, managedSet()); lost > 0 {
+		return true, fmt.Errorf("the disable overrides did not survive the reboot (%d of %d changes lost)", lost, len(toDisable)+len(toEnable))
+	}
+	return true, nil
+}
+
+// countLost reports how many of the desired managed transitions are not
+// reflected in the state read back after the reboot.
+func countLost(after, desired, managed map[string]bool) int {
+	toDisable, toEnable := delta(after, desired, managed)
+	return len(toDisable) + len(toEnable)
+}
+
+func persistentOverridesSupported(version string) bool {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return false
+	}
+	major, majorErr := strconv.Atoi(parts[0])
+	minor, minorErr := strconv.Atoi(parts[1])
+	return majorErr == nil && minorErr == nil && (major > 18 || major == 18 && minor >= 5)
+}
+
+// enableSlim disables the profile's daemons and boots the device slim.
+func EnableSlim(ctx context.Context, set, udid string, p Profile, report Reporter) (bool, error) {
+	return ensure(ctx, set, udid, p.Desired(), report)
+}
+
+// disableSlim re-enables every managed daemon, returning the device to stock.
+func DisableSlim(ctx context.Context, set, udid string, report Reporter) (bool, error) {
+	return ensure(ctx, set, udid, map[string]bool{}, report)
+}
+
+// Status describes how slim a device currently is.
+type Status struct {
+	ManagedDisabled int  `json:"managedDisabled"` // managed labels currently disabled
+	ManagedTotal    int  `json:"managedTotal"`    // size of the managed universe
+	Booted          bool `json:"booted"`
+}
+
+// status reports how slim a device is and returns the labels it currently has
+// disabled (nil when the device is not booted).
+func ReadStatus(ctx context.Context, udid string) (Status, map[string]bool, error) {
+	d, err := FindDevice(ctx, udid, "")
+	if err != nil {
+		return Status{}, nil, err
+	}
+	return ReadStatusForDevice(ctx, d)
+}
+
+func ReadStatusForDevice(ctx context.Context, d Device) (Status, map[string]bool, error) {
+	managed := SlimmableSet()
+	st := Status{ManagedTotal: len(managed), Booted: d.State == "Booted"}
+	if !st.Booted {
+		return st, nil, fmt.Errorf("simulator must be booted to read its state (it is %s)", d.State)
+	}
+	disabled, err := readDisabled(ctx, d.Set, d.UDID)
+	if err != nil {
+		return st, nil, err
+	}
+	for l := range disabled {
+		if managed[l] {
+			st.ManagedDisabled++
+		}
+	}
+	return st, disabled, nil
+}
+
+// droppedCategories groups the disabled managed daemons by category, in category
+// order, omitting categories with nothing disabled.
+func DroppedCategories(disabled map[string]bool) []DroppedCategory {
+	var out []DroppedCategory
+	for _, c := range Categories {
+		var labels []string
+		for _, l := range c.Labels {
+			if disabled[l] {
+				labels = append(labels, l)
+			}
+		}
+		if len(labels) == 0 {
+			continue
+		}
+		sort.Strings(labels)
+		out = append(out, DroppedCategory{ID: c.ID, Name: c.Name, Downside: c.Downside, Labels: labels})
+	}
+	return out
+}

@@ -43,9 +43,12 @@ import type {
 } from '../types';
 import {
 	type DevToolsStorageAdapter,
+	diffStorageValues,
 	normalizeStorageConfiguration,
+	parseStorageDraft,
 	type StorageAdapterSnapshot,
 	type StorageChangeEvent,
+	type StorageEntrySnapshot,
 	type StorageKeyRule,
 	type StorageSnapshot,
 	snapshotStorageAdapter,
@@ -54,15 +57,19 @@ import {
 
 export type {
 	DevToolsStorageAdapter,
+	StorageAdapterCapabilities,
 	StorageAdapterSnapshot,
 	StorageChangeEvent,
 	StorageEntrySnapshot,
 	StorageKeyRule,
+	StorageRegisteredKey,
 	StorageSnapshot,
 	StorageSnapshotLimits,
+	StorageStructuralDiffEntry,
 	StorageValidationResult,
 } from './storage-model';
 export {
+	diffStorageValues,
 	isStorageEntryEditable,
 	parseStorageDraft,
 	validateStorageSnapshot,
@@ -89,6 +96,8 @@ export type StoragePlugin = {
 	getSnapshot: () => StorageSnapshot;
 	getEvents: () => readonly StorageChangeEvent[];
 	clearEvents: () => void;
+	toggleEventBookmark: (eventId: number) => void;
+	undoEvent: (eventId: number) => Promise<boolean>;
 };
 
 const MAX_VALUE_BYTES = 1024 * 1024;
@@ -169,12 +178,40 @@ export function createStoragePlugin({
 	let subscriptions: Array<() => void> = [];
 	let lifecycleGeneration = 0;
 	let nextEventId = 1;
+	const undoRetentionMs = 10 * 60 * 1_000;
 	const adapterBaselines = new Set<string>();
+	const eventLifecycles = new Map<number, number>();
+	const undoInFlight = new Set<number>();
 	let refreshInFlight: Promise<void> | undefined;
 	let refreshRequested = false;
 	const stopLoading = (): void => {
 		const snapshot = store.getSnapshot();
 		if (snapshot.loading) store.set({ ...snapshot, loading: false });
+	};
+	const canRestoreEntryValue = (
+		entry: StorageEntrySnapshot | undefined,
+	): entry is StorageEntrySnapshot & { value: string } =>
+		entry !== undefined &&
+		!entry.valueHidden &&
+		!entry.truncated &&
+		!entry.redacted &&
+		!entry.binary &&
+		!entry.readError &&
+		entry.value !== undefined;
+	const appendEvent = (event: Omit<StorageChangeEvent, 'id'>): void => {
+		const id = nextEventId++;
+		eventStore.append({ id, ...event });
+		eventLifecycles.set(id, lifecycleGeneration);
+		const retainedIds = new Set(
+			eventStore.getSnapshot().map((candidate) => candidate.id),
+		);
+		for (const retainedId of eventLifecycles.keys()) {
+			if (!retainedIds.has(retainedId)) eventLifecycles.delete(retainedId);
+		}
+	};
+	const clearEvents = (): void => {
+		eventLifecycles.clear();
+		eventStore.clear();
 	};
 
 	const recordChanges = (previous: StorageSnapshot, next: StorageSnapshot) => {
@@ -208,30 +245,48 @@ export function createStoragePlugin({
 					old.valueHidden !== entry.valueHidden ||
 					old.readError !== entry.readError
 				) {
-					eventStore.append({
-						id: nextEventId++,
+					appendEvent({
 						at: Date.now(),
 						adapterId: adapter.id,
 						adapterTitle: adapter.title,
 						key: entry.key,
 						type: old ? 'updated' : 'added',
 						previousValue: entry.valueHidden ? undefined : old?.value,
+						previousValueType: entry.valueHidden ? undefined : old?.valueType,
 						value: entry.valueHidden ? undefined : entry.value,
+						valueType: entry.valueHidden ? undefined : entry.valueType,
 						valueHidden: entry.valueHidden,
+						undoAvailable: old
+							? canRestoreEntryValue(old) &&
+								adapter.capabilities?.writable === true
+							: adapter.capabilities?.deletable === true,
+						undoExpiresAt: Date.now() + undoRetentionMs,
+						undoStatus: 'available',
+						structuralDiff: entry.valueHidden
+							? undefined
+							: diffStorageValues(old?.value, entry.value),
 					});
 				}
 			}
 			for (const old of oldEntries.values()) {
 				if (!newEntries.has(old.key))
-					eventStore.append({
-						id: nextEventId++,
+					appendEvent({
 						at: Date.now(),
 						adapterId: adapter.id,
 						adapterTitle: adapter.title,
 						key: old.key,
 						type: 'removed',
 						previousValue: old.valueHidden ? undefined : old.value,
+						previousValueType: old.valueHidden ? undefined : old.valueType,
 						valueHidden: old.valueHidden,
+						undoAvailable:
+							canRestoreEntryValue(old) &&
+							adapter.capabilities?.writable === true,
+						undoExpiresAt: Date.now() + undoRetentionMs,
+						undoStatus: 'available',
+						structuralDiff: old.valueHidden
+							? undefined
+							: diffStorageValues(old.value, undefined),
 					});
 			}
 		}
@@ -380,7 +435,8 @@ export function createStoragePlugin({
 				onBack={browsing ? () => setOpenAdapterId(null) : onBack}
 				title={browsing ? browsing.snapshot.title : title}
 				trailing={
-					browsing?.adapter.clear ? (
+					browsing?.adapter.clear &&
+					(browsing.snapshot.capabilities?.clearable ?? true) ? (
 						<NavIconButton
 							accessibilityLabel={`Clear ${browsing.snapshot.title}`}
 							destructive
@@ -404,7 +460,7 @@ export function createStoragePlugin({
 							accessibilityLabel="Clear activity"
 							destructive
 							onPress={() =>
-								runMutation('Clear storage activity', eventStore.clear, {
+								runMutation('Clear storage activity', clearEvents, {
 									title: 'Clear recorded activity?',
 									message:
 										'The captured reads and writes are only held in memory, so this cannot be undone.',
@@ -671,7 +727,12 @@ export function createStoragePlugin({
 											title={index === 0 ? undefined : ageGroup.title}
 										>
 											{ageGroup.events.map((event) => (
-												<ActivityEventRow event={event} key={event.id} />
+												<ActivityEventRow
+													event={event}
+													key={event.id}
+													onBookmark={() => toggleEventBookmark(event.id)}
+													onUndo={() => void undoEvent(event.id)}
+												/>
 											))}
 										</Section>
 									))
@@ -927,10 +988,127 @@ export function createStoragePlugin({
 					subscriptions = [];
 					refreshRequested = false;
 					adapterBaselines.clear();
-					stopLoading();
+					clearEvents();
+					store.set({ loading: false, adapters: [] });
 				}
 			};
 		},
+	};
+
+	const toggleEventBookmark = (eventId: number): void => {
+		const event = eventStore
+			.getSnapshot()
+			.find((candidate) => candidate.id === eventId);
+		if (!event) return;
+		eventStore.replace((candidate) => candidate.id === eventId, {
+			...event,
+			bookmarked: !event.bookmarked,
+		});
+	};
+
+	const undoEvent = async (eventId: number): Promise<boolean> => {
+		if (undoInFlight.has(eventId)) return false;
+		const generation = lifecycleGeneration;
+		let event = eventStore
+			.getSnapshot()
+			.find((candidate) => candidate.id === eventId);
+		if (
+			!event?.undoAvailable ||
+			event.valueHidden ||
+			eventLifecycles.get(eventId) !== generation
+		) {
+			return false;
+		}
+		if (!event.undoExpiresAt || event.undoExpiresAt <= Date.now()) {
+			eventStore.replace((candidate) => candidate.id === eventId, {
+				...event,
+				undoAvailable: false,
+				undoStatus: 'expired',
+			});
+			return false;
+		}
+		const adapterId = event.adapterId;
+		const adapter = adapters.find((candidate) => candidate.id === adapterId);
+		if (!adapter) return false;
+		undoInFlight.add(eventId);
+		try {
+			await refresh();
+			if (
+				generation !== lifecycleGeneration ||
+				eventLifecycles.get(eventId) !== generation
+			) {
+				return false;
+			}
+			event = eventStore
+				.getSnapshot()
+				.find((candidate) => candidate.id === eventId);
+			if (!event?.undoAvailable || event.valueHidden) return false;
+			const currentAdapter = store
+				.getSnapshot()
+				.adapters.find((candidate) => candidate.id === event?.adapterId);
+			const currentEntry = currentAdapter?.entries.find(
+				(candidate) => candidate.key === event?.key,
+			);
+			const currentStateMatches =
+				currentAdapter !== undefined &&
+				!currentAdapter.error &&
+				!currentAdapter.truncated &&
+				(event.type === 'removed'
+					? currentEntry === undefined
+					: currentEntry !== undefined &&
+						!currentEntry.valueHidden &&
+						!currentEntry.truncated &&
+						!currentEntry.redacted &&
+						!currentEntry.binary &&
+						!currentEntry.readError &&
+						currentEntry.value === event.value &&
+						currentEntry.valueType === event.valueType);
+			if (!currentStateMatches) {
+				eventStore.replace((candidate) => candidate.id === eventId, {
+					...event,
+					undoAvailable: false,
+					undoStatus: 'failed',
+				});
+				return false;
+			}
+			if (event.type === 'added') {
+				if (!adapter.removeValue) return false;
+				await adapter.removeValue(event.key);
+			} else {
+				if (!adapter.setValue || event.previousValue === undefined)
+					return false;
+				const value = adapter.parseValue
+					? adapter.parseValue(
+							event.key,
+							event.previousValue,
+							event.previousValueType ?? 'string',
+						)
+					: parseStorageDraft(
+							event.previousValue,
+							event.previousValueType ?? 'string',
+						);
+				await adapter.setValue(event.key, value);
+			}
+			if (generation !== lifecycleGeneration) return false;
+			eventStore.replace((candidate) => candidate.id === eventId, {
+				...event,
+				undoAvailable: false,
+				undoStatus: 'succeeded',
+			});
+			await refresh();
+			return true;
+		} catch {
+			if (generation === lifecycleGeneration && event) {
+				eventStore.replace((candidate) => candidate.id === eventId, {
+					...event,
+					undoAvailable: false,
+					undoStatus: 'failed',
+				});
+			}
+			return false;
+		} finally {
+			undoInFlight.delete(eventId);
+		}
 	};
 
 	return {
@@ -938,6 +1116,8 @@ export function createStoragePlugin({
 		refresh,
 		getSnapshot: store.getSnapshot,
 		getEvents: eventStore.getSnapshot,
-		clearEvents: eventStore.clear,
+		clearEvents,
+		toggleEventBookmark,
+		undoEvent,
 	};
 }

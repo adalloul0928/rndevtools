@@ -24,6 +24,11 @@ import {
 import { serializeValue, truncateText } from '../core/serialize';
 import { shareDiagnosticContent } from '../core/share';
 import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
+import {
+	assertEnvironmentRules as assertTypedEnvironmentRules,
+	summarizeEnvironmentHealth,
+	validateEnvironmentValues as validateTypedEnvironmentValues,
+} from './environment-model';
 
 const MAX_ENVIRONMENT_RENDERED_VALUE_BYTES = 16 * 1024;
 const MAX_ENVIRONMENT_TEXT_LENGTH = 4 * 1024;
@@ -46,7 +51,7 @@ function formatEnvironmentEntry(key: string, value: unknown): string {
 		: formatEnvironmentValue(value);
 }
 
-export type EnvironmentValueType =
+type EnvironmentValueType =
 	| 'string'
 	| 'number'
 	| 'boolean'
@@ -62,7 +67,7 @@ export type EnvironmentValueRule = {
 	expectedValue?: unknown;
 };
 
-export type EnvironmentValidationStatus =
+type EnvironmentValidationStatus =
 	| 'valid'
 	| 'missing'
 	| 'typeMismatch'
@@ -457,15 +462,17 @@ export function createEnvironmentPlugin({
 		sectionTitles.add(declaredSection.title);
 	}
 	assertEnvironmentRules(declaredSections, rules);
+	assertTypedEnvironmentRules(declaredSections, rules);
 
 	function EnvironmentPanel({ onBack }: { onBack: () => void }) {
-		const validationResults = validateEnvironmentValues(
+		const validationResults = validateTypedEnvironmentValues(
 			declaredSections,
 			rules,
 		);
 		const failing = validationResults.filter(
 			(result) => result.status !== 'valid',
 		);
+		const health = summarizeEnvironmentHealth(validationResults);
 		const exportValue = sanitizeDiagnosticValue(
 			Object.fromEntries(
 				declaredSections.map((declared) => [declared.title, declared.values]),
@@ -513,6 +520,9 @@ export function createEnvironmentPlugin({
 												: `${validationResults.length} of ${validationResults.length} checks passing`
 										}
 									/>
+									<LabeledContent label="Health score">
+										<UIText>{health.score}%</UIText>
+									</LabeledContent>
 									{failing.map((result) => (
 										<DisclosureGroup
 											key={`${result.section ?? '*'}:${result.key}`}
@@ -569,6 +579,10 @@ export function createEnvironmentPlugin({
 					<AndroidPanelScroll>
 						{validationResults.length > 0 ? (
 							<AndroidPanelSection title="Health">
+								<AndroidPanelRow
+									label="Health score"
+									value={`${health.score}%`}
+								/>
 								<AndroidPanelRow
 									label={
 										failing.length > 0

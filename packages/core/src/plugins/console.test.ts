@@ -101,6 +101,111 @@ describe('createConsolePlugin', () => {
 		expect(diagnostics.getEvents()[0]?.message).toBe('second');
 	});
 
+	it('groups identical structured logs inside the grouping window', () => {
+		let listener: ((event: ConsoleLogInput) => void) | undefined;
+		const diagnostics = createConsolePlugin({
+			groupingWindowMs: 500,
+			source: {
+				subscribe: (nextListener) => {
+					listener = nextListener;
+					return () => {};
+				},
+			},
+		});
+		diagnostics.plugin.install?.();
+		const repeated: ConsoleLogInput = {
+			at: 1_000,
+			level: 'warn',
+			message: 'Retrying request',
+			scope: 'network.retry',
+			correlationId: 'request-42',
+			attributes: { attempt: 1 },
+		};
+		listener?.(repeated);
+		listener?.({ ...repeated, at: 1_250 });
+		listener?.({ ...repeated, at: 2_000 });
+
+		expect(diagnostics.getEvents()).toHaveLength(2);
+		expect(diagnostics.getEvents()[0]).toMatchObject({
+			firstAt: 1_000,
+			lastAt: 1_250,
+			at: 1_250,
+			repeatCount: 2,
+			scope: 'network.retry',
+			correlationId: 'request-42',
+		});
+		expect(diagnostics.getEvents()[1]).toMatchObject({
+			firstAt: 2_000,
+			lastAt: 2_000,
+			repeatCount: 1,
+		});
+	});
+
+	it('captures supplied error and source metadata after bounding and redaction', () => {
+		let listener: ((event: ConsoleLogInput) => void) | undefined;
+		const diagnostics = createConsolePlugin({
+			maxStackBytes: 256,
+			source: {
+				subscribe: (nextListener) => {
+					listener = nextListener;
+					return () => {};
+				},
+			},
+		});
+		diagnostics.plugin.install?.();
+		listener?.({
+			level: 'error',
+			message: 'Request failed',
+			error: {
+				name: 'NetworkError',
+				stack:
+					'NetworkError: Bearer top-secret\n at fetch (person@example.com:1:2)',
+			},
+			sourceLocation: {
+				file: '/src/network/client.ts?token=source-secret',
+				line: 42,
+				column: 7,
+			},
+		});
+
+		const captured = diagnostics.getEvents()[0];
+		expect(captured).toMatchObject({
+			errorName: 'NetworkError',
+			sourceLocation: { line: 42, column: 7 },
+			repeatCount: 1,
+		});
+		expect(JSON.stringify(captured)).not.toContain('top-secret');
+		expect(JSON.stringify(captured)).not.toContain('person@example.com');
+		expect(JSON.stringify(captured)).not.toContain('source-secret');
+	});
+
+	it('bookmarks retained events and removes stale bookmarks on eviction or clear', () => {
+		let listener: ((event: ConsoleLogInput) => void) | undefined;
+		const diagnostics = createConsolePlugin({
+			maxEvents: 1,
+			source: {
+				subscribe: (nextListener) => {
+					listener = nextListener;
+					return () => {};
+				},
+			},
+		});
+		diagnostics.plugin.install?.();
+		listener?.({ level: 'info', message: 'first' });
+		expect(diagnostics.toggleBookmark(1)).toBe(true);
+		expect(diagnostics.getBookmarkedEventIds()).toEqual([1]);
+		expect(diagnostics.toggleBookmark(1)).toBe(false);
+		expect(diagnostics.getBookmarkedEventIds()).toEqual([]);
+		diagnostics.toggleBookmark(1);
+
+		listener?.({ level: 'warn', message: 'second' });
+		expect(diagnostics.getBookmarkedEventIds()).toEqual([]);
+		expect(diagnostics.toggleBookmark(1)).toBe(false);
+		expect(diagnostics.toggleBookmark(2)).toBe(true);
+		diagnostics.clear();
+		expect(diagnostics.getBookmarkedEventIds()).toEqual([]);
+	});
+
 	it('ignores source callbacks retained after disposal', () => {
 		const listeners: Array<(event: ConsoleLogInput) => void> = [];
 		const diagnostics = createConsolePlugin({

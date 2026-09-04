@@ -394,6 +394,392 @@ describe('createZustandPlugin', () => {
 			'did not return a disposer',
 		);
 	});
+
+	it('advertises only explicit mutation capabilities', () => {
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'read-only',
+					title: 'Read only',
+					getInspectableState: () => ({ count: 0 }),
+					subscribe: () => () => {},
+				},
+				{
+					id: 'writable',
+					title: 'Writable',
+					getInspectableState: () => ({ count: 0 }),
+					subscribe: () => () => {},
+					validatePatch: (patch) => patch,
+					applyPatch: () => {},
+					reset: () => {},
+					persisted: true,
+					restorable: true,
+				},
+			],
+		});
+		diagnostics.plugin.install?.();
+
+		expect(diagnostics.getSnapshot().stores).toEqual([
+			expect.objectContaining({
+				id: 'read-only',
+				capabilities: {
+					writable: false,
+					resettable: false,
+					persisted: false,
+					restorable: false,
+					sensitivePaths: [],
+				},
+			}),
+			expect.objectContaining({
+				id: 'writable',
+				capabilities: {
+					writable: true,
+					resettable: true,
+					persisted: true,
+					restorable: true,
+					sensitivePaths: [],
+				},
+			}),
+		]);
+	});
+
+	it('rejects partial, accessor-backed, and unsafe mutation contracts', () => {
+		const optionalGetter = jest.fn(() => true);
+		const accessorAdapter = {
+			id: 'accessor',
+			title: 'Accessor',
+			getInspectableState: () => ({ count: 0 }),
+			subscribe: () => () => {},
+		} as Record<string, unknown>;
+		Object.defineProperty(accessorAdapter, 'restorable', {
+			enumerable: true,
+			get: optionalGetter,
+		});
+		const cases = [
+			{
+				id: 'partial',
+				title: 'Partial',
+				getInspectableState: () => ({ count: 0 }),
+				subscribe: () => () => {},
+				validatePatch: (patch: unknown) => patch,
+			},
+			{
+				id: 'no-writer',
+				title: 'No writer',
+				getInspectableState: () => ({ count: 0 }),
+				subscribe: () => () => {},
+				restorable: true,
+			},
+			{
+				id: 'sensitive-restore',
+				title: 'Sensitive restore',
+				getInspectableState: () => ({ count: 0 }),
+				subscribe: () => () => {},
+				validatePatch: (patch: unknown) => patch,
+				applyPatch: () => {},
+				restorable: true,
+				sensitivePaths: ['token'],
+			},
+			accessorAdapter,
+		];
+
+		for (const adapter of cases) {
+			const diagnostics = createZustandPlugin({
+				stores: [adapter] as unknown as Parameters<
+					typeof createZustandPlugin
+				>[0]['stores'],
+			});
+			diagnostics.plugin.install?.();
+			expect(diagnostics.getSnapshot().error).toBeTruthy();
+		}
+		expect(optionalGetter).not.toHaveBeenCalled();
+	});
+
+	it('normalizes bounded sensitive paths without invoking list accessors', () => {
+		const itemGetter = jest.fn(() => 'token');
+		const paths: string[] = ['profile.email', 'profile.email', 'session.token'];
+		Object.defineProperty(paths, '1', {
+			enumerable: true,
+			get: itemGetter,
+		});
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'unsafe-paths',
+					title: 'Unsafe paths',
+					getInspectableState: () => ({ ready: true }),
+					subscribe: () => () => {},
+					sensitivePaths: paths,
+				},
+			],
+		});
+		diagnostics.plugin.install?.();
+		expect(itemGetter).not.toHaveBeenCalled();
+		expect(diagnostics.getSnapshot().error).toContain('holes or accessors');
+
+		const bounded = createZustandPlugin({
+			stores: [
+				{
+					id: 'too-many-paths',
+					title: 'Too many paths',
+					getInspectableState: () => ({ ready: true }),
+					subscribe: () => () => {},
+					sensitivePaths: Array.from(
+						{ length: 501 },
+						(_, index) => `p${index}`,
+					),
+				},
+			],
+		});
+		bounded.plugin.install?.();
+		expect(bounded.getSnapshot().error).toContain('cannot exceed 500');
+	});
+
+	it('applies validated patches, captures history, and correlates events', async () => {
+		let state = { count: 0, label: 'initial' };
+		let notify = () => {};
+		const append = jest.fn();
+		const diagnostics = createZustandPlugin({
+			eventStore: { append } as never,
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: (listener) => {
+						notify = listener;
+						return () => {};
+					},
+					validatePatch: (patch) => {
+						if (!patch || typeof patch !== 'object')
+							throw new Error('bad patch');
+						return patch;
+					},
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+						notify();
+					},
+					restorable: true,
+				},
+			],
+		});
+		diagnostics.plugin.install?.();
+
+		const receipt = await diagnostics.applyPatch(
+			'counter',
+			{ count: 2 },
+			'route-action-1',
+		);
+
+		expect(state).toEqual({ count: 2, label: 'initial' });
+		expect(receipt).toMatchObject({
+			kind: 'patch',
+			status: 'succeeded',
+			changedKeys: ['count'],
+			correlationId: 'route-action-1',
+		});
+		expect(diagnostics.getStateSnapshots('counter')).toHaveLength(2);
+		expect(diagnostics.getMutationReceipts()).toEqual([receipt]);
+		expect(append).toHaveBeenCalledWith(
+			expect.objectContaining({
+				correlationId: 'route-action-1',
+				kind: 'mutation-succeeded',
+			}),
+		);
+	});
+
+	it('rejects invalid patches before mutation and records a failed receipt', async () => {
+		let state = { count: 0 };
+		const applyPatch = jest.fn((patch: unknown) => {
+			state = { ...state, ...(patch as typeof state) };
+		});
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: () => () => {},
+					validatePatch: (patch) => {
+						const candidate = patch as { count?: number };
+						if (candidate.count !== undefined && candidate.count < 0) {
+							throw new Error('count must be non-negative');
+						}
+						return patch;
+					},
+					applyPatch,
+					restorable: true,
+				},
+			],
+		});
+
+		await expect(
+			diagnostics.applyPatch('counter', { count: -1 }),
+		).rejects.toThrow('count must be non-negative');
+		expect(state).toEqual({ count: 0 });
+		expect(applyPatch).not.toHaveBeenCalled();
+		expect(diagnostics.getMutationReceipts()).toEqual([
+			expect.objectContaining({ status: 'failed', kind: 'patch' }),
+		]);
+	});
+
+	it('rolls back an adapter that throws after mutating', async () => {
+		let state = { count: 0 };
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: () => () => {},
+					validatePatch: (patch) => patch,
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+						if (state.count === 2) throw new Error('host apply failed');
+					},
+					restorable: true,
+				},
+			],
+		});
+
+		await expect(
+			diagnostics.applyPatch('counter', { count: 2 }),
+		).rejects.toThrow('prior state was restored');
+		expect(state).toEqual({ count: 0 });
+		expect(diagnostics.getMutationReceipts()).toEqual([
+			expect.objectContaining({ status: 'rolled-back' }),
+		]);
+	});
+
+	it('rolls back a validator that changes state before rejecting a patch', async () => {
+		let state = { count: 0 };
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: () => () => {},
+					validatePatch: (patch) => {
+						if ((patch as { count?: number }).count === 3) {
+							state = { count: 99 };
+							throw new Error('validator rejected after a side effect');
+						}
+						return patch;
+					},
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+					},
+					restorable: true,
+				},
+			],
+		});
+
+		await expect(
+			diagnostics.applyPatch('counter', { count: 3 }),
+		).rejects.toThrow('prior state was restored');
+		expect(state).toEqual({ count: 0 });
+		expect(diagnostics.getMutationReceipts()).toEqual([
+			expect.objectContaining({ status: 'rolled-back' }),
+		]);
+	});
+
+	it('resets and jumps only through the restorable adapter', async () => {
+		let state = { count: 1 };
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: () => () => {},
+					validatePatch: (patch) => patch,
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+					},
+					reset: () => {
+						state = { count: 0 };
+					},
+					restorable: true,
+				},
+			],
+		});
+		const captured = await diagnostics.captureState('counter');
+		await diagnostics.applyPatch('counter', { count: 7 });
+		expect(state.count).toBe(7);
+		await diagnostics.jumpToState('counter', captured.id);
+		expect(state.count).toBe(1);
+		await diagnostics.resetStore('counter');
+		expect(state.count).toBe(0);
+	});
+
+	it('keeps exact snapshots private and bounds public history', async () => {
+		let state = { accessToken: 'private-token', count: 0 };
+		const diagnostics = createZustandPlugin({
+			maxStateSnapshots: 1,
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => state,
+					subscribe: () => () => {},
+					validatePatch: (patch) => patch,
+					applyPatch: (patch) => {
+						state = { ...state, ...(patch as typeof state) };
+					},
+					restorable: true,
+				},
+			],
+		});
+		await diagnostics.captureState('counter');
+		state = { ...state, count: 1 };
+		await diagnostics.captureState('counter');
+
+		const snapshots = diagnostics.getStateSnapshots();
+		expect(snapshots).toHaveLength(1);
+		expect(JSON.stringify(snapshots)).toContain('[REDACTED]');
+		expect(JSON.stringify(snapshots)).not.toContain('private-token');
+		expect(snapshots[0]).not.toHaveProperty('json');
+	});
+
+	it('rejects accessor patches and dangerous object keys before host callbacks', async () => {
+		const validatePatch = jest.fn((patch: unknown) => patch);
+		const applyPatch = jest.fn();
+		const diagnostics = createZustandPlugin({
+			stores: [
+				{
+					id: 'counter',
+					title: 'Counter',
+					getInspectableState: () => ({ count: 0 }),
+					subscribe: () => () => {},
+					validatePatch,
+					applyPatch,
+					restorable: true,
+				},
+			],
+		});
+		const getter = jest.fn(() => 2);
+		const accessorPatch = {} as Record<string, unknown>;
+		Object.defineProperty(accessorPatch, 'count', {
+			enumerable: true,
+			get: getter,
+		});
+		await expect(
+			diagnostics.applyPatch('counter', accessorPatch),
+		).rejects.toThrow('accessor');
+		expect(getter).not.toHaveBeenCalled();
+
+		const dangerous = JSON.parse(
+			'{"constructor":{"prototype":{"admin":true}}}',
+		);
+		await expect(diagnostics.applyPatch('counter', dangerous)).rejects.toThrow(
+			'not allowed',
+		);
+		expect(applyPatch).not.toHaveBeenCalled();
+		// validatePatch is used to validate the rollback projection, but neither
+		// rejected user payload reaches it.
+		expect(validatePatch).toHaveBeenCalledTimes(2);
+	});
 });
 
 describe('changedZustandKeys', () => {

@@ -33,7 +33,7 @@ import {
 } from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
-import { BoundedEventStore } from '../core/external-store';
+import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
 import { redactDiagnosticText } from '../core/redact';
 import { createRefCountedInstaller } from '../core/ref-counted-installer';
@@ -58,16 +58,38 @@ export type ConsoleLogInput = {
 	level: ConsoleLogLevel;
 	message: string;
 	attributes?: Readonly<Record<string, unknown>>;
+	scope?: string;
+	correlationId?: string;
+	groupId?: string;
+	error?: unknown;
+	sourceLocation?: {
+		file: string;
+		line?: number;
+		column?: number;
+	};
 };
 
 export type ConsoleLogEvent = {
 	id: number;
 	at: number;
+	firstAt: number;
+	lastAt: number;
 	level: ConsoleLogLevel;
 	message: string;
 	messageTruncated: boolean;
 	attributesText?: string;
 	attributesTruncated: boolean;
+	scope?: string;
+	correlationId?: string;
+	groupId: string;
+	repeatCount: number;
+	errorName?: string;
+	errorStack?: string;
+	sourceLocation?: {
+		file: string;
+		line?: number;
+		column?: number;
+	};
 };
 
 export type ConsoleLogSource = {
@@ -82,6 +104,8 @@ export type ConsolePluginOptions = {
 	maxEventBytes?: number;
 	maxMessageBytes?: number;
 	maxAttributesBytes?: number;
+	maxStackBytes?: number;
+	groupingWindowMs?: number;
 	title?: string;
 	id?: string;
 	description?: string;
@@ -92,6 +116,8 @@ export type ConsolePluginOptions = {
 export type ConsolePlugin = {
 	plugin: DevToolsPanelPlugin;
 	getEvents: () => readonly ConsoleLogEvent[];
+	getBookmarkedEventIds: () => readonly number[];
+	toggleBookmark: (eventId: number) => boolean;
 	clear: () => void;
 };
 
@@ -129,6 +155,8 @@ const MAX_CONSOLE_EVENTS = 10_000;
 const MAX_CONSOLE_STORE_BYTES = 16 * 1024 * 1024;
 const MAX_CONSOLE_MESSAGE_BYTES = 64 * 1024;
 const MAX_CONSOLE_ATTRIBUTES_BYTES = 1024 * 1024;
+const MAX_CONSOLE_STACK_BYTES = 64 * 1024;
+const MAX_GROUPING_WINDOW_MS = 60_000;
 
 function isConsoleLogLevel(value: unknown): value is ConsoleLogLevel {
 	return typeof value === 'string' && LOG_LEVELS.has(value as ConsoleLogLevel);
@@ -235,7 +263,87 @@ function levelImage(level: ConsoleLogLevel): DevToolsSystemImage {
 }
 
 function eventSearchText(event: ConsoleLogEvent): string {
-	return `${event.level} ${event.message} ${event.attributesText ?? ''}`.toLowerCase();
+	return `${event.level} ${event.scope ?? ''} ${event.message} ${event.errorName ?? ''} ${event.errorStack ?? ''} ${event.attributesText ?? ''}`.toLowerCase();
+}
+
+function boundedConsoleText(
+	value: unknown,
+	maxBytes: number,
+): { text?: string; truncated: boolean } {
+	if (typeof value !== 'string' || !value.trim()) return { truncated: false };
+	const result = truncateText(redactConsoleText(value.trim()), maxBytes);
+	return { text: result.text, truncated: result.truncated };
+}
+
+function boundedConsoleIdentifier(
+	value: unknown,
+	maxBytes: number,
+): string | undefined {
+	const text = boundedConsoleText(value, maxBytes).text;
+	return text && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(text) ? text : undefined;
+}
+
+function consoleErrorFields(
+	value: unknown,
+	maxStackBytes: number,
+): { name?: string; stack?: string; truncated: boolean } {
+	if (!value || typeof value !== 'object') return { truncated: false };
+	let descriptors: Record<string, PropertyDescriptor>;
+	try {
+		descriptors = Object.getOwnPropertyDescriptors(value);
+	} catch {
+		return { truncated: false };
+	}
+	const data = (key: string): unknown => {
+		const descriptor = descriptors[key];
+		return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+	};
+	const name = boundedConsoleText(data('name'), 256);
+	const stack = boundedConsoleText(data('stack'), maxStackBytes);
+	return {
+		...(name.text ? { name: name.text } : {}),
+		...(stack.text ? { stack: stack.text } : {}),
+		truncated: name.truncated || stack.truncated,
+	};
+}
+
+function consoleSourceLocation(
+	value: unknown,
+): ConsoleLogEvent['sourceLocation'] | undefined {
+	if (!value || typeof value !== 'object') return undefined;
+	let descriptors: Record<string, PropertyDescriptor>;
+	try {
+		descriptors = Object.getOwnPropertyDescriptors(value);
+	} catch {
+		return undefined;
+	}
+	const data = (key: string): unknown => {
+		const descriptor = descriptors[key];
+		return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+	};
+	const file = boundedConsoleText(data('file'), 2 * 1024).text;
+	if (!file) return undefined;
+	const line = data('line');
+	const column = data('column');
+	return Object.freeze({
+		file,
+		...(typeof line === 'number' && Number.isSafeInteger(line) && line > 0
+			? { line }
+			: {}),
+		...(typeof column === 'number' && Number.isSafeInteger(column) && column > 0
+			? { column }
+			: {}),
+	});
+}
+
+function consoleGroupFingerprint(parts: readonly unknown[]): string {
+	const value = parts.join('\u0000');
+	let hash = 2_166_136_261;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 16_777_619);
+	}
+	return `auto-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 export function createConsolePlugin(
@@ -247,10 +355,14 @@ export function createConsolePlugin(
 	const maxEventBytes = options.maxEventBytes ?? 512 * 1024;
 	const maxMessageBytes = options.maxMessageBytes ?? 2 * 1024;
 	const maxAttributesBytes = options.maxAttributesBytes ?? 16 * 1024;
+	const maxStackBytes = options.maxStackBytes ?? 16 * 1024;
+	const groupingWindowMs = options.groupingWindowMs ?? 1_000;
 	assertPositiveInteger(maxEvents, 'maxEvents');
 	assertPositiveFinite(maxEventBytes, 'maxEventBytes');
 	assertPositiveFinite(maxMessageBytes, 'maxMessageBytes');
 	assertPositiveFinite(maxAttributesBytes, 'maxAttributesBytes');
+	assertPositiveFinite(maxStackBytes, 'maxStackBytes');
+	assertPositiveFinite(groupingWindowMs, 'groupingWindowMs');
 	if (maxEvents > MAX_CONSOLE_EVENTS) {
 		throw new Error(`maxEvents cannot exceed ${MAX_CONSOLE_EVENTS}`);
 	}
@@ -267,14 +379,46 @@ export function createConsolePlugin(
 			`maxAttributesBytes cannot exceed ${MAX_CONSOLE_ATTRIBUTES_BYTES}`,
 		);
 	}
+	if (maxStackBytes > MAX_CONSOLE_STACK_BYTES) {
+		throw new Error(`maxStackBytes cannot exceed ${MAX_CONSOLE_STACK_BYTES}`);
+	}
+	if (groupingWindowMs > MAX_GROUPING_WINDOW_MS) {
+		throw new Error(`groupingWindowMs cannot exceed ${MAX_GROUPING_WINDOW_MS}`);
+	}
 
 	const eventStore = new BoundedEventStore<ConsoleLogEvent>({
 		maxEvents,
 		maxBytes: maxEventBytes,
 		estimateBytes: (event) =>
-			serializeValue(event, maxMessageBytes + maxAttributesBytes + 1024)
-				.estimatedBytes,
+			serializeValue(
+				event,
+				maxMessageBytes + maxAttributesBytes + maxStackBytes + 8 * 1024,
+			).estimatedBytes,
 	});
+	const bookmarksStore = new ExternalStore<readonly number[]>(
+		Object.freeze([]),
+	);
+	const reconcileBookmarks = (): void => {
+		const retained = new Set(eventStore.getSnapshot().map((event) => event.id));
+		const current = bookmarksStore.getSnapshot();
+		const next = current.filter((eventId) => retained.has(eventId));
+		if (next.length !== current.length) bookmarksStore.set(Object.freeze(next));
+	};
+	const toggleBookmark = (eventId: number): boolean => {
+		if (!Number.isSafeInteger(eventId) || eventId <= 0) return false;
+		if (!eventStore.getSnapshot().some((event) => event.id === eventId))
+			return false;
+		const current = bookmarksStore.getSnapshot();
+		const isBookmarked = current.includes(eventId);
+		bookmarksStore.set(
+			Object.freeze(
+				isBookmarked
+					? current.filter((candidate) => candidate !== eventId)
+					: [...current, eventId].slice(-1_000),
+			),
+		);
+		return !isBookmarked;
+	};
 	let nextEventId = 1;
 
 	const ingest = (input: ConsoleLogInput): void => {
@@ -312,21 +456,67 @@ export function createConsolePlugin(
 		const hasAttributes =
 			attributes.text !== '{}' && attributes.text !== 'undefined';
 		const rawTimestamp = field('at');
+		const at =
+			typeof rawTimestamp === 'number' &&
+			Number.isFinite(rawTimestamp) &&
+			rawTimestamp >= 0 &&
+			rawTimestamp <= MAX_DATE_TIMESTAMP
+				? rawTimestamp
+				: Date.now();
+		const scope = boundedConsoleText(field('scope'), 256).text;
+		const correlationId = boundedConsoleIdentifier(field('correlationId'), 512);
+		const explicitGroupId = boundedConsoleIdentifier(field('groupId'), 512);
+		const error = consoleErrorFields(field('error'), maxStackBytes);
+		const sourceLocation = consoleSourceLocation(field('sourceLocation'));
+		const groupId =
+			explicitGroupId ??
+			consoleGroupFingerprint([
+				level,
+				scope ?? '',
+				message.text,
+				attributes.text,
+				error.name ?? '',
+				error.stack ?? '',
+				sourceLocation?.file ?? '',
+				sourceLocation?.line ?? '',
+			]);
+		const priorEvents = eventStore.getSnapshot();
+		const candidate = priorEvents[priorEvents.length - 1];
+		const previous =
+			candidate?.groupId === groupId &&
+			at >= candidate.lastAt &&
+			at - candidate.lastAt <= groupingWindowMs
+				? candidate
+				: undefined;
+		if (previous) {
+			eventStore.replace((event) => event.id === previous.id, {
+				...previous,
+				at,
+				lastAt: at,
+				repeatCount: previous.repeatCount + 1,
+			});
+			reconcileBookmarks();
+			return;
+		}
 		eventStore.append({
 			id: nextEventId,
-			at:
-				typeof rawTimestamp === 'number' &&
-				Number.isFinite(rawTimestamp) &&
-				rawTimestamp >= 0 &&
-				rawTimestamp <= MAX_DATE_TIMESTAMP
-					? rawTimestamp
-					: Date.now(),
+			at,
+			firstAt: at,
+			lastAt: at,
 			level,
 			message: message.text,
 			messageTruncated: message.truncated,
 			attributesText: hasAttributes ? attributes.text : undefined,
-			attributesTruncated: attributes.truncated,
+			attributesTruncated: attributes.truncated || error.truncated,
+			...(scope ? { scope } : {}),
+			...(correlationId ? { correlationId } : {}),
+			groupId,
+			repeatCount: 1,
+			...(error.name ? { errorName: error.name } : {}),
+			...(error.stack ? { errorStack: error.stack } : {}),
+			...(sourceLocation ? { sourceLocation } : {}),
 		});
+		reconcileBookmarks();
 		nextEventId += 1;
 	};
 	const install = createRefCountedInstaller(({ addCleanup }) => {
@@ -359,6 +549,12 @@ export function createConsolePlugin(
 		);
 		const [filter, setFilter] = useState<ConsoleFilter>('all');
 		const [search, setSearch] = useState('');
+		const bookmarkedIds = useSyncExternalStore(
+			bookmarksStore.subscribe,
+			bookmarksStore.getSnapshot,
+			bookmarksStore.getServerSnapshot,
+		);
+		const bookmarked = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds]);
 		const needle = search.trim().toLowerCase();
 		const visibleEvents = useMemo(
 			() =>
@@ -378,7 +574,7 @@ export function createConsolePlugin(
 					events
 						.map(
 							(event) =>
-								`${new Date(event.at).toISOString()} [${event.level.toUpperCase()}] ${event.message}${event.attributesText ? ` ${event.attributesText}` : ''}`,
+								`${new Date(event.at).toISOString()} [${event.level.toUpperCase()}]${event.scope ? ` [${event.scope}]` : ''} ${event.message}${event.repeatCount > 1 ? ` ×${event.repeatCount}` : ''}${event.errorStack ? `\n${event.errorStack}` : ''}${event.attributesText ? ` ${event.attributesText}` : ''}`,
 						)
 						.join('\n'),
 					1024 * 1024,
@@ -394,7 +590,10 @@ export function createConsolePlugin(
 					confirmLabel: 'Clear',
 					destructive: true,
 				},
-				action: eventStore.clear,
+				action: () => {
+					eventStore.clear();
+					bookmarksStore.set(Object.freeze([]));
+				},
 			});
 		};
 
@@ -462,7 +661,7 @@ export function createConsolePlugin(
 									visibleEvents.map((event) => (
 										<DisclosureGroup
 											key={event.id}
-											label={`${event.level.toUpperCase()} — ${event.message}`}
+											label={`${bookmarked.has(event.id) ? '★ ' : ''}${event.level.toUpperCase()} — ${event.message}${event.repeatCount > 1 ? ` ×${event.repeatCount}` : ''}`}
 										>
 											<Label
 												color={PlatformColor(levelColor(event.level))}
@@ -474,6 +673,30 @@ export function createConsolePlugin(
 													{event.message}
 												</UIText>
 											</LabeledContent>
+											{event.scope ? (
+												<LabeledContent label="Scope">
+													<UIText>{event.scope}</UIText>
+												</LabeledContent>
+											) : null}
+											{event.repeatCount > 1 ? (
+												<LabeledContent label="Repeated">
+													<UIText>{`${event.repeatCount} times`}</UIText>
+												</LabeledContent>
+											) : null}
+											{event.errorStack ? (
+												<UIText
+													modifiers={[
+														font({
+															design: 'monospaced',
+															textStyle: 'footnote',
+														}),
+														foregroundStyle('secondary'),
+														lineLimit(20),
+													]}
+												>
+													{event.errorStack}
+												</UIText>
+											) : null}
 											{event.attributesText ? (
 												<UIText
 													modifiers={[
@@ -488,6 +711,14 @@ export function createConsolePlugin(
 													{event.attributesText}
 												</UIText>
 											) : null}
+											<Button
+												label={
+													bookmarked.has(event.id)
+														? 'Remove bookmark'
+														: 'Bookmark'
+												}
+												onPress={() => toggleBookmark(event.id)}
+											/>
 										</DisclosureGroup>
 									))
 								)}
@@ -539,7 +770,7 @@ export function createConsolePlugin(
 								visibleEvents.map((event) => (
 									<AndroidPanelTextBlock
 										key={event.id}
-										label={`${event.level.toUpperCase()} · ${new Date(event.at).toLocaleTimeString()}`}
+										label={`${bookmarked.has(event.id) ? '★ · ' : ''}${event.level.toUpperCase()} · ${new Date(event.at).toLocaleTimeString()}${event.repeatCount > 1 ? ` · ×${event.repeatCount}` : ''}`}
 										tone={
 											event.level === 'error' || event.level === 'fatal'
 												? 'danger'
@@ -547,7 +778,7 @@ export function createConsolePlugin(
 													? 'warning'
 													: 'default'
 										}
-										value={`${event.message}${event.attributesText ? `\n${event.attributesText}` : ''}`}
+										value={`${event.scope ? `[${event.scope}] ` : ''}${event.message}${event.errorStack ? `\n${event.errorStack}` : ''}${event.attributesText ? `\n${event.attributesText}` : ''}`}
 									/>
 								))
 							)}
@@ -583,6 +814,11 @@ export function createConsolePlugin(
 	return {
 		plugin,
 		getEvents: eventStore.getSnapshot,
-		clear: eventStore.clear,
+		getBookmarkedEventIds: bookmarksStore.getSnapshot,
+		toggleBookmark,
+		clear: () => {
+			eventStore.clear();
+			bookmarksStore.set(Object.freeze([]));
+		},
 	};
 }

@@ -8,10 +8,21 @@
 	"main": "dist/main/index.js",
 	"scripts": {
 		"dev": "electron-vite dev",
+		"dev:simulator": "pnpm native:build && electron-vite dev",
 		"start": "electron-vite preview",
 		"build": "electron-vite build",
-		"package": "pnpm build && electron-builder --dir",
-		"make": "pnpm build && electron-builder",
+		"native:build": "node scripts/build-native-helpers.mjs",
+		"native:build:all": "node scripts/build-native-helpers.mjs --all",
+		"native:build:package": "node scripts/build-native-helpers.mjs --if-supported",
+		"native:check": "node scripts/check-native-helpers.mjs && pnpm native:check:packaging",
+		"native:check:go": "node scripts/check-native-helpers.mjs --go",
+		"native:check:packaging": "node --test scripts/native-packaging.node-test.cjs scripts/verify-vendored-simslim.node-test.mjs",
+		"native:check:swift": "node scripts/check-native-helpers.mjs --swift",
+		"native:verify": "node scripts/verify-native-resources.cjs",
+		"native:verify:capabilities": "node scripts/verify-native-host-capabilities.mjs",
+		"native:verify:cold-start": "node scripts/verify-packaged-cold-start.mjs",
+		"package": "pnpm native:build:package && pnpm build && electron-builder --dir",
+		"make": "pnpm native:build:package && pnpm build && electron-builder",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit --pretty false -p tsconfig.node.json && tsc --noEmit --pretty false -p tsconfig.renderer.json",
@@ -78,6 +89,22 @@
 		"mac": {
 			"category": "public.app-category.developer-tools",
 			"hardenedRuntime": true,
+			"signIgnore": [
+				"/Contents/Resources/native/pumpd-(?:sim-helper|native-host|devtools)$"
+			],
+			"extraResources": [
+				{
+					"from": "build/native/mac-${arch}",
+					"to": "native",
+					"filter": [
+						"**/*"
+					]
+				},
+				{
+					"from": "THIRD_PARTY_NOTICES.md",
+					"to": "THIRD_PARTY_NOTICES.md"
+				}
+			],
 			"target": [
 				"dmg",
 				"zip"

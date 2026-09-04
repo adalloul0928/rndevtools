@@ -25,6 +25,12 @@ const MAX_RENDERED_MUTATIONS = 250;
 
 type QueryFilter = 'all' | 'active' | 'stale' | 'fetching' | 'errors';
 type QueryTab = 'queries' | 'mutations';
+const SIMULATION_LABELS = {
+	loading: 'Loading',
+	error: 'Error',
+	paused: 'Paused',
+	offline: 'Offline',
+} as const;
 
 function queryTone(entry: QueryEntry): 'success' | 'warning' | 'danger' | 'info' {
 	if (entry.status === 'error') return 'danger';
@@ -57,10 +63,18 @@ export function QueryPanel() {
 	const queries = selectedDevice?.tools.queries ?? [];
 	const mutations = selectedDevice?.tools.mutations ?? [];
 	const summary = selectedDevice?.tools.querySummary;
+	const simulation = selectedDevice?.tools.querySimulation;
+	const activeSimulation = simulation?.active;
 	const [tab, setTab] = useState<QueryTab>('queries');
 	const [filter, setFilter] = useState<QueryFilter>('all');
 	const [query, setQuery] = useState('');
 	const [selectedId, setSelectedId] = useState<string | null>(queries[0]?.id ?? null);
+	const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(
+		simulation?.active?.familyId ?? simulation?.families[0]?.id ?? null
+	);
+	const selectedFamily =
+		simulation?.families.find((family) => family.id === selectedFamilyId) ??
+		simulation?.families[0];
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -218,6 +232,90 @@ export function QueryPanel() {
 					</div>
 				) : null}
 			</Toolbar>
+			{simulation && selectedFamily ? (
+				<div className="mx-5 mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3">
+					<div className="flex items-start justify-between gap-4">
+						<div>
+							<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+								Query simulation
+							</p>
+							<p className="mb-0 mt-1 text-xs text-(--foreground)">
+								{simulation.active
+									? `${simulation.active.familyLabel} · ${SIMULATION_LABELS[simulation.active.mode]} active`
+									: selectedFamily.label}
+							</p>
+							<p className="mb-0 mt-1 text-[10px] text-(--text-3)">
+								{selectedFamily.description ??
+									'Only explicitly registered query-family adapters can be changed.'}
+							</p>
+						</div>
+						{activeSimulation ? (
+							<Button
+								isDisabled={!canRunAction('query', 'clearSimulation')}
+								size="sm"
+								variant="secondary"
+								onPress={() =>
+									void runAction(
+										'query',
+										'clearSimulation',
+										{ receiptId: activeSimulation.receiptId },
+										'Query simulation reset.'
+									)
+								}
+							>
+								<RotateCcw className="h-3.5 w-3.5" /> Reset
+							</Button>
+						) : null}
+					</div>
+					{simulation.families.length > 1 ? (
+						<div className="mt-3 flex flex-wrap gap-1">
+							{simulation.families.map((family) => (
+								<Button
+									aria-pressed={family.id === selectedFamily.id}
+									className="h-7 px-2 text-[10px]"
+									key={family.id}
+									size="sm"
+									variant={family.id === selectedFamily.id ? 'secondary' : 'ghost'}
+									onPress={() => setSelectedFamilyId(family.id)}
+								>
+									{family.label}
+								</Button>
+							))}
+						</div>
+					) : null}
+					<div className="mt-3 flex flex-wrap gap-2">
+						{selectedFamily.modes.map((mode) => (
+							<Button
+								isDisabled={!mode.supported || !canRunAction('query', 'simulate')}
+								key={mode.mode}
+								size="sm"
+								variant="secondary"
+								onPress={() =>
+									void runAction(
+										'query',
+										'simulate',
+										{ familyId: selectedFamily.id, mode: mode.mode },
+										`${SIMULATION_LABELS[mode.mode]} query simulation applied.`
+									)
+								}
+							>
+								{SIMULATION_LABELS[mode.mode]}
+							</Button>
+						))}
+					</div>
+					{selectedFamily.modes.some((mode) => !mode.supported) ? (
+						<ul className="mb-0 mt-2 space-y-1 pl-4 text-[10px] text-(--text-3)">
+							{selectedFamily.modes
+								.filter((mode) => !mode.supported)
+								.map((mode) => (
+									<li key={mode.mode}>
+										{SIMULATION_LABELS[mode.mode]}: {mode.reason}
+									</li>
+								))}
+						</ul>
+					) : null}
+				</div>
+			) : null}
 			{omittedCount > 0 ? (
 				<PanelNotice title="Cache capture incomplete.">
 					{omittedCount} {tab === 'queries' ? 'query' : 'mutation'} entr

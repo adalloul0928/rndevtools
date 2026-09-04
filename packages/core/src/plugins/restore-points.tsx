@@ -35,6 +35,29 @@ import type {
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
+import {
+	DEFAULT_RESTORE_POINTS_KEY,
+	estimateRestorePointBytes,
+	RestorePointRepository,
+	type RestorePointStorage,
+} from './restore-repository';
+import {
+	type RestoreTransactionOptions,
+	type RestoreTransactionReceipt,
+	runResetToBaselineTransaction,
+	runRestoreTransaction,
+} from './restore-transaction';
+
+export type {
+	RestorePointImportMode,
+	RestorePointStorage,
+} from './restore-repository';
+export type {
+	RestoreTransactionOptions,
+	RestoreTransactionReceipt,
+	RestoreTransactionSourceResult,
+	RestoreTransactionStatus,
+} from './restore-transaction';
 
 /**
  * Restore is intentionally explicit: sources decide what can be captured and
@@ -45,8 +68,11 @@ export type RestorePointSource = {
 	id: string;
 	title: string;
 	description?: string;
+	dependencies?: readonly string[];
 	capture: () => unknown | Promise<unknown>;
+	validate?: (snapshot: unknown) => unknown | Promise<unknown>;
 	restore: (snapshot: unknown) => void | Promise<void>;
+	resetToBaseline?: () => void | Promise<void>;
 };
 
 export type RestorePointSourceSnapshot = {
@@ -67,6 +93,10 @@ export type RestorePoint = {
 
 export type RestorePointsPluginOptions = {
 	sources: readonly RestorePointSource[];
+	persistence?: Readonly<{
+		storage: RestorePointStorage;
+		key?: string;
+	}>;
 	maxPoints?: number;
 	maxSourceBytes?: number;
 	maxTotalBytes?: number;
@@ -79,11 +109,27 @@ export type RestorePointsPluginOptions = {
 
 export type RestorePointsPlugin = {
 	plugin: DevToolsPanelPlugin;
+	ready: Promise<void>;
 	capture: (label?: string) => Promise<RestorePoint>;
-	restore: (restorePointId: string) => Promise<void>;
-	remove: (restorePointId: string) => void;
-	clear: () => void;
+	restore: (
+		restorePointId: string,
+		options?: RestoreTransactionOptions,
+	) => Promise<void>;
+	restoreDetailed: (
+		restorePointId: string,
+		options?: RestoreTransactionOptions,
+	) => Promise<RestoreTransactionReceipt>;
+	resetToBaseline: (
+		options?: RestoreTransactionOptions,
+	) => Promise<RestoreTransactionReceipt>;
+	rename: (restorePointId: string, label: string) => Promise<RestorePoint>;
+	duplicate: (restorePointId: string, label?: string) => Promise<RestorePoint>;
+	remove: (restorePointId: string) => Promise<void>;
+	clear: () => Promise<void>;
+	exportJson: () => string;
+	importJson: (value: string, mode?: 'replace' | 'merge') => Promise<void>;
 	getPoints: () => readonly RestorePoint[];
+	getReceipts: () => readonly RestoreTransactionReceipt[];
 };
 
 type CanonicalSnapshot = {
@@ -95,6 +141,11 @@ type CanonicalSnapshot = {
 const MAX_RESTORE_SOURCE_BYTES = 1024 * 1024;
 const MAX_RESTORE_VALIDATION_DEPTH = 64;
 const MAX_RESTORE_VALIDATION_ENTRIES = 100_000;
+const DANGEROUS_RESTORE_KEYS = new Set([
+	'__proto__',
+	'constructor',
+	'prototype',
+]);
 
 type JsonCloneState = {
 	seen: WeakSet<object>;
@@ -224,6 +275,9 @@ function cloneJsonValue(
 	state.remainingEntries -= entries.length;
 	const output = Object.create(null) as Record<string, unknown>;
 	for (const [key, descriptor] of entries) {
+		if (DANGEROUS_RESTORE_KEYS.has(key)) {
+			throw new Error(`${path}.${key} is not allowed in restore snapshots.`);
+		}
 		if (!descriptor.enumerable) {
 			throw new Error(`${path}.${key} is non-enumerable.`);
 		}
@@ -286,10 +340,6 @@ export function canonicalizeRestoreValue(
 	};
 }
 
-function cloneSnapshot(snapshot: RestorePointSourceSnapshot): unknown {
-	return JSON.parse(snapshot.json);
-}
-
 function validateSources(
 	sources: readonly RestorePointSource[],
 ): readonly RestorePointSource[] {
@@ -333,8 +383,11 @@ function validateSources(
 		const sourceId = field('id');
 		const sourceTitle = field('title');
 		const sourceDescription = field('description');
+		const dependencies = field('dependencies');
 		const capture = field('capture');
+		const validate = field('validate');
 		const restore = field('restore');
+		const resetToBaseline = field('resetToBaseline');
 		if (
 			typeof sourceId !== 'string' ||
 			!sourceId.trim() ||
@@ -370,6 +423,45 @@ function validateSources(
 				'Restore-point sources require capture and restore functions.',
 			);
 		}
+		if (validate !== undefined && typeof validate !== 'function') {
+			throw new Error('Restore-point source validate must be a function.');
+		}
+		if (
+			resetToBaseline !== undefined &&
+			typeof resetToBaseline !== 'function'
+		) {
+			throw new Error(
+				'Restore-point source resetToBaseline must be a function.',
+			);
+		}
+		let normalizedDependencies: string[] | undefined;
+		if (dependencies !== undefined) {
+			if (!Array.isArray(dependencies) || dependencies.length > 50) {
+				throw new Error('Restore-point source dependencies must be an array.');
+			}
+			normalizedDependencies = dependencies.map((_, dependencyIndex) => {
+				const descriptor = Object.getOwnPropertyDescriptor(
+					dependencies,
+					String(dependencyIndex),
+				);
+				if (
+					!descriptor ||
+					!('value' in descriptor) ||
+					typeof descriptor.value !== 'string' ||
+					!descriptor.value.trim() ||
+					descriptor.value !== descriptor.value.trim() ||
+					descriptor.value.length > 256
+				) {
+					throw new Error('Restore-point source dependency ids are invalid.');
+				}
+				return descriptor.value;
+			});
+			if (
+				new Set(normalizedDependencies).size !== normalizedDependencies.length
+			) {
+				throw new Error('Restore-point source dependencies must be unique.');
+			}
+		}
 		if (ids.has(sourceId)) {
 			throw new Error(`Duplicate restore-point source id: ${sourceId}`);
 		}
@@ -380,9 +472,30 @@ function validateSources(
 			...(typeof sourceDescription === 'string'
 				? { description: sourceDescription }
 				: {}),
+			...(normalizedDependencies
+				? { dependencies: normalizedDependencies }
+				: {}),
 			capture: capture as RestorePointSource['capture'],
+			...(typeof validate === 'function'
+				? { validate: validate as RestorePointSource['validate'] }
+				: {}),
 			restore: restore as RestorePointSource['restore'],
+			...(typeof resetToBaseline === 'function'
+				? {
+						resetToBaseline:
+							resetToBaseline as RestorePointSource['resetToBaseline'],
+					}
+				: {}),
 		});
+	}
+	for (const source of normalized) {
+		for (const dependencyId of source.dependencies ?? []) {
+			if (dependencyId === source.id || !ids.has(dependencyId)) {
+				throw new Error(
+					`Restore-point source ${source.id} has invalid dependency ${dependencyId}.`,
+				);
+			}
+		}
 	}
 	return normalized;
 }
@@ -391,18 +504,6 @@ function describePoint(point: RestorePoint): string {
 	const sourceLabel =
 		point.sources.length === 1 ? '1 source' : `${point.sources.length} sources`;
 	return `${sourceLabel} · ${formatBytes(point.estimatedBytes)}`;
-}
-
-function restorePointBytes(
-	point: Omit<RestorePoint, 'estimatedBytes'>,
-): number {
-	let estimatedBytes = 0;
-	for (let attempt = 0; attempt < 4; attempt += 1) {
-		const next = utf8ByteLength(JSON.stringify({ ...point, estimatedBytes }));
-		if (next === estimatedBytes) break;
-		estimatedBytes = next;
-	}
-	return estimatedBytes;
 }
 
 export function createRestorePointsPlugin(
@@ -424,9 +525,21 @@ export function createRestorePointsPlugin(
 	if (maxTotalBytes > 16 * 1024 * 1024) {
 		throw new Error(`maxTotalBytes cannot exceed ${16 * 1024 * 1024}`);
 	}
-	const pointStore = new ExternalStore<readonly RestorePoint[]>([]);
+	const repository = new RestorePointRepository({
+		maxPoints,
+		maxSourceBytes,
+		maxTotalBytes,
+		...(options.persistence
+			? {
+					storage: options.persistence.storage,
+					key: options.persistence.key ?? DEFAULT_RESTORE_POINTS_KEY,
+				}
+			: {}),
+	});
 	const operationStore = new ExternalStore(false);
-	let nextPointId = 1;
+	const receiptStore = new ExternalStore<readonly RestoreTransactionReceipt[]>(
+		[],
+	);
 
 	const captureSource = async (
 		source: RestorePointSource,
@@ -443,40 +556,28 @@ export function createRestorePointsPlugin(
 	};
 
 	const capturePoint = async (label?: string): Promise<RestorePoint> => {
+		await repository.ready;
 		if (sources.length === 0) {
 			throw new Error('No explicit restore-point sources are registered.');
 		}
 		const createdAt = Date.now();
 		const sourceSnapshots = await Promise.all(sources.map(captureSource));
 		const pointWithoutSize = {
-			id: `${createdAt}-${nextPointId}`,
+			id: repository.createId(createdAt),
 			label:
 				truncateText(redactDiagnosticText(label?.trim() ?? ''), 256).text ||
-				`Restore point ${nextPointId}`,
+				`Restore point ${repository.getSnapshot().length + 1}`,
 			createdAt,
 			sources: sourceSnapshots,
 		};
-		nextPointId += 1;
-		const estimatedBytes = restorePointBytes(pointWithoutSize);
+		const estimatedBytes = estimateRestorePointBytes(pointWithoutSize);
 		if (estimatedBytes > maxTotalBytes) {
 			throw new Error(
-				`Restore point is ${formatBytes(estimatedBytes)}; the session limit is ${formatBytes(maxTotalBytes)}.`,
+				`Restore point is ${formatBytes(estimatedBytes)}; the repository limit is ${formatBytes(maxTotalBytes)}.`,
 			);
 		}
 		const point: RestorePoint = { ...pointWithoutSize, estimatedBytes };
-		const next = [...pointStore.getSnapshot(), point];
-		let totalBytes = next.reduce(
-			(sum, candidate) => sum + candidate.estimatedBytes,
-			0,
-		);
-		while (
-			next.length > maxPoints ||
-			(totalBytes > maxTotalBytes && next.length > 0)
-		) {
-			totalBytes -= next.shift()?.estimatedBytes ?? 0;
-		}
-		pointStore.set(next);
-		return point;
+		return repository.add(point);
 	};
 	const capture = async (label?: string): Promise<RestorePoint> => {
 		if (operationStore.getSnapshot()) {
@@ -490,111 +591,116 @@ export function createRestorePointsPlugin(
 		}
 	};
 
-	const restorePoint = async (restorePointId: string): Promise<void> => {
-		const point = pointStore
-			.getSnapshot()
-			.find((candidate) => candidate.id === restorePointId);
-		if (!point) throw new Error('Restore point is no longer available.');
-
-		const sourceById = new Map(sources.map((source) => [source.id, source]));
-		const ordered = point.sources.map((snapshot) => {
-			const source = sourceById.get(snapshot.sourceId);
-			if (!source) {
-				throw new Error(
-					`Restore source is no longer registered: ${snapshot.sourceTitle}`,
-				);
-			}
-			return { source, snapshot };
-		});
-		// Capture a bounded rollback set before the first mutation. If one source
-		// fails, every attempted source is put back to this pre-restore state.
-		const rollback = new Map<string, RestorePointSourceSnapshot>();
-		for (const { source } of ordered) {
-			try {
-				rollback.set(source.id, await captureSource(source));
-			} catch (error) {
-				// captureSource reports limits against live state, so its raw message
-				// reads as if the selected restore point were the oversized one.
-				throw new Error(
-					`Could not capture a rollback snapshot of the current ${source.title} state, so the restore was not started: ${errorMessage(error)}`,
-				);
-			}
-		}
-
-		const attempted: RestorePointSource[] = [];
-		try {
-			for (const { source, snapshot } of ordered) {
-				attempted.push(source);
-				await source.restore(cloneSnapshot(snapshot));
-			}
-		} catch (error) {
-			const rollbackErrors: string[] = [];
-			for (const source of attempted.reverse()) {
-				const snapshot = rollback.get(source.id);
-				if (!snapshot) continue;
-				try {
-					await source.restore(cloneSnapshot(snapshot));
-				} catch (rollbackError) {
-					rollbackErrors.push(
-						`${source.title}: ${errorMessage(rollbackError)}`,
-					);
-				}
-			}
-			const rollbackMessage =
-				rollbackErrors.length === 0
-					? 'The pre-restore state was reapplied.'
-					: `Rollback also failed for ${rollbackErrors.join('; ')}.`;
-			throw new Error(
-				`Restore failed: ${errorMessage(error)} ${rollbackMessage}`,
-			);
-		}
-	};
-	const restore = async (restorePointId: string): Promise<void> => {
+	const restoreDetailed = async (
+		restorePointId: string,
+		restoreOptions?: RestoreTransactionOptions,
+	): Promise<RestoreTransactionReceipt> => {
 		if (operationStore.getSnapshot()) {
 			throw new Error('Another restore-point operation is already running.');
 		}
 		operationStore.set(true);
 		try {
-			await restorePoint(restorePointId);
+			await repository.ready;
+			const point = repository
+				.getSnapshot()
+				.find((candidate) => candidate.id === restorePointId);
+			if (!point) throw new Error('Restore point is no longer available.');
+			const receipt = await runRestoreTransaction(
+				point,
+				sources,
+				captureSource,
+				restoreOptions,
+			);
+			receiptStore.set([...receiptStore.getSnapshot(), receipt].slice(-20));
+			return receipt;
+		} finally {
+			operationStore.set(false);
+		}
+	};
+	const restore = async (
+		restorePointId: string,
+		restoreOptions?: RestoreTransactionOptions,
+	): Promise<void> => {
+		const receipt = await restoreDetailed(restorePointId, restoreOptions);
+		if (receipt.status === 'complete') return;
+		if (receipt.status === 'rolled-back') {
+			throw new Error(
+				`Restore failed: ${receipt.error ?? 'A source rejected the snapshot.'} The pre-restore state was reapplied.`,
+			);
+		}
+		if (receipt.status === 'needs-attention') {
+			const rollbackErrors = receipt.sourceResults
+				.filter((result) => result.rollback === 'failed')
+				.map(
+					(result) =>
+						`${result.sourceTitle}: ${result.rollbackError ?? 'unknown rollback error'}`,
+				)
+				.join('; ');
+			throw new Error(
+				`Restore failed and rollback needs attention. ${rollbackErrors}`,
+			);
+		}
+		throw new Error(
+			`Restore was not started: ${receipt.error ?? 'preflight failed'}`,
+		);
+	};
+	const resetToBaseline = async (
+		resetOptions?: RestoreTransactionOptions,
+	): Promise<RestoreTransactionReceipt> => {
+		if (operationStore.getSnapshot()) {
+			throw new Error('Another restore-point operation is already running.');
+		}
+		operationStore.set(true);
+		try {
+			const receipt = await runResetToBaselineTransaction(
+				sources,
+				captureSource,
+				resetOptions,
+			);
+			receiptStore.set([...receiptStore.getSnapshot(), receipt].slice(-20));
+			return receipt;
 		} finally {
 			operationStore.set(false);
 		}
 	};
 
-	const remove = (restorePointId: string): void => {
+	const ensureIdle = (message: string): void => {
 		if (operationStore.getSnapshot()) {
-			throw new Error(
-				'Cannot remove a restore point during an active operation.',
-			);
+			throw new Error(message);
 		}
-		if (
-			!pointStore
-				.getSnapshot()
-				.some((candidate) => candidate.id === restorePointId)
-		) {
-			throw new Error('Restore point is no longer available.');
-		}
-		pointStore.set(
-			pointStore
-				.getSnapshot()
-				.filter((candidate) => candidate.id !== restorePointId),
-		);
 	};
-
-	const clear = (): void => {
-		if (operationStore.getSnapshot()) {
-			throw new Error(
-				'Cannot clear restore points during an active operation.',
-			);
-		}
-		if (pointStore.getSnapshot().length > 0) pointStore.set([]);
+	const rename = async (restorePointId: string, label: string) => {
+		ensureIdle('Cannot rename a restore point during an active operation.');
+		return repository.rename(restorePointId, label);
 	};
+	const duplicate = async (restorePointId: string, label?: string) => {
+		ensureIdle('Cannot duplicate a restore point during an active operation.');
+		return repository.duplicate(restorePointId, label);
+	};
+	const remove = async (restorePointId: string): Promise<void> => {
+		ensureIdle('Cannot remove a restore point during an active operation.');
+		await repository.remove(restorePointId);
+	};
+	const clear = async (): Promise<void> => {
+		ensureIdle('Cannot clear restore points during an active operation.');
+		await repository.clear();
+	};
+	const importJson = async (
+		value: string,
+		mode: 'replace' | 'merge' = 'replace',
+	): Promise<void> => {
+		ensureIdle('Cannot import restore points during an active operation.');
+		await repository.importJson(value, mode);
+	};
+	const retentionDescription = options.persistence
+		? 'persisted in the dedicated PUMPD devtools namespace'
+		: 'held in memory for this tools session';
 
 	function RestorePointsPanel({ onBack, actions }: DevToolsPanelProps) {
 		const points = useSyncExternalStore(
-			pointStore.subscribe,
-			pointStore.getSnapshot,
-			pointStore.getServerSnapshot,
+			repository.subscribe,
+			repository.getSnapshot,
+			repository.getServerSnapshot,
 		);
 		const operationInFlight = useSyncExternalStore(
 			operationStore.subscribe,
@@ -607,6 +713,26 @@ export function createRestorePointsPlugin(
 				pluginId: id,
 				label: 'Capture restore point',
 				action: () => capture(),
+			});
+		};
+		const resetBaseline = () => {
+			void actions.run({
+				pluginId: id,
+				label: 'Reset explicit sources to baseline',
+				confirmation: {
+					title: 'Reset explicit sources to baseline?',
+					message:
+						'Only sources that explicitly implement resetToBaseline will change. PUMPD captures rollback data first.',
+					confirmLabel: 'Reset safely',
+				},
+				action: async () => {
+					const receipt = await resetToBaseline();
+					if (receipt.status !== 'complete') {
+						throw new Error(
+							`Baseline reset ${receipt.status}: ${receipt.error ?? 'review the transaction receipt'}`,
+						);
+					}
+				},
 			});
 		};
 		const restorePoint = (point: RestorePoint) => {
@@ -629,7 +755,7 @@ export function createRestorePointsPlugin(
 				confirmation: {
 					title: `Delete ${point.label}?`,
 					message:
-						'This removes the in-memory restore point. It does not change current app state.',
+						'This permanently removes the saved restore point. It does not change current app state.',
 					confirmLabel: 'Delete',
 					destructive: true,
 				},
@@ -644,9 +770,9 @@ export function createRestorePointsPlugin(
 							<Section
 								footer={
 									<UIText>
-										Restore points are JSON-only, size-bounded, and held in
-										memory for this tools session. A rollback snapshot is taken
-										before every restore.
+										Restore points are JSON-only, size-bounded, and{' '}
+										{retentionDescription}. A rollback snapshot is taken before
+										every restore.
 									</UIText>
 								}
 							>
@@ -655,8 +781,13 @@ export function createRestorePointsPlugin(
 									modifiers={[disabled(operationInFlight)]}
 									onPress={capturePoint}
 								/>
+								<Button
+									label="Reset explicit baselines"
+									modifiers={[disabled(operationInFlight)]}
+									onPress={resetBaseline}
+								/>
 							</Section>
-							<Section title={`This session · ${points.length}`}>
+							<Section title={`Saved points · ${points.length}`}>
 								{points.length === 0 ? (
 									<ContentUnavailableView
 										description="Capture a known-safe state before reproducing an issue."
@@ -731,7 +862,7 @@ export function createRestorePointsPlugin(
 				) : (
 					<AndroidPanelScroll>
 						<AndroidPanelSection
-							footer="Restore points are JSON-only, bounded, and held in memory. A rollback snapshot is taken before every restore."
+							footer={`Restore points are JSON-only, bounded, and ${retentionDescription}. A rollback snapshot is taken before every restore.`}
 							title="Safety"
 						>
 							<AndroidPanelRow
@@ -739,9 +870,14 @@ export function createRestorePointsPlugin(
 								onPress={operationInFlight ? undefined : capturePoint}
 								value={operationInFlight ? 'Working…' : undefined}
 							/>
+							<AndroidPanelRow
+								label="Reset explicit baselines"
+								onPress={operationInFlight ? undefined : resetBaseline}
+								value={operationInFlight ? 'Working…' : undefined}
+							/>
 						</AndroidPanelSection>
 						{points.length === 0 ? (
-							<AndroidPanelSection title="This session · 0">
+							<AndroidPanelSection title="Saved points · 0">
 								<AndroidPanelRow
 									detail="Capture a known-safe state before reproducing an issue."
 									label="No restore points"
@@ -816,10 +952,18 @@ export function createRestorePointsPlugin(
 			section: options.section,
 			Panel: RestorePointsPanel,
 		},
+		ready: repository.ready,
 		capture,
 		restore,
+		restoreDetailed,
+		resetToBaseline,
+		rename,
+		duplicate,
 		remove,
 		clear,
-		getPoints: pointStore.getSnapshot,
+		exportJson: () => repository.exportJson(),
+		importJson,
+		getPoints: repository.getSnapshot,
+		getReceipts: receiptStore.getSnapshot,
 	};
 }

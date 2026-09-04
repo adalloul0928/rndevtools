@@ -10,6 +10,7 @@
 		"./desktop-protocol": "./src/desktop-protocol.ts",
 		"./format": "./src/core/format.ts",
 		"./redact": "./src/core/redact.ts",
+		"./scenario-model": "./src/scenario-model.ts",
 		"./serialize": "./src/core/serialize.ts",
 		"./plugins": "./src/plugins/index.ts",
 		"./plugins/storage": "./src/plugins/storage.tsx",

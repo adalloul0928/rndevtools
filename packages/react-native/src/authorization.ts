@@ -10,6 +10,7 @@ const DISABLED_AUTHORIZATION: InternalToolsAuthorization = Object.freeze({
 
 let snapshot = DISABLED_AUTHORIZATION;
 const listeners = new Set<() => void>();
+let ownerBoundaryCleanup: (() => void) | undefined;
 
 export function setInternalToolsAuthorization(
 	next: InternalToolsAuthorization
@@ -47,4 +48,34 @@ export function subscribeToInternalToolsAuthorization(
 ): () => void {
 	listeners.add(listener);
 	return () => listeners.delete(listener);
+}
+
+/**
+ * Binds the authorization mirror to its live authentication owner. A source
+ * change can only revoke synchronously; React may explicitly re-grant the new
+ * owner after recomputing all visibility policy.
+ */
+export function bindInternalToolsAuthorizationOwnerSource(source: {
+	getOwnerId: () => string | null;
+	subscribe: (listener: () => void) => () => void;
+}): void {
+	ownerBoundaryCleanup?.();
+	const reconcile = () => {
+		let liveOwnerId: string | null = null;
+		try {
+			const candidate = source.getOwnerId();
+			liveOwnerId = typeof candidate === 'string' ? candidate : null;
+		} catch {
+			// A failed owner read is a revocation boundary.
+		}
+		if (snapshot.enabled && snapshot.ownerId !== liveOwnerId) {
+			disableInternalToolsAuthorization();
+		}
+	};
+	try {
+		ownerBoundaryCleanup = source.subscribe(reconcile);
+	} catch {
+		ownerBoundaryCleanup = undefined;
+	}
+	reconcile();
 }

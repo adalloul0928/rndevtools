@@ -28,6 +28,7 @@ import {
 } from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
+import type { DevtoolsEventStore } from '../core/event-store';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { formatBytes, formatRelativeTime } from '../core/format';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
@@ -36,12 +37,18 @@ import {
 	sanitizeDiagnosticValue,
 	sanitizeDiagnosticValueWithMetadata,
 } from '../core/redact';
-import { serializeValue, truncateText } from '../core/serialize';
+import {
+	serializeValue,
+	truncateText,
+	utf8ByteLength,
+} from '../core/serialize';
 import type {
+	DevToolsActionConfirmation,
 	DevToolsPanelPlugin,
 	DevToolsPanelProps,
 	DevToolsSystemImage,
 } from '../types';
+import { canonicalizeRestoreValue } from './restore-points';
 
 /**
  * A deliberately projected Zustand store. The host owns the projection so the
@@ -53,6 +60,18 @@ export type DevToolsZustandAdapter = {
 	description?: string;
 	getInspectableState: () => unknown;
 	subscribe: (listener: () => void) => () => void;
+	/** Validates and returns a detached, canonical top-level patch. */
+	validatePatch?: (patch: unknown) => unknown | Promise<unknown>;
+	/** Applies only a patch returned by validatePatch. */
+	applyPatch?: (patch: unknown) => void | Promise<void>;
+	/** Restores the adapter's explicit, non-sensitive baseline. */
+	reset?: () => void | Promise<void>;
+	/** Whether the owning Zustand store persists state across app restarts. */
+	persisted?: boolean;
+	/** Diagnostic paths that mutation adapters must never accept. */
+	sensitivePaths?: readonly string[];
+	/** The inspectable projection is a complete patch that can be rolled back. */
+	restorable?: boolean;
 };
 
 export type ZustandStoreSnapshot = {
@@ -64,6 +83,13 @@ export type ZustandStoreSnapshot = {
 	truncated: boolean;
 	keys: readonly string[];
 	updatedAt: number;
+	capabilities: Readonly<{
+		writable: boolean;
+		resettable: boolean;
+		persisted: boolean;
+		restorable: boolean;
+		sensitivePaths: readonly string[];
+	}>;
 	error?: string;
 };
 
@@ -86,6 +112,31 @@ export type ZustandChangeEvent = {
 	error?: string;
 };
 
+export type ZustandMutationKind = 'patch' | 'reset' | 'jump';
+
+export type ZustandMutationReceipt = Readonly<{
+	id: string;
+	storeId: string;
+	kind: ZustandMutationKind;
+	status: 'succeeded' | 'failed' | 'rolled-back' | 'needs-attention';
+	startedAt: number;
+	completedAt: number;
+	changedKeys: readonly string[];
+	correlationId?: string;
+	snapshotId?: string;
+	error?: string;
+}>;
+
+export type ZustandStateSnapshot = Readonly<{
+	id: string;
+	storeId: string;
+	storeTitle: string;
+	createdAt: number;
+	stateText: string;
+	stateBytes: number;
+	truncated: boolean;
+}>;
+
 export type ZustandPluginOptions = {
 	stores:
 		| readonly DevToolsZustandAdapter[]
@@ -96,6 +147,11 @@ export type ZustandPluginOptions = {
 	maxSnapshotBytes?: number;
 	maxEvents?: number;
 	maxEventBytes?: number;
+	maxStateSnapshots?: number;
+	maxMutationReceipts?: number;
+	maxMutationBytes?: number;
+	eventStore?: DevtoolsEventStore;
+	now?: () => number;
 	title?: string;
 	id?: string;
 	description?: string;
@@ -109,6 +165,23 @@ export type ZustandPlugin = {
 	getSnapshot: () => ZustandInspectorSnapshot;
 	getEvents: () => readonly ZustandChangeEvent[];
 	clearEvents: () => void;
+	applyPatch: (
+		storeId: string,
+		patch: unknown,
+		correlationId?: string,
+	) => Promise<ZustandMutationReceipt>;
+	resetStore: (
+		storeId: string,
+		correlationId?: string,
+	) => Promise<ZustandMutationReceipt>;
+	jumpToState: (
+		storeId: string,
+		snapshotId: string,
+		correlationId?: string,
+	) => Promise<ZustandMutationReceipt>;
+	captureState: (storeId: string) => Promise<ZustandStateSnapshot>;
+	getStateSnapshots: (storeId?: string) => readonly ZustandStateSnapshot[];
+	getMutationReceipts: () => readonly ZustandMutationReceipt[];
 };
 
 type StoreFingerprints = Readonly<Record<string, string>>;
@@ -118,6 +191,24 @@ type ZustandSubscription = {
 	dispose: () => void;
 	active: boolean;
 	captureQueued: boolean;
+	dirtyDuringMutation: boolean;
+};
+
+type CanonicalZustandState = Readonly<{
+	json: string;
+	value: Readonly<Record<string, unknown>>;
+	preview: string;
+	bytes: number;
+}>;
+
+type PrivateZustandStateSnapshot = ZustandStateSnapshot & {
+	json: string;
+};
+
+type RestorableZustandAdapter = DevToolsZustandAdapter & {
+	validatePatch: NonNullable<DevToolsZustandAdapter['validatePatch']>;
+	applyPatch: NonNullable<DevToolsZustandAdapter['applyPatch']>;
+	restorable: true;
 };
 const MAX_INSPECTABLE_KEYS = 500;
 const MAX_INSPECTABLE_STORES = 500;
@@ -125,6 +216,14 @@ const MAX_ZUSTAND_VALUE_BYTES = 1024 * 1024;
 const MAX_ZUSTAND_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 const MAX_ZUSTAND_EVENTS = 10_000;
 const MAX_ZUSTAND_EVENT_BYTES = 16 * 1024 * 1024;
+const MAX_SENSITIVE_PATHS = 500;
+const MAX_SENSITIVE_PATH_BYTES = 1024;
+const MAX_STATE_SNAPSHOTS = 100;
+const MAX_MUTATION_RECEIPTS = 1_000;
+const MAX_MUTATION_BYTES = 1024 * 1024;
+const MAX_CORRELATION_ID_BYTES = 512;
+const UNSAFE_PATCH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const EMPTY_SENSITIVE_PATHS: readonly string[] = Object.freeze([]);
 
 function errorMessage(error: unknown): string {
 	return diagnosticErrorText(error);
@@ -143,6 +242,131 @@ function inspectableKeys(value: unknown): readonly string[] {
 
 function inspectableObjectKeys(value: object): readonly string[] {
 	return Object.keys(value).sort().slice(0, MAX_INSPECTABLE_KEYS);
+}
+
+function normalizeSensitivePaths(value: unknown): readonly string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) {
+		throw new Error('Zustand adapter sensitivePaths must be an array.');
+	}
+	const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+	const length =
+		lengthDescriptor &&
+		'value' in lengthDescriptor &&
+		Number.isSafeInteger(lengthDescriptor.value)
+			? lengthDescriptor.value
+			: -1;
+	if (length < 0 || length > MAX_SENSITIVE_PATHS) {
+		throw new Error(
+			`Zustand adapter sensitivePaths cannot exceed ${MAX_SENSITIVE_PATHS} entries.`,
+		);
+	}
+	const normalized: string[] = [];
+	const seen = new Set<string>();
+	for (let index = 0; index < length; index += 1) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+		if (!descriptor || !('value' in descriptor)) {
+			throw new Error(
+				'Zustand adapter sensitivePaths cannot contain holes or accessors.',
+			);
+		}
+		const path = descriptor.value;
+		if (
+			typeof path !== 'string' ||
+			!path.trim() ||
+			path !== path.trim() ||
+			utf8ByteLength(path) > MAX_SENSITIVE_PATH_BYTES
+		) {
+			throw new Error(
+				`Zustand adapter sensitive paths must be trimmed strings no longer than ${MAX_SENSITIVE_PATH_BYTES} bytes.`,
+			);
+		}
+		if (!seen.has(path)) {
+			seen.add(path);
+			normalized.push(path);
+		}
+	}
+	return Object.freeze(normalized);
+}
+
+function assertSafePatchKeys(value: unknown, path = '$'): void {
+	if (!value || typeof value !== 'object') return;
+	if (Array.isArray(value)) {
+		for (let index = 0; index < value.length; index += 1) {
+			assertSafePatchKeys(value[index], `${path}[${index}]`);
+		}
+		return;
+	}
+	for (const [key, entry] of Object.entries(value)) {
+		if (UNSAFE_PATCH_KEYS.has(key)) {
+			throw new Error(`${path}.${key} is not allowed in a Zustand patch.`);
+		}
+		assertSafePatchKeys(entry, `${path}.${key}`);
+	}
+}
+
+function canonicalizeTopLevelState(
+	value: unknown,
+	maxBytes: number,
+	label: string,
+): CanonicalZustandState {
+	const canonical = canonicalizeRestoreValue(value, maxBytes);
+	const detached: unknown = JSON.parse(canonical.json);
+	if (!detached || typeof detached !== 'object' || Array.isArray(detached)) {
+		throw new Error(`${label} must be a top-level JSON object.`);
+	}
+	assertSafePatchKeys(detached);
+	return Object.freeze({
+		json: canonical.json,
+		value: detached as Readonly<Record<string, unknown>>,
+		preview: canonical.preview,
+		bytes: canonical.bytes,
+	});
+}
+
+function normalizeCorrelationId(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	if (
+		typeof value !== 'string' ||
+		!value.trim() ||
+		value !== value.trim() ||
+		utf8ByteLength(value) > MAX_CORRELATION_ID_BYTES
+	) {
+		throw new Error(
+			`Zustand correlation ids must be trimmed strings no longer than ${MAX_CORRELATION_ID_BYTES} bytes.`,
+		);
+	}
+	return value;
+}
+
+function sensitivePathRoots(paths: readonly string[]): ReadonlySet<string> {
+	const roots = new Set<string>();
+	for (const path of paths) {
+		const root = path.split(/[.[\]]/, 1)[0];
+		if (root) roots.add(root);
+	}
+	return roots;
+}
+
+function assertPatchAvoidsSensitivePaths(
+	patch: Readonly<Record<string, unknown>>,
+	paths: readonly string[],
+): void {
+	const roots = sensitivePathRoots(paths);
+	for (const key of Object.keys(patch)) {
+		if (roots.has(key)) {
+			throw new Error(
+				`Zustand patch field ${key} is protected by the adapter's sensitive-path policy.`,
+			);
+		}
+	}
+}
+
+function validateTimestamp(value: number): number {
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new Error('Zustand mutation clock returned an invalid timestamp.');
+	}
+	return value;
 }
 
 /**
@@ -218,6 +442,13 @@ function changeLabel(event: ZustandChangeEvent): string {
 	return `${event.changedKeys.slice(0, 3).join(', ')} +${event.changedKeys.length - 3}`;
 }
 
+function zustandCapabilityLabel(snapshot: ZustandStoreSnapshot): string {
+	const mode = snapshot.capabilities.restorable
+		? 'Reversible edits'
+		: 'Read only';
+	return snapshot.capabilities.persisted ? `${mode} · persisted` : mode;
+}
+
 export function createZustandPlugin(
 	options: ZustandPluginOptions,
 ): ZustandPlugin {
@@ -228,6 +459,10 @@ export function createZustandPlugin(
 	const maxSnapshotBytes = options.maxSnapshotBytes ?? 2 * 1024 * 1024;
 	const maxEvents = options.maxEvents ?? 100;
 	const maxEventBytes = options.maxEventBytes ?? 512 * 1024;
+	const maxStateSnapshots = options.maxStateSnapshots ?? 20;
+	const maxMutationReceipts = options.maxMutationReceipts ?? 100;
+	const maxMutationBytes = options.maxMutationBytes ?? maxValueBytes;
+	const now = options.now ?? Date.now;
 	assertPositiveFinite(maxValueBytes, 'maxValueBytes');
 	assertPositiveInteger(maxStores, 'maxStores');
 	if (maxStores > MAX_INSPECTABLE_STORES) {
@@ -236,6 +471,9 @@ export function createZustandPlugin(
 	assertPositiveFinite(maxSnapshotBytes, 'maxSnapshotBytes');
 	assertPositiveInteger(maxEvents, 'maxEvents');
 	assertPositiveFinite(maxEventBytes, 'maxEventBytes');
+	assertPositiveInteger(maxStateSnapshots, 'maxStateSnapshots');
+	assertPositiveInteger(maxMutationReceipts, 'maxMutationReceipts');
+	assertPositiveFinite(maxMutationBytes, 'maxMutationBytes');
 	if (maxValueBytes > MAX_ZUSTAND_VALUE_BYTES) {
 		throw new Error(`maxValueBytes cannot exceed ${MAX_ZUSTAND_VALUE_BYTES}`);
 	}
@@ -250,6 +488,20 @@ export function createZustandPlugin(
 	if (maxEventBytes > MAX_ZUSTAND_EVENT_BYTES) {
 		throw new Error(`maxEventBytes cannot exceed ${MAX_ZUSTAND_EVENT_BYTES}`);
 	}
+	if (maxStateSnapshots > MAX_STATE_SNAPSHOTS) {
+		throw new Error(`maxStateSnapshots cannot exceed ${MAX_STATE_SNAPSHOTS}`);
+	}
+	if (maxMutationReceipts > MAX_MUTATION_RECEIPTS) {
+		throw new Error(
+			`maxMutationReceipts cannot exceed ${MAX_MUTATION_RECEIPTS}`,
+		);
+	}
+	if (maxMutationBytes > MAX_MUTATION_BYTES) {
+		throw new Error(`maxMutationBytes cannot exceed ${MAX_MUTATION_BYTES}`);
+	}
+	if (typeof now !== 'function') {
+		throw new Error('Zustand mutation now must be a function.');
+	}
 
 	const snapshotStore = new ExternalStore<ZustandInspectorSnapshot>({
 		stores: [],
@@ -263,12 +515,22 @@ export function createZustandPlugin(
 		estimateBytes: (event) =>
 			serializeValue(event, maxValueBytes + 8 * 1024).estimatedBytes,
 	});
+	const stateSnapshotStore = new ExternalStore<
+		readonly PrivateZustandStateSnapshot[]
+	>([]);
+	const mutationReceiptStore = new ExternalStore<
+		readonly ZustandMutationReceipt[]
+	>([]);
 	const snapshots = new Map<string, ZustandStoreSnapshot>();
 	const snapshotSizes = new Map<string, number>();
 	const fingerprints = new Map<string, StoreFingerprints>();
 	const subscriptions = new Map<string, ZustandSubscription>();
 	let installCount = 0;
 	let nextEventId = 1;
+	let nextStateSnapshotId = 1;
+	let nextMutationReceiptId = 1;
+	let mutationQueue = Promise.resolve();
+	const mutatingStoreIds = new Set<string>();
 	let storeRegistrySubscription:
 		| { active: boolean; dispose: () => void }
 		| undefined;
@@ -289,6 +551,19 @@ export function createZustandPlugin(
 		}
 		return descriptor.value;
 	};
+	const optionalAdapterField = (adapter: object, key: string): unknown => {
+		let descriptor: PropertyDescriptor | undefined;
+		try {
+			descriptor = Object.getOwnPropertyDescriptor(adapter, key);
+		} catch {
+			throw new Error(`Zustand adapter field ${key} is unreadable.`);
+		}
+		if (!descriptor) return undefined;
+		if (!('value' in descriptor)) {
+			throw new Error(`Zustand adapter field ${key} must be plain data.`);
+		}
+		return descriptor.value;
+	};
 	const normalizeAdapter = (candidate: unknown): DevToolsZustandAdapter => {
 		if (!candidate || typeof candidate !== 'object') {
 			throw new Error('Zustand adapters must be objects.');
@@ -297,24 +572,17 @@ export function createZustandPlugin(
 		if (cached) return cached;
 		const id = adapterField(candidate, 'id');
 		const title = adapterField(candidate, 'title');
-		let description: unknown;
-		try {
-			const descriptor = Object.getOwnPropertyDescriptor(
-				candidate,
-				'description',
-			);
-			if (descriptor && !('value' in descriptor)) {
-				throw new Error(
-					'Zustand adapter field description must be plain data.',
-				);
-			}
-			description = descriptor?.value;
-		} catch (error) {
-			if (error instanceof Error) throw error;
-			throw new Error('Zustand adapter field description is unreadable.');
-		}
+		const description = optionalAdapterField(candidate, 'description');
 		const getInspectableState = adapterField(candidate, 'getInspectableState');
 		const subscribe = adapterField(candidate, 'subscribe');
+		const validatePatch = optionalAdapterField(candidate, 'validatePatch');
+		const applyPatch = optionalAdapterField(candidate, 'applyPatch');
+		const reset = optionalAdapterField(candidate, 'reset');
+		const persisted = optionalAdapterField(candidate, 'persisted');
+		const restorable = optionalAdapterField(candidate, 'restorable');
+		const sensitivePaths = normalizeSensitivePaths(
+			optionalAdapterField(candidate, 'sensitivePaths'),
+		);
 		if (typeof id !== 'string' || !id.trim() || id !== id.trim()) {
 			throw new Error(
 				'Zustand adapter ids must be non-empty and cannot have surrounding whitespace.',
@@ -344,13 +612,54 @@ export function createZustandPlugin(
 				'Zustand adapters require projection and subscription callbacks.',
 			);
 		}
-		const adapter: DevToolsZustandAdapter = {
+		if (
+			(validatePatch === undefined) !== (applyPatch === undefined) ||
+			(validatePatch !== undefined && typeof validatePatch !== 'function') ||
+			(applyPatch !== undefined && typeof applyPatch !== 'function')
+		) {
+			throw new Error(
+				'Writable Zustand adapters require both validatePatch and applyPatch callbacks.',
+			);
+		}
+		if (reset !== undefined && typeof reset !== 'function') {
+			throw new Error('Zustand adapter reset must be a function.');
+		}
+		if (persisted !== undefined && typeof persisted !== 'boolean') {
+			throw new Error('Zustand adapter persisted must be a boolean.');
+		}
+		if (restorable !== undefined && typeof restorable !== 'boolean') {
+			throw new Error('Zustand adapter restorable must be a boolean.');
+		}
+		if (restorable === true && (!validatePatch || !applyPatch)) {
+			throw new Error(
+				'Restorable Zustand adapters require writable patch callbacks.',
+			);
+		}
+		if (restorable === true && sensitivePaths.length > 0) {
+			throw new Error(
+				'Restorable Zustand projections cannot contain sensitive paths.',
+			);
+		}
+		const adapter: DevToolsZustandAdapter = Object.freeze({
 			id,
 			title,
 			...(typeof description === 'string' ? { description } : {}),
 			getInspectableState: getInspectableState as () => unknown,
 			subscribe: subscribe as (listener: () => void) => () => void,
-		};
+			...(typeof validatePatch === 'function'
+				? {
+						validatePatch:
+							validatePatch as DevToolsZustandAdapter['validatePatch'],
+						applyPatch: applyPatch as DevToolsZustandAdapter['applyPatch'],
+					}
+				: {}),
+			...(typeof reset === 'function'
+				? { reset: reset as DevToolsZustandAdapter['reset'] }
+				: {}),
+			...(persisted === true ? { persisted: true } : {}),
+			...(restorable === true ? { restorable: true } : {}),
+			...(sensitivePaths.length > 0 ? { sensitivePaths } : {}),
+		});
 		normalizedAdapterCache.set(candidate, adapter);
 		return adapter;
 	};
@@ -414,6 +723,14 @@ export function createZustandPlugin(
 			error: truncateText(errorMessage(error), 8 * 1024).text,
 		});
 	};
+	const adapterCapabilities = (adapter: DevToolsZustandAdapter) =>
+		Object.freeze({
+			writable: Boolean(adapter.validatePatch && adapter.applyPatch),
+			resettable: Boolean(adapter.reset),
+			persisted: adapter.persisted === true,
+			restorable: adapter.restorable === true,
+			sensitivePaths: adapter.sensitivePaths ?? EMPTY_SENSITIVE_PATHS,
+		});
 	const retainSnapshot = (snapshot: ZustandStoreSnapshot): void => {
 		const serialized = serializeValue(
 			snapshot,
@@ -470,6 +787,7 @@ export function createZustandPlugin(
 				truncated: serialized.truncated || sanitized.truncated,
 				keys: inspectableKeys(sanitized.value),
 				updatedAt: at,
+				capabilities: adapterCapabilities(adapter),
 			};
 		} catch (error) {
 			const message = truncateText(errorMessage(error), 8 * 1024).text;
@@ -482,6 +800,7 @@ export function createZustandPlugin(
 				truncated: false,
 				keys: [],
 				updatedAt: at,
+				capabilities: adapterCapabilities(adapter),
 				error: message,
 			};
 		}
@@ -530,7 +849,376 @@ export function createZustandPlugin(
 		}
 	};
 
+	const enqueueMutation = <Result,>(
+		operation: () => Promise<Result>,
+	): Promise<Result> => {
+		const result = mutationQueue.then(operation, operation);
+		mutationQueue = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	};
+	const normalizeStoreId = (storeId: unknown): string => {
+		if (
+			typeof storeId !== 'string' ||
+			!storeId.trim() ||
+			storeId !== storeId.trim() ||
+			storeId.length > 256
+		) {
+			throw new Error('Zustand store id is invalid.');
+		}
+		return storeId;
+	};
+	const resolveAdapter = (storeId: unknown): DevToolsZustandAdapter => {
+		const normalizedStoreId = normalizeStoreId(storeId);
+		const adapter = validatedAdapters().find(
+			(candidate) => candidate.id === normalizedStoreId,
+		);
+		if (!adapter) throw new Error('Zustand store is unavailable.');
+		return adapter;
+	};
+	const resolveRestorableAdapter = (
+		storeId: unknown,
+	): RestorableZustandAdapter => {
+		const adapter = resolveAdapter(storeId);
+		if (
+			adapter.restorable !== true ||
+			!adapter.validatePatch ||
+			!adapter.applyPatch
+		) {
+			throw new Error(
+				'Zustand store is read-only because it has no complete rollback adapter.',
+			);
+		}
+		return adapter as RestorableZustandAdapter;
+	};
+	const assertCurrentAdapter = (adapter: DevToolsZustandAdapter): void => {
+		if (resolveAdapter(adapter.id) !== adapter) {
+			throw new Error(
+				'Zustand store adapter changed during the operation; refresh and try again.',
+			);
+		}
+	};
+	const canonicalizeWithAdapter = async (
+		adapter: RestorableZustandAdapter,
+		value: unknown,
+		label: string,
+	): Promise<CanonicalZustandState> => {
+		const untrusted = canonicalizeTopLevelState(value, maxMutationBytes, label);
+		assertPatchAvoidsSensitivePaths(
+			untrusted.value,
+			adapter.sensitivePaths ?? EMPTY_SENSITIVE_PATHS,
+		);
+		const validated = await adapter.validatePatch(JSON.parse(untrusted.json));
+		const canonical = canonicalizeTopLevelState(
+			validated,
+			maxMutationBytes,
+			`${label} validation result`,
+		);
+		assertPatchAvoidsSensitivePaths(
+			canonical.value,
+			adapter.sensitivePaths ?? EMPTY_SENSITIVE_PATHS,
+		);
+		return canonical;
+	};
+	const captureCanonicalState = async (
+		adapter: RestorableZustandAdapter,
+	): Promise<CanonicalZustandState> => {
+		const observed = canonicalizeTopLevelState(
+			adapter.getInspectableState(),
+			maxMutationBytes,
+			`Zustand state for ${adapter.id}`,
+		);
+		return canonicalizeWithAdapter(
+			adapter,
+			JSON.parse(observed.json),
+			`Zustand state for ${adapter.id}`,
+		);
+	};
+	const publicStateSnapshot = (
+		snapshot: PrivateZustandStateSnapshot,
+	): ZustandStateSnapshot =>
+		Object.freeze({
+			id: snapshot.id,
+			storeId: snapshot.storeId,
+			storeTitle: snapshot.storeTitle,
+			createdAt: snapshot.createdAt,
+			stateText: snapshot.stateText,
+			stateBytes: snapshot.stateBytes,
+			truncated: snapshot.truncated,
+		});
+	const recordStateSnapshot = (
+		adapter: DevToolsZustandAdapter,
+		canonical: CanonicalZustandState,
+	): ZustandStateSnapshot => {
+		const snapshot: PrivateZustandStateSnapshot = Object.freeze({
+			id: `zustand-state-${nextStateSnapshotId++}`,
+			storeId: adapter.id,
+			storeTitle: adapter.title,
+			createdAt: validateTimestamp(now()),
+			stateText: canonical.preview,
+			stateBytes: canonical.bytes,
+			truncated: canonical.bytes > 8 * 1024,
+			json: canonical.json,
+		});
+		stateSnapshotStore.set(
+			Object.freeze(
+				[...stateSnapshotStore.getSnapshot(), snapshot].slice(
+					-maxStateSnapshots,
+				),
+			),
+		);
+		return publicStateSnapshot(snapshot);
+	};
+	const appendMutationEvent = (receipt: ZustandMutationReceipt): void => {
+		try {
+			options.eventStore?.append({
+				source: 'zustand',
+				kind: `mutation-${receipt.status}`,
+				level:
+					receipt.status === 'succeeded'
+						? 'info'
+						: receipt.status === 'needs-attention'
+							? 'error'
+							: 'warn',
+				title: `Zustand ${receipt.kind} ${receipt.status}`,
+				summary: receipt.error,
+				...(receipt.correlationId
+					? { correlationId: receipt.correlationId }
+					: {}),
+				resourceRef: { toolId: id, resourceId: receipt.id },
+				attributes: {
+					storeId: receipt.storeId,
+					kind: receipt.kind,
+					status: receipt.status,
+				},
+			});
+		} catch {
+			// The shared diagnostics timeline cannot change mutation outcomes.
+		}
+	};
+	const recordMutationReceipt = (
+		receipt: ZustandMutationReceipt,
+	): ZustandMutationReceipt => {
+		const frozen = Object.freeze({
+			...receipt,
+			changedKeys: Object.freeze([...receipt.changedKeys]),
+		});
+		mutationReceiptStore.set(
+			Object.freeze(
+				[...mutationReceiptStore.getSnapshot(), frozen].slice(
+					-maxMutationReceipts,
+				),
+			),
+		);
+		appendMutationEvent(frozen);
+		return frozen;
+	};
+	const settleMutationCapture = (adapter: DevToolsZustandAdapter): void => {
+		const subscription = subscriptions.get(adapter.id);
+		if (subscription) subscription.dirtyDuringMutation = false;
+		try {
+			assertCurrentAdapter(adapter);
+			capture(adapter, true);
+			publish(validatedAdapters());
+		} catch (error) {
+			reportError(error);
+		}
+	};
+	const verifyPatchApplied = (
+		patch: CanonicalZustandState,
+		result: CanonicalZustandState,
+	): void => {
+		for (const key of Object.keys(patch.value)) {
+			if (
+				JSON.stringify(result.value[key]) !== JSON.stringify(patch.value[key])
+			) {
+				throw new Error(
+					`Zustand adapter did not apply the validated ${key} field.`,
+				);
+			}
+		}
+	};
+	const runMutation = (
+		kind: ZustandMutationKind,
+		storeId: string,
+		payload: unknown,
+		correlationValue?: string,
+	): Promise<ZustandMutationReceipt> =>
+		enqueueMutation(async () => {
+			const startedAt = validateTimestamp(now());
+			const receiptId = `zustand-mutation-${nextMutationReceiptId++}`;
+			let correlationId: string | undefined;
+			let adapter: RestorableZustandAdapter | undefined;
+			let before: CanonicalZustandState | undefined;
+			let observedBefore: CanonicalZustandState | undefined;
+			let mutationStarted = false;
+			let snapshotId: string | undefined;
+			let changedKeys: readonly string[] = [];
+			try {
+				correlationId = normalizeCorrelationId(correlationValue);
+				adapter = resolveRestorableAdapter(storeId);
+				if (kind === 'reset' && !adapter.reset) {
+					throw new Error('Zustand store has no explicit reset adapter.');
+				}
+				observedBefore = canonicalizeTopLevelState(
+					adapter.getInspectableState(),
+					maxMutationBytes,
+					`Zustand state for ${adapter.id}`,
+				);
+				before = await canonicalizeWithAdapter(
+					adapter,
+					JSON.parse(observedBefore.json),
+					`Zustand state for ${adapter.id}`,
+				);
+				let desired: CanonicalZustandState | undefined;
+				if (kind === 'patch') {
+					desired = await canonicalizeWithAdapter(
+						adapter,
+						payload,
+						`Zustand patch for ${adapter.id}`,
+					);
+				} else if (kind === 'jump') {
+					if (
+						typeof payload !== 'string' ||
+						!payload.trim() ||
+						payload !== payload.trim() ||
+						payload.length > 256
+					) {
+						throw new Error('Zustand state snapshot id is invalid.');
+					}
+					const snapshot = stateSnapshotStore
+						.getSnapshot()
+						.find(
+							(candidate) =>
+								candidate.id === payload && candidate.storeId === adapter?.id,
+						);
+					if (!snapshot) {
+						throw new Error(
+							'Zustand state snapshot is unavailable or belongs to another store.',
+						);
+					}
+					snapshotId = snapshot.id;
+					desired = await canonicalizeWithAdapter(
+						adapter,
+						JSON.parse(snapshot.json),
+						`Zustand snapshot ${snapshot.id}`,
+					);
+				}
+				assertCurrentAdapter(adapter);
+				const currentObserved = canonicalizeTopLevelState(
+					adapter.getInspectableState(),
+					maxMutationBytes,
+					`Zustand state for ${adapter.id}`,
+				);
+				if (currentObserved.json !== observedBefore.json) {
+					throw new Error(
+						'Zustand store changed while the operation was being validated; retry with the latest state.',
+					);
+				}
+				mutatingStoreIds.add(adapter.id);
+				mutationStarted = true;
+				if (kind === 'reset') {
+					await adapter.reset?.();
+				} else if (desired) {
+					await adapter.applyPatch(JSON.parse(desired.json));
+				}
+				assertCurrentAdapter(adapter);
+				const after = await captureCanonicalState(adapter);
+				if (kind === 'jump' && desired?.json !== after.json) {
+					throw new Error(
+						'Zustand adapter did not restore the complete captured state.',
+					);
+				}
+				if (kind === 'patch' && desired) verifyPatchApplied(desired, after);
+				changedKeys = changedZustandKeys(
+					topLevelFingerprints(before.value, maxMutationBytes),
+					topLevelFingerprints(after.value, maxMutationBytes),
+				);
+				recordStateSnapshot(adapter, before);
+				const afterSnapshot = recordStateSnapshot(adapter, after);
+				if (kind !== 'jump') snapshotId = afterSnapshot.id;
+				const receipt = recordMutationReceipt({
+					id: receiptId,
+					storeId: adapter.id,
+					kind,
+					status: 'succeeded',
+					startedAt,
+					completedAt: validateTimestamp(now()),
+					changedKeys,
+					...(correlationId ? { correlationId } : {}),
+					...(snapshotId ? { snapshotId } : {}),
+				});
+				return receipt;
+			} catch (error) {
+				let status: ZustandMutationReceipt['status'] = 'failed';
+				let failure = truncateText(errorMessage(error), 8 * 1024).text;
+				let shouldRollback = mutationStarted;
+				if (!shouldRollback && adapter && before && observedBefore) {
+					try {
+						const currentObserved = canonicalizeTopLevelState(
+							adapter.getInspectableState(),
+							maxMutationBytes,
+							`Zustand state for ${adapter.id}`,
+						);
+						shouldRollback = currentObserved.json !== observedBefore.json;
+					} catch {
+						shouldRollback = true;
+					}
+				}
+				if (shouldRollback && adapter && before) {
+					try {
+						await adapter.applyPatch(JSON.parse(before.json));
+						const restored = await captureCanonicalState(adapter);
+						if (restored.json !== before.json) {
+							throw new Error(
+								'Rollback verification did not match prior state.',
+							);
+						}
+						status = 'rolled-back';
+					} catch (rollbackError) {
+						status = 'needs-attention';
+						failure = `${failure} Rollback failed: ${truncateText(errorMessage(rollbackError), 4 * 1024).text}`;
+					}
+				}
+				const receipt = recordMutationReceipt({
+					id: receiptId,
+					storeId:
+						adapter?.id ??
+						(typeof storeId === 'string' ? storeId.slice(0, 256) : 'unknown'),
+					kind,
+					status,
+					startedAt,
+					completedAt: validateTimestamp(now()),
+					changedKeys,
+					...(correlationId ? { correlationId } : {}),
+					...(snapshotId ? { snapshotId } : {}),
+					error: failure,
+				});
+				throw new Error(
+					`${receipt.error}${status === 'rolled-back' ? ' The prior state was restored.' : ''}`,
+				);
+			} finally {
+				if (adapter) {
+					mutatingStoreIds.delete(adapter.id);
+					settleMutationCapture(adapter);
+				}
+			}
+		});
+	const captureState = (storeId: string): Promise<ZustandStateSnapshot> =>
+		enqueueMutation(async () => {
+			const adapter = resolveRestorableAdapter(storeId);
+			const canonical = await captureCanonicalState(adapter);
+			assertCurrentAdapter(adapter);
+			return recordStateSnapshot(adapter, canonical);
+		});
+
 	const scheduleCapture = (subscription: ZustandSubscription): void => {
+		if (mutatingStoreIds.has(subscription.adapter.id)) {
+			subscription.dirtyDuringMutation = true;
+			return;
+		}
 		if (subscription.captureQueued) return;
 		subscription.captureQueued = true;
 		const runCapture = () => {
@@ -574,6 +1262,7 @@ export function createZustandPlugin(
 				dispose: () => {},
 				active: true,
 				captureQueued: false,
+				dirtyDuringMutation: false,
 			};
 			try {
 				const dispose = adapter.subscribe(() => {
@@ -638,7 +1327,18 @@ export function createZustandPlugin(
 			eventStore.getSnapshot,
 			eventStore.getServerSnapshot,
 		);
+		const stateSnapshotHistory = useSyncExternalStore(
+			stateSnapshotStore.subscribe,
+			stateSnapshotStore.getSnapshot,
+			stateSnapshotStore.getServerSnapshot,
+		);
+		const mutationReceipts = useSyncExternalStore(
+			mutationReceiptStore.subscribe,
+			mutationReceiptStore.getSnapshot,
+			mutationReceiptStore.getServerSnapshot,
+		);
 		const [search, setSearch] = useState('');
+		const [patchDrafts, setPatchDrafts] = useState<Record<string, string>>({});
 		const needle = search.trim().toLowerCase();
 		const visibleStores = useMemo(
 			() =>
@@ -652,7 +1352,64 @@ export function createZustandPlugin(
 			[snapshot.stores, needle],
 		);
 		const recentEvents = [...events].reverse().slice(0, 20);
+		const recentMutationReceipts = [...mutationReceipts].reverse().slice(0, 20);
 		const now = Date.now();
+		const patchDraft = (storeId: string): string =>
+			patchDrafts[storeId] ?? '{}';
+		const updatePatchDraft = (storeId: string, value: string): void => {
+			setPatchDrafts((current) => ({ ...current, [storeId]: value }));
+		};
+		const storeStateSnapshots = (
+			storeId: string,
+		): readonly ZustandStateSnapshot[] =>
+			stateSnapshotHistory
+				.filter((snapshot) => snapshot.storeId === storeId)
+				.map(publicStateSnapshot);
+		const runStoreMutation = (
+			label: string,
+			action: () => unknown | Promise<unknown>,
+			confirmation?: DevToolsActionConfirmation,
+		): void => {
+			void actions.run({ pluginId: id, label, action, confirmation });
+		};
+		const applyStoreDraft = (store: ZustandStoreSnapshot): void => {
+			runStoreMutation(`Apply Zustand patch to ${store.title}`, () => {
+				const patch: unknown = JSON.parse(patchDraft(store.id));
+				return runMutation('patch', store.id, patch);
+			});
+		};
+		const captureStoreState = (store: ZustandStoreSnapshot): void => {
+			runStoreMutation(`Capture Zustand state for ${store.title}`, () =>
+				captureState(store.id),
+			);
+		};
+		const resetStoreState = (store: ZustandStoreSnapshot): void => {
+			runStoreMutation(
+				`Reset Zustand store ${store.title}`,
+				() => runMutation('reset', store.id, undefined),
+				{
+					title: `Reset ${store.title}?`,
+					message:
+						'The store will be reset through its explicit adapter. PUMPD will restore the prior state if verification fails.',
+					confirmLabel: 'Reset',
+					destructive: true,
+				},
+			);
+		};
+		const jumpToStoreSnapshot = (
+			store: ZustandStoreSnapshot,
+			stateSnapshot: ZustandStateSnapshot,
+		): void => {
+			runStoreMutation(
+				`Restore Zustand state for ${store.title}`,
+				() => runMutation('jump', store.id, stateSnapshot.id),
+				{
+					title: `Restore ${store.title}?`,
+					message: `Restore the state captured at ${new Date(stateSnapshot.createdAt).toLocaleTimeString()}? The current state is checkpointed first.`,
+					confirmLabel: 'Restore',
+				},
+			);
+		};
 		const clearRecordedChanges = () => {
 			void actions.run({
 				pluginId: id,
@@ -740,6 +1497,9 @@ export function createZustandPlugin(
 													{formatRelativeTime(store.updatedAt, now)}
 												</UIText>
 											</LabeledContent>
+											<LabeledContent label="Access">
+												<UIText>{zustandCapabilityLabel(store)}</UIText>
+											</LabeledContent>
 											{store.error ? (
 												<Label
 													color={PlatformColor('systemOrangeColor')}
@@ -760,6 +1520,51 @@ export function createZustandPlugin(
 													{store.stateText}
 												</UIText>
 											)}
+											{store.capabilities.restorable ? (
+												<>
+													<TextField
+														axis="vertical"
+														modifiers={[
+															autocorrectionDisabled(),
+															font({
+																design: 'monospaced',
+																textStyle: 'footnote',
+															}),
+															lineLimit(8),
+														]}
+														onTextChange={(value) =>
+															updatePatchDraft(store.id, value)
+														}
+														placeholder='{"field":"value"}'
+													/>
+													<Button
+														label="Apply validated patch"
+														onPress={() => applyStoreDraft(store)}
+													/>
+													<Button
+														label="Capture state"
+														onPress={() => captureStoreState(store)}
+													/>
+													{store.capabilities.resettable ? (
+														<Button
+															label="Reset store"
+															onPress={() => resetStoreState(store)}
+														/>
+													) : null}
+													{storeStateSnapshots(store.id)
+														.slice(-3)
+														.reverse()
+														.map((stateSnapshot) => (
+															<Button
+																key={stateSnapshot.id}
+																label={`Restore ${new Date(stateSnapshot.createdAt).toLocaleTimeString()}`}
+																onPress={() =>
+																	jumpToStoreSnapshot(store, stateSnapshot)
+																}
+															/>
+														))}
+												</>
+											) : null}
 										</DisclosureGroup>
 									))
 								)}
@@ -800,6 +1605,27 @@ export function createZustandPlugin(
 										onPress={clearRecordedChanges}
 									/>
 								) : null}
+							</Section>
+							<Section
+								title={`Mutation receipts · ${recentMutationReceipts.length}`}
+							>
+								{recentMutationReceipts.length === 0 ? (
+									<UIText modifiers={[foregroundStyle('secondary')]}>
+										No Zustand mutations recorded.
+									</UIText>
+								) : (
+									recentMutationReceipts.map((receipt) => (
+										<Label
+											key={receipt.id}
+											systemImage={
+												receipt.status === 'succeeded'
+													? 'checkmark.circle.fill'
+													: 'exclamationmark.triangle.fill'
+											}
+											title={`${receipt.storeId} · ${receipt.kind} · ${receipt.status}`}
+										/>
+									))
+								)}
 							</Section>
 						</List>
 					</Host>
@@ -854,11 +1680,52 @@ export function createZustandPlugin(
 									label="Projection"
 									value={describeStore(store)}
 								/>
+								<AndroidPanelRow
+									label="Access"
+									value={zustandCapabilityLabel(store)}
+								/>
 								<AndroidPanelTextBlock
 									label={store.error ? 'Error' : 'State'}
 									tone={store.error ? 'warning' : 'default'}
 									value={store.error ?? store.stateText}
 								/>
+								{store.capabilities.restorable ? (
+									<>
+										<AndroidPanelSearch
+											onChangeText={(value) =>
+												updatePatchDraft(store.id, value)
+											}
+											placeholder='JSON patch, for example {"field":"value"}'
+											value={patchDraft(store.id)}
+										/>
+										<AndroidPanelRow
+											label="Apply validated patch"
+											onPress={() => applyStoreDraft(store)}
+										/>
+										<AndroidPanelRow
+											label="Capture state"
+											onPress={() => captureStoreState(store)}
+										/>
+										{store.capabilities.resettable ? (
+											<AndroidPanelRow
+												label="Reset store"
+												onPress={() => resetStoreState(store)}
+											/>
+										) : null}
+										{storeStateSnapshots(store.id)
+											.slice(-3)
+											.reverse()
+											.map((stateSnapshot) => (
+												<AndroidPanelRow
+													key={stateSnapshot.id}
+													label={`Restore ${new Date(stateSnapshot.createdAt).toLocaleTimeString()}`}
+													onPress={() =>
+														jumpToStoreSnapshot(store, stateSnapshot)
+													}
+												/>
+											))}
+									</>
+								) : null}
 							</AndroidPanelSection>
 						))}
 						<AndroidPanelSection
@@ -882,6 +1749,24 @@ export function createZustandPlugin(
 									onPress={clearRecordedChanges}
 								/>
 							) : null}
+						</AndroidPanelSection>
+						<AndroidPanelSection
+							title={`Mutation receipts · ${recentMutationReceipts.length}`}
+						>
+							{recentMutationReceipts.length === 0 ? (
+								<AndroidPanelRow label="No Zustand mutations recorded" />
+							) : (
+								recentMutationReceipts.map((receipt) => (
+									<AndroidPanelRow
+										key={receipt.id}
+										label={`${receipt.storeId} · ${receipt.kind}`}
+										tone={
+											receipt.status === 'succeeded' ? 'default' : 'warning'
+										}
+										value={receipt.status}
+									/>
+								))
+							)}
 						</AndroidPanelSection>
 					</AndroidPanelScroll>
 				)}
@@ -976,5 +1861,26 @@ export function createZustandPlugin(
 		getSnapshot: snapshotStore.getSnapshot,
 		getEvents: eventStore.getSnapshot,
 		clearEvents: eventStore.clear,
+		applyPatch: (storeId, patch, correlationId) =>
+			runMutation('patch', storeId, patch, correlationId),
+		resetStore: (storeId, correlationId) =>
+			runMutation('reset', storeId, undefined, correlationId),
+		jumpToState: (storeId, snapshotId, correlationId) =>
+			runMutation('jump', storeId, snapshotId, correlationId),
+		captureState,
+		getStateSnapshots: (storeId) => {
+			const normalizedStoreId =
+				storeId === undefined ? undefined : normalizeStoreId(storeId);
+			return Object.freeze(
+				stateSnapshotStore
+					.getSnapshot()
+					.filter(
+						(snapshot) =>
+							!normalizedStoreId || snapshot.storeId === normalizedStoreId,
+					)
+					.map(publicStateSnapshot),
+			);
+		},
+		getMutationReceipts: mutationReceiptStore.getSnapshot,
 	};
 }
