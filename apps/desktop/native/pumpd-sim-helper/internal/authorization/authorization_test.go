@@ -165,8 +165,12 @@ func TestAuthorizationRejectsMismatchesExpiryAndUntrustedParent(t *testing.T) {
 			authorizer := New(bytes.NewReader(data), &stubAttestor{error: test.attestError})
 			authorizer.now = func() time.Time { return now }
 			authorizer.parentPID = func() int { return test.parentPID }
-			if apiError := authorizer.Authorize(context.Background(), request); apiError == nil {
+			apiError := authorizer.Authorize(context.Background(), request)
+			if apiError == nil {
 				t.Fatal("mismatched authorization unexpectedly succeeded")
+			}
+			if test.attestError != nil && !strings.Contains(apiError.Message, test.attestError.Error()) {
+				t.Fatalf("attestation reason was not surfaced: %q", apiError.Message)
 			}
 		})
 	}

@@ -13,10 +13,7 @@ import {
 import type { ReactNode } from 'react';
 import { EmptyPanel, PanelHeader } from '@/components/ui';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
-import type {
-	SimulatorCapability,
-	SimulatorDevice,
-} from '../../shared/simulator-protocol';
+import type { SimulatorDevice } from '../../shared/simulator-protocol';
 
 export function SimulatorPanelHeader({
 	eyebrow,
@@ -127,6 +124,8 @@ export function DenseVirtualList<T extends object>({
 	renderItem,
 	textValue,
 	selectedId,
+	selectedIds,
+	onSelectedIdsChange,
 	onSelect,
 	emptyTitle = 'Nothing here yet',
 	emptyDescription = 'Refresh discovery or change the current filters.',
@@ -139,17 +138,34 @@ export function DenseVirtualList<T extends object>({
 	renderItem: (item: T) => ReactNode;
 	textValue: (item: T) => string;
 	selectedId?: string | null | undefined;
+	selectedIds?: string[] | undefined;
+	onSelectedIdsChange?: ((ids: string[]) => void) | undefined;
 	onSelect?: (item: T) => void;
 	emptyTitle?: string;
 	emptyDescription?: string;
 	rowHeight?: number;
 	className?: string | undefined;
 }) {
+	const selectionMode = onSelectedIdsChange
+		? 'multiple'
+		: selectedId !== undefined && onSelect
+			? 'single'
+			: 'none';
 	return (
 		<ListView
 			aria-label={ariaLabel}
 			className={`sim-virtual-list ${className}`}
 			items={items}
+			selectionMode={selectionMode}
+			selectionBehavior={selectionMode === 'multiple' ? 'toggle' : 'replace'}
+			selectedKeys={selectedIds ?? (selectedId ? [selectedId] : [])}
+			onSelectionChange={(keys) => {
+				const selected = items.filter(
+					(item) => keys === 'all' || keys.has(getId(item))
+				);
+				if (onSelectedIdsChange) onSelectedIdsChange(selected.map(getId));
+				else if (selected[0]) onSelect?.(selected[0]);
+			}}
 			renderEmptyState={() => (
 				<div className="sim-list-empty">
 					<strong>{emptyTitle}</strong>
@@ -161,13 +177,17 @@ export function DenseVirtualList<T extends object>({
 		>
 			{(item) => {
 				const itemId = getId(item);
+				const selected =
+					selectionMode === 'multiple'
+						? selectedIds?.includes(itemId)
+						: selectedId === itemId;
 				return (
 					<ListView.Item
-						aria-current={selectedId === itemId ? 'true' : undefined}
-						className={`sim-list-item ${selectedId === itemId ? 'is-selected' : ''}`}
+						aria-current={selectionMode === 'single' && selected ? 'true' : undefined}
+						className={`sim-list-item ${selected ? 'is-selected' : ''}`}
 						id={itemId}
 						textValue={textValue(item)}
-						onAction={() => onSelect?.(item)}
+						{...(selectionMode === 'none' ? { onAction: () => onSelect?.(item) } : {})}
 					>
 						{renderItem(item)}
 					</ListView.Item>
@@ -191,17 +211,6 @@ export function TargetStatePill({ state }: { state: SimulatorDevice['state'] }) 
 			{state === 'shuttingDown' ? 'shutting down' : state}
 		</span>
 	);
-}
-
-export function CapabilityStatePill({
-	status,
-}: {
-	status: SimulatorCapability['status'];
-}) {
-	const label = status;
-	const tone =
-		status === 'available' ? 'success' : status === 'checking' ? 'info' : 'danger';
-	return <span className={`sim-state-pill is-${tone}`}>{label}</span>;
 }
 
 export function NoSimulatorTarget({ onOpenSettings }: { onOpenSettings?: () => void }) {

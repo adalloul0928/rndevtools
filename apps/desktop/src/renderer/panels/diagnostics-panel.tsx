@@ -92,7 +92,7 @@ export function DiagnosticsPanel() {
 					value={query}
 					onChange={setQuery}
 				/>
-				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+				<span className="ml-auto font-mono text-xs text-(--text-3)">
 					{filtered.length} of {matching.length} events
 				</span>
 			</Toolbar>
@@ -181,7 +181,7 @@ export function DiagnosticsPanel() {
 								<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
 									Connection endpoints
 								</Card.Title>
-								<Card.Description className="mb-0 mt-1 text-[10px] text-(--text-3)">
+								<Card.Description className="mb-0 mt-1 text-xs text-(--text-3)">
 									Use the first reachable WebSocket URL from a development device.
 								</Card.Description>
 							</div>
@@ -196,19 +196,19 @@ export function DiagnosticsPanel() {
 									<span
 										className={`h-1.5 w-1.5 rounded-full ${broker.status === 'listening' ? 'bg-emerald-400' : 'bg-red-400'}`}
 									/>
-									<code className="min-w-0 flex-1 truncate text-[10px] text-(--foreground)">
+									<code className="min-w-0 flex-1 truncate text-xs text-(--foreground)">
 										{url}
 									</code>
 									<CopyButton label="Copy endpoint" value={url} />
 								</div>
 							))}
 							{broker?.urls.length === 0 ? (
-								<p className="m-0 px-4 py-3 text-[10px] text-(--text-3)">
+								<p className="m-0 px-4 py-3 text-xs text-(--text-3)">
 									No connection endpoint is available.
 								</p>
 							) : null}
 							{broker?.error ? (
-								<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-[10px] leading-5 text-red-200">
+								<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-xs leading-5 text-red-200">
 									<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {broker.error}
 								</div>
 							) : null}
@@ -267,14 +267,12 @@ export function DiagnosticsPanel() {
 									className="grid grid-cols-[78px_72px_110px_minmax(0,1fr)] items-start gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
 									key={`${entry.scope}-${entry.id}`}
 								>
-									<span className="font-mono text-[9px] text-(--text-3)">
+									<span className="font-mono text-xs text-(--text-3)">
 										{formatClock(entry.at)}
 									</span>
 									<StatusPill tone={levelTone(entry.level)}>{entry.level}</StatusPill>
-									<code className="truncate text-[10px] text-(--muted)">
-										{entry.scope}
-									</code>
-									<span className="text-[10px] leading-4 text-(--foreground)">
+									<code className="truncate text-xs text-(--muted)">{entry.scope}</code>
+									<span className="text-xs leading-4 text-(--foreground)">
 										{entry.message}
 									</span>
 								</div>
@@ -313,7 +311,7 @@ function HealthCard({
 		>
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
-					<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+					<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 						{label}
 					</p>
 					<p className="mb-0 mt-2 truncate text-sm font-semibold capitalize text-(--foreground)">
@@ -326,7 +324,7 @@ function HealthCard({
 					{icon}
 				</span>
 			</div>
-			<p className="mb-0 mt-3 truncate text-[9px] text-(--text-3)">{detail}</p>
+			<p className="mb-0 mt-3 truncate text-xs text-(--text-3)">{detail}</p>
 		</Card>
 	);
 }
@@ -334,8 +332,8 @@ function HealthCard({
 function VersionRow({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex items-center justify-between gap-3 border-t border-white/[0.06] py-2 first:border-0">
-			<span className="text-[10px] text-(--text-3)">{label}</span>
-			<code className="max-w-[170px] truncate text-[10px] text-(--foreground)">
+			<span className="text-xs text-(--text-3)">{label}</span>
+			<code className="max-w-[170px] truncate text-xs text-(--foreground)">
 				{value}
 			</code>
 		</div>

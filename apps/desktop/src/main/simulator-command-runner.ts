@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { closeSync, openSync } from 'node:fs';
 import type { Writable } from 'node:stream';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -66,6 +67,15 @@ function positiveLimit(value: number | undefined, fallback: number): number {
 function commandLabel(executable: string): string {
 	const executableName = executable.split('/').at(-1) || 'command';
 	return executableName;
+}
+
+function closeReservedAuthorizationFd(fd: number | undefined): void {
+	if (fd === undefined) return;
+	try {
+		closeSync(fd);
+	} catch {
+		// The descriptor is already gone; nothing further to release.
+	}
 }
 
 function simulatorCommandEnvironment(
@@ -149,19 +159,33 @@ export async function runSimulatorCommand(
 		let forceKillTimer: NodeJS.Timeout | undefined;
 
 		let child: ChildProcessWithoutNullStreams;
+		// Descriptor 3 is reserved for the one-shot mutation authorization, and on a
+		// read-only run it carries nothing. It still must be a character device
+		// rather than 'ignore': above descriptor 2, 'ignore' yields a pollable FIFO
+		// with no peer, which the helper's Go runtime registers with its netpoll
+		// kqueue. The helper then closes descriptor 3 exactly once as the spent
+		// authorization, tearing that registration down underneath the running
+		// scheduler ("fatal error: runtime: netpoll failed"). /dev/null is never
+		// added to the poller, so the same close is inert.
+		let reservedAuthorizationFd: number | undefined;
 		try {
+			if (options.gracefulCancellationPipe) {
+				reservedAuthorizationFd = openSync('/dev/null', 'r');
+			}
 			child = spawn(executable, [...args], {
 				env: simulatorCommandEnvironment(
 					options.simulatorAppEnvironment,
 					options.gracefulCancellationPipe === true
 				),
-				stdio: options.gracefulCancellationPipe
-					? ['pipe', 'pipe', 'pipe', 'ignore', 'pipe']
-					: ['pipe', 'pipe', 'pipe'],
+				stdio:
+					options.gracefulCancellationPipe && reservedAuthorizationFd !== undefined
+						? ['pipe', 'pipe', 'pipe', reservedAuthorizationFd, 'pipe']
+						: ['pipe', 'pipe', 'pipe'],
 				shell: false,
 				windowsHide: true,
 			}) as ChildProcessWithoutNullStreams;
 		} catch (cause) {
+			closeReservedAuthorizationFd(reservedAuthorizationFd);
 			reject(
 				new SimulatorCommandError(`${label} could not start.`, {
 					kind: 'spawn',
@@ -170,6 +194,8 @@ export async function runSimulatorCommand(
 			);
 			return;
 		}
+		// The child holds its own duplicate once spawn returns.
+		closeReservedAuthorizationFd(reservedAuthorizationFd);
 		const controlPipe = options.gracefulCancellationPipe
 			? (child.stdio[4] as Writable | null)
 			: undefined;

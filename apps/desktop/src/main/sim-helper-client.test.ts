@@ -3,6 +3,7 @@ import {
 	NativeHelperTrustError,
 	type VerifiedSimulatorHelper,
 } from './native-helper-trust';
+import { NativeHostResponseError } from './native-host-client';
 import { SimHelperClient } from './sim-helper-client';
 import type { runSimulatorCommand } from './simulator-command-runner';
 
@@ -21,7 +22,7 @@ function verified(): VerifiedSimulatorHelper {
 			protocolVersion: 2,
 			compatibilityMatrixVersion: '2026-09-03-v2',
 			catalog: {
-				version: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+				version: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 				upstreamRepository: 'https://github.com/MobAI-App/simslim',
 				upstreamCommit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
 				patchSet: 'pumpd.1',
@@ -62,7 +63,7 @@ function handshakeResult() {
 		protocolVersion: 2,
 		platform: 'darwin',
 		architecture: 'arm64',
-		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 		catalogSource: {
 			repository: 'https://github.com/MobAI-App/simslim',
 			commit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
@@ -284,6 +285,69 @@ describe('sim helper client', () => {
 		expect(mutationBroker.runSimulatorMutation).toHaveBeenCalledOnce();
 	});
 
+	it('surfaces the native host code and reason when the broker refuses a mutation', async () => {
+		const runner = vi.fn(async () => {
+			throw new Error('the direct read-only runner must not carry a mutation');
+		});
+		const mutationBroker = {
+			runSimulatorMutation: vi.fn(async () => {
+				throw new NativeHostResponseError(
+					'mutation_authorization_required',
+					'The desktop parent is not a production-signed PUMPD application.',
+					false
+				);
+			}),
+		};
+		const client = new SimHelperClient({
+			resourceDirectory: '/signed',
+			appVersion: '0.1.0',
+			runner,
+			trustVerifier: vi.fn(async () => verified()),
+			mutationBroker,
+		});
+		await expect(client.cleanDisk(UDID, ['caches'])).rejects.toMatchObject({
+			code: 'helper_process_failed',
+			message: expect.stringMatching(
+				/native host mutation_authorization_required.*not a production-signed PUMPD application/
+			),
+		});
+		expect(runner).not.toHaveBeenCalled();
+	});
+
+	it('preserves the helper denial code and reason returned through the broker', async () => {
+		const runner = vi.fn(async () => {
+			throw new Error('the direct read-only runner must not carry a mutation');
+		});
+		const reason =
+			"The helper's parent is not an authenticated PUMPD mutation broker: verify live broker signature: static codesign requirement bound to live cdhash failed";
+		const mutationBroker = {
+			runSimulatorMutation: vi.fn(async (input: string) => {
+				const request = JSON.parse(input) as { requestId: string };
+				return JSON.stringify({
+					protocolVersion: 2,
+					requestId: request.requestId,
+					ok: false,
+					error: {
+						code: 'mutation_authorization_required',
+						message: reason,
+						retryable: false,
+					},
+				});
+			}),
+		};
+		const client = new SimHelperClient({
+			resourceDirectory: '/signed',
+			appVersion: '0.1.0',
+			runner,
+			trustVerifier: vi.fn(async () => verified()),
+			mutationBroker,
+		});
+		await expect(client.cleanDisk(UDID, ['caches'])).rejects.toMatchObject({
+			code: 'mutation_authorization_required',
+			message: reason,
+		});
+	});
+
 	it('requires deterministic doctor blocker arrays at the helper boundary', async () => {
 		let blockedByServiceIds: string[] | null = [];
 		const runner = vi.fn(async (_executable, _args, options) => {
@@ -420,7 +484,7 @@ describe('sim helper client', () => {
 		});
 		await expect(client.handshake()).resolves.toMatchObject({
 			helperVersion: '0.1.0',
-			catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+			catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 		});
 		expect(verifier).toHaveBeenCalledTimes(1);
 	});

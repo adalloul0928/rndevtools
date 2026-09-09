@@ -58,6 +58,7 @@ type MutationEvidence struct {
 	Operation         protocol.Operation     `json:"operation"`
 	ProfileID         string                 `json:"profileId,omitempty"`
 	FailureCode       string                 `json:"failureCode,omitempty"`
+	FailureDetail     string                 `json:"failureDetail,omitempty"`
 	Changed           bool                   `json:"changed"`
 	CheckpointToken   string                 `json:"checkpointToken"`
 	Compatibility     compatibility.Decision `json:"compatibility"`
@@ -160,7 +161,7 @@ func (service *Service) prepareMutation(
 	if err != nil {
 		return MutationPreparationEvidence{}, protocol.NewError(
 			"process_mapping_inconclusive",
-			"The helper could not bind running to-disable services to the exact Simulator process tree; no mutation was attempted.",
+			"The helper could not bind running to-disable services to the exact Simulator process tree; no mutation was attempted. "+protocol.BoundedDetail(err.Error()),
 			false,
 		)
 	}
@@ -332,7 +333,7 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 	if err != nil {
 		return cleanupPreflight(protocol.NewError(
 			"process_mapping_inconclusive",
-			"The helper could not bind commit-time running services to the exact Simulator process tree; no mutation was attempted.",
+			"The helper could not bind commit-time running services to the exact Simulator process tree; no mutation was attempted. "+protocol.BoundedDetail(err.Error()),
 			false,
 		))
 	}
@@ -375,6 +376,10 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 		desired.ManagedDisabledServiceIDs,
 	)
 	if err != nil {
+		// SimSlim explains an apply failure in prose ("the disable overrides did
+		// not survive the reboot (3 of 60 changes lost)"); the code alone hides
+		// which layer refused and why.
+		evidence.FailureDetail = protocol.BoundedDetail(err.Error())
 		return service.failAndRollback(ctx, evidence, preparation, "apply_delta_failed")
 	}
 	evidence.Rebooted = changed
@@ -387,10 +392,14 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 	evidence.Verification = verificationEvidence(err, verification)
 	evidence.After = stateEvidence(evidence.Verification.CurrentManagedDisabledIDs)
 	if err != nil || !evidence.Verification.Verified {
+		if err != nil {
+			evidence.FailureDetail = protocol.BoundedDetail(err.Error())
+		}
 		return service.failAndRollback(ctx, evidence, preparation, "verification_failed")
 	}
 	finalState, err := service.backend.RestoreBootState(ctx, preparation.Device.ID, finalBootTarget)
 	if err != nil {
+		evidence.FailureDetail = protocol.BoundedDetail(err.Error())
 		return service.failAndRollback(ctx, evidence, preparation, "restore_boot_state_failed")
 	}
 	evidence.FinalBootState = finalState

@@ -167,7 +167,7 @@ export function ComponentsPanel() {
 					value={query}
 					onChange={setQuery}
 				/>
-				<div className="ml-auto flex items-center gap-3 font-mono text-[10px] text-(--text-3)">
+				<div className="ml-auto flex items-center gap-3 font-mono text-xs text-(--text-3)">
 					<span title={currentScreenHash ?? 'Not reported'}>
 						Screen {currentScreenHash ? currentScreenHash.slice(0, 10) : 'v1 / unknown'}
 					</span>
@@ -242,10 +242,10 @@ export function ComponentsPanel() {
 											{target.kind}
 										</StatusPill>
 									</div>
-									<p className="mb-0 mt-1.5 truncate font-mono text-[9px] text-(--text-3)">
+									<p className="mb-0 mt-1.5 truncate font-mono text-xs text-(--text-3)">
 										{target.route ?? target.feature ?? 'No route'}
 									</p>
-									<div className="mt-2 flex items-center gap-2 text-[9px] text-(--text-3)">
+									<div className="mt-2 flex items-center gap-2 text-xs text-(--text-3)">
 										{target.bounds ? (
 											<Crosshair className="h-3 w-3 text-blue-300" />
 										) : null}
@@ -261,10 +261,10 @@ export function ComponentsPanel() {
 
 				<div className="panel-scroll border-r border-white/8 p-5 max-[1160px]:hidden">
 					<div className="mb-4">
-						<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+						<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Measured coordinate map
 						</p>
-						<p className="mb-0 mt-1 text-[10px] leading-4 text-(--muted)">
+						<p className="mb-0 mt-1 text-xs leading-4 text-(--muted)">
 							A bounds map from explicit measurements—not a live screen recording.
 						</p>
 					</div>
@@ -290,7 +290,7 @@ export function ComponentsPanel() {
 										onClick={() => setSelectedId(target.id)}
 									>
 										{isSelected ? (
-											<span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-blue-400 px-1.5 py-0.5 font-mono text-[7px] font-semibold text-black">
+											<span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-blue-400 px-1.5 py-0.5 font-mono text-xs font-semibold text-black">
 												{target.name}
 											</span>
 										) : null}
@@ -306,7 +306,7 @@ export function ComponentsPanel() {
 						<>
 							<div className="mb-4 flex items-start justify-between gap-4">
 								<div>
-									<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Selected target
 									</p>
 									<h2 className="mb-0 mt-1 text-base font-semibold tracking-[-0.025em] text-(--foreground)">
@@ -371,7 +371,7 @@ export function ComponentsPanel() {
 									variant="secondary"
 								>
 									<Card.Header className="border-b border-white/8 px-3 py-2.5">
-										<Card.Title className="flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+										<Card.Title className="flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
 											<Clock3 className="h-3.5 w-3.5" /> Recent renders
 										</Card.Title>
 									</Card.Header>
@@ -382,10 +382,10 @@ export function ComponentsPanel() {
 												key={event.id}
 											>
 												<div className="min-w-0">
-													<p className="m-0 truncate text-[10px] font-medium text-(--foreground)">
+													<p className="m-0 truncate text-xs font-medium text-(--foreground)">
 														{event.phase} · {event.cause}
 													</p>
-													<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+													<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
 														Render #{event.renderCount} · base{' '}
 														{event.baseDuration.toFixed(1)} ms
 													</p>
@@ -434,7 +434,7 @@ export function ComponentsPanel() {
 								variant="secondary"
 							>
 								<Card.Header className="border-b border-white/8 px-3 py-2.5">
-									<Card.Title className="flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+									<Card.Title className="flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
 										<BadgeCheck className="h-3.5 w-3.5" /> Accessibility semantics
 									</Card.Title>
 								</Card.Header>
@@ -469,10 +469,10 @@ export function ComponentsPanel() {
 							<section className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
 								<div className="mb-3 flex items-center justify-between gap-3">
 									<div>
-										<p className="m-0 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+										<p className="m-0 text-xs uppercase tracking-[0.07em] text-(--text-3)">
 											Semantic actions
 										</p>
-										<p className="mb-0 mt-1 text-[9px] leading-4 text-(--text-3)">
+										<p className="mb-0 mt-1 text-xs leading-4 text-(--text-3)">
 											{selected.isFocused
 												? 'Every mutation is bound to the exact current screen hash.'
 												: "Open this target's route before using semantic mutations."}
@@ -637,15 +637,15 @@ export function ComponentsPanel() {
 								</div>
 							</section>
 							<div className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
-								<div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.07em] text-(--text-3)">
+								<div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
 									<FileCode2 className="h-3.5 w-3.5" /> Source
 								</div>
 								{selected.sourceFiles.length === 0 ? (
-									<span className="text-[10px] text-(--text-3)">Not reported</span>
+									<span className="text-xs text-(--text-3)">Not reported</span>
 								) : (
 									selected.sourceFiles.map((file) => (
 										<code
-											className="block break-all py-1 text-[10px] text-blue-200/75"
+											className="block break-all py-1 text-xs text-blue-200/75"
 											key={file}
 										>
 											{file}

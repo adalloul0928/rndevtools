@@ -10,7 +10,7 @@ import {
 	TimerReset,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
+import { InfoPopover, PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
 import { formatDuration, formatPercent } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { PerformanceSample } from '../../shared/protocol';
@@ -75,9 +75,10 @@ function MetricCard({
 		>
 			<div className="flex items-start justify-between gap-3">
 				<div>
-					<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+					<div className="flex items-center gap-1 text-xs text-(--text-3)">
 						{label}
-					</p>
+						<InfoPopover label={label}>{description}</InfoPopover>
+					</div>
 					<p className="mb-0 mt-2 font-mono text-2xl font-semibold tracking-[-0.045em] text-(--foreground)">
 						{value}
 						{suffix ? (
@@ -108,7 +109,6 @@ function MetricCard({
 					vectorEffect="non-scaling-stroke"
 				/>
 			</svg>
-			<p className="mb-0 mt-2 text-[10px] leading-4 text-(--text-3)">{description}</p>
 		</Card>
 	);
 }
@@ -153,7 +153,7 @@ export function PerformancePanel() {
 			<PanelHeader
 				eyebrow="Review"
 				title="Performance"
-				description="Record an interaction window, inspect JS responsiveness, and include native UI, CPU, and memory channels when the device reports them."
+				description="Record interactions to inspect JavaScript responsiveness. The app supplies the overall grade, including severe stalls that averages can hide. CPU and memory appear only when a native sampler reports them. Use a release build for representative measurements."
 				meta={
 					<StatusPill tone={gradeTone(summary?.grade ?? 'idle')} dot>
 						{summary?.grade === 'needsAttention'
@@ -207,7 +207,7 @@ export function PerformancePanel() {
 				</PanelNotice>
 			) : null}
 			<div className="panel-scroll p-5">
-				<div className="mb-4 grid grid-cols-4 gap-3 max-[1180px]:grid-cols-2">
+				<div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
 					<MetricCard
 						label="JS FPS"
 						value={latest ? Math.round(latest.jsFps).toString() : '—'}
@@ -226,32 +226,36 @@ export function PerformancePanel() {
 						tone="amber"
 						description="Scheduler drift that reveals blocked JS interactions."
 					/>
-					<MetricCard
-						label="CPU"
-						value={formatPercent(latest?.cpuPercent)}
-						icon={<Cpu className="h-4 w-4" />}
-						values={samples
-							.slice(-60)
-							.flatMap((sample) =>
-								sample.cpuPercent === undefined ? [] : [sample.cpuPercent]
-							)}
-						maxValue={100}
-						tone="green"
-						description="Native process CPU when the host exposes it."
-					/>
-					<MetricCard
-						label="Memory"
-						value={latest?.memoryMb === undefined ? '—' : latest.memoryMb.toFixed(1)}
-						suffix={latest?.memoryMb === undefined ? undefined : 'MB'}
-						icon={<MemoryStick className="h-4 w-4" />}
-						values={samples
-							.slice(-60)
-							.flatMap((sample) =>
-								sample.memoryMb === undefined ? [] : [sample.memoryMb]
-							)}
-						tone="violet"
-						description="Resident memory when native instrumentation is installed."
-					/>
+					{samples.some((sample) => sample.cpuPercent !== undefined) ? (
+						<MetricCard
+							label="CPU"
+							value={formatPercent(latest?.cpuPercent)}
+							icon={<Cpu className="h-4 w-4" />}
+							values={samples
+								.slice(-60)
+								.flatMap((sample) =>
+									sample.cpuPercent === undefined ? [] : [sample.cpuPercent]
+								)}
+							maxValue={100}
+							tone="green"
+							description="Native process CPU when the host exposes it."
+						/>
+					) : null}
+					{samples.some((sample) => sample.memoryMb !== undefined) ? (
+						<MetricCard
+							label="Memory"
+							value={latest?.memoryMb === undefined ? '—' : latest.memoryMb.toFixed(1)}
+							suffix={latest?.memoryMb === undefined ? undefined : 'MB'}
+							icon={<MemoryStick className="h-4 w-4" />}
+							values={samples
+								.slice(-60)
+								.flatMap((sample) =>
+									sample.memoryMb === undefined ? [] : [sample.memoryMb]
+								)}
+							tone="violet"
+							description="Resident memory when native instrumentation is installed."
+						/>
+					) : null}
 				</div>
 
 				<div className="mb-4 grid grid-cols-[minmax(0,1.6fr)_minmax(320px,.8fr)] gap-4 max-[1120px]:grid-cols-1">
@@ -264,11 +268,11 @@ export function PerformancePanel() {
 								<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
 									Interaction trace
 								</Card.Title>
-								<Card.Description className="mb-0 mt-1 text-[10px] text-(--text-3)">
+								<Card.Description className="mb-0 mt-1 text-xs text-(--text-3)">
 									JS FPS and event-loop lag over the current review
 								</Card.Description>
 							</div>
-							<span className="flex items-center gap-1.5 font-mono text-[10px] text-(--text-3)">
+							<span className="flex items-center gap-1.5 font-mono text-xs text-(--text-3)">
 								<span
 									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-red-400' : 'bg-white/20'}`}
 								/>
@@ -300,7 +304,7 @@ export function PerformancePanel() {
 								['Long frames', summary?.longFrameCount ?? '—'],
 							].map(([label, value]) => (
 								<div className="bg-[#0a0a0a] p-3" key={label}>
-									<p className="m-0 text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.06em] text-(--text-3)">
 										{label}
 									</p>
 									<p className="mb-0 mt-1 font-mono text-sm text-(--foreground)">
@@ -308,10 +312,6 @@ export function PerformancePanel() {
 									</p>
 								</div>
 							))}
-						</div>
-						<div className="mt-4 rounded-md border border-blue-400/15 bg-blue-400/[0.05] p-3 text-[10px] leading-5 text-blue-100/65">
-							The built-in JS collector does not claim native UI FPS, CPU, or memory.
-							Those channels remain blank unless a native sampler reports them.
 						</div>
 					</Card>
 				</div>
@@ -328,7 +328,7 @@ export function PerformancePanel() {
 						</Card.Header>
 						<Card.Content className="p-0">
 							{routeStats.length === 0 ? (
-								<p className="m-0 p-4 text-[10px] leading-5 text-(--text-3)">
+								<p className="m-0 p-4 text-xs leading-5 text-(--text-3)">
 									Record an interaction to compare responsiveness by route.
 								</p>
 							) : (
@@ -338,18 +338,18 @@ export function PerformancePanel() {
 										key={route.route}
 									>
 										<div className="min-w-0">
-											<p className="m-0 truncate font-mono text-[10px] text-(--foreground)">
+											<p className="m-0 truncate font-mono text-xs text-(--foreground)">
 												{route.route}
 											</p>
-											<p className="mb-0 mt-1 text-[9px] text-(--text-3)">
+											<p className="mb-0 mt-1 text-xs text-(--text-3)">
 												{route.samples} samples · {route.longFrames} long frames
 											</p>
 										</div>
-										<span className="text-right font-mono text-[10px] text-(--muted)">
+										<span className="text-right font-mono text-xs text-(--muted)">
 											{route.jsFps.toFixed(1)} fps
 										</span>
 										<span
-											className={`text-right font-mono text-[10px] ${route.lag > 32 ? 'text-amber-300' : 'text-emerald-300'}`}
+											className={`text-right font-mono text-xs ${route.lag > 32 ? 'text-amber-300' : 'text-emerald-300'}`}
 										>
 											{route.lag.toFixed(1)} ms
 										</span>
@@ -369,7 +369,7 @@ export function PerformancePanel() {
 						</Card.Header>
 						<Card.Content className="max-h-[340px] overflow-auto p-0">
 							<table className="w-full border-collapse text-left">
-								<thead className="sticky top-0 bg-[#0b0b0b] text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+								<thead className="sticky top-0 bg-[#0b0b0b] text-xs uppercase tracking-[0.06em] text-(--text-3)">
 									<tr>
 										<th className="px-4 py-2 font-medium">JS FPS</th>
 										<th className="px-3 py-2 font-medium">Loop lag</th>
@@ -381,7 +381,7 @@ export function PerformancePanel() {
 									{samples.length === 0 ? (
 										<tr>
 											<td
-												className="px-4 py-6 text-center text-[10px] text-(--text-3)"
+												className="px-4 py-6 text-center text-xs text-(--text-3)"
 												colSpan={4}
 											>
 												No samples recorded yet.
@@ -393,7 +393,7 @@ export function PerformancePanel() {
 											.reverse()
 											.map((sample) => (
 												<tr
-													className="border-t border-white/[0.06] font-mono text-[10px] text-(--muted)"
+													className="border-t border-white/[0.06] font-mono text-xs text-(--muted)"
 													key={sample.id}
 												>
 													<td className="px-4 py-2.5 text-(--foreground)">
@@ -442,7 +442,7 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 	);
 	return (
 		<div>
-			<div className="mb-3 flex items-center gap-4 text-[9px] uppercase tracking-[0.06em] text-(--text-3)">
+			<div className="mb-3 flex items-center gap-4 text-xs uppercase tracking-[0.06em] text-(--text-3)">
 				<span className="flex items-center gap-1.5">
 					<span className="h-1.5 w-3 rounded-full bg-blue-400" /> JS FPS
 				</span>

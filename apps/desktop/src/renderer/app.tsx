@@ -17,6 +17,7 @@ import {
 	type ComponentType,
 	type LazyExoticComponent,
 	lazy,
+	memo,
 	Suspense,
 	useEffect,
 	useState,
@@ -956,7 +957,12 @@ function SimulatorContent({
 	);
 }
 
-function ConnectedContent({ activeTool }: { activeTool: ToolId }) {
+// Native fleet polling must not rerender the connected app inspector.
+const ConnectedContent = memo(function ConnectedContent({
+	activeTool,
+}: {
+	activeTool: ToolId;
+}) {
 	const { runtimeError, selectedDevice, state } = useDesktopRuntime();
 	return (
 		<>
@@ -980,7 +986,7 @@ function ConnectedContent({ activeTool }: { activeTool: ToolId }) {
 			)}
 		</>
 	);
-}
+});
 
 function ConnectedToolPanel({ tool }: { tool: ToolId }) {
 	const Panel = TOOL_PANELS[tool];

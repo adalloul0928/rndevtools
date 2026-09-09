@@ -37,7 +37,7 @@ function readSupportedManifest(resolvedDirectory) {
 		!['arm64', 'x64'].includes(manifest.architecture) ||
 		manifest.protocolVersion !== 2 ||
 		manifest.compatibilityMatrixVersion !== '2026-09-03-v2' ||
-		manifest.catalog?.version !== 'simslim-v0.8.0-09fc9cbb-pumpd.1' ||
+		manifest.catalog?.version !== 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2' ||
 		manifest.catalog?.upstreamCommit !== '09fc9cbbca35db5230e6d571a0a366fe6876266e' ||
 		manifest.catalog?.patchSet !== 'pumpd.1' ||
 		manifest.catalog?.upstreamSourceManifestSha256 !==

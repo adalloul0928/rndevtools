@@ -29,6 +29,8 @@ import {
 } from '@/components/simulator-ui';
 import {
 	ConfirmAction,
+	Disclosure,
+	InfoPopover,
 	KeyValue,
 	PanelNotice,
 	SearchControl,
@@ -381,7 +383,7 @@ export function CapturesPanel() {
 				actions={<SimulatorTargetSelect />}
 				description="Capture screenshots and recordings from booted targets, preview them through a private desktop protocol, and explicitly export or reveal local originals. No filesystem path crosses into the renderer."
 				eyebrow="Media"
-				meta={`${state.captures.length} assets`}
+				meta={`${state.captures.length} capture${state.captures.length === 1 ? '' : 's'}`}
 				title="Captures"
 			/>
 			<BridgeUnavailableNotice />
@@ -473,7 +475,7 @@ export function CapturesPanel() {
 						getId={(capture) => capture.id}
 						rowHeight={62}
 						selectedId={selectedCapture?.id}
-						textValue={(capture) => `${capture.name} ${capture.kind} ${capture.status}`}
+						textValue={(capture) => `${captureDisplayName(capture)} ${capture.status}`}
 						onSelect={(capture) => setSelectedCaptureId(capture.id)}
 						renderItem={(capture) => <CaptureRow capture={capture} />}
 					/>
@@ -499,8 +501,7 @@ export function CapturesPanel() {
 				</section>
 				<aside className="sim-capture-inspector panel-scroll">
 					<header>
-						<p className="sim-eyebrow">Original media</p>
-						<h2>Capture actions</h2>
+						<h2>Selected capture</h2>
 					</header>
 					<div className="sim-inspector-actions sim-capture-primary-actions">
 						<Button
@@ -544,7 +545,7 @@ export function CapturesPanel() {
 									: undefined
 							}
 						>
-							<FolderOpen className="h-3.5 w-3.5" /> Reveal
+							<FolderOpen className="h-3.5 w-3.5" /> Show file
 						</Button>
 						<ConfirmAction
 							confirmLabel="Delete capture"
@@ -553,7 +554,8 @@ export function CapturesPanel() {
 							title="Delete local capture?"
 							triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
 							triggerLabel="Delete"
-							triggerVariant="danger"
+							triggerVariant="ghost"
+							tone="danger"
 							onConfirm={() =>
 								selectedCapture
 									? void executeOperation(
@@ -571,43 +573,52 @@ export function CapturesPanel() {
 						/>
 					</div>
 
-					<CaptureCompositionEditor
-						fields={compositionFields}
-						isRendering={isRenderingComposition}
-						nativeAvailable={state.native.imageComposition === true}
-						primaryCapture={selectedCapture}
-						screenshots={screenshotCaptures}
-						onChange={setCompositionFields}
-						onRender={() => void renderComposition()}
-					/>
+					{selectedCapture?.kind === 'screenshot' ? (
+						<CaptureCompositionEditor
+							fields={compositionFields}
+							isRendering={isRenderingComposition}
+							nativeAvailable={state.native.imageComposition === true}
+							primaryCapture={selectedCapture}
+							screenshots={screenshotCaptures}
+							onChange={setCompositionFields}
+							onRender={() => void renderComposition()}
+						/>
+					) : null}
 
-					<CaptureRetentionControls
-						fields={retentionFields}
-						isPolicyValid={parsedRetentionPolicy !== null}
-						isSaving={pendingOperation === 'capture.retention.update'}
-						retention={retention}
-						onChange={setRetentionFields}
-						onRefresh={() => void loadRetention()}
-						onSave={() =>
-							parsedRetentionPolicy
-								? void executeOperation(
-										{
-											kind: 'capture.retention.update',
-											policy: parsedRetentionPolicy,
-										},
-										{
-											pending: 'Applying capture retention policy…',
-											success: 'Capture retention policy was updated.',
-										}
-									)
-								: undefined
-						}
-						retentionChanged={retentionChanged}
-					/>
+					<Disclosure title="Storage & cleanup">
+						<CaptureRetentionControls
+							fields={retentionFields}
+							isPolicyValid={parsedRetentionPolicy !== null}
+							isSaving={pendingOperation === 'capture.retention.update'}
+							retention={retention}
+							onChange={setRetentionFields}
+							onRefresh={() => void loadRetention()}
+							onSave={() =>
+								parsedRetentionPolicy
+									? void executeOperation(
+											{
+												kind: 'capture.retention.update',
+												policy: parsedRetentionPolicy,
+											},
+											{
+												pending: 'Applying capture retention policy…',
+												success: 'Capture retention policy was updated.',
+											}
+										)
+									: undefined
+							}
+							retentionChanged={retentionChanged}
+						/>
+					</Disclosure>
 				</aside>
 			</div>
 		</section>
 	);
+}
+
+function captureDisplayName(capture: SimulatorCapture): string {
+	if (!/^(?:screenshot|recording|video)-\d+-/.test(capture.name)) return capture.name;
+	return `${capture.kind === 'video' ? 'Recording' : 'Screenshot'} · ${new Date(capture.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 function CaptureRow({ capture }: { capture: SimulatorCapture }) {
@@ -621,13 +632,12 @@ function CaptureRow({ capture }: { capture: SimulatorCapture }) {
 				)}
 			</div>
 			<div className="sim-list-copy">
-				<strong>{capture.name}</strong>
+				<strong>{captureDisplayName(capture)}</strong>
 				<span>
 					{new Date(capture.createdAt).toLocaleString()} · {formatBytes(capture.bytes)}
 				</span>
 			</div>
 			<div className="sim-capture-row-tags">
-				<span className="sim-category-tag">{capture.kind}</span>
 				{capture.status === 'partial' ? (
 					<span className="sim-state-pill is-warning">Recovered</span>
 				) : null}
@@ -762,10 +772,14 @@ function CapturePreview({
 			</div>
 			<div className="sim-preview-meta">
 				<div>
-					<strong>{capture.name}</strong>
-					<span>
-						{capture.mimeType} · {capture.deviceUdid}
-					</span>
+					<strong>{captureDisplayName(capture)}</strong>
+					<InfoPopover label="Capture details">
+						{capture.name}
+						<br />
+						{capture.mimeType}
+						<br />
+						Simulator {capture.deviceUdid}
+					</InfoPopover>
 				</div>
 				<code>{formatBytes(capture.bytes)}</code>
 			</div>

@@ -322,14 +322,18 @@ func (client *Client) CaptureRunningServiceProcesses(ctx context.Context, simula
 	if err != nil {
 		return nil, errors.New("could not inspect the Simulator launchd service domains")
 	}
-	runningPIDs := make([]int, 0, len(serviceIDs))
+	type runningJob struct {
+		label string
+		pid   int
+	}
+	runningJobs := make([]runningJob, 0, len(serviceIDs))
 	for _, serviceID := range serviceIDs {
 		pid, registered := services[serviceID]
 		if registered && pid > 0 {
-			runningPIDs = append(runningPIDs, pid)
+			runningJobs = append(runningJobs, runningJob{label: serviceID, pid: pid})
 		}
 	}
-	if len(runningPIDs) == 0 {
+	if len(runningJobs) == 0 {
 		return []string{}, nil
 	}
 	processes, err := client.processes(ctx, simulatorID)
@@ -348,17 +352,29 @@ func (client *Client) CaptureRunningServiceProcesses(ctx context.Context, simula
 		processByPID[process.PID] = process.Command
 		processNameCounts[process.Command]++
 	}
-	names := make([]string, 0, len(runningPIDs))
-	boundPIDs := make(map[int]bool, len(runningPIDs))
-	for _, pid := range runningPIDs {
-		command, found := processByPID[pid]
+	names := make([]string, 0, len(runningJobs))
+	boundPIDs := make(map[int]bool, len(runningJobs))
+	for _, job := range runningJobs {
+		command, found := processByPID[job.pid]
 		if !found {
-			return nil, errors.New("launchd PID did not match the exact Simulator process tree")
+			return nil, fmt.Errorf(
+				"launchd job %s (pid %d) did not match the exact Simulator process tree",
+				job.label,
+				job.pid,
+			)
 		}
-		if boundPIDs[pid] || processNameCounts[command] != 1 {
-			return nil, errors.New("running launchd job executable identity was not unique in the exact Simulator process tree")
+		// Naming the label and executable turns a transient fail-closed into
+		// something a person can act on instead of a sentence they can only retry.
+		if boundPIDs[job.pid] || processNameCounts[command] != 1 {
+			return nil, fmt.Errorf(
+				"running launchd job %s (pid %d, executable %s) was not unique in the exact Simulator process tree: %d processes share that executable name",
+				job.label,
+				job.pid,
+				command,
+				processNameCounts[command],
+			)
 		}
-		boundPIDs[pid] = true
+		boundPIDs[job.pid] = true
 		names = append(names, command)
 	}
 	return sortedUniqueCopy(names), nil

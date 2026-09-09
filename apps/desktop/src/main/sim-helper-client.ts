@@ -6,6 +6,7 @@ import {
 	type VerifiedSimulatorHelper,
 	verifySimulatorHelper,
 } from './native-helper-trust';
+import { NativeHostResponseError } from './native-host-client';
 import { runSimulatorCommand, SimulatorCommandError } from './simulator-command-runner';
 
 const PROTOCOL_VERSION = 2;
@@ -242,6 +243,7 @@ const helperMutationSchema = z.strictObject({
 	operation: z.enum(['apply_profile', 'restore_managed', 'undo_last']),
 	profileId: identifierSchema.optional(),
 	failureCode: identifierSchema.optional(),
+	failureDetail: z.string().max(2_048).optional(),
 	changed: z.boolean(),
 	checkpointToken: z
 		.string()
@@ -289,6 +291,36 @@ const helperPreparedMutationSchema = z.strictObject({
 	observedRunningProcessNames: processNamesSchema,
 });
 type SimHelperPreparedMutation = z.infer<typeof helperPreparedMutationSchema>;
+
+const MAX_FAILURE_DETAIL_CHARS = 300;
+
+/**
+ * The helper writes its own diagnostics to stderr, and a crashed process leaves
+ * nothing on stdout to parse. Without this, every spawn-level failure collapses
+ * into one indistinguishable sentence and the real cause is only reachable from
+ * a debugger.
+ */
+function helperFailureDetail(error: unknown): string {
+	const parts: string[] = [];
+	if (error instanceof SimulatorCommandError) {
+		parts.push(error.kind);
+		if (error.exitCode !== null) parts.push(`exit ${error.exitCode}`);
+		const stderr = error.stderr.trim();
+		if (stderr) parts.push(stderr);
+	} else if (error instanceof NativeHostResponseError) {
+		parts.push(`native host ${error.code}`);
+		if (error.message.trim()) parts.push(error.message.trim());
+	} else if (error instanceof Error && error.message.trim()) {
+		parts.push(error.message.trim());
+	}
+	if (parts.length === 0) return '';
+	const detail = parts.join(': ').replace(/\s+/g, ' ');
+	return ` ${
+		detail.length > MAX_FAILURE_DETAIL_CHARS
+			? `${detail.slice(0, MAX_FAILURE_DETAIL_CHARS)}…`
+			: detail
+	}`;
+}
 
 export function mutationEvidenceFromError(
 	error: SimHelperError
@@ -379,6 +411,7 @@ const helperProfilesSchema = z.strictObject({
 				name: shortTextSchema,
 				description: shortTextSchema,
 				categoryIds: z.array(identifierSchema).max(100),
+				preservedServiceIds: serviceIdsSchema.optional(),
 				experimental: z.boolean(),
 			})
 		)
@@ -824,7 +857,7 @@ export class SimHelperClient {
 			} else {
 				throw new SimHelperError(
 					'helper_process_failed',
-					'Native helper process failed.',
+					`Native helper process failed.${helperFailureDetail(error)}`,
 					false,
 					undefined,
 					{ cause: error }

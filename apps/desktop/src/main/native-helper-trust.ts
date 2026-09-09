@@ -8,7 +8,7 @@ import { runSimulatorCommand } from './simulator-command-runner';
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_HELPER_BYTES = 64 * 1024 * 1024;
 const EXPECTED_PROTOCOL_VERSION = 2;
-const EXPECTED_CATALOG_VERSION = 'simslim-v0.8.0-09fc9cbb-pumpd.1';
+const EXPECTED_CATALOG_VERSION = 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2';
 const EXPECTED_UPSTREAM_COMMIT = '09fc9cbbca35db5230e6d571a0a366fe6876266e';
 const EXPECTED_PATCH_SET = 'pumpd.1';
 const EXPECTED_UPSTREAM_SOURCE_MANIFEST_SHA256 =

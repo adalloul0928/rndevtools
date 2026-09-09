@@ -80,10 +80,10 @@ export function EnvironmentPanel() {
 					onChange={setQuery}
 				/>
 				<div className="ml-auto flex items-center gap-3">
-					<span className="flex items-center gap-1.5 text-[10px] text-emerald-300">
+					<span className="flex items-center gap-1.5 text-xs text-emerald-300">
 						<CheckCircle2 className="h-3.5 w-3.5" /> {valid} valid
 					</span>
-					<span className="flex items-center gap-1.5 text-[10px] text-amber-300">
+					<span className="flex items-center gap-1.5 text-xs text-amber-300">
 						<CircleAlert className="h-3.5 w-3.5" /> {failures} review
 					</span>
 				</div>
@@ -106,7 +106,7 @@ export function EnvironmentPanel() {
 									<div className="font-mono text-2xl font-semibold tracking-[-0.04em] text-(--foreground)">
 										{hasChecks ? `${score}%` : '—'}
 									</div>
-									<div className="mt-0.5 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<div className="mt-0.5 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Health
 									</div>
 								</div>
@@ -142,10 +142,10 @@ export function EnvironmentPanel() {
 								variant="secondary"
 							>
 								<Card.Header className="flex h-11 items-center justify-between border-b border-white/8 px-4">
-									<Card.Title className="m-0 text-[11px] font-medium uppercase tracking-[0.07em] text-(--muted)">
+									<Card.Title className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
 										{section.title}
 									</Card.Title>
-									<span className="font-mono text-[9px] text-(--text-3)">
+									<span className="font-mono text-xs text-(--text-3)">
 										{section.entries.length} values
 									</span>
 								</Card.Header>
@@ -156,16 +156,16 @@ export function EnvironmentPanel() {
 											key={entry.id}
 										>
 											<div className="min-w-0">
-												<p className="m-0 truncate font-mono text-[10px] text-(--foreground)">
+												<p className="m-0 truncate font-mono text-xs text-(--foreground)">
 													{entry.key}
 												</p>
 												{entry.description ? (
-													<p className="mb-0 mt-1 truncate text-[9px] text-(--text-3)">
+													<p className="mb-0 mt-1 truncate text-xs text-(--text-3)">
 														{entry.description}
 													</p>
 												) : null}
 											</div>
-											<code className="block truncate text-[10px] text-(--muted)">
+											<code className="block truncate text-xs text-(--muted)">
 												{entry.valueText}
 											</code>
 											<StatusPill tone={validationTone(entry.status)}>

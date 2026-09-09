@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { VerifiedNativeHelper } from './native-helper-trust';
-import { NativeHostClient } from './native-host-client';
+import { NativeHostClient, NativeHostResponseError } from './native-host-client';
 
 const verified: VerifiedNativeHelper = {
 	executablePath: '/signed/pumpd-native-host',
@@ -17,7 +17,7 @@ const verified: VerifiedNativeHelper = {
 		protocolVersion: 2,
 		compatibilityMatrixVersion: '2026-09-03-v2',
 		catalog: {
-			version: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+			version: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 			upstreamRepository: 'https://github.com/MobAI-App/simslim',
 			upstreamCommit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
 			patchSet: 'pumpd.1',
@@ -102,6 +102,49 @@ describe('native host client', () => {
 				forceKillDelayMs: 120_000,
 			})
 		).resolves.toContain('mutation-1');
+	});
+
+	it('keeps the native host error code when the host refuses a request', async () => {
+		const runner = vi.fn(async (_executable, _args, options) => {
+			const request = JSON.parse(options.stdin ?? '') as { requestId: string };
+			return {
+				stdout: JSON.stringify({
+					protocolVersion: 4,
+					requestId: request.requestId,
+					ok: false,
+					error: {
+						code: 'mutation_authorization_required',
+						message: 'The desktop parent failed its live designated requirement.',
+						retryable: false,
+					},
+				}),
+				stderr: '',
+				exitCode: 1,
+			};
+		});
+		const client = new NativeHostClient({
+			resourceDirectory: '/signed',
+			appVersion: '0.1.0',
+			runner,
+			verifier: vi.fn(async () => verified),
+		});
+		const failure = await client
+			.runSimulatorMutation(
+				'{"protocolVersion":2,"requestId":"mutation-2","operation":"disk_cleanup","payload":{"simulatorId":"11111111-2222-3333-4444-555555555555"}}\n',
+				{ timeoutMs: 660_000 }
+			)
+			.then(
+				() => undefined,
+				(error: unknown) => error
+			);
+		// A refused attestation must stay distinguishable from a helper that died
+		// mid-operation; a bare Error threw that distinction away.
+		expect(failure).toBeInstanceOf(NativeHostResponseError);
+		expect(failure).toMatchObject({
+			code: 'mutation_authorization_required',
+			retryable: false,
+			message: 'The desktop parent failed its live designated requirement.',
+		});
 	});
 
 	it('uses bounded one-request processes and returns read-only native capabilities', async () => {

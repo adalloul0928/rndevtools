@@ -37,7 +37,7 @@ describe('Simulator Fleet destructive-action policy', () => {
 			simulatorEraseAvailability({ isAvailable: true, state: 'shutdown' }, true)
 		).toEqual({
 			allowed: true,
-			reason: 'Returns this Simulator to a clean, recoverable state.',
+			reason: 'Permanently removes installed apps, accounts, and local data.',
 		});
 	});
 

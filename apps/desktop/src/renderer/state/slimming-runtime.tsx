@@ -178,6 +178,26 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 		kind: 'idle',
 		message: '',
 	});
+	const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
+	useEffect(() => {
+		const job = state.jobs.find((candidate) => candidate.id === submittedJobId);
+		if (!job) return;
+		const kind =
+			job.status === 'complete'
+				? ('success' as const)
+				: ['failed', 'needs-attention'].includes(job.status)
+					? ('error' as const)
+					: job.status === 'cancelled'
+						? ('success' as const)
+						: ('pending' as const);
+		setActionStatus((current) =>
+			current.kind === kind && current.message === job.message
+				? current
+				: { kind, message: job.message }
+		);
+		if (kind !== 'pending') setSubmittedJobId(null);
+	}, [state.jobs, submittedJobId]);
+
 	const pendingActionRef = useRef<string | null>(null);
 	const pendingSettingRef = useRef<string | null>(null);
 	const pendingAcknowledgementRef = useRef<string | null>(null);
@@ -189,7 +209,9 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 		try {
 			unsubscribe = bridge.subscribeSlimmingState((nextState) => {
 				if (!active) return;
-				setState(nextState);
+				setState((current) =>
+					nextState.revision >= current.revision ? nextState : current
+				);
 				setRuntimeError(null);
 				setIsLoading(false);
 			});
@@ -201,7 +223,9 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			.getSlimmingState()
 			.then((nextState) => {
 				if (!active) return;
-				setState(nextState);
+				setState((current) =>
+					nextState.revision >= current.revision ? nextState : current
+				);
 				setRuntimeError(null);
 			})
 			.catch((error: unknown) => {
@@ -227,7 +251,10 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 		}
 		setIsLoading(true);
 		try {
-			setState(await bridge.refreshSlimming());
+			const nextState = await bridge.refreshSlimming();
+			setState((current) =>
+				nextState.revision >= current.revision ? nextState : current
+			);
 			setRuntimeError(null);
 		} catch (error) {
 			setRuntimeError(errorText(error));
@@ -255,6 +282,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			}
 			const request = { ...input, actionId } as SlimmingSettingRequest;
 			pendingSettingRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({
 				kind: 'pending',
 				message: input.enabled
@@ -287,14 +315,19 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 					});
 					return;
 				}
-				setState(receipt.state);
+				setState((current) =>
+					receipt.state.revision >= current.revision ? receipt.state : current
+				);
+				if (receipt.jobId) setSubmittedJobId(receipt.jobId);
 				setActionStatus({
-					kind: 'success',
-					message: input.enabled
-						? 'Experimental Simulator mutations enabled.'
-						: input.disposition === 'restore-and-verify'
-							? 'Managed-service restore queued. Mutations disable after verification succeeds.'
-							: 'Experimental mutations disabled with managed overrides left in place.',
+					kind: receipt.jobId ? 'pending' : 'success',
+					message: receipt.jobId
+						? 'Restoring services before disabling SimSlim…'
+						: receipt.state.setting.experimentalMutationsEnabled
+							? 'SimSlim enabled.'
+							: receipt.state.setting.disabledDisposition === 'left-overrides-in-place'
+								? 'SimSlim disabled. Managed services remain changed.'
+								: 'SimSlim disabled.',
 				});
 			} catch (error) {
 				setActionStatus({ kind: 'error', message: errorText(error) });
@@ -329,6 +362,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				return { accepted: false, error };
 			}
 			pendingAcknowledgementRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({
 				kind: 'pending',
 				message: 'Verifying and acknowledging the current compatibility tuple…',
@@ -341,7 +375,9 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 					setActionStatus({ kind: 'error', message: error });
 					return { accepted: false, error };
 				}
-				setState(receipt.state);
+				setState((current) =>
+					receipt.state.revision >= current.revision ? receipt.state : current
+				);
 				setActionStatus(
 					receipt.accepted
 						? {
@@ -388,6 +424,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			}
 			let action = { ...actionInput, actionId } as SlimmingAction;
 			pendingActionRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({
 				kind: 'pending',
 				message: messages.pendingMessage ?? 'Submitting Slimming action…',
@@ -412,12 +449,15 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 					action = { ...action, confirmationToken: confirmation.token };
 				}
 				const receipt = await bridge.runSlimmingAction(action);
+				if (receipt.accepted && receipt.jobId) setSubmittedJobId(receipt.jobId);
 				if (pendingActionRef.current === actionId) {
 					setActionStatus(
 						receipt.accepted
 							? {
-									kind: 'success',
-									message: messages.successMessage ?? 'Slimming job accepted.',
+									kind: receipt.jobId ? 'pending' : 'success',
+									message: receipt.jobId
+										? 'SimSlim job queued…'
+										: (messages.successMessage ?? 'Action accepted.'),
 								}
 							: {
 									kind: 'error',
@@ -459,6 +499,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 	);
 
 	const clearActionStatus = useCallback(() => {
+		setSubmittedJobId(null);
 		setActionStatus({ kind: 'idle', message: '' });
 	}, []);
 

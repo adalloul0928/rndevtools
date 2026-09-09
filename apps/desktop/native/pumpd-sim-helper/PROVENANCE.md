@@ -43,6 +43,15 @@ boundary, exact-UDID validation, compatibility and confirmation policy,
 two-phase durable restore-point persistence, helper-supervision time budgets,
 and sequential per-Simulator jobs.
 
+PUMPD preset revision `presets.2` uses upstream `Profile.Keep` to preserve
+`com.apple.MapKit.SnapshotService`, `com.apple.siri.acousticsignature`, and
+`com.apple.siri.context.service` in the two PUMPD presets. These jobs remained
+registered after reboot in real iOS 26.5 apply attempts, which correctly failed
+verification and rolled back. They remain in the managed universe for legacy
+override repair. The upstream source and patch set remain unchanged; Maximum
+Density still projects the complete upstream desired set. Profile responses
+disclose these exceptions through optional `preservedServiceIds`.
+
 Verification proves exact managed override equality and the absence of
 disabled launchd job registrations through `launchctl print`. Immediately
 before a transition, PUMPD also binds each running to-disable label's single

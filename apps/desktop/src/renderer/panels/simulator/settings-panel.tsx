@@ -1,12 +1,9 @@
 import { Button } from '@heroui/react/button';
-import { Stepper } from '@heroui-pro/react/stepper';
 import {
 	Accessibility,
 	ArrowUpRight,
 	AudioLines,
 	Camera,
-	Check,
-	CircleAlert,
 	Command,
 	FolderCog,
 	Frame,
@@ -14,7 +11,6 @@ import {
 	LockKeyhole,
 	MonitorUp,
 	Network,
-	RefreshCw,
 	ShieldCheck,
 	Smartphone,
 	TerminalSquare,
@@ -23,11 +19,10 @@ import {
 import { type ComponentType, useMemo } from 'react';
 import {
 	BridgeUnavailableNotice,
-	CapabilityStatePill,
 	RefreshSimulatorsButton,
 	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
-import { PanelNotice } from '@/components/ui';
+import { Disclosure, InfoPopover, PanelNotice, StatusPill } from '@/components/ui';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
@@ -233,27 +228,26 @@ export function SettingsPanel() {
 			}),
 		[state.capability, state.native]
 	);
-	const readyCount = capabilities.filter(
-		(capability) => capability.status === 'available'
-	).length;
 	const requiredReady = capabilities
 		.filter((capability) => capability.required)
 		.every((capability) => capability.status === 'available');
-	const permissionsReady = capabilities
-		.filter((capability) =>
-			['screen-recording', 'accessibility', 'camera'].includes(capability.id)
-		)
-		.every((capability) => ['available', 'unavailable'].includes(capability.status));
-	const currentStep = !requiredReady ? 0 : !permissionsReady ? 1 : 2;
+	const renderCapability = (capability: (typeof capabilities)[number]) => (
+		<CapabilityRow
+			capability={capability}
+			isBridgeAvailable={isBridgeAvailable}
+			key={capability.id}
+			onRunOnboarding={(operation) => void runOnboardingOperation(operation)}
+		/>
+	);
 
 	return (
 		<section className="panel-root">
 			<SimulatorPanelHeader
 				actions={<RefreshSimulatorsButton />}
-				description="Make native dependencies and macOS permissions explicit. Optional capabilities stay disabled until you opt in, and every privileged operation remains behind the preload bridge."
+				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected PUMPD app."
 				eyebrow="Capability onboarding"
-				meta={`${readyCount}/${capabilities.length} ready`}
-				title="Simulator Settings"
+				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
+				title="Settings"
 			/>
 			<BridgeUnavailableNotice />
 			{state.capability.licenseStatus === 'required' ? (
@@ -263,124 +257,71 @@ export function SettingsPanel() {
 				</PanelNotice>
 			) : null}
 			<div className="sim-settings-scroll panel-scroll">
-				<section className="sim-onboarding-surface">
-					<header>
-						<div>
-							<p className="sim-eyebrow">Local readiness</p>
-							<h2>
-								{requiredReady
-									? 'Core simulator controls are ready'
-									: 'Finish core setup'}
-							</h2>
-							<p>
-								The connected-app diagnostics client is separate and is not required for
-								this workspace.
-							</p>
-						</div>
-						<span className={`sim-readiness-ring ${requiredReady ? 'is-ready' : ''}`}>
-							<strong>{readyCount}</strong>
-							<small>of {capabilities.length}</small>
-						</span>
-					</header>
-					<Stepper
-						className="sim-onboarding-stepper"
-						currentStep={currentStep}
-						size="sm"
-					>
-						<Stepper.Step>
-							<Stepper.Indicator>
-								<Stepper.Icon>{requiredReady ? <Check /> : '1'}</Stepper.Icon>
-							</Stepper.Indicator>
-							<Stepper.Content>
-								<Stepper.Title>Toolchain</Stepper.Title>
-								<Stepper.Description>Xcode and Simulator control</Stepper.Description>
-							</Stepper.Content>
-							<Stepper.Separator />
-						</Stepper.Step>
-						<Stepper.Step>
-							<Stepper.Indicator>
-								<Stepper.Icon>{permissionsReady ? <Check /> : '2'}</Stepper.Icon>
-							</Stepper.Indicator>
-							<Stepper.Content>
-								<Stepper.Title>Permissions</Stepper.Title>
-								<Stepper.Description>Optional macOS capabilities</Stepper.Description>
-							</Stepper.Content>
-							<Stepper.Separator />
-						</Stepper.Step>
-					</Stepper>
-				</section>
-
 				<div className="sim-settings-layout">
 					<section className="sim-surface">
 						<header className="sim-surface-header">
 							<div>
-								<p className="sim-eyebrow">Capabilities</p>
-								<h2>Native integrations</h2>
+								<h2>Simulator setup</h2>
 							</div>
-							<span>{readyCount} ready</span>
 						</header>
 						<div className="sim-capability-list">
-							{capabilities.map((capability) => (
-								<CapabilityRow
-									capability={capability}
-									isBridgeAvailable={isBridgeAvailable}
-									key={capability.id}
-									onRunOnboarding={(operation) =>
-										void runOnboardingOperation(operation)
-									}
-								/>
-							))}
+							{capabilities
+								.filter((capability) => capability.required)
+								.map(renderCapability)}
 						</div>
+						<Disclosure title="Optional features & permissions">
+							<div className="sim-capability-list">
+								{capabilities
+									.filter((capability) => !capability.required)
+									.map(renderCapability)}
+							</div>
+						</Disclosure>
 					</section>
 
 					<aside className="sim-settings-aside">
-						<section className="sim-security-boundary">
-							<header>
-								<TerminalSquare className="h-4 w-4" />
-								<strong>Local agent CLI</strong>
-							</header>
-							<p>
-								Packaged startup verifies the signed CLI before opening its private
-								socket. In development, Reveal CLI performs the same manifest, hash,
-								architecture, and signature checks against the current local build.
-								PUMPD never modifies your shell path.
-							</p>
-							<Button
-								isDisabled={!isBridgeAvailable}
-								size="sm"
-								variant="secondary"
-								onPress={() => void runOnboardingOperation({ kind: 'agentCli.reveal' })}
-							>
-								Reveal verified CLI
-							</Button>
-						</section>
-						<PanelNotice
-							title="Feature settings are applied at their boundary."
-							tone="info"
-						>
-							Capture retention lives in Captures, while the experimental mutation
-							toggle lives in Slimming. Physical-device discovery remains outside the
-							Simulator-only launch scope.
-						</PanelNotice>
-						<section className="sim-security-boundary">
-							<header>
-								<LockKeyhole className="h-4 w-4" />
-								<strong>Privilege boundary</strong>
-							</header>
-							<p>
-								The renderer cannot invoke a shell, enumerate arbitrary files, or grant
-								its own permissions. It sends allowlisted requests through a typed,
-								sandboxed preload bridge.
-							</p>
-							<div>
-								<span>
-									<ShieldCheck /> Context isolation
-								</span>
-								<span>
-									<Command /> Explicit actions
-								</span>
-							</div>
-						</section>
+						<Disclosure title="Advanced tools & permissions">
+							<section className="sim-security-boundary">
+								<header>
+									<TerminalSquare className="h-4 w-4" />
+									<strong>Local agent CLI</strong>
+								</header>
+								<p>
+									Packaged startup verifies the signed CLI before opening its private
+									socket. In development, Reveal CLI performs the same manifest, hash,
+									architecture, and signature checks against the current local build.
+									PUMPD never modifies your shell path.
+								</p>
+								<Button
+									isDisabled={!isBridgeAvailable}
+									size="sm"
+									variant="secondary"
+									onPress={() =>
+										void runOnboardingOperation({ kind: 'agentCli.reveal' })
+									}
+								>
+									Reveal verified CLI
+								</Button>
+							</section>
+							<section className="sim-security-boundary">
+								<header>
+									<LockKeyhole className="h-4 w-4" />
+									<strong>Privilege boundary</strong>
+								</header>
+								<p>
+									The renderer cannot invoke a shell, enumerate arbitrary files, or
+									grant its own permissions. It sends allowlisted requests through a
+									typed, sandboxed preload bridge.
+								</p>
+								<div>
+									<span>
+										<ShieldCheck /> Context isolation
+									</span>
+									<span>
+										<Command /> Explicit actions
+									</span>
+								</div>
+							</section>
+						</Disclosure>
 					</aside>
 				</div>
 			</div>
@@ -424,30 +365,36 @@ function CapabilityRow({
 			<div className="sim-capability-copy">
 				<div>
 					<strong>{capability.label}</strong>
+					<InfoPopover label={capability.label}>
+						<p>{capability.description}</p>
+						<p className="mt-2 break-words">
+							{capability.detail ?? capability.mechanism}
+						</p>
+					</InfoPopover>
 					{capability.required ? <span>Required</span> : <span>Optional</span>}
 				</div>
-				<p>{capability.description}</p>
-				<code>{capability.detail ?? capability.mechanism}</code>
-				<p className="sim-capability-next-step">{guidance}</p>
+				{capability.status !== 'available' ? (
+					<p className="sim-capability-next-step">{guidance}</p>
+				) : null}
 			</div>
 			<div className="sim-capability-action">
-				<CapabilityStatePill status={capability.status} />
-				<span className="sim-capability-guidance">
-					{capability.status === 'available' ? (
-						<Check className="h-3.5 w-3.5" />
-					) : capability.status === 'checking' ? (
-						<RefreshCw className="h-3.5 w-3.5" />
-					) : (
-						<CircleAlert className="h-3.5 w-3.5" />
-					)}
+				<StatusPill
+					tone={
+						capability.status === 'available'
+							? 'success'
+							: capability.required
+								? 'warning'
+								: 'default'
+					}
+				>
 					{capability.status === 'available'
 						? 'Ready'
 						: capability.status === 'checking'
 							? 'Checking'
-							: isBridgeAvailable
-								? 'Unavailable'
-								: 'Desktop required'}
-				</span>
+							: capability.required
+								? 'Needs setup'
+								: 'Not available'}
+				</StatusPill>
 				{onboarding ? (
 					<Button
 						isDisabled={!isBridgeAvailable}

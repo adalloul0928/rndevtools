@@ -10,10 +10,19 @@ import { runSimulatorCommand } from './simulator-command-runner';
 const XCRUN_PATH = '/usr/bin/xcrun';
 const MEMORY_PRESSURE_PATH = '/usr/bin/memory_pressure';
 const PS_PATH = '/bin/ps';
+const TOP_PATH = '/usr/bin/top';
 const MAX_BOOTED_DEVICES = 20;
 const MAX_PROCESSES_PER_DEVICE = 100;
 const MAX_LAUNCHCTL_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_PS_OUTPUT_BYTES = 4 * 1024 * 1024;
+const MAX_TOP_OUTPUT_BYTES = 4 * 1024 * 1024;
+const FOOTPRINT_UNIT_BYTES: Readonly<Record<string, number>> = {
+	'': 1,
+	B: 1,
+	K: 1024,
+	M: 1024 ** 2,
+	G: 1024 ** 3,
+};
 const MAX_DISK_OUTPUT_BYTES = 16 * 1024 * 1024;
 const DISK_REFRESH_INTERVAL_MS = 30_000;
 const SERVICE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._\-[\]]{1,255}$/;
@@ -29,7 +38,6 @@ type ServiceProcess = {
 type ProcessSample = {
 	processId: number;
 	cpuPercent: number;
-	memoryBytes: number;
 };
 
 export function parseHostMemoryPressure(
@@ -102,28 +110,56 @@ export function parseSimulatorServiceProcesses(output: string): ServiceProcess[]
 export function parseProcessSamples(output: string): Map<number, ProcessSample> {
 	const samples = new Map<number, ProcessSample>();
 	for (const line of output.split(/\r?\n/)) {
-		const match = line.match(/^\s*(\d+)\s+([0-9.]+)\s+(\d+)\s+/);
+		const match = line.match(/^\s*(\d+)\s+([0-9.]+)(?:\s|$)/);
 		if (!match) continue;
 		const processId = Number(match[1]);
 		const cpuPercent = Number(match[2]);
-		const rssKilobytes = Number(match[3]);
 		if (
 			!Number.isSafeInteger(processId) ||
 			processId <= 0 ||
 			!Number.isFinite(cpuPercent) ||
-			cpuPercent < 0 ||
-			!Number.isSafeInteger(rssKilobytes) ||
-			rssKilobytes < 0
+			cpuPercent < 0
 		) {
 			continue;
 		}
 		samples.set(processId, {
 			processId,
 			cpuPercent: Math.min(cpuPercent, 10_000),
-			memoryBytes: rssKilobytes * 1024,
 		});
 	}
 	return samples;
+}
+
+/**
+ * Memory comes from `top`'s MEM column, the kernel's physical footprint of each
+ * process, not from `ps` RSS. RSS counts every resident page including the
+ * dyld shared cache and system frameworks that all ~200 Simulator processes
+ * map, so summing it across a device tree overstated memory three- to
+ * four-fold (19.5 GB for a Simulator whose footprint was 5.3 GB). Footprint is
+ * also what the embedded SimSlim core measures, so Fleet and Slimming agree.
+ */
+export function parseProcessFootprints(output: string): Map<number, number> {
+	const footprints = new Map<number, number>();
+	for (const line of output.split(/\r?\n/)) {
+		const match = line.match(/^\s*(\d+)\s+(\d+(?:\.\d+)?)([KMGB]?)\+?\s*$/);
+		if (!match) continue;
+		const processId = Number(match[1]);
+		const value = Number(match[2]);
+		const unit = FOOTPRINT_UNIT_BYTES[match[3] ?? ''];
+		if (
+			!Number.isSafeInteger(processId) ||
+			processId <= 0 ||
+			!Number.isFinite(value) ||
+			value < 0 ||
+			unit === undefined
+		) {
+			continue;
+		}
+		const bytes = Math.round(value * unit);
+		if (!Number.isSafeInteger(bytes)) continue;
+		footprints.set(processId, bytes);
+	}
+	return footprints;
 }
 
 export function parseSimulatorDiskAllocations(output: string): Map<string, number> {
@@ -203,11 +239,23 @@ export class SimulatorMetricsProvider {
 				timeoutMs: 5_000,
 				maxOutputBytes: 64 * 1024,
 			});
-			const psPromise = runSimulatorCommand(
-				PS_PATH,
-				['-axo', 'pid=,pcpu=,rss=,comm='],
-				{ ...commandOptions, timeoutMs: 5_000, maxOutputBytes: MAX_PS_OUTPUT_BYTES }
+			const psPromise = runSimulatorCommand(PS_PATH, ['-axo', 'pid=,pcpu='], {
+				...commandOptions,
+				timeoutMs: 5_000,
+				maxOutputBytes: MAX_PS_OUTPUT_BYTES,
+			});
+			const topPromise = runSimulatorCommand(
+				TOP_PATH,
+				['-l', '1', '-stats', 'pid,mem'],
+				{
+					...commandOptions,
+					timeoutMs: 10_000,
+					maxOutputBytes: MAX_TOP_OUTPUT_BYTES,
+				}
 			);
+			// Attach rejection handlers before awaiting slower per-device probes. A
+			// cancelled host command must not become an unhandled rejection in main.
+			const hostSamples = Promise.allSettled([memoryPromise, psPromise, topPromise]);
 			const booted = devices
 				.filter((device) => device.state === 'booted' && device.isAvailable)
 				.slice(0, MAX_BOOTED_DEVICES);
@@ -252,9 +300,16 @@ export class SimulatorMetricsProvider {
 			}
 
 			await diskPromise;
-			const [memoryResult, psResult] = await Promise.all([memoryPromise, psPromise]);
+			const [memorySample, psSample, topSample] = await hostSamples;
+			if (memorySample.status === 'rejected') throw memorySample.reason;
+			if (psSample.status === 'rejected') throw psSample.reason;
+			if (topSample.status === 'rejected') throw topSample.reason;
+			const memoryResult = memorySample.value;
+			const psResult = psSample.value;
+			const topResult = topSample.value;
 			const host = parseHostMemoryPressure(memoryResult.stdout);
 			const processSamples = parseProcessSamples(psResult.stdout);
+			const processFootprints = parseProcessFootprints(topResult.stdout);
 			const byDevice: Record<string, SimulatorDeviceMetrics> = Object.create(null);
 			for (const device of devices.slice(0, 200)) {
 				const services = serviceResults.get(device.udid);
@@ -267,7 +322,9 @@ export class SimulatorMetricsProvider {
 							processId: service.processId,
 							name: service.label,
 							cpuPercent: sample.cpuPercent,
-							memoryBytes: sample.memoryBytes,
+							// A process that exited between the two samples contributes
+							// nothing rather than a stale or inflated figure.
+							memoryBytes: processFootprints.get(service.processId) ?? 0,
 							...(service.bundleIdentifier
 								? { bundleIdentifier: service.bundleIdentifier }
 								: {}),

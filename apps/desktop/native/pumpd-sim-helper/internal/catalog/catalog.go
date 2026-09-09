@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	Version                      = "simslim-v0.8.0-09fc9cbb-pumpd.1"
+	Version                      = "simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2"
 	UpstreamCommit               = "09fc9cbbca35db5230e6d571a0a366fe6876266e"
 	UpstreamProfilesHash         = "e86e26967d4bf5e4ee33444066416330736ee7a4633ecf756cce15e801cdc0de"
 	PatchSet                     = "pumpd.1"
@@ -30,19 +30,30 @@ type Category struct {
 }
 
 type Profile struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	CategoryIDs  []string `json:"categoryIds"`
-	Experimental bool     `json:"experimental"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	CategoryIDs         []string `json:"categoryIds"`
+	PreservedServiceIDs []string `json:"preservedServiceIds,omitempty"`
+	Experimental        bool     `json:"experimental"`
+}
+
+// These jobs remained registered after reboot in real iOS 26.5 apply tests.
+// Keep them enabled in PUMPD presets instead of weakening registration proof.
+// They remain in the upstream mutation universe so legacy overrides can be restored.
+var pumpdPreservedServiceIDs = []string{
+	"com.apple.MapKit.SnapshotService",
+	"com.apple.siri.acousticsignature",
+	"com.apple.siri.context.service",
 }
 
 var profiles = []Profile{
 	{
 		ID: "pumpd-development", Name: "PUMPD Development",
-		Description:  "A conservative profile that reduces nonessential background work while preserving common PUMPD development capabilities.",
-		CategoryIDs:  []string{"siri", "family", "apps", "telemetry"},
-		Experimental: true,
+		Description:         "A conservative profile that reduces nonessential background work while preserving common PUMPD development capabilities.",
+		CategoryIDs:         []string{"siri", "family", "apps", "telemetry"},
+		PreservedServiceIDs: pumpdPreservedServiceIDs,
+		Experimental:        true,
 	},
 	{
 		ID: "pumpd-ui-automation", Name: "PUMPD UI Automation",
@@ -51,7 +62,8 @@ var profiles = []Profile{
 			"widgets", "siri", "search", "family", "photos", "apps", "messaging",
 			"connectivity", "telemetry", "other",
 		},
-		Experimental: true,
+		PreservedServiceIDs: pumpdPreservedServiceIDs,
+		Experimental:        true,
 	},
 	{
 		ID: "maximum-density", Name: "Maximum Density",
@@ -86,6 +98,7 @@ func Profiles() []Profile {
 	for i, profile := range profiles {
 		out[i] = profile
 		out[i].CategoryIDs = append([]string(nil), profile.CategoryIDs...)
+		out[i].PreservedServiceIDs = append([]string(nil), profile.PreservedServiceIDs...)
 	}
 	return out
 }
@@ -97,6 +110,7 @@ func ProfileByID(id string) (Profile, bool) {
 	for _, profile := range profiles {
 		if profile.ID == id {
 			profile.CategoryIDs = append([]string(nil), profile.CategoryIDs...)
+			profile.PreservedServiceIDs = append([]string(nil), profile.PreservedServiceIDs...)
 			return profile, true
 		}
 	}
@@ -121,10 +135,10 @@ func DesiredServiceIDs(profileID string) ([]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown profile %q", profileID)
 	}
-	return desiredForCategories(profile.CategoryIDs)
+	return desiredForCategories(profile.CategoryIDs, profile.PreservedServiceIDs...)
 }
 
-func desiredForCategories(categoryIDs []string) ([]string, error) {
+func desiredForCategories(categoryIDs []string, preservedServiceIDs ...string) ([]string, error) {
 	selected := make(map[string]bool, len(categoryIDs))
 	for _, id := range categoryIDs {
 		if _, known := simslim.CategoryByID(id); !known {
@@ -138,7 +152,15 @@ func desiredForCategories(categoryIDs []string) ([]string, error) {
 			except[category.ID] = true
 		}
 	}
-	return sortedKeys(simslim.Profile{ExceptCategories: except}.Desired()), nil
+	keep := make(map[string]bool, len(preservedServiceIDs))
+	slimmable := simslim.SlimmableSet()
+	for _, label := range preservedServiceIDs {
+		if !slimmable[label] {
+			return nil, fmt.Errorf("preserved service %q is absent from pinned SimSlim", label)
+		}
+		keep[label] = true
+	}
+	return sortedKeys(simslim.Profile{ExceptCategories: except, Keep: keep}.Desired()), nil
 }
 
 // UpstreamProfileForDesired converts a previously checkpointed PUMPD target

@@ -7,9 +7,10 @@
 	"description": "Local-first desktop diagnostics for PUMPD apps",
 	"main": "dist/main/index.js",
 	"scripts": {
-		"dev": "electron-vite dev",
-		"dev:simulator": "pnpm native:build && electron-vite dev",
-		"start": "electron-vite preview",
+		"electron:ensure": "node -e \"require('electron')\"",
+		"dev": "pnpm electron:ensure && electron-vite dev",
+		"dev:simulator": "pnpm native:build && pnpm dev",
+		"start": "pnpm electron:ensure && electron-vite preview",
 		"build": "electron-vite build",
 		"native:build": "node scripts/build-native-helpers.mjs",
 		"native:build:all": "node scripts/build-native-helpers.mjs --all",

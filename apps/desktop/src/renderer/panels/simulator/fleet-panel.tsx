@@ -1,5 +1,6 @@
 import { Button } from '@heroui/react/button';
 import { Input } from '@heroui/react/input';
+import { Switch } from '@heroui/react/switch';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	ChevronDown,
@@ -12,6 +13,7 @@ import {
 	Plus,
 	Power,
 	RotateCcw,
+	Smartphone,
 	Square,
 	SquareCheckBig,
 	Trash2,
@@ -29,9 +31,12 @@ import {
 } from '@/components/simulator-ui';
 import {
 	ConfirmAction,
+	Disclosure,
+	InfoPopover,
 	KeyValue,
 	PanelNotice,
 	SearchControl,
+	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import {
@@ -81,7 +86,7 @@ export function simulatorEraseAvailability(
 	}
 	return {
 		allowed: true,
-		reason: 'Returns this Simulator to a clean, recoverable state.',
+		reason: 'Permanently removes installed apps, accounts, and local data.',
 	};
 }
 
@@ -118,12 +123,31 @@ export function connectedSessionsForSimulator(
 
 export function FleetPanel() {
 	const desktop = useDesktopRuntime();
-	const { isBridgeAvailable, runAction, selectedDevice, setSelectedDeviceUdid, state } =
-		useSimulatorRuntime();
+	const {
+		isBridgeAvailable,
+		runAction,
+		cancelJob,
+		selectedDevice,
+		setSelectedDeviceUdid,
+		state,
+	} = useSimulatorRuntime();
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<TargetFilter>('all');
 	const [batchUdids, setBatchUdids] = useState<string[]>([]);
 	const [showCreate, setShowCreate] = useState(false);
+	const [batchMode, setBatchMode] = useState(false);
+	const [createdJobId, setCreatedJobId] = useState<string | null>(null);
+	const recentJobs = state.jobs
+		.filter((job) => job.kind.startsWith('device.'))
+		.toReversed();
+	const activeJobs = recentJobs.filter((job) => !job.finishedAt);
+	useEffect(() => {
+		const job = state.jobs.find((item) => item.id === createdJobId);
+		if (job?.deviceUdid) {
+			setSelectedDeviceUdid(job.deviceUdid);
+			setCreatedJobId(null);
+		}
+	}, [createdJobId, state.jobs, setSelectedDeviceUdid]);
 	const normalizedQuery = query.trim().toLowerCase();
 	const runtimeById = useMemo(
 		() => new Map(state.runtimes.map((runtime) => [runtime.identifier, runtime])),
@@ -177,21 +201,23 @@ export function FleetPanel() {
 
 	useEffect(() => {
 		const known = new Set(state.devices.map((device) => device.udid));
-		setBatchUdids((current) => current.filter((udid) => known.has(udid)));
+		setBatchUdids((current) => {
+			const retained = current.filter((udid) => known.has(udid));
+			return retained.length === current.length ? current : retained;
+		});
 	}, [state.devices]);
 
-	const toggleBatchTarget = (target: SimulatorDevice) => {
-		setSelectedDeviceUdid(target.udid);
-		setBatchUdids((current) =>
-			current.includes(target.udid)
-				? current.filter((udid) => udid !== target.udid)
-				: current.length >= 20
-					? current
-					: [...current, target.udid]
-		);
-	};
+	const bootableUdids = batchUdids.filter((udid) =>
+		state.devices.some(
+			(device) =>
+				device.udid === udid && device.isAvailable && device.state === 'shutdown'
+		)
+	);
+	const stoppableUdids = batchUdids.filter((udid) =>
+		state.devices.some((device) => device.udid === udid && device.state === 'booted')
+	);
 	const runBatchLifecycle = (kind: 'device.boot' | 'device.shutdown') => {
-		for (const udid of batchUdids) {
+		for (const udid of kind === 'device.boot' ? bootableUdids : stoppableUdids) {
 			void runAction(
 				{ kind, udid },
 				{
@@ -207,11 +233,25 @@ export function FleetPanel() {
 	return (
 		<section className="panel-root">
 			<SimulatorPanelHeader
-				actions={<RefreshSimulatorsButton />}
-				description="One control plane for installed iOS Simulator devices and runtimes. Discovery works independently of the PUMPD mobile diagnostics client."
+				actions={
+					<>
+						<RefreshSimulatorsButton compact />
+						<Button
+							isDisabled={!isBridgeAvailable}
+							size="sm"
+							variant="primary"
+							aria-expanded={showCreate}
+							onPress={() => setShowCreate((shown) => !shown)}
+						>
+							<Plus className="h-4 w-4" />
+							{showCreate ? 'Close creation' : 'New simulator'}
+						</Button>
+					</>
+				}
+				description="Create a simulator, open it, and run PUMPD. Select a row to inspect it, or use Select multiple for batch actions."
 				eyebrow="Targets"
 				meta={`${state.devices.length} discovered`}
-				title="Fleet"
+				title="Simulators"
 			/>
 			<BridgeUnavailableNotice />
 			{state.metrics.error ? (
@@ -269,19 +309,10 @@ export function FleetPanel() {
 					}
 				/>
 			</div>
-			{state.devices.length > 0 ? (
-				<FleetStatusRail
-					devices={state.devices}
-					metrics={state.metrics.byDevice}
-					runtimeById={runtimeById}
-					selectedUdid={selectedDevice?.udid}
-					onSelect={setSelectedDeviceUdid}
-				/>
-			) : null}
 			<Toolbar>
 				<SearchControl
 					ariaLabel="Search Simulator targets"
-					placeholder="Search name, runtime, or UDID"
+					placeholder="Search simulators"
 					value={query}
 					onChange={setQuery}
 				/>
@@ -299,29 +330,37 @@ export function FleetPanel() {
 						</NativeSelect.Indicator>
 					</NativeSelect.Trigger>
 				</NativeSelect>
-				<span className="sim-toolbar-separator" />
+				{batchMode ? (
+					<>
+						<span className="sim-toolbar-separator" />
+						<Button
+							isDisabled={!isBridgeAvailable || bootableUdids.length === 0}
+							size="sm"
+							variant="secondary"
+							onPress={() => runBatchLifecycle('device.boot')}
+						>
+							<Play className="h-3.5 w-3.5" /> Start {bootableUdids.length || ''}
+						</Button>
+						<Button
+							isDisabled={!isBridgeAvailable || stoppableUdids.length === 0}
+							size="sm"
+							variant="ghost"
+							onPress={() => runBatchLifecycle('device.shutdown')}
+						>
+							<Power className="h-3.5 w-3.5" /> Shut down {stoppableUdids.length || ''}
+						</Button>
+					</>
+				) : null}
 				<Button
-					isDisabled={!isBridgeAvailable || batchUdids.length === 0}
 					size="sm"
-					variant="secondary"
-					onPress={() => runBatchLifecycle('device.boot')}
+					variant={batchMode ? 'secondary' : 'ghost'}
+					aria-pressed={batchMode}
+					onPress={() => {
+						setBatchMode(!batchMode);
+						setBatchUdids([]);
+					}}
 				>
-					<Play className="h-3.5 w-3.5" /> Boot {batchUdids.length || ''}
-				</Button>
-				<Button
-					isDisabled={!isBridgeAvailable || batchUdids.length === 0}
-					size="sm"
-					variant="ghost"
-					onPress={() => runBatchLifecycle('device.shutdown')}
-				>
-					<Power className="h-3.5 w-3.5" /> Shut down {batchUdids.length || ''}
-				</Button>
-				<Button
-					size="sm"
-					variant={showCreate ? 'secondary' : 'ghost'}
-					onPress={() => setShowCreate((shown) => !shown)}
-				>
-					<Plus className="h-3.5 w-3.5" /> Create
+					{batchMode ? 'Done selecting' : 'Select multiple'}
 				</Button>
 				<span className="sim-toolbar-meta sim-fleet-toolbar-meta">
 					{targets.length} matching · {batchUdids.length} selected
@@ -330,11 +369,18 @@ export function FleetPanel() {
 			{showCreate ? (
 				<CreateFleetControls
 					deviceTypes={state.deviceTypes}
+					preferredDeviceTypeId={selectedDevice?.deviceTypeIdentifier}
 					isBridgeAvailable={isBridgeAvailable}
 					runtimes={state.runtimes}
-					onCreate={(action) =>
-						void runAction(action, { successMessage: 'Simulator creation queued.' })
-					}
+					onCreate={async (action) => {
+						const receipt = await runAction(action, {
+							successMessage: 'Simulator creation queued.',
+						});
+						if (receipt.accepted && receipt.jobId) {
+							setCreatedJobId(receipt.jobId);
+							setShowCreate(false);
+						}
+					}}
 				/>
 			) : null}
 			{state.devices.length === 0 ? (
@@ -356,23 +402,26 @@ export function FleetPanel() {
 							getId={(target) => target.udid}
 							rowHeight={58}
 							selectedId={selectedDevice?.udid}
+							selectedIds={batchMode ? batchUdids : undefined}
+							onSelectedIdsChange={
+								batchMode ? (ids) => setBatchUdids(ids.slice(0, 20)) : undefined
+							}
 							textValue={(target) =>
 								`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
 							}
-							onSelect={toggleBatchTarget}
+							onSelect={(target) => setSelectedDeviceUdid(target.udid)}
 							renderItem={(target) => (
 								<>
-									<div
-										className={`sim-list-leading ${batchUdids.includes(target.udid) ? 'text-blue-300' : ''}`}
-									>
-										{batchUdids.includes(target.udid) ? (
-											<SquareCheckBig className="h-3.5 w-3.5" />
-										) : (
-											<Square className="h-3.5 w-3.5" />
-										)}
-									</div>
+									{!batchMode ? (
+										<div className="sim-list-leading">
+											<Smartphone className="h-4 w-4" />
+										</div>
+									) : null}
 									<ListRowText
-										description={`${target.deviceTypeIdentifier ? (deviceTypeById.get(target.deviceTypeIdentifier)?.name ?? 'Simulator') : 'Simulator'} · ${runtimeById.get(target.runtimeIdentifier)?.name ?? target.runtimeIdentifier}`}
+										description={
+											runtimeById.get(target.runtimeIdentifier)?.name ??
+											target.runtimeIdentifier
+										}
 										title={target.name}
 									/>
 									<TargetStatePill state={target.state} />
@@ -408,6 +457,51 @@ export function FleetPanel() {
 					</div>
 				</div>
 			)}
+			{recentJobs.length > 0 ? (
+				<div className="sim-fleet-activity">
+					<Disclosure
+						title={
+							activeJobs.length
+								? `Simulator activity · ${activeJobs.length} running`
+								: 'Recent simulator activity'
+						}
+					>
+						<div className="sim-activity-list panel-scroll">
+							{recentJobs.slice(0, 20).map((job) => (
+								<div className="sim-activity-row" key={job.id}>
+									<div>
+										<strong>
+											{state.devices.find((device) => device.udid === job.deviceUdid)
+												?.name ?? 'New simulator'}
+										</strong>
+										<span>{job.message}</span>
+									</div>
+									<StatusPill
+										tone={
+											job.status === 'failed' || job.status === 'needs-attention'
+												? 'danger'
+												: job.finishedAt
+													? 'default'
+													: 'info'
+										}
+									>
+										{job.status}
+									</StatusPill>
+									{!job.finishedAt ? (
+										<Button
+											size="sm"
+											variant="ghost"
+											onPress={() => void cancelJob(job.id)}
+										>
+											Cancel
+										</Button>
+									) : null}
+								</div>
+							))}
+						</div>
+					</Disclosure>
+				</div>
+			) : null}
 		</section>
 	);
 }
@@ -421,83 +515,16 @@ function ListRowText({ title, description }: { title: string; description: strin
 	);
 }
 
-function FleetStatusRail({
-	devices,
-	metrics,
-	runtimeById,
-	selectedUdid,
-	onSelect,
-}: {
-	devices: SimulatorDevice[];
-	metrics: Record<string, SimulatorDeviceMetrics>;
-	runtimeById: Map<string, SimulatorRuntime>;
-	selectedUdid: string | undefined;
-	onSelect: (udid: string) => void;
-}) {
-	const sampledCount = devices.filter((device) => metrics[device.udid]).length;
-	return (
-		<section className="sim-fleet-status-rail" aria-label="Live Simulator fleet">
-			<header>
-				<div>
-					<span className="connection-dot is-online" />
-					<strong>Live fleet</strong>
-				</div>
-				<span>
-					{sampledCount}/{devices.length} resource samples · refreshes while visible
-				</span>
-			</header>
-			<div className="sim-fleet-status-track">
-				{devices.map((device) => {
-					const metric = metrics[device.udid];
-					const runtime = runtimeById.get(device.runtimeIdentifier);
-					const selected = selectedUdid === device.udid;
-					return (
-						<button
-							aria-current={selected ? 'true' : undefined}
-							className={`sim-fleet-status-card is-${device.state} ${selected ? 'is-selected' : ''}`}
-							key={device.udid}
-							type="button"
-							onClick={() => onSelect(device.udid)}
-						>
-							<span className="sim-fleet-status-card-heading">
-								<span
-									aria-hidden="true"
-									className={`connection-dot ${device.state === 'booted' ? 'is-online' : ''}`}
-								/>
-								<strong>{device.name}</strong>
-								<em>{device.state}</em>
-							</span>
-							<span className="sim-fleet-status-runtime">
-								{runtime?.version ?? runtime?.name ?? 'Unknown runtime'}
-							</span>
-							<span className="sim-fleet-status-values">
-								<span>
-									CPU{' '}
-									<strong>{metric ? `${metric.cpuPercent.toFixed(1)}%` : '—'}</strong>
-								</span>
-								<span>
-									RAM <strong>{metric ? formatBytes(metric.memoryBytes) : '—'}</strong>
-								</span>
-								<span>
-									PROC <strong>{metric?.processCount ?? '—'}</strong>
-								</span>
-							</span>
-						</button>
-					);
-				})}
-			</div>
-		</section>
-	);
-}
-
 function CreateFleetControls({
 	runtimes,
 	deviceTypes,
+	preferredDeviceTypeId,
 	isBridgeAvailable,
 	onCreate,
 }: {
 	runtimes: SimulatorRuntime[];
 	deviceTypes: SimulatorDeviceType[];
+	preferredDeviceTypeId?: string | undefined;
 	isBridgeAvailable: boolean;
 	onCreate: (action: SimulatorActionInput) => void;
 }) {
@@ -505,18 +532,27 @@ function CreateFleetControls({
 		() => runtimes.filter((runtime) => runtime.isAvailable),
 		[runtimes]
 	);
-	const [nameTemplate, setNameTemplate] = useState('PUMPD Test {n}');
+	const [nameTemplate, setNameTemplate] = useState('PUMPD Test');
 	const [countText, setCountText] = useState('1');
+	const [bootAfterCreate, setBootAfterCreate] = useState(true);
 	const [runtimeId, setRuntimeId] = useState(availableRuntimes[0]?.identifier ?? '');
-	const [deviceTypeId, setDeviceTypeId] = useState(deviceTypes[0]?.identifier ?? '');
+	const defaultDeviceTypeId =
+		deviceTypes.find((type) => type.identifier === preferredDeviceTypeId)?.identifier ??
+		deviceTypes
+			.filter((type) => /^iPhone \d/.test(type.name))
+			.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true }))[0]
+			?.identifier ??
+		deviceTypes[0]?.identifier ??
+		'';
+	const [deviceTypeId, setDeviceTypeId] = useState(defaultDeviceTypeId);
 	useEffect(() => {
 		if (!availableRuntimes.some((runtime) => runtime.identifier === runtimeId)) {
 			setRuntimeId(availableRuntimes[0]?.identifier ?? '');
 		}
 		if (!deviceTypes.some((deviceType) => deviceType.identifier === deviceTypeId)) {
-			setDeviceTypeId(deviceTypes[0]?.identifier ?? '');
+			setDeviceTypeId(defaultDeviceTypeId);
 		}
-	}, [availableRuntimes, deviceTypeId, deviceTypes, runtimeId]);
+	}, [availableRuntimes, defaultDeviceTypeId, deviceTypeId, deviceTypes, runtimeId]);
 	const count = parseSimulatorCreateCount(countText);
 	const canCreate =
 		isBridgeAvailable &&
@@ -527,9 +563,9 @@ function CreateFleetControls({
 	return (
 		<div className="sim-fleet-create">
 			<div className="sim-toolbar-field sim-toolbar-field-grow">
-				<span>Naming template</span>
+				<span>Name</span>
 				<Input
-					aria-label="Simulator naming template"
+					aria-label="Simulator name"
 					placeholder="PUMPD Test {n}"
 					value={nameTemplate}
 					onChange={(event) => setNameTemplate(event.currentTarget.value)}
@@ -592,6 +628,12 @@ function CreateFleetControls({
 					</NativeSelect.Indicator>
 				</NativeSelect.Trigger>
 			</NativeSelect>
+			<Switch isSelected={bootAfterCreate} onChange={setBootAfterCreate} size="sm">
+				<Switch.Control>
+					<Switch.Thumb />
+				</Switch.Control>
+				<Switch.Content>Open when ready</Switch.Content>
+			</Switch>
 			<Button
 				isDisabled={!canCreate}
 				size="sm"
@@ -607,6 +649,7 @@ function CreateFleetControls({
 								: `${baseName} ${index}`;
 						onCreate({
 							kind: 'device.create',
+							bootAfterCreate,
 							name,
 							deviceTypeIdentifier: deviceTypeId,
 							runtimeIdentifier: runtimeId,
@@ -614,13 +657,17 @@ function CreateFleetControls({
 					}
 				}}
 			>
-				<Plus className="h-3.5 w-3.5" /> Create {count ?? ''}
+				<Plus className="h-3.5 w-3.5" /> {bootAfterCreate ? 'Create & open' : 'Create'}
+				{count !== null && count > 1 ? ` ${count}` : ''}
 			</Button>
-			<span className="sim-toolbar-meta">
-				{availableRuntimes.length === 0
-					? 'No available iOS runtime. Install or repair one in Xcode.'
-					: `${runtimes.length - availableRuntimes.length} unavailable runtime${runtimes.length - availableRuntimes.length === 1 ? '' : 's'} disabled · use {n} for numbering`}
-			</span>
+			{availableRuntimes.length === 0 ? (
+				<span className="sim-field-error">Install an iOS runtime in Xcode first.</span>
+			) : null}
+			<InfoPopover label="Creating simulators">
+				Create up to 20 simulators. Names are numbered automatically; use {'{n}'} to
+				choose where the number goes. Open when ready starts each simulator after
+				creation.
+			</InfoPopover>
 		</div>
 	);
 }
@@ -660,20 +707,6 @@ function TargetDetail({
 		: undefined;
 	return (
 		<div className="sim-target-detail">
-			<div className="sim-device-stage" aria-hidden="true">
-				<div className={`sim-device-frame is-${target.state}`}>
-					<span className="sim-device-island" />
-					<div className="sim-device-screen">
-						<div className="sim-device-time">9:41</div>
-						<div className="sim-device-app-grid">
-							{['01', '02', '03', '04', '05', '06'].map((id) => (
-								<span key={id} />
-							))}
-						</div>
-						<p>{target.state === 'booted' ? 'Ready for actions' : target.state}</p>
-					</div>
-				</div>
-			</div>
 			<div className="sim-detail-heading">
 				<div>
 					<p className="sim-eyebrow">Selected target</p>
@@ -725,8 +758,7 @@ function TargetDetail({
 					<Power className="h-3.5 w-3.5" /> Shut down
 				</Button>
 			</div>
-			<section className="sim-detail-section">
-				<h3>Target information</h3>
+			<Disclosure title="Target information">
 				<dl>
 					<KeyValue label="UDID" mono value={target.udid} />
 					<KeyValue label="Runtime" value={runtime?.name ?? target.runtimeIdentifier} />
@@ -751,12 +783,16 @@ function TargetDetail({
 						}
 					/>
 				</dl>
-			</section>
+			</Disclosure>
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
 						<h3>Connected PUMPD sessions</h3>
-						<p>Matched by the app-reported Simulator UDID</p>
+						<InfoPopover label="Connected PUMPD sessions">
+							Open PUMPD with Metro running to connect. Linking it here requires the app
+							to report this simulator’s identifier. All sessions are available in
+							Connected App.
+						</InfoPopover>
 					</div>
 					<span>{connectedSessions.length}</span>
 				</div>
@@ -793,8 +829,7 @@ function TargetDetail({
 					</div>
 				) : (
 					<p className="sim-section-empty">
-						No connected PUMPD app has reported this Simulator UDID. Protocol-v1
-						sessions remain available in Connected App but cannot be joined reliably.
+						No PUMPD session linked to this simulator.
 					</p>
 				)}
 			</section>
@@ -808,7 +843,10 @@ function TargetDetail({
 				<div className="sim-section-heading">
 					<div>
 						<h3>Resource monitoring</h3>
-						<p>Bounded host process sample for this Simulator</p>
+						<InfoPopover label="Resource monitoring">
+							Live process footprint, sampled every five seconds while the desktop is
+							visible. Shared memory can affect totals; compare the same workload.
+						</InfoPopover>
 					</div>
 					<Cpu className="h-3.5 w-3.5" />
 				</div>
@@ -836,23 +874,30 @@ function TargetDetail({
 								</strong>
 							</div>
 						</div>
-						<div className="sim-process-list">
-							{[...metrics.processes]
-								.sort((left, right) => right.memoryBytes - left.memoryBytes)
-								.slice(0, 20)
-								.map((processMetric) => (
-									<div key={processMetric.processId}>
-										<span>
-											<strong>{processMetric.name}</strong>
-											<code>PID {processMetric.processId}</code>
-										</span>
-										<span>
-											<code>{processMetric.cpuPercent.toFixed(1)}% CPU</code>
-											<code>{formatBytes(processMetric.memoryBytes)}</code>
-										</span>
-									</div>
-								))}
-						</div>
+						<Disclosure title="Processes using the most memory">
+							<div className="sim-process-list">
+								{[...metrics.processes]
+									.sort((left, right) => right.memoryBytes - left.memoryBytes)
+									.slice(0, 20)
+									.map((processMetric) => (
+										<div key={processMetric.processId}>
+											<span>
+												<strong title={processMetric.name}>
+													{apps.find(
+														(app) =>
+															app.bundleIdentifier === processMetric.bundleIdentifier
+													)?.displayName ?? processMetric.name}
+												</strong>
+												<code>PID {processMetric.processId}</code>
+											</span>
+											<span>
+												<code>{processMetric.cpuPercent.toFixed(1)}% CPU</code>
+												<code>{formatBytes(processMetric.memoryBytes)}</code>
+											</span>
+										</div>
+									))}
+							</div>
+						</Disclosure>
 					</>
 				) : (
 					<p className="sim-section-empty">
@@ -860,10 +905,9 @@ function TargetDetail({
 					</p>
 				)}
 			</section>
-			<section className="sim-detail-section">
+			<Disclosure title="Manage target">
 				<div className="sim-section-heading">
 					<div>
-						<h3>Manage target</h3>
 						<p>Rename or create a repairable clone</p>
 					</div>
 					<Pencil className="h-3.5 w-3.5" />
@@ -916,10 +960,9 @@ function TargetDetail({
 					A clone is the supported repair path today. If cloning fails, the backend
 					reports the exact simctl error without mutating the source.
 				</p>
-			</section>
-			<section className="sim-detail-section">
+			</Disclosure>
+			<Disclosure title="Installed apps">
 				<div className="sim-section-heading">
-					<h3>Installed apps</h3>
 					<span>{apps.length}</span>
 				</div>
 				{apps.length > 0 ? (
@@ -959,7 +1002,7 @@ function TargetDetail({
 				) : (
 					<p className="sim-section-empty">No user-installed apps were reported.</p>
 				)}
-			</section>
+			</Disclosure>
 			<section className="sim-danger-zone">
 				<div>
 					<strong>Erase content and settings</strong>
@@ -1039,7 +1082,10 @@ function DiskInventorySection({
 			<div className="sim-section-heading">
 				<div>
 					<h3>Disk inventory</h3>
-					<p>Categorized by the signed, pinned SimSlim helper</p>
+					<InfoPopover label="Disk inventory">
+						Inspect storage to find disposable caches and logs. App data and user files
+						are protected.
+					</InfoPopover>
 				</div>
 				<Button
 					isDisabled={!isBridgeAvailable || !target.isAvailable}
@@ -1169,10 +1215,7 @@ function DiskInventorySection({
 					</p>
 				</>
 			) : (
-				<p className="sim-section-empty">
-					Inspect this target to classify cleanable caches, logs, temporary files, and
-					linguistic data separately from protected app and user storage.
-				</p>
+				<p className="sim-section-empty">Inspect storage to see what can be cleaned.</p>
 			)}
 		</section>
 	);

@@ -71,15 +71,13 @@ export function RestorePanel() {
 								<h2 className="m-0 text-xs font-semibold text-(--foreground)">
 									New checkpoint
 								</h2>
-								<p className="mb-0 mt-0.5 text-[10px] text-(--text-3)">
+								<p className="mb-0 mt-0.5 text-xs text-(--text-3)">
 									Explicit safe sources only
 								</p>
 							</div>
 						</div>
 						<TextField fullWidth value={label} onChange={setLabel}>
-							<Label className="mb-1.5 text-[10px] text-(--muted)">
-								Checkpoint label
-							</Label>
+							<Label className="mb-1.5 text-xs text-(--muted)">Checkpoint label</Label>
 							<Input
 								className="h-9 rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground)"
 								maxLength={120}
@@ -109,7 +107,7 @@ export function RestorePanel() {
 								triggerLabel="Reset explicit baselines"
 								title="Reset explicit sources to baseline?"
 								description="Only sources that explicitly implement a baseline reset will change. PUMPD captures rollback data before the first mutation."
-								confirmLabel="Reset safely"
+								confirmLabel="Reset state"
 								isDisabled={!canRunAction('restore', 'resetBaseline')}
 								tone="warning"
 								triggerVariant="secondary"
@@ -125,12 +123,10 @@ export function RestorePanel() {
 						</div>
 					</div>
 					<div className="mb-2 flex items-center justify-between px-1">
-						<span className="text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Checkpoints
 						</span>
-						<span className="font-mono text-[9px] text-(--text-3)">
-							{points.length}
-						</span>
+						<span className="font-mono text-xs text-(--text-3)">{points.length}</span>
 					</div>
 					{points.length === 0 ? (
 						<EmptyPanel
@@ -156,7 +152,7 @@ export function RestorePanel() {
 											<p className="m-0 truncate text-xs font-medium text-(--foreground)">
 												{point.label}
 											</p>
-											<p className="mb-0 mt-1 text-[9px] text-(--text-3)">
+											<p className="mb-0 mt-1 text-xs text-(--text-3)">
 												{formatRelativeTime(point.createdAt)} ·{' '}
 												{formatBytes(point.estimatedBytes)}
 											</p>
@@ -176,7 +172,7 @@ export function RestorePanel() {
 										<StatusPill tone="success" dot>
 											Captured
 										</StatusPill>
-										<span className="text-[10px] text-(--text-3)">
+										<span className="text-xs text-(--text-3)">
 											{formatRelativeTime(selected.createdAt)}
 										</span>
 									</div>
@@ -259,7 +255,7 @@ export function RestorePanel() {
 										tone="warning"
 										title="Restore explicit developer state?"
 										description={`PUMPD will preflight ${selectedSourceIds.length} selected source${selectedSourceIds.length === 1 ? '' : 's'}, include required dependencies, capture rollback data, then apply in dependency order. User data, authentication, and secure storage remain excluded.`}
-										confirmLabel="Restore safely"
+										confirmLabel="Restore selected"
 										isDisabled={
 											selectedSourceIds.length === 0 ||
 											!canRunAction('restore', 'restore')
@@ -277,7 +273,7 @@ export function RestorePanel() {
 							</div>
 							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
 								<div className="border-r border-white/8 p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Sources
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -285,7 +281,7 @@ export function RestorePanel() {
 									</p>
 								</div>
 								<div className="border-r border-white/8 p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Size
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -293,7 +289,7 @@ export function RestorePanel() {
 									</p>
 								</div>
 								<div className="p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Lifetime
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -314,7 +310,7 @@ export function RestorePanel() {
 													<h3 className="m-0 text-xs font-semibold text-(--foreground)">
 														{source.title}
 													</h3>
-													<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+													<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
 														{source.id}
 													</p>
 												</div>
@@ -367,7 +363,7 @@ export function RestorePanel() {
 											{selectedReceipts[0].status}
 										</StatusPill>
 									</div>
-									<div className="space-y-1 text-[10px] text-(--text-3)">
+									<div className="space-y-1 text-xs text-(--text-3)">
 										{selectedReceipts[0].sourceResults.map((result) => (
 											<p className="m-0" key={result.sourceId}>
 												{result.sourceTitle}: preflight {result.preflight}, apply{' '}
@@ -381,7 +377,7 @@ export function RestorePanel() {
 								<div className="flex items-center gap-2 text-xs font-medium text-emerald-200">
 									<ShieldCheck className="h-4 w-4" /> Restore safety boundary
 								</div>
-								<p className="mb-0 mt-2 text-[11px] leading-5 text-emerald-100/60">
+								<p className="mb-0 mt-2 text-xs leading-5 text-emerald-100/60">
 									Snapshots are JSON-bounded and validated before writes. If a later
 									source fails, PUMPD attempts to reapply the captured rollback data.
 									Secure storage and app user data are not included.

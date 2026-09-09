@@ -30,7 +30,7 @@ const swiftPackage = join(desktopDirectory, 'native', 'pumpd-native-host');
 const packageManifest = JSON.parse(
 	readFileSync(join(desktopDirectory, 'package.json'), 'utf8')
 );
-const catalogVersion = 'simslim-v0.8.0-09fc9cbb-pumpd.1';
+const catalogVersion = 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2';
 verifyVendoredSimSlim(goPackage);
 const sourceCommit = nativeSourceIdentity();
 

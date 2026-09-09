@@ -25,6 +25,7 @@ import type {
 import {
 	simulatorActionSchema,
 	simulatorStateSchema,
+	udidSchema,
 } from '../shared/simulator-protocol';
 import type { SimHelperClient } from './sim-helper-client';
 import { type SimctlInventory, SimctlProvider } from './simctl-provider';
@@ -42,7 +43,7 @@ import {
 } from './simulator-mutation-coordinator';
 
 const DEFAULT_POLL_INTERVAL_MS = 2_500;
-const METRICS_POLL_INTERVAL_MS = 2_000;
+const METRICS_POLL_INTERVAL_MS = 5_000;
 const MAX_JOBS = 200;
 const MAX_PUSH_PAYLOAD_BYTES = 4_096;
 const MAX_JOB_ERROR_LENGTH = 4 * 1024;
@@ -452,6 +453,7 @@ export class SimulatorService {
 	#updatedAt: number;
 	#pollTimer: NodeJS.Timeout | undefined;
 	#metricsTimer: NodeJS.Timeout | undefined;
+	#pollingActive = true;
 	#refreshPromise: Promise<SimulatorState> | undefined;
 	#metricsRefreshPromise: Promise<SimulatorState> | undefined;
 	#nativeRefreshPromise: Promise<SimulatorState> | undefined;
@@ -539,17 +541,34 @@ export class SimulatorService {
 		return () => this.#listeners.delete(listener);
 	}
 
+	setPollingActive(active: boolean): void {
+		if (this.#pollingActive === active) return;
+		this.#pollingActive = active;
+		if (active && !this.#stopped) {
+			void this.refresh()
+				.then(() => this.refreshMetrics())
+				.catch(() => undefined);
+		}
+	}
+
 	async start(): Promise<void> {
 		this.#stopped = false;
 		await this.#captureStore.initialize();
 		this.#touch();
-		await Promise.all([this.refresh(), this.refreshMetrics(), this.refreshNative()]);
+		// Metrics need the discovered device list; an empty first sample looked like
+		// zero resource use and ran a redundant host scan before discovery finished.
+		await Promise.all([
+			this.refresh().then(() => this.refreshMetrics()),
+			this.refreshNative(),
+		]);
 		if (this.#stopped || this.#pollTimer) return;
 		this.#pollTimer = setInterval(() => {
+			if (!this.#pollingActive) return;
 			void this.refresh().catch(() => undefined);
 		}, this.#pollIntervalMs);
 		this.#pollTimer.unref();
 		this.#metricsTimer = setInterval(() => {
+			if (!this.#pollingActive) return;
 			void this.refreshMetrics().catch(() => undefined);
 		}, METRICS_POLL_INTERVAL_MS);
 		this.#metricsTimer.unref();
@@ -952,7 +971,10 @@ export class SimulatorService {
 		try {
 			const capture = mutatesInventory(action)
 				? await this.#withInventoryMutation(job.controller.signal, () =>
-						this.#execute(action, context, job.controller.signal)
+						this.#execute(action, context, job.controller.signal, (udid) => {
+							job.public = { ...job.public, deviceUdid: udid };
+							this.#touch();
+						})
 					)
 				: await this.#execute(action, context, job.controller.signal);
 			if (job.controller.signal.aborted) {
@@ -1075,7 +1097,8 @@ export class SimulatorService {
 	async #execute(
 		action: SimulatorAction,
 		context: SimulatorActionContext,
-		signal: AbortSignal
+		signal: AbortSignal,
+		onCreated?: (udid: string) => void
 	): Promise<SimulatorCapture | undefined> {
 		if (action.kind === 'device.create') {
 			await this.#refreshInventory(signal);
@@ -1095,7 +1118,7 @@ export class SimulatorService {
 			) {
 				throw new Error('Runtime is not available in the current inventory.');
 			}
-			await this.#run(
+			const createdOutput = await this.#run(
 				[
 					'create',
 					action.name,
@@ -1106,6 +1129,23 @@ export class SimulatorService {
 				{ timeoutMs: 60_000 }
 			);
 			await this.#refreshInventory(signal);
+			const created = udidSchema.safeParse(createdOutput.trim());
+			if (created.success) onCreated?.(created.data);
+			if (action.bootAfterCreate) {
+				if (!created.success)
+					throw new Error(
+						'Simulator created, but Xcode did not return a valid device ID. Refresh the list to open it.'
+					);
+				const device = this.#requireDevice(created.data);
+				if (device.state !== 'booted')
+					await this.#run(['boot', device.udid], signal, { timeoutMs: 120_000 });
+				await this.#run(['bootstatus', device.udid, '-b'], signal, {
+					timeoutMs: 180_000,
+				});
+				await this.#provider.openSimulator(device.udid, signal);
+				await this.#refreshInventory(signal);
+				await this.#refreshApps(device.udid, signal);
+			}
 			return undefined;
 		}
 		if (action.kind === 'capture.compose') {

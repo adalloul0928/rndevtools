@@ -158,7 +158,7 @@ func (authorizer *Authorizer) Authorize(ctx context.Context, request protocol.Re
 		return denied("The mutation authorization was not issued by this helper's parent broker.")
 	}
 	if err := authorizer.attestor.Attest(ctx, parentPID); err != nil {
-		return denied("The helper's parent is not an authenticated PUMPD mutation broker.")
+		return denied("The helper's parent is not an authenticated PUMPD mutation broker: " + protocol.BoundedDetail(err.Error()))
 	}
 	return nil
 }

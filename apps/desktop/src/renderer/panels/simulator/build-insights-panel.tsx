@@ -169,7 +169,7 @@ export function BuildInsightsPanel() {
 								)
 							}
 						>
-							<FolderSearch className="h-3.5 w-3.5" /> Add scan root
+							<FolderSearch className="h-3.5 w-3.5" /> Add build folder
 						</Button>
 						<Button
 							aria-label="Refresh local build results"
@@ -185,12 +185,11 @@ export function BuildInsightsPanel() {
 						</Button>
 					</div>
 				}
-				description="Index user-selected local Xcode result bundles and bounded DerivedData scans, then inspect duration, status, and diagnostic trends without uploading build data."
+				description={`Review local Xcode build times and errors. Import an .xcresult file or choose a DerivedData folder to scan. ${BUILD_INSIGHTS_FOUNDATION_COPY}`}
 				eyebrow="Xcode"
 				meta={`${state.stats.totalBuilds} builds · ${state.retentionMonths} month retention`}
 				title="Build Insights"
 			/>
-			<PanelNotice tone="info">{BUILD_INSIGHTS_FOUNDATION_COPY}</PanelNotice>
 			{!bridge ? (
 				<PanelNotice tone="error">
 					The narrow Build Insights bridge is unavailable. Reopen the updated desktop
@@ -233,7 +232,7 @@ export function BuildInsightsPanel() {
 					<DenseVirtualList
 						ariaLabel="Build history"
 						className="sim-build-list"
-						emptyDescription="Import an .xcresult or add a user-selected DerivedData scan root."
+						emptyDescription="Import an .xcresult file or choose a DerivedData folder."
 						emptyTitle="No local build results"
 						items={state.builds}
 						getId={(build) => build.id}
@@ -380,9 +379,7 @@ function EmptyBuildDetail({
 			<div className="sim-empty-preview">
 				<PackageCheck className="h-5 w-5" />
 				<strong>Build evidence appears here</strong>
-				<span>
-					Only bounded summaries from local Xcode artifacts cross into the renderer.
-				</span>
+				<span>Select a build to review its duration and errors.</span>
 			</div>
 			<SourcesAndActivity state={state} />
 			<ExportActions onExport={onExport} />
@@ -397,8 +394,8 @@ function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
-						<h3>Local scan sources</h3>
-						<p>Bounded scans run in Electron main; paths never enter the renderer</p>
+						<h3>Build folders</h3>
+						<p>Selected folders are scanned when you refresh.</p>
 					</div>
 					<code>{state.sources.length}</code>
 				</div>

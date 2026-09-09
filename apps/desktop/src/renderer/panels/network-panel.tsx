@@ -139,7 +139,7 @@ export function NetworkPanel() {
 				isRowHeader: true,
 				cell: (entry) => (
 					<span
-						className={`inline-flex h-5 items-center rounded border px-1.5 font-mono text-[10px] font-semibold ${methodTone(entry.method)}`}
+						className={`inline-flex h-5 items-center rounded border px-1.5 font-mono text-xs font-semibold ${methodTone(entry.method)}`}
 					>
 						{entry.method}
 					</span>
@@ -151,10 +151,10 @@ export function NetworkPanel() {
 				minWidth: 340,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
-						<div className="truncate font-mono text-[11px] text-(--foreground)">
+						<div className="truncate font-mono text-xs text-(--foreground)">
 							{entry.path}
 						</div>
-						<div className="mt-0.5 truncate text-[10px] text-(--text-3)">
+						<div className="mt-0.5 truncate text-xs text-(--text-3)">
 							{entry.host} {entry.source ? `· ${entry.source}` : ''}
 						</div>
 					</div>
@@ -176,7 +176,7 @@ export function NetworkPanel() {
 				width: 90,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-[11px] text-(--muted)">
+					<span className="font-mono text-xs text-(--muted)">
 						{formatDuration(entry.durationMs)}
 					</span>
 				),
@@ -187,7 +187,7 @@ export function NetworkPanel() {
 				width: 88,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-[11px] text-(--muted)">
+					<span className="font-mono text-xs text-(--muted)">
 						{formatBytes(entry.responseBytes)}
 					</span>
 				),
@@ -198,7 +198,7 @@ export function NetworkPanel() {
 				width: 92,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-[10px] text-(--text-3)">
+					<span className="font-mono text-xs text-(--text-3)">
 						{formatClock(entry.at)}
 					</span>
 				),
@@ -281,7 +281,7 @@ export function NetworkPanel() {
 					{(['all', 'errors', 'slow', 'supabase'] as const).map((value) => (
 						<Button
 							aria-pressed={filter === value}
-							className="h-7 rounded-md px-2.5 text-[11px] capitalize"
+							className="h-7 rounded-md px-2.5 text-xs capitalize"
 							key={value}
 							size="sm"
 							variant={filter === value ? 'secondary' : 'ghost'}
@@ -345,11 +345,18 @@ export function NetworkPanel() {
 				>
 					<WifiOff className="h-3.5 w-3.5" /> Clear
 				</Button>
-				<span className="ml-auto shrink-0 font-mono text-[10px] text-(--text-3)">
+				<span className="ml-auto shrink-0 font-mono text-xs text-(--text-3)">
 					{filtered.length} of {entries.length} requests
 				</span>
 			</Toolbar>
-			<PanelNotice title="App-scoped network simulation." tone="info">
+			<PanelNotice
+				title={
+					currentProfile?.active
+						? `${currentProfile.name} is active · PUMPD requests only`
+						: 'Network simulation is off'
+				}
+				tone="info"
+			>
 				{currentProfile?.active
 					? `${currentProfile.name} is active for instrumented PUMPD fetch only. `
 					: 'No network profile is currently active. '}
@@ -411,7 +418,7 @@ function NetworkDetail({
 			<div className="border-b border-white/8 p-4">
 				<div className="mb-3 flex items-center gap-2">
 					<span
-						className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-semibold ${methodTone(entry.method)}`}
+						className={`rounded border px-1.5 py-0.5 font-mono text-xs font-semibold ${methodTone(entry.method)}`}
 					>
 						{entry.method}
 					</span>
@@ -422,7 +429,7 @@ function NetworkDetail({
 				<h2 className="m-0 break-all font-mono text-xs font-medium leading-5 text-(--foreground)">
 					{truncateMiddle(entry.url, 160)}
 				</h2>
-				<p className="mb-0 mt-2 text-[10px] text-(--text-3)">
+				<p className="mb-0 mt-2 text-xs text-(--text-3)">
 					{formatClock(entry.at)} · {formatDuration(entry.durationMs)} ·{' '}
 					{formatBytes(entry.responseBytes)}
 				</p>
@@ -431,7 +438,7 @@ function NetworkDetail({
 				{(['overview', 'headers', 'request', 'response'] as const).map((value) => (
 					<button
 						aria-pressed={tab === value}
-						className={`h-9 border-b text-[11px] capitalize transition-colors ${tab === value ? 'border-white text-white' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
+						className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-white text-white' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
 						key={value}
 						type="button"
 						onClick={() => onTabChange(value)}

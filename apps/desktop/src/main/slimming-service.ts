@@ -66,6 +66,13 @@ const NO_MUTATION_ERROR_CODES = new Set([
 	'experimental_acknowledgement_required',
 	'limited_operation_blocked',
 	'mutation_policy_blocked',
+	// The helper denies these before it constructs the simulator service
+	// (cmd/pumpd-sim-helper/main.go), and Electron raises the broker one before
+	// spawning anything, so neither can have touched a Simulator. Leaving them
+	// out reported a refused attestation as a mutation needing restart
+	// reconciliation.
+	'mutation_authorization_required',
+	'mutation_broker_unavailable',
 ]);
 
 export type SlimmingHelperProvider = Pick<
@@ -169,6 +176,65 @@ function actionKindForMutation(
 	return 'profile.undo';
 }
 
+const MAX_EVIDENCE_IDS = 8;
+
+function abbreviatedIds(ids: readonly string[]): string {
+	const shown = ids.slice(0, MAX_EVIDENCE_IDS).join(', ');
+	return ids.length > MAX_EVIDENCE_IDS
+		? `${shown} (+${ids.length - MAX_EVIDENCE_IDS} more)`
+		: shown;
+}
+
+/**
+ * The helper's own account of a failed mutation: its failure code, the prose
+ * from the layer that refused, and the exact services or processes that did
+ * not verify. Reducing all of that to one fixed sentence left a rolled-back
+ * apply indistinguishable from any other.
+ */
+function mutationFailureDetail(error: unknown): string {
+	const evidence =
+		error instanceof SimHelperError ? mutationEvidenceFromError(error) : undefined;
+	if (!evidence) return '';
+	const parts: string[] = [];
+	if (evidence.failureCode) parts.push(`helper failure ${evidence.failureCode}`);
+	if (evidence.failureDetail) parts.push(evidence.failureDetail);
+	const verification = evidence.verification;
+	if (!verification.verified) {
+		if (!verification.overridesMatch) {
+			const missing = abbreviatedIds(verification.missingDisabledServiceIds);
+			const unexpected = abbreviatedIds(verification.unexpectedDisabledServiceIds);
+			parts.push(
+				`overrides did not match${missing ? `; missing: ${missing}` : ''}${unexpected ? `; unexpected: ${unexpected}` : ''}`
+			);
+		}
+		if (!verification.disabledLaunchdJobRegistrationsAbsent) {
+			parts.push(
+				`still registered: ${abbreviatedIds(verification.registeredDisabledLaunchdJobIds)}`
+			);
+		}
+		if (!verification.observedPreMutationProcessesAbsent) {
+			parts.push(
+				`still running: ${abbreviatedIds(verification.presentObservedProcessNames)}`
+			);
+		}
+	}
+	parts.push(
+		evidence.rollback.attempted
+			? evidence.rollback.succeeded
+				? 'rollback succeeded'
+				: `rollback failed${evidence.rollback.errorCode ? ` (${evidence.rollback.errorCode})` : ''}`
+			: 'rollback not attempted'
+	);
+	return ` [${parts.join('; ')}]`;
+}
+
+function describeMutationFailure(error: unknown): string {
+	return `${safeError(error)}${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
+		0,
+		4 * 1024
+	);
+}
+
 function mutationFailureIsProvenSafe(error: unknown): boolean {
 	const evidence =
 		error instanceof SimHelperError ? mutationEvidenceFromError(error) : undefined;
@@ -197,6 +263,7 @@ export class SlimmingService {
 	readonly #helper: SlimmingHelperProvider;
 	readonly #persistence: SlimmingPersistence;
 	readonly #appVersion: string;
+	readonly #mutationUnavailableReason: string | undefined;
 	readonly #now: () => number;
 	readonly #pollIntervalMs: number;
 	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort;
@@ -206,6 +273,7 @@ export class SlimmingService {
 	#queue: Promise<void> = Promise.resolve();
 	#mutationQueue: Promise<void> = Promise.resolve();
 	#refreshPromise: Promise<SlimmingState> | undefined;
+	#pollingActive = true;
 	#pollTimer: NodeJS.Timeout | undefined;
 	#stopped = false;
 	#persistenceHealthy = true;
@@ -216,6 +284,7 @@ export class SlimmingService {
 		resourceDirectory,
 		persistenceDirectory,
 		appVersion,
+		mutationUnavailableReason,
 		helper = new SimHelperClient({ resourceDirectory, appVersion }),
 		mutationCoordinator = new SimulatorMutationCoordinator(),
 		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -224,6 +293,7 @@ export class SlimmingService {
 		resourceDirectory: string;
 		persistenceDirectory: string;
 		appVersion: string;
+		mutationUnavailableReason?: string;
 		helper?: SlimmingHelperProvider;
 		mutationCoordinator?: SimulatorMutationCoordinatorPort;
 		pollIntervalMs?: number;
@@ -233,6 +303,7 @@ export class SlimmingService {
 		this.#mutationCoordinator = mutationCoordinator;
 		this.#persistence = new SlimmingPersistence(persistenceDirectory);
 		this.#appVersion = appVersion;
+		this.#mutationUnavailableReason = mutationUnavailableReason;
 		this.#now = now;
 		this.#pollIntervalMs =
 			Number.isFinite(pollIntervalMs) && pollIntervalMs >= 1_000
@@ -267,6 +338,12 @@ export class SlimmingService {
 		return () => this.#listeners.delete(listener);
 	}
 
+	setPollingActive(active: boolean): void {
+		if (this.#pollingActive === active) return;
+		this.#pollingActive = active;
+		if (active && !this.#stopped) void this.refresh().catch(() => undefined);
+	}
+
 	async start(): Promise<void> {
 		this.#stopped = false;
 		try {
@@ -285,6 +362,13 @@ export class SlimmingService {
 		await this.refresh();
 		if (this.#stopped || this.#pollTimer) return;
 		this.#pollTimer = setInterval(() => {
+			// Recovery remains supervised even with every window hidden. Running jobs
+			// own their verification; idle discovery does not need to wake simulators.
+			if (
+				!this.#pollingActive &&
+				Object.keys(this.#persistence.pendingMutations()).length === 0
+			)
+				return;
 			void this.refresh().catch(() => undefined);
 		}, this.#pollIntervalMs);
 		this.#pollTimer.unref();
@@ -790,8 +874,11 @@ export class SlimmingService {
 						cancelled && !needsAttention
 							? 'Cancelled.'
 							: needsAttention
-								? 'Mutation outcome requires restart reconciliation.'
-								: safeError(error),
+								? `Mutation outcome requires restart reconciliation.${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
+										0,
+										4 * 1024
+									)
+								: describeMutationFailure(error),
 					condition: needsAttention ? 'needs-attention' : 'unknown',
 					...(error instanceof SimHelperError ? { errorCode: error.code } : {}),
 					checkpointAvailable:
@@ -801,6 +888,10 @@ export class SlimmingService {
 				if (cancelled) {
 					this.#cancelRemaining(job, index + 1);
 					break;
+				}
+			} finally {
+				if (MUTATION_KINDS.has(job.action.kind)) {
+					this.#clearInspections(target.simulatorUdid);
 				}
 			}
 		}
@@ -934,6 +1025,7 @@ export class SlimmingService {
 		}
 
 		const publicCompatibility = this.#compatibilityForDevice(simulatorUdid);
+		this.#clearInspections(simulatorUdid);
 		if (!publicCompatibility) {
 			throw new Error(
 				`${simulatorUdid} has no inspected compatibility tuple; refresh before mutation.`
@@ -1134,6 +1226,20 @@ export class SlimmingService {
 		};
 	}
 
+	#clearInspections(simulatorUdid: string): void {
+		// A mutation invalidates earlier plans and capability checks, including
+		// inspections requested while it was running or before a failed attempt.
+		if (
+			!this.#state.previewBySimulator[simulatorUdid] &&
+			!this.#state.doctorBySimulator[simulatorUdid]
+		) {
+			return;
+		}
+		delete this.#state.previewBySimulator[simulatorUdid];
+		delete this.#state.doctorBySimulator[simulatorUdid];
+		this.#touch();
+	}
+
 	#checkpointMetadata(
 		operationId: string,
 		exactProfileId?: string
@@ -1203,7 +1309,7 @@ export class SlimmingService {
 				safeResolution ? status : 'needs-attention',
 				safeResolution ? condition : 'needs-attention',
 				evidence?.changed,
-				safeError(error),
+				describeMutationFailure(error),
 				errorCode
 			);
 			if (pending) {
@@ -1427,6 +1533,9 @@ export class SlimmingService {
 				compatibilityMatrixVersion: handshake.capabilities.compatibilityMatrixVersion,
 				mutationMode: handshake.capabilities.mutationMode,
 				mutationReason: handshake.capabilities.mutationSafety,
+				...(this.#mutationUnavailableReason
+					? { mutationUnavailableReason: this.#mutationUnavailableReason }
+					: {}),
 				verifiedMutationTuples: handshake.capabilities.verifiedMutationTuples,
 				verifiedAt: this.#now(),
 				...(!this.#persistenceHealthy

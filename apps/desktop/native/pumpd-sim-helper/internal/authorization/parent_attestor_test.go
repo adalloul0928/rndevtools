@@ -2,12 +2,31 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func TestLiveCodeVerificationPinsPIDIdentifierTeamAndAppleAnchor(t *testing.T) {
+const (
+	testBrokerPath         = "/Applications/PUMPD Devtools.app/Contents/Resources/native/pumpd-native-host"
+	fakeCodeDirectoryHash  = "0102030405060708090a0b0c0d0e0f1011121314"
+	fakeBrokerProcessID    = 42
+	unreadableIdentityText = "no such process"
+)
+
+func fakeIdentity(flags uint32) liveCodeIdentityReader {
+	return func(int) (LiveCodeIdentity, error) {
+		var identity LiveCodeIdentity
+		for index := range identity.CodeDirectoryHash {
+			identity.CodeDirectoryHash[index] = byte(index + 1)
+		}
+		identity.Flags = flags
+		return identity, nil
+	}
+}
+
+func TestLiveCodeVerificationBindsKernelCDHashIntoStaticRequirement(t *testing.T) {
 	var executable string
 	var arguments []string
 	runner := func(_ context.Context, command string, values ...string) ([]byte, error) {
@@ -15,7 +34,14 @@ func TestLiveCodeVerificationPinsPIDIdentifierTeamAndAppleAnchor(t *testing.T) {
 		arguments = append([]string(nil), values...)
 		return nil, nil
 	}
-	if err := verifyLiveCode(context.Background(), 42, expectedBrokerIdentifier, runner); err != nil {
+	if err := verifyLiveCode(
+		context.Background(),
+		fakeBrokerProcessID,
+		testBrokerPath,
+		expectedBrokerIdentifier,
+		fakeIdentity(csValid),
+		runner,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if executable != "/usr/bin/codesign" {
@@ -30,26 +56,98 @@ func TestLiveCodeVerificationPinsPIDIdentifierTeamAndAppleAnchor(t *testing.T) {
 		"-R=anchor apple generic",
 		`identifier "pumpd-native-host"`,
 		`certificate leaf[subject.OU] = "434X69L4Z5"`,
+		`cdhash H"` + fakeCodeDirectoryHash + `"`,
 	} {
 		if !strings.Contains(requirement, required) {
 			t.Fatalf("requirement %q does not pin %q", requirement, required)
 		}
 	}
-	if arguments[4] != "+42" {
-		t.Fatalf("codesign did not target the live process: %#v", arguments)
+	if arguments[4] != testBrokerPath {
+		t.Fatalf("codesign did not target the static executable: %#v", arguments)
+	}
+	for _, argument := range arguments {
+		if strings.HasPrefix(argument, "+") {
+			t.Fatalf("codesign +pid verification must not be relied upon: %#v", arguments)
+		}
 	}
 }
 
 func TestLiveCodeVerificationRejectsUnapprovedIdentityBeforeExecution(t *testing.T) {
-	called := false
+	identityRead := false
+	codesignCalled := false
+	identity := func(int) (LiveCodeIdentity, error) {
+		identityRead = true
+		return LiveCodeIdentity{Flags: csValid}, nil
+	}
 	runner := func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		called = true
+		codesignCalled = true
 		return nil, nil
 	}
-	if err := verifyLiveCode(context.Background(), 42, "forged-host", runner); err == nil {
+	err := verifyLiveCode(context.Background(), fakeBrokerProcessID, testBrokerPath, "forged-host", identity, runner)
+	if err == nil {
 		t.Fatal("forged live-code identity unexpectedly accepted")
 	}
-	if called {
-		t.Fatal("codesign was invoked for an unapproved identity")
+	if identityRead || codesignCalled {
+		t.Fatal("an unapproved identity reached the kernel or codesign")
+	}
+}
+
+func TestLiveCodeVerificationRequiresAbsoluteExecutablePath(t *testing.T) {
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		t.Fatal("codesign was invoked for a relative executable path")
+		return nil, nil
+	}
+	err := verifyLiveCode(context.Background(), fakeBrokerProcessID, "pumpd-native-host", expectedBrokerIdentifier, fakeIdentity(csValid), runner)
+	if err == nil {
+		t.Fatal("relative executable path unexpectedly accepted")
+	}
+}
+
+func TestLiveCodeVerificationFailsClosedOnKernelIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity liveCodeIdentityReader
+		want     string
+	}{
+		{
+			name: "unreadable",
+			identity: func(int) (LiveCodeIdentity, error) {
+				return LiveCodeIdentity{}, errors.New(unreadableIdentityText)
+			},
+			want: unreadableIdentityText,
+		},
+		{name: "invalid signature", identity: fakeIdentity(0), want: "does not consider"},
+		{name: "ad-hoc", identity: fakeIdentity(csValid | csAdhoc), want: "ad-hoc"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			codesignCalled := false
+			runner := func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+				codesignCalled = true
+				return nil, nil
+			}
+			err := verifyLiveCode(context.Background(), fakeBrokerProcessID, testBrokerPath, expectedBrokerIdentifier, test.identity, runner)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected failure containing %q, got %v", test.want, err)
+			}
+			if codesignCalled {
+				t.Fatal("codesign ran although the kernel identity was already rejected")
+			}
+		})
+	}
+}
+
+func TestLiveCodeVerificationSurfacesCodesignOutput(t *testing.T) {
+	runner := func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return []byte("test-requirement: code failed to satisfy specified code requirement(s)\n"), errors.New("exit status 3")
+	}
+	err := verifyLiveCode(context.Background(), fakeBrokerProcessID, testBrokerPath, expectedBrokerIdentifier, fakeIdentity(csValid), runner)
+	if err == nil {
+		t.Fatal("codesign failure unexpectedly accepted")
+	}
+	for _, expected := range []string{"failed to satisfy", fakeCodeDirectoryHash, testBrokerPath} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error %q does not carry %q", err.Error(), expected)
+		}
 	}
 }

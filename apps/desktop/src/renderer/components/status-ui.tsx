@@ -25,7 +25,7 @@ export function StatusPill({
 }) {
 	return (
 		<span
-			className={`inline-flex h-6 items-center gap-1.5 rounded-md border px-2 font-mono text-[10px] font-medium uppercase tracking-[0.04em] ${statusToneClassName[tone]} ${className}`}
+			className={`inline-flex h-6 items-center gap-1.5 rounded-md border px-2 font-mono text-xs font-medium uppercase tracking-[0.04em] ${statusToneClassName[tone]} ${className}`}
 		>
 			{dot ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : null}
 			{children}
@@ -42,6 +42,12 @@ export function ActionNotice({
 	message: string;
 	onDismiss: () => void;
 }) {
+	const hasDetails = message.length > 240 || message.includes('\n');
+	const headline = hasDetails
+		? kind === 'error'
+			? 'The action could not finish. Review the details below.'
+			: message.split('\n')[0]?.slice(0, 200)
+		: message;
 	const icon =
 		kind === 'success' ? (
 			<Check className="h-3.5 w-3.5" />
@@ -53,11 +59,21 @@ export function ActionNotice({
 	return (
 		<div
 			aria-live={kind === 'error' ? 'assertive' : 'polite'}
-			className={`fixed bottom-5 right-5 z-50 flex min-w-[280px] max-w-[min(560px,calc(100vw-40px))] items-center gap-2 rounded-lg border px-3 py-2.5 text-xs shadow-2xl ${statusToneClassName[kind === 'success' ? 'success' : kind === 'error' ? 'danger' : 'info']}`}
+			className={`fixed bottom-5 right-5 z-50 flex min-w-[280px] max-w-[min(560px,calc(100vw-40px))] items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-2xl ${statusToneClassName[kind === 'success' ? 'success' : kind === 'error' ? 'danger' : 'info']}`}
 			role={kind === 'error' ? 'alert' : 'status'}
 		>
 			{icon}
-			<span className="min-w-0 flex-1 break-words">{message}</span>
+			<div className="min-w-0 flex-1 break-words">
+				<span>{headline}</span>
+				{hasDetails ? (
+					<details className="mt-2">
+						<summary className="cursor-pointer">Details</summary>
+						<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+							{message}
+						</pre>
+					</details>
+				) : null}
+			</div>
 			<Button
 				aria-label="Dismiss"
 				className="h-6 min-w-6 rounded p-0 text-current"

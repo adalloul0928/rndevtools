@@ -5,6 +5,7 @@
 @import '@heroui/styles/base' layer(base);
 @import '@heroui/styles/components/label.css' layer(components);
 @import '@heroui/styles/components/button.css' layer(components);
+@import '@heroui/styles/components/checkbox.css' layer(components);
 @import '@heroui/styles/components/card.css' layer(components);
 @import '@heroui/styles/components/input.css' layer(components);
 @import '@heroui/styles/components/search-field.css' layer(components);
@@ -13,6 +14,7 @@
 @import '@heroui/styles/components/textarea.css' layer(components);
 @import '@heroui/styles/components/textfield.css' layer(components);
 @import '@heroui/styles/components/tooltip.css' layer(components);
+@import '@heroui/styles/components/popover.css' layer(components);
 @import '@heroui/styles/components/alert-dialog.css' layer(components);
 @import '@heroui/styles/themes/default';
 @import '@heroui/styles/utilities';
@@ -79,11 +81,13 @@
 		--text-1: var(--foreground);
 		--text-2: var(--muted);
 		--text-3: #8a8a8a;
-		--text-4: #737373;
+		--text-4: #929292;
 		--titlebar-height: 48px;
 		/* macOS draws the traffic lights at x:16; clear them plus a 12px gutter. */
 		--titlebar-macos-inset: 80px;
-		--sidebar-width: 245px;
+		--sidebar-width: 228px;
+		--font-size-caption: 12px;
+		--font-size-control: 14px;
 	}
 }
 
@@ -103,7 +107,8 @@ body,
 
 body {
 	font-family: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-	font-size: 13px;
+	font-size: 14px;
+	line-height: 1.5;
 	-webkit-font-smoothing: antialiased;
 	color: var(--foreground);
 }
@@ -119,7 +124,7 @@ button {
 	cursor: default;
 }
 
-:where(button, input, select, textarea, [tabindex]):focus-visible {
+:where(button, input, select, textarea, summary, [tabindex]):focus-visible {
 	outline: 2px solid var(--focus);
 	outline-offset: 2px;
 }
@@ -299,7 +304,7 @@ button:disabled {
 
 .live-label {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
 	color: var(--text-3);
@@ -319,7 +324,7 @@ button:disabled {
 	height: 26px;
 	padding: 0 7px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	white-space: nowrap;
 }
 
@@ -353,7 +358,7 @@ button:disabled {
 	background: rgb(255 255 255 / 2.5%);
 	color: var(--text-3);
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	white-space: nowrap;
 }
 
@@ -400,7 +405,7 @@ button:disabled {
 	height: 26px;
 	padding: 0 26px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: var(--muted);
 }
 
@@ -448,7 +453,7 @@ button:disabled {
 }
 
 .device-name {
-	font-size: 11px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #d4d4d4;
 }
@@ -456,7 +461,7 @@ button:disabled {
 .device-meta {
 	margin-top: 3px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	text-transform: capitalize;
 	color: #8a8a8a;
 }
@@ -482,7 +487,7 @@ button:disabled {
 	margin: 0;
 	padding: 7px 8px 5px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 500;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
@@ -491,15 +496,15 @@ button:disabled {
 
 .tool-nav-item {
 	width: 100%;
-	height: 31px;
-	min-height: 31px;
+	height: 36px;
+	min-height: 36px;
 	justify-content: flex-start;
 	gap: 9px;
 	padding: 0 8px;
 	border: 1px solid transparent;
 	border-radius: 5px;
 	color: #8a8a8a;
-	font-size: 11px;
+	font-size: var(--font-size-control);
 	font-weight: 450;
 }
 
@@ -524,7 +529,7 @@ button:disabled {
 	border-radius: 4px;
 	background: rgb(255 255 255 / 5%);
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	text-align: center;
 	color: #8a8a8a;
 }
@@ -561,14 +566,14 @@ button:disabled {
 }
 
 .broker-summary p {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	text-transform: capitalize;
 	color: #aaa;
 }
 
 .broker-summary code {
 	margin-top: 2px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #8a8a8a;
 }
 
@@ -578,7 +583,7 @@ button:disabled {
 	justify-content: space-between;
 	gap: 8px;
 	padding: 9px 3px 1px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: var(--text-4);
 }
 
@@ -588,7 +593,7 @@ button:disabled {
 	border-radius: 4px;
 	background: rgb(255 255 255 / 4%);
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: var(--text-3);
 }
 
@@ -619,7 +624,7 @@ button:disabled {
 	padding: 7px 14px;
 	border-bottom: 1px solid rgb(248 113 113 / 20%);
 	background: rgb(248 113 113 / 7%);
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	line-height: 1.5;
 	color: rgb(254 202 202 / 78%);
 }
@@ -656,24 +661,24 @@ button:disabled {
 
 .panel-header {
 	display: flex;
-	min-height: 92px;
+	min-height: 72px;
 	flex: 0 0 auto;
 	align-items: center;
 	justify-content: space-between;
 	gap: 24px;
-	padding: 17px 22px;
+	padding: 16px 22px;
 	border-bottom: 1px solid rgb(255 255 255 / 8%);
 	background: #030303;
 }
 
 .panel-toolbar {
 	display: flex;
+	flex-wrap: wrap;
 	min-height: 45px;
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 8px;
-	overflow-x: auto;
-	overflow-y: hidden;
+	overflow: visible;
 	padding: 6px 12px;
 	border-bottom: 1px solid rgb(255 255 255 / 8%);
 	background: #070707;
@@ -817,7 +822,7 @@ button:disabled {
 .fatal-error-eyebrow {
 	margin: 0 0 8px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	letter-spacing: 0.09em;
 	text-transform: uppercase;
 	color: #f87171;
@@ -859,8 +864,8 @@ button:disabled {
 	padding: 0 8px;
 	border: 1px solid transparent;
 	border-radius: 5px;
-	color: #7d7d7d;
-	font-size: 9px;
+	color: #929292;
+	font-size: var(--font-size-control);
 }
 
 .workspace-switcher button:hover {
@@ -880,9 +885,9 @@ button:disabled {
 .workspace-switcher kbd,
 .tool-shortcut {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	font-weight: 450;
-	color: #666;
+	color: #929292;
 }
 
 .simulator-summary {
@@ -924,7 +929,7 @@ button:disabled {
 	border-bottom: 1px solid rgb(244 185 66 / 17%);
 	background: rgb(244 185 66 / 6%);
 	color: #b99755;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	text-align: left;
 }
 
@@ -960,7 +965,7 @@ button:disabled {
 	border-bottom: 1px solid rgb(248 113 113 / 16%);
 	background: rgb(248 113 113 / 6%);
 	color: #d48787;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 }
 
 .sim-bridge-notice div {
@@ -1008,15 +1013,15 @@ button:disabled {
 	height: 30px;
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #aaa;
 }
 
 .sim-toolbar-meta {
 	margin-left: 4px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #737373;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-toolbar-spacer {
@@ -1035,9 +1040,9 @@ button:disabled {
 	align-items: center;
 	gap: 8px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .sim-toolbar-field [data-slot='input'] {
@@ -1045,7 +1050,7 @@ button:disabled {
 	border-color: rgb(255 255 255 / 10%);
 	background: #090909;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	text-transform: none;
 }
 
@@ -1068,6 +1073,7 @@ button:disabled {
 }
 
 .sim-metric {
+	display: block;
 	min-width: 0;
 	padding: 12px 15px;
 	border: 0;
@@ -1082,6 +1088,7 @@ button:disabled {
 }
 
 .sim-metric-header {
+	flex-direction: row;
 	display: flex;
 	min-height: auto;
 	align-items: center;
@@ -1091,11 +1098,11 @@ button:disabled {
 
 .sim-metric-label {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 500;
 	letter-spacing: 0.07em;
 	text-transform: uppercase;
-	color: #737373;
+	color: #929292;
 }
 
 .sim-metric-icon {
@@ -1106,7 +1113,7 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 5px;
 	background: rgb(255 255 255 / 3%);
-	color: #7d7d7d;
+	color: #929292;
 }
 
 .sim-metric.is-success .sim-metric-icon {
@@ -1120,6 +1127,8 @@ button:disabled {
 }
 
 .sim-metric-content {
+	flex-direction: row;
+	flex-wrap: wrap;
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
@@ -1130,7 +1139,7 @@ button:disabled {
 	min-width: 0;
 	overflow: hidden;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 17px;
+	font-size: 22px;
 	font-weight: 540;
 	letter-spacing: -0.04em;
 	text-overflow: ellipsis;
@@ -1139,141 +1148,8 @@ button:disabled {
 }
 
 .sim-metric-content span {
-	font-size: 9px;
-	color: #737373;
-}
-
-.sim-fleet-status-rail {
-	flex: 0 0 auto;
-	min-width: 0;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #030303;
-}
-
-.sim-fleet-status-rail > header {
-	display: flex;
-	height: 26px;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	padding: 0 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #666;
-}
-
-.sim-fleet-status-rail > header > div {
-	display: flex;
-	min-width: 0;
-	align-items: center;
-	gap: 7px;
-}
-
-.sim-fleet-status-rail > header strong {
-	font-size: 8px;
-	font-weight: 560;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: #9a9a9a;
-}
-
-.sim-fleet-status-track {
-	display: flex;
-	min-width: 0;
-	gap: 1px;
-	overflow-x: auto;
-	padding: 1px;
-	scrollbar-width: thin;
-}
-
-.sim-fleet-status-card {
-	display: grid;
-	width: 190px;
-	min-width: 190px;
-	gap: 5px;
-	padding: 8px 9px;
-	border: 1px solid transparent;
-	border-radius: 5px;
-	background: #070707;
-	color: #777;
-	text-align: left;
-}
-
-.sim-fleet-status-card:hover {
-	border-color: rgb(255 255 255 / 10%);
-	background: #0a0a0a;
-}
-
-.sim-fleet-status-card.is-selected {
-	border-color: rgb(82 168 255 / 24%);
-	background: rgb(82 168 255 / 6%);
-	box-shadow: inset 0 0 0 1px rgb(82 168 255 / 4%);
-}
-
-.sim-fleet-status-card-heading {
-	display: grid;
-	grid-template-columns: 6px minmax(0, 1fr) auto;
-	align-items: center;
-	gap: 6px;
-}
-
-.sim-fleet-status-card-heading strong,
-.sim-fleet-status-card-heading em,
-.sim-fleet-status-runtime {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.sim-fleet-status-card-heading strong {
-	font-size: 9px;
-	font-style: normal;
-	font-weight: 560;
-	color: #b8b8b8;
-}
-
-.sim-fleet-status-card-heading em {
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	font-style: normal;
-	text-transform: uppercase;
-	color: #666;
-}
-
-.sim-fleet-status-card.is-booted .sim-fleet-status-card-heading em {
-	color: #67bb89;
-}
-
-.sim-fleet-status-runtime {
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #656565;
-}
-
-.sim-fleet-status-values {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 5px;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #555;
-}
-
-.sim-fleet-status-values > span {
-	display: flex;
-	min-width: 0;
-	align-items: baseline;
-	gap: 3px;
-}
-
-.sim-fleet-status-values strong {
-	overflow: hidden;
-	font-size: 7px;
-	font-weight: 500;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	color: #909090;
+	font-size: var(--font-size-control);
+	color: #929292;
 }
 
 .sim-fleet-layout,
@@ -1301,6 +1177,18 @@ button:disabled {
 	grid-template-columns: minmax(270px, 34%) minmax(0, 1fr);
 }
 
+/*
+ * HeroUI's AlertDialog.Trigger renders a block-level div, not a button. When it
+ * wears the button classes (ConfirmAction's enabled state) the trigger slot's
+ * `display` wins over `.button`'s inline-flex, so the icon and label stack on
+ * two lines inside a fixed-height box. Give it the button's box model back.
+ */
+.alert-dialog__trigger.button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
 .sim-slimming-header-actions,
 .sim-slimming-header-actions > label {
 	display: flex;
@@ -1310,7 +1198,7 @@ button:disabled {
 
 .sim-slimming-switch-label {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
 	color: #888;
 }
@@ -1333,7 +1221,7 @@ button:disabled {
 	height: 30px;
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #aaa;
 }
 
@@ -1357,7 +1245,7 @@ button:disabled {
 	height: 22px;
 	flex: 0 0 22px;
 	place-items: center;
-	color: #595959;
+	color: #929292;
 }
 
 .sim-selection-box.is-selected {
@@ -1382,16 +1270,16 @@ button:disabled {
 }
 
 .sim-slimming-action-copy strong {
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #d0d0d0;
 }
 
 .sim-slimming-action-copy span {
 	margin-top: 4px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #717171;
+	color: #929292;
 }
 
 .sim-slimming-action-buttons {
@@ -1424,13 +1312,13 @@ button:disabled {
 }
 
 .sim-unknown-ack strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 }
 
 .sim-unknown-ack small {
 	margin-top: 3px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
 	color: #806f4d;
 }
@@ -1445,7 +1333,7 @@ button:disabled {
 .sim-ack-dialog-body > p,
 .sim-disable-dialog-body > p {
 	margin: 0;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	line-height: 1.55;
 	color: #929292;
 }
@@ -1481,14 +1369,14 @@ button:disabled {
 .sim-managed-targets code,
 .sim-ack-input code {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #8ebef0;
 }
 
 .sim-tuple-list span {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #717171;
+	color: #929292;
 }
 
 .sim-ack-input {
@@ -1498,7 +1386,7 @@ button:disabled {
 }
 
 .sim-ack-input > span {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #aaa;
 }
 
@@ -1529,15 +1417,15 @@ button:disabled {
 }
 
 .sim-disable-choice strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 560;
 	color: #bebebe;
 }
 
 .sim-disable-choice span {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #747474;
+	color: #929292;
 }
 
 .sim-slimming-grid {
@@ -1570,7 +1458,7 @@ button:disabled {
 }
 
 .sim-profile-categories strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #bcbcbc;
 }
@@ -1578,9 +1466,9 @@ button:disabled {
 .sim-profile-categories small,
 .sim-profile-categories em {
 	margin-top: 2px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #717171;
+	color: #929292;
 }
 
 .sim-profile-categories em {
@@ -1612,9 +1500,9 @@ button:disabled {
 .sim-evidence-grid span,
 .sim-device-metrics span {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #686868;
+	color: #929292;
 }
 
 .sim-evidence-grid strong,
@@ -1657,7 +1545,7 @@ button:disabled {
 }
 
 .sim-target-status-table summary strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #bbb;
 }
@@ -1666,10 +1554,10 @@ button:disabled {
 	max-width: 240px;
 	overflow: hidden;
 	margin-top: 2px;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #5f5f5f;
+	color: #929292;
 }
 
 .sim-target-status-table dl {
@@ -1704,21 +1592,21 @@ button:disabled {
 }
 
 .sim-slimming-job header strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #bdbdbd;
 }
 
 .sim-slimming-job header code,
 .sim-slimming-job footer {
-	font-size: 7px;
-	color: #646464;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-slimming-job p {
 	margin: 7px 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .sim-job-progress {
@@ -1780,7 +1668,7 @@ button:disabled {
 	height: 30px;
 	border-color: rgb(255 255 255 / 9%);
 	background: #080808;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 }
 
 .sim-process-list {
@@ -1814,7 +1702,7 @@ button:disabled {
 .sim-process-list strong,
 .sim-process-list code {
 	display: block;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 }
 
 .sim-process-list strong {
@@ -1824,7 +1712,7 @@ button:disabled {
 
 .sim-process-list code {
 	margin-top: 2px;
-	color: #646464;
+	color: #929292;
 }
 
 .sim-disk-summary {
@@ -1849,15 +1737,15 @@ button:disabled {
 .sim-disk-summary span,
 .sim-disk-categories legend {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #656565;
+	color: #929292;
 }
 
 .sim-disk-summary strong {
 	margin-top: 4px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 11px;
+	font-size: var(--font-size-control);
 	font-weight: 520;
 	color: #bdbdbd;
 }
@@ -1915,7 +1803,7 @@ button:disabled {
 
 .sim-disk-storage strong,
 .sim-disk-categories strong {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 540;
 	color: #a9a9a9;
 }
@@ -1924,10 +1812,10 @@ button:disabled {
 .sim-disk-categories small,
 .sim-disk-categories em {
 	margin-top: 2px;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	font-style: normal;
 	line-height: 1.45;
-	color: #646464;
+	color: #929292;
 }
 
 .sim-disk-categories em {
@@ -1936,8 +1824,8 @@ button:disabled {
 
 .sim-disk-storage code,
 .sim-disk-categories code {
-	font-size: 7px;
-	color: #777;
+	font-size: var(--font-size-caption);
+	color: #a1a1a1;
 }
 
 .sim-disk-category-check {
@@ -1964,16 +1852,16 @@ button:disabled {
 }
 
 .sim-disk-cleanup-action strong {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #aaa;
 }
 
 .sim-disk-cleanup-action span,
 .sim-disk-last-cleanup {
 	margin-top: 2px;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #696969;
+	color: #929292;
 }
 
 .sim-disk-last-cleanup {
@@ -2038,9 +1926,9 @@ button:disabled {
 .camera-drop-card p {
 	max-width: 430px;
 	margin: 6px 0 14px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #737373;
+	color: #929292;
 }
 
 .camera-file-label {
@@ -2053,7 +1941,7 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 11%);
 	border-radius: 6px;
 	background: #151515;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 520;
 	color: #d0d0d0;
 }
@@ -2082,7 +1970,7 @@ button:disabled {
 	height: 32px;
 	border-color: rgb(255 255 255 / 9%);
 	background: #080808;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 }
 
 .camera-preset-grid {
@@ -2110,14 +1998,14 @@ button:disabled {
 }
 
 .camera-preset-grid strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #bbb;
 }
 
 .camera-preset-grid span {
 	margin-top: 2px;
-	font-size: 8px;
-	color: #696969;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .camera-preset-grid [data-slot='input'] {
@@ -2151,17 +2039,17 @@ button:disabled {
 	border: 1px solid rgb(82 168 255 / 12%);
 	border-radius: 6px;
 	background: rgb(82 168 255 / 4%);
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.55;
 	color: #66829e;
 }
 
 .sim-captures-layout {
-	grid-template-columns: minmax(240px, 290px) minmax(340px, 1fr) minmax(320px, 370px);
+	grid-template-columns: minmax(200px, 23%) minmax(0, 1fr) minmax(240px, 29%);
 }
 
 .sim-automation-layout {
-	grid-template-columns: minmax(260px, 300px) minmax(350px, 1fr) minmax(240px, 285px);
+	grid-template-columns: minmax(200px, 24%) minmax(0, 1fr) minmax(240px, 28%);
 }
 
 .sim-build-layout {
@@ -2196,6 +2084,17 @@ button:disabled {
 	min-height: 0;
 	overflow: auto;
 	outline: none;
+}
+
+/*
+ * HeroUI Pro pins `overflow: hidden` on a virtualized primary ListView
+ * (`.list-view--primary[data-virtualized]`), which outranks the single class
+ * above. The virtualizer scrolls this root element itself — there is no inner
+ * scroll container — so the root must stay scrollable or every dense list
+ * (Fleet, Slimming targets, Automation) silently clips past the fold.
+ */
+.sim-virtual-list.list-view[data-virtualized] {
+	overflow: auto;
 }
 
 .sim-virtual-list [data-slot='list-view-item'],
@@ -2259,15 +2158,15 @@ button:disabled {
 }
 
 .sim-list-copy strong {
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 540;
 	color: #cfcfcf;
 }
 
 .sim-list-copy span {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #737373;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-state-pill,
@@ -2281,10 +2180,10 @@ button:disabled {
 	border-radius: 4px;
 	background: rgb(255 255 255 / 3%);
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .sim-state-pill.is-success {
@@ -2323,16 +2222,16 @@ button:disabled {
 }
 
 .sim-list-empty strong {
-	font-size: 11px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #aaa;
 }
 
 .sim-list-empty span {
 	max-width: 280px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #666;
+	color: #929292;
 }
 
 .sim-toolbar-field [data-slot='input'],
@@ -2347,11 +2246,11 @@ button:disabled {
 .sim-eyebrow {
 	margin: 0;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 500;
 	letter-spacing: 0.09em;
 	text-transform: uppercase;
-	color: #707070;
+	color: #929292;
 }
 
 .sim-target-detail,
@@ -2360,89 +2259,6 @@ button:disabled {
 	max-width: 820px;
 	margin: 0 auto;
 	padding: 22px;
-}
-
-.sim-device-stage {
-	display: grid;
-	height: 190px;
-	margin: -22px -22px 20px;
-	place-items: center;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
-	background: #020202;
-}
-
-.sim-device-frame {
-	position: relative;
-	width: 82px;
-	height: 160px;
-	padding: 5px;
-	border: 2px solid #333;
-	border-radius: 18px;
-	background: #0b0b0b;
-	box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
-}
-
-.sim-device-frame.is-booted {
-	border-color: #525252;
-}
-
-.sim-device-island {
-	position: absolute;
-	z-index: 2;
-	top: 9px;
-	left: 50%;
-	width: 27px;
-	height: 7px;
-	transform: translateX(-50%);
-	border-radius: 99px;
-	background: #050505;
-}
-
-.sim-device-screen {
-	display: flex;
-	height: 100%;
-	align-items: center;
-	flex-direction: column;
-	padding: 12px 7px 8px;
-	border-radius: 12px;
-	background: #151515;
-}
-
-.sim-device-time {
-	align-self: flex-start;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 5px;
-	color: #777;
-}
-
-.sim-device-app-grid {
-	display: grid;
-	width: 49px;
-	margin-top: 22px;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 6px;
-}
-
-.sim-device-app-grid span {
-	display: block;
-	width: 12px;
-	height: 12px;
-	border: 1px solid rgb(255 255 255 / 9%);
-	border-radius: 3px;
-	background: #222;
-}
-
-.sim-device-app-grid span:first-child {
-	border-color: rgb(82 168 255 / 30%);
-	background: rgb(82 168 255 / 16%);
-}
-
-.sim-device-screen p {
-	margin: auto 0 2px;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 5px;
-	text-transform: capitalize;
-	color: #737373;
 }
 
 .sim-detail-heading,
@@ -2471,12 +2287,13 @@ button:disabled {
 .sim-report-heading > div > span {
 	display: block;
 	margin-top: 4px;
-	font-size: 9px;
-	color: #777;
+	font-size: var(--font-size-control);
+	color: #a1a1a1;
 }
 
 .sim-action-row {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 7px;
 	margin-top: 18px;
@@ -2493,7 +2310,7 @@ button:disabled {
 .sim-danger-zone strong,
 .sim-section-heading h3 {
 	margin: 0;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 560;
 	color: #c7c7c7;
 }
@@ -2508,14 +2325,14 @@ button:disabled {
 .sim-section-heading > span,
 .sim-section-heading > svg {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-section-heading p {
 	margin: 3px 0 0;
-	font-size: 9px;
-	color: #696969;
+	font-size: var(--font-size-control);
+	color: #929292;
 }
 
 .sim-installed-apps {
@@ -2543,7 +2360,7 @@ button:disabled {
 	place-items: center;
 	border-radius: 6px;
 	background: #e8e8e8;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 650;
 	color: #111;
 }
@@ -2569,21 +2386,21 @@ button:disabled {
 }
 
 .sim-installed-apps strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 520;
 	color: #bbb;
 }
 
 .sim-installed-apps code {
 	margin-top: 2px;
-	font-size: 7px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-section-empty {
 	margin: 10px 0 0;
-	font-size: 9px;
-	color: #666;
+	font-size: var(--font-size-control);
+	color: #929292;
 }
 
 .sim-danger-zone {
@@ -2601,7 +2418,7 @@ button:disabled {
 .sim-danger-zone span {
 	display: block;
 	margin-top: 3px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #8b6a6a;
 }
 
@@ -2621,9 +2438,9 @@ button:disabled {
 .sim-onboarding-surface header p {
 	max-width: 620px;
 	margin: 6px 0 0;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	line-height: 1.55;
-	color: #7c7c7c;
+	color: #929292;
 }
 
 .sim-command-preview {
@@ -2640,12 +2457,12 @@ button:disabled {
 .sim-command-preview span,
 .sim-command-preview code {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 }
 
 .sim-command-preview span {
 	text-transform: uppercase;
-	color: #666;
+	color: #929292;
 }
 
 .sim-command-preview code {
@@ -2680,15 +2497,15 @@ button:disabled {
 }
 
 .sim-switch-copy strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #c4c4c4;
 }
 
 .sim-switch-copy small {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #6f6f6f;
+	color: #929292;
 }
 
 .sim-field {
@@ -2699,10 +2516,10 @@ button:disabled {
 
 .sim-field > span {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
-	color: #707070;
+	color: #929292;
 }
 
 .sim-coordinate-fields {
@@ -2717,9 +2534,9 @@ button:disabled {
 
 .sim-field-help {
 	margin: 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #696969;
+	color: #929292;
 }
 
 .sim-inline-note {
@@ -2731,9 +2548,9 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 6px;
 	background: rgb(255 255 255 / 2%);
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	line-height: 1.45;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .sim-inline-note.is-warning {
@@ -2758,15 +2575,15 @@ button:disabled {
 }
 
 .sim-run-footer strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #bbb;
 }
 
 .sim-run-footer span {
 	margin-top: 3px;
-	font-size: 8px;
-	color: #696969;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-surface {
@@ -2779,6 +2596,24 @@ button:disabled {
 
 .sim-surface:last-child {
 	border-right: 0;
+}
+
+/*
+ * `.sim-surface`, `.sim-detail-pane` and the other Simulator pane surfaces are
+ * declared after `.panel-scroll` at the same specificity, so a pane that is
+ * also a scroll region silently inherited `overflow: hidden` on source order
+ * alone and clipped its own content with no way to reach it. Restate the
+ * scrolling intent at a higher specificity for every pane that opts in.
+ */
+.sim-surface.panel-scroll,
+.sim-list-pane.panel-scroll,
+.sim-detail-pane.panel-scroll,
+.sim-capture-preview.panel-scroll,
+.sim-capture-inspector.panel-scroll,
+.sim-scenario-detail.panel-scroll,
+.sim-automation-inspector.panel-scroll,
+.sim-build-detail.panel-scroll {
+	overflow: auto;
 }
 
 .sim-surface-header,
@@ -2794,19 +2629,19 @@ button:disabled {
 }
 
 .sim-surface-header h2 {
-	font-size: 12px;
+	font-size: 14px;
 }
 
 .sim-surface-header > span,
 .sim-subpane-header code {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #696969;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-subpane-header {
 	height: 38px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #898989;
 }
 
@@ -2834,7 +2669,7 @@ button:disabled {
 
 .sim-capture-inspector h2,
 .sim-automation-inspector h2 {
-	font-size: 12px;
+	font-size: 14px;
 }
 
 .sim-capture-primary-actions {
@@ -2860,9 +2695,9 @@ button:disabled {
 
 .sim-capture-inspector-section > header > span {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #666;
+	color: #929292;
 }
 
 .sim-capture-row-tags {
@@ -3060,8 +2895,8 @@ button:disabled {
 	align-content: center;
 	gap: 8px;
 	background: #080808;
-	font-size: 8px;
-	color: #777;
+	font-size: var(--font-size-caption);
+	color: #a1a1a1;
 }
 
 .sim-preview-placeholder,
@@ -3072,18 +2907,18 @@ button:disabled {
 	gap: 7px;
 	padding: 20px;
 	text-align: center;
-	color: #686868;
+	color: #929292;
 }
 
 .sim-preview-placeholder span,
 .sim-empty-preview span {
 	max-width: 250px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
 }
 
 .sim-preview-placeholder strong {
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #aaa;
 }
@@ -3106,7 +2941,7 @@ button:disabled {
 	border: 1px solid rgb(244 185 66 / 18%);
 	border-radius: 6px;
 	background: rgb(244 185 66 / 6%);
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #a98b4e;
 }
@@ -3126,7 +2961,7 @@ button:disabled {
 }
 
 .sim-empty-preview strong {
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #929292;
 }
@@ -3146,7 +2981,7 @@ button:disabled {
 }
 
 .sim-preview-meta strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 540;
 	color: #aaa;
 }
@@ -3154,8 +2989,8 @@ button:disabled {
 .sim-preview-meta span,
 .sim-preview-meta code {
 	margin-top: 3px;
-	font-size: 7px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-retention-summary {
@@ -3184,9 +3019,9 @@ button:disabled {
 	padding: 9px;
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 6px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .sim-retention-status.is-error {
@@ -3216,8 +3051,8 @@ button:disabled {
 .sim-retention-fields > div > span,
 .sim-retention-fields > div > small {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #737373;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-retention-fields [data-slot='input'] {
@@ -3226,13 +3061,13 @@ button:disabled {
 	border-radius: 5px;
 	background: #080808;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #d4d4d4;
 }
 
 .sim-field-error {
 	margin: 8px 0 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
 	color: #db8585;
 }
@@ -3259,22 +3094,22 @@ button:disabled {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 550;
 	color: #8d8d8d;
 }
 
 .sim-recent-run p {
 	margin: 7px 0 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #656565;
+	color: #929292;
 }
 
 .sim-recent-run > strong {
 	display: block;
 	margin-top: 9px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	color: #aaa;
 }
 
@@ -3286,13 +3121,13 @@ button:disabled {
 }
 
 .sim-build-row-metrics code {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #929292;
 }
 
 .sim-build-row-metrics span {
-	font-size: 7px;
-	color: #6a6a6a;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-settings-scroll {
@@ -3352,8 +3187,8 @@ button:disabled {
 }
 
 .sim-readiness-ring small {
-	font-size: 7px;
-	color: #747474;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-onboarding-stepper {
@@ -3424,7 +3259,7 @@ button:disabled {
 }
 
 .sim-capability-copy strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #bdbdbd;
 }
@@ -3434,22 +3269,22 @@ button:disabled {
 	border-radius: 3px;
 	background: rgb(255 255 255 / 5%);
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 6px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #666;
+	color: #929292;
 }
 
 .sim-capability-copy p {
 	margin: 3px 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #696969;
+	color: #929292;
 }
 
 .sim-capability-copy code {
 	display: block;
 	overflow: hidden;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: #5e7790;
@@ -3475,8 +3310,8 @@ button:disabled {
 	gap: 5px;
 	padding: 0 6px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
-	color: #696969;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-capability-feature-link {
@@ -3489,7 +3324,7 @@ button:disabled {
 	border-radius: 4px;
 	background: transparent;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	color: #76a9dc;
 	cursor: pointer;
 }
@@ -3525,13 +3360,13 @@ button:disabled {
 }
 
 .sim-security-boundary strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 }
 
 .sim-security-boundary p {
 	margin: 7px 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.55;
 	color: #68798b;
 }
@@ -3550,7 +3385,7 @@ button:disabled {
 	border: 1px solid rgb(82 168 255 / 10%);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	color: #6987a3;
 }
 
@@ -3582,8 +3417,8 @@ button:disabled {
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
-	font-size: 9px;
-	color: #777;
+	font-size: var(--font-size-control);
+	color: #a1a1a1;
 }
 
 .recipe-row-state {
@@ -3648,7 +3483,7 @@ button:disabled {
 	min-height: 45px;
 	resize: vertical;
 	padding: 7px 9px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #878787;
 }
@@ -3680,10 +3515,10 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #707070;
+	color: #929292;
 }
 
 .recipe-header-meta .is-dirty {
@@ -3714,7 +3549,7 @@ button:disabled {
 .recipe-segmented-control .button {
 	height: 25px;
 	min-height: 25px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 }
 
 .recipe-view-control {
@@ -3749,16 +3584,16 @@ button:disabled {
 	justify-content: space-between;
 	gap: 12px;
 	margin: 9px 0 12px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #676767;
+	color: #929292;
 }
 
 .recipe-lane-note span {
 	flex: 0 0 auto;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #555;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-execution-rail {
@@ -3855,7 +3690,7 @@ button:disabled {
 
 .recipe-rail-copy strong {
 	overflow: hidden;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -3866,10 +3701,10 @@ button:disabled {
 .recipe-rail-index {
 	overflow: hidden;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #5f5f5f;
+	color: #929292;
 }
 
 .recipe-execution-rail button > svg {
@@ -3909,10 +3744,10 @@ button:disabled {
 .recipe-editor-section-heading code {
 	max-width: 55%;
 	overflow: hidden;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #666;
+	color: #929292;
 }
 
 .recipe-field-grid {
@@ -3941,15 +3776,15 @@ button:disabled {
 }
 
 .recipe-field > span {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 520;
-	color: #7e7e7e;
+	color: #929292;
 }
 
 .recipe-field > small {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #5f5f5f;
+	color: #929292;
 }
 
 .recipe-field [data-slot='input'],
@@ -3958,7 +3793,7 @@ button:disabled {
 	height: 30px;
 	padding: 0 8px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 }
 
 .recipe-field [data-slot='textarea'],
@@ -3966,7 +3801,7 @@ button:disabled {
 	min-height: 70px;
 	resize: vertical;
 	padding: 8px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 }
 
@@ -3996,7 +3831,7 @@ button:disabled {
 	border: 1px solid rgb(82 168 255 / 12%);
 	border-radius: 5px;
 	background: rgb(82 168 255 / 3%);
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #70849a;
 }
@@ -4016,7 +3851,7 @@ button:disabled {
 	border: 1px dashed rgb(255 255 255 / 13%);
 	border-radius: 6px;
 	background: #060606;
-	color: #777;
+	color: #a1a1a1;
 }
 
 .recipe-fixture-picker strong,
@@ -4025,14 +3860,14 @@ button:disabled {
 }
 
 .recipe-fixture-picker strong {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #aaa;
 }
 
 .recipe-fixture-picker span {
 	margin-top: 2px;
-	font-size: 7px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-fixture-picker label {
@@ -4042,7 +3877,7 @@ button:disabled {
 	padding: 5px 7px;
 	border: 1px solid rgb(255 255 255 / 10%);
 	border-radius: 5px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
 
@@ -4061,7 +3896,7 @@ button:disabled {
 	border: 1px solid rgb(214 90 90 / 18%);
 	border-radius: 5px;
 	background: rgb(214 90 90 / 4%);
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #b97474;
 }
@@ -4114,15 +3949,15 @@ button:disabled {
 	justify-content: space-between;
 	gap: 8px;
 	margin-bottom: 7px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 550;
 	color: #999;
 }
 
 .recipe-section-title code,
 .recipe-run-history > header code {
-	font-size: 7px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-target-list {
@@ -4139,8 +3974,8 @@ button:disabled {
 .recipe-target-list > p {
 	margin: 0;
 	padding: 12px;
-	font-size: 8px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-target-list button {
@@ -4190,7 +4025,7 @@ button:disabled {
 }
 
 .recipe-target-list strong {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 520;
 	color: #aaa;
 }
@@ -4198,8 +4033,8 @@ button:disabled {
 .recipe-target-list small {
 	margin-top: 2px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 6px;
-	color: #5f5f5f;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-concurrency-field {
@@ -4235,14 +4070,14 @@ button:disabled {
 }
 
 .recipe-approval-preview header span {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 }
 
 .recipe-approval-preview header strong {
 	margin-top: 2px;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 560;
 }
 
@@ -4257,16 +4092,16 @@ button:disabled {
 	padding: 5px 3px;
 	border: 1px solid rgb(255 255 255 / 6%);
 	border-radius: 4px;
-	font-size: 6px;
+	font-size: var(--font-size-caption);
 	text-align: center;
-	color: #696969;
+	color: #929292;
 }
 
 .recipe-approval-counts b {
 	display: block;
 	margin-bottom: 1px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 10px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #aaa;
 }
@@ -4288,7 +4123,7 @@ button:disabled {
 }
 
 .recipe-approval-preview li strong {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	color: #a88b68;
 }
 
@@ -4298,9 +4133,9 @@ button:disabled {
 .recipe-run-history > p,
 .recipe-agent-safety p {
 	margin: 4px 0 0;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #666;
+	color: #929292;
 }
 
 .recipe-run-actions {
@@ -4324,13 +4159,13 @@ button:disabled {
 
 .recipe-pending-approval-actions p {
 	margin: 0;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #78899a;
 }
 
 .recipe-pending-approval-actions code {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	color: #91b9df;
 }
 
@@ -4370,17 +4205,17 @@ button:disabled {
 
 .recipe-target-progress strong,
 .recipe-target-progress code {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	color: #8a8a8a;
 }
 
 .recipe-target-progress small,
 .recipe-target-progress em {
 	grid-column: 2 / -1;
-	font-size: 6px;
+	font-size: var(--font-size-caption);
 	font-style: normal;
 	line-height: 1.4;
-	color: #5f5f5f;
+	color: #929292;
 }
 
 .recipe-target-progress em {
@@ -4433,7 +4268,7 @@ button:disabled {
 	border-top: 1px solid rgb(255 255 255 / 6%);
 	background: transparent;
 	text-align: left;
-	color: #777;
+	color: #a1a1a1;
 	cursor: pointer;
 }
 
@@ -4447,15 +4282,15 @@ button:disabled {
 }
 
 .recipe-run-history button strong {
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	font-weight: 520;
 	color: #999;
 }
 
 .recipe-run-history button small,
 .recipe-run-history button code {
-	font-size: 6px;
-	color: #5e5e5e;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-agent-safety {
@@ -4466,7 +4301,7 @@ button:disabled {
 }
 
 .recipe-agent-safety strong {
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 550;
 }
 
@@ -4503,8 +4338,8 @@ button:disabled {
 .recipe-evidence-header p:last-child {
 	margin: 4px 0 0;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #666;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-evidence-stats {
@@ -4527,13 +4362,13 @@ button:disabled {
 }
 
 .recipe-evidence-stats span {
-	font-size: 7px;
-	color: #777;
+	font-size: var(--font-size-caption);
+	color: #a1a1a1;
 }
 
 .recipe-evidence-stats strong {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 11px;
+	font-size: var(--font-size-control);
 	font-weight: 550;
 	color: #aaa;
 }
@@ -4556,17 +4391,17 @@ button:disabled {
 	gap: 8px;
 	padding: 0 9px;
 	border-bottom: 1px solid rgb(255 255 255 / 7%);
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #8b8b8b;
 }
 
 .recipe-evidence-timeline > header code {
 	max-width: 60%;
 	overflow: hidden;
-	font-size: 6px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #555;
+	color: #929292;
 }
 
 .recipe-timeline-sequence {
@@ -4577,8 +4412,8 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #6d6d6d;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-timeline-sequence.is-failed,
@@ -4593,8 +4428,8 @@ button:disabled {
 }
 
 .recipe-timeline-time {
-	font-size: 6px;
-	color: #555;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-evidence-artifacts {
@@ -4617,7 +4452,7 @@ button:disabled {
 	align-items: center;
 	justify-content: space-between;
 	gap: 7px;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	color: #888;
 }
 
@@ -4637,16 +4472,16 @@ button:disabled {
 	overflow: hidden;
 	padding: 3px 0;
 	border-top: 1px solid rgb(255 255 255 / 5%);
-	font-size: 6px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #676767;
+	color: #929292;
 }
 
 .recipe-evidence-artifacts p {
 	margin: 6px 0 0;
-	font-size: 7px;
-	color: #5f5f5f;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .recipe-evidence-boundary {
@@ -4667,7 +4502,7 @@ button:disabled {
 	padding: 8px 12px;
 	border-bottom: 1px solid rgb(255 255 255 / 8%);
 	background: #050505;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.45;
 	color: #8a8a8a;
 }
@@ -4729,13 +4564,13 @@ button:disabled {
 
 .sim-build-facts span {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #696969;
+	color: #929292;
 }
 
 .sim-build-facts strong {
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 540;
 	color: #b8b8b8;
 }
@@ -4750,7 +4585,7 @@ button:disabled {
 
 .sim-classification-card strong {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 9px;
+	font-size: var(--font-size-control);
 	font-weight: 560;
 	text-transform: uppercase;
 	color: #9bc4ed;
@@ -4760,9 +4595,9 @@ button:disabled {
 .sim-build-sources > p,
 .sim-build-activity > p {
 	margin: 5px 0 0;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #737373;
+	color: #929292;
 }
 
 .sim-build-sources {
@@ -4784,7 +4619,7 @@ button:disabled {
 
 .sim-build-sources strong {
 	overflow: hidden;
-	font-size: 8px;
+	font-size: var(--font-size-caption);
 	font-weight: 540;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -4792,13 +4627,13 @@ button:disabled {
 }
 
 .sim-build-sources code {
-	font-size: 7px;
-	color: #737373;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-build-sources small {
 	grid-column: 2 / -1;
-	font-size: 7px;
+	font-size: var(--font-size-caption);
 	line-height: 1.4;
 	color: #bf7979;
 }
@@ -4842,8 +4677,8 @@ button:disabled {
 .sim-build-activity span,
 .sim-build-activity code {
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: 7px;
-	color: #717171;
+	font-size: var(--font-size-caption);
+	color: #929292;
 }
 
 .sim-build-activity code {
@@ -4871,6 +4706,48 @@ button:disabled {
 	padding-top: 14px;
 	border-top: 1px solid rgb(255 255 255 / 8%);
 }
+
+
+/* Shared readable controls and progressive disclosure. */
+.panel-heading { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+.panel-heading h1 { overflow-wrap: anywhere; }
+.panel-heading-meta { color: var(--text-2); font-size: 12px; }
+.panel-header-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.info-button.button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; color: var(--text-2); border-radius: 50%; }
+.info-button:hover { color: var(--foreground); background: #202020; }
+.info-popover { max-width: min(360px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); background: #151515; box-shadow: 0 12px 36px #0009; }
+.info-popover-copy { margin-top: 8px; color: var(--text-2); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.panel-info-note { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--separator); color: var(--text-2); font-size: 12px; }
+.panel-disclosure { margin-top: 16px; border-top: 1px solid var(--separator); }
+.panel-disclosure > summary { display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none; color: var(--foreground); font-size: 14px; font-weight: 550; }
+.panel-disclosure > summary::-webkit-details-marker { display: none; }
+.panel-disclosure[open] > summary > svg { transform: rotate(90deg); }
+.panel-disclosure-content { padding-bottom: 12px; }
+.panel-disclosure-content > .sim-section-heading:has(> div:empty) { display: none; }
+.button--sm { min-height: 32px; font-size: 14px; }
+.sim-fleet-activity { flex-shrink: 0; padding: 0 16px; }
+.sim-fleet-activity .panel-disclosure { margin-top: 0; }
+.sim-activity-list { max-height: 160px; }
+.sim-activity-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.sim-activity-row > div { flex: 1; min-width: 0; }
+.sim-activity-row strong, .sim-activity-row span { overflow-wrap: anywhere; }
+.sim-activity-row > div > span { display: block; color: var(--text-2); font-size: 12px; }
+.sim-slimming-switch-label { text-transform: none; letter-spacing: normal; }
+.sim-section-heading > div:has(> .info-button) { display: flex; align-items: center; gap: 6px; }
+.sim-slimming-header-actions .switch { flex-direction: row; align-items: center; }
+.recipe-workspace:not(:has(.recipe-run-inspector)) { grid-template-columns: 190px minmax(0, 1fr); }
+.sim-settings-layout { grid-template-columns: minmax(0, 1fr); max-width: 960px; }
+.sim-settings-layout > .sim-surface > .panel-disclosure > summary { padding-left: 16px; }
+.sim-composition-editor > .switch { flex-direction: row; align-items: center; gap: 8px; }
+.sim-state-pill { text-transform: none; letter-spacing: normal; }
+.sim-eyebrow { text-transform: none; letter-spacing: normal; }
+.sim-toolbar-field { text-transform: none; letter-spacing: normal; }
+.sim-profile-categories .info-button { display: inline-flex; vertical-align: middle; margin-left: 6px; }
+.sim-profile-categories strong { display: inline; }
+.sim-profile-categories em { margin-top: 4px; }
+.sim-target-detail > .sim-detail-heading { padding-top: 4px; }
+.sim-target-detail > .sim-action-row { margin-bottom: 16px; }
+.sim-fleet-create { max-height: 230px; overflow: auto; flex-shrink: 0; }
 
 @media (max-width: 1220px) {
 	:root {
@@ -4946,11 +4823,11 @@ button:disabled {
 	}
 
 	.sim-captures-layout {
-		grid-template-columns: 210px minmax(300px, 1fr) 200px;
+		grid-template-columns: 190px minmax(0, 1fr) 240px;
 	}
 
 	.sim-automation-layout {
-		grid-template-columns: 190px minmax(285px, 1fr) 205px;
+		grid-template-columns: 190px minmax(0, 1fr) 240px;
 	}
 
 	.recipe-definition-body,

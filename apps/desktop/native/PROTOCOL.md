@@ -120,7 +120,7 @@ cross the native boundary as arbitrary service lists.
     "hostArchitecture": "arm64 | x64",
     "helperVersion": "0.1.0",
     "helperBuildCommit": "40-hex-commit-or-dirty-aware-source-identity",
-    "catalogVersion": "simslim-v0.8.0-09fc9cbb-pumpd.1"
+    "catalogVersion": "simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2"
   },
   "verifiedOperations": []
 }
@@ -183,7 +183,11 @@ service delta/prepared checkpoint, tuple, target checkpoint, and cleanup or
 clone payload), expiry, nonce, and broker PID.
 
 The Go helper independently proves that its live parent PID and its own live
-process satisfy pinned PUMPD designated requirements, requires the authorization
+process satisfy pinned PUMPD designated requirements. It reads each process's
+kernel-attached CodeDirectory hash through `csops(2)` and binds that hash into a
+static `codesign` requirement on the executable, because `codesign`'s `+pid`
+form cannot evaluate an explicit requirement against a process on current
+macOS. It also requires the authorization
 to name its exact build commit, consumes the descriptor exactly once, watches
 the broker parent for the operation lifetime, and rejects replay, mismatch,
 expiry, downgrade, missing FD, parent death, or untrusted-parent cases before

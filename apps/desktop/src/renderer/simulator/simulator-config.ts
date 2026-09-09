@@ -29,7 +29,7 @@ export type SimulatorToolDefinition = {
 export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'fleet',
-		label: 'Fleet',
+		label: 'Simulators',
 		description: 'Boot, inspect, and manage local Simulator and device targets.',
 		icon: Smartphone,
 		shortcut: 1,
@@ -44,7 +44,7 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	},
 	{
 		id: 'slimming',
-		label: 'Slimming',
+		label: 'SimSlim',
 		description:
 			'Preview, apply, verify, and roll back experimental Simulator service profiles.',
 		icon: Layers3,

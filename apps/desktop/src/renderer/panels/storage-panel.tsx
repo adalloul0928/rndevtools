@@ -100,10 +100,10 @@ export function StoragePanel() {
 				isRowHeader: true,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
-						<div className="truncate font-mono text-[11px] text-(--foreground)">
+						<div className="truncate font-mono text-xs text-(--foreground)">
 							{entry.key}
 						</div>
-						<div className="mt-0.5 truncate text-[10px] text-(--text-3)">
+						<div className="mt-0.5 truncate text-xs text-(--text-3)">
 							{entry.adapterTitle}
 						</div>
 					</div>
@@ -115,11 +115,11 @@ export function StoragePanel() {
 				minWidth: 280,
 				cell: (entry) =>
 					entry.sensitive ? (
-						<span className="flex items-center gap-1.5 text-[11px] text-(--text-3)">
+						<span className="flex items-center gap-1.5 text-xs text-(--text-3)">
 							<EyeOff className="h-3.5 w-3.5" /> Value intentionally hidden
 						</span>
 					) : (
-						<span className="block truncate font-mono text-[11px] text-(--muted)">
+						<span className="block truncate font-mono text-xs text-(--muted)">
 							{entry.valueText ?? 'undefined'}
 						</span>
 					),
@@ -140,7 +140,7 @@ export function StoragePanel() {
 				width: 80,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-[10px] text-(--text-3)">
+					<span className="font-mono text-xs text-(--text-3)">
 						{formatBytes(entry.bytes)}
 					</span>
 				),
@@ -176,7 +176,7 @@ export function StoragePanel() {
 				<div className="flex items-center gap-1">
 					<Button
 						aria-pressed={adapter === 'all'}
-						className="h-7 rounded-md px-2.5 text-[11px]"
+						className="h-7 rounded-md px-2.5 text-xs"
 						size="sm"
 						variant={adapter === 'all' ? 'secondary' : 'ghost'}
 						onPress={() => setAdapter('all')}
@@ -186,7 +186,7 @@ export function StoragePanel() {
 					{adapters.map((value) => (
 						<Button
 							aria-pressed={adapter === value}
-							className="h-7 rounded-md px-2.5 text-[11px]"
+							className="h-7 rounded-md px-2.5 text-xs"
 							key={value}
 							size="sm"
 							variant={adapter === value ? 'secondary' : 'ghost'}
@@ -198,7 +198,7 @@ export function StoragePanel() {
 						</Button>
 					))}
 				</div>
-				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+				<span className="ml-auto font-mono text-xs text-(--text-3)">
 					{summary?.totalKeyCount ?? entries.length} keys · {events.length} changes
 				</span>
 			</Toolbar>
@@ -243,7 +243,7 @@ export function StoragePanel() {
 						<div className="h-full overflow-auto p-4">
 							<div className="mb-4 flex items-start justify-between gap-3">
 								<div className="min-w-0">
-									<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										{selected.adapterTitle}
 									</p>
 									<h2 className="mb-0 mt-1 break-all font-mono text-xs font-medium leading-5 text-(--foreground)">
@@ -271,7 +271,7 @@ export function StoragePanel() {
 									<div className="flex items-center gap-2 text-xs font-medium text-amber-200">
 										<EyeOff className="h-4 w-4" /> Encrypted value hidden
 									</div>
-									<p className="mb-0 mt-2 text-[11px] leading-5 text-amber-100/60">
+									<p className="mb-0 mt-2 text-xs leading-5 text-amber-100/60">
 										The key is listed for diagnostics, but its value is never read or
 										transmitted to desktop.
 									</p>
@@ -289,11 +289,11 @@ export function StoragePanel() {
 										})
 									}
 								>
-									<Label className="mb-2 text-[11px] text-(--muted)">Value</Label>
+									<Label className="mb-2 text-xs text-(--muted)">Value</Label>
 									{selected.valueType === 'json' || draft.length > 80 ? (
-										<TextArea className="min-h-40 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-[11px] leading-5 text-(--foreground) outline-none focus:border-white/25" />
+										<TextArea className="min-h-40 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-white/25" />
 									) : (
-										<Input className="h-9 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-[11px] text-(--foreground)" />
+										<Input className="h-9 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-xs text-(--foreground)" />
 									)}
 									<div className="mt-3 flex justify-end">
 										<ConfirmAction
@@ -323,7 +323,7 @@ export function StoragePanel() {
 								<CodePreview label="Value" value={selected.valueText} maxHeight={300} />
 							)}
 							<div className="mt-5 border-t border-white/8 pt-4">
-								<div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+								<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 									<History className="h-3.5 w-3.5" /> Recent changes
 								</div>
 								{selectedEvents.length === 0 ? (
@@ -337,20 +337,20 @@ export function StoragePanel() {
 												className="rounded-md border border-white/8 bg-white/[0.025] p-3"
 												key={event.id}
 											>
-												<div className="flex items-center justify-between text-[10px]">
+												<div className="flex items-center justify-between text-xs">
 													<StatusPill tone="info">{event.kind}</StatusPill>
 													<span className="font-mono text-(--text-3)">
 														{formatRelativeTime(event.at)}
 													</span>
 												</div>
-												<p className="mb-0 mt-2 truncate font-mono text-[10px] text-(--muted)">
+												<p className="mb-0 mt-2 truncate font-mono text-xs text-(--muted)">
 													{event.previousText ?? '∅'} → {event.nextText ?? '∅'}
 												</p>
 												{event.structuralDiff?.length ? (
 													<div className="mt-2 space-y-1 border-t border-white/8 pt-2">
 														{event.structuralDiff.slice(0, 8).map((diff) => (
 															<p
-																className="m-0 truncate font-mono text-[10px] text-(--text-3)"
+																className="m-0 truncate font-mono text-xs text-(--text-3)"
 																key={`${diff.path}:${diff.kind}`}
 															>
 																{diff.kind} {diff.path}
@@ -360,7 +360,7 @@ export function StoragePanel() {
 												) : null}
 												<div className="mt-2 flex justify-end gap-2">
 													<Button
-														className="h-7 px-2 text-[10px]"
+														className="h-7 px-2 text-xs"
 														isDisabled={!canRunAction('storage', 'bookmark')}
 														size="sm"
 														variant="ghost"

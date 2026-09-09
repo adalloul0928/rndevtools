@@ -73,6 +73,7 @@ const slimmingProfileSchema = z.strictObject({
 	name: shortTextSchema,
 	description: shortTextSchema,
 	categoryIds: z.array(identifierSchema).max(100),
+	preservedServiceIds: serviceIdentifiersSchema.optional(),
 	experimental: z.boolean(),
 });
 export type SlimmingProfile = z.infer<typeof slimmingProfileSchema>;
@@ -241,6 +242,7 @@ const slimmingHelperStateSchema = z.strictObject({
 	compatibilityMatrixVersion: shortTextSchema.optional(),
 	mutationMode: shortTextSchema.optional(),
 	mutationReason: shortTextSchema.optional(),
+	mutationUnavailableReason: shortTextSchema.optional(),
 	verifiedMutationTuples: z.number().int().nonnegative().optional(),
 	verifiedAt: timestampSchema.optional(),
 	error: shortTextSchema.optional(),

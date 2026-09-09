@@ -34,7 +34,7 @@ async function fixture() {
 		protocolVersion: 2,
 		compatibilityMatrixVersion: '2026-09-03-v2',
 		catalog: {
-			version: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+			version: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 			upstreamRepository: 'https://github.com/MobAI-App/simslim',
 			upstreamCommit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
 			patchSet: 'pumpd.1',

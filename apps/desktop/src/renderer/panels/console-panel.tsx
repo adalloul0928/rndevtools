@@ -129,7 +129,7 @@ export function ConsolePanel() {
 				width: 92,
 				isRowHeader: true,
 				cell: (entry) => (
-					<span className="font-mono text-[10px] text-(--text-3)">
+					<span className="font-mono text-xs text-(--text-3)">
 						{formatClock(entry.at)}
 					</span>
 				),
@@ -148,13 +148,13 @@ export function ConsolePanel() {
 				minWidth: 420,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
-						<div className="truncate font-mono text-[11px] text-(--foreground)">
+						<div className="truncate font-mono text-xs text-(--foreground)">
 							{bookmarkedIds.has(entry.id) ? '★ ' : ''}
 							{entry.message}
 							{(entry.repeatCount ?? 1) > 1 ? ` ×${entry.repeatCount}` : ''}
 						</div>
 						{entry.attributesText ? (
-							<div className="mt-0.5 truncate font-mono text-[10px] text-(--text-3)">
+							<div className="mt-0.5 truncate font-mono text-xs text-(--text-3)">
 								{entry.attributesText.replace(/\s+/g, ' ')}
 							</div>
 						) : null}
@@ -166,7 +166,7 @@ export function ConsolePanel() {
 				header: 'Source',
 				width: 140,
 				cell: (entry) => (
-					<span className="truncate text-[11px] text-(--muted)">
+					<span className="truncate text-xs text-(--muted)">
 						{entry.scope ?? entry.source ?? 'application'}
 					</span>
 				),
@@ -234,7 +234,7 @@ export function ConsolePanel() {
 					{(['all', 'debug', 'info', 'warn', 'error'] as const).map((value) => (
 						<Button
 							aria-pressed={level === value}
-							className="h-7 rounded-md px-2.5 text-[11px] capitalize"
+							className="h-7 rounded-md px-2.5 text-xs capitalize"
 							key={value}
 							size="sm"
 							variant={level === value ? 'secondary' : 'ghost'}
@@ -242,7 +242,7 @@ export function ConsolePanel() {
 						>
 							{value}
 							{value !== 'all' && levelCounts[value] > 0 ? (
-								<span className="font-mono text-[9px] text-(--text-3)">
+								<span className="font-mono text-xs text-(--text-3)">
 									{levelCounts[value]}
 								</span>
 							) : null}
@@ -251,14 +251,14 @@ export function ConsolePanel() {
 				</div>
 				<Button
 					aria-pressed={bookmarksOnly}
-					className="h-7 rounded-md px-2.5 text-[11px]"
+					className="h-7 rounded-md px-2.5 text-xs"
 					size="sm"
 					variant={bookmarksOnly ? 'secondary' : 'ghost'}
 					onPress={() => setBookmarksOnly((value) => !value)}
 				>
 					<Bookmark className="h-3.5 w-3.5" /> Bookmarks {bookmarkedIds.size}
 				</Button>
-				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+				<span className="ml-auto font-mono text-xs text-(--text-3)">
 					{filtered.length} events
 				</span>
 			</Toolbar>
@@ -293,7 +293,7 @@ export function ConsolePanel() {
 								<StatusPill tone={levelTone(selected.level)}>
 									{selected.level}
 								</StatusPill>
-								<span className="font-mono text-[10px] text-(--text-3)">
+								<span className="font-mono text-xs text-(--text-3)">
 									{formatClock(selected.at)}
 								</span>
 							</div>
@@ -353,7 +353,7 @@ export function ConsolePanel() {
 									No structured attributes were attached to this event.
 								</div>
 							)}
-							<div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-[11px] leading-5 text-emerald-200/80">
+							<div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-xs leading-5 text-emerald-200/80">
 								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens, emails,
 								and identifiers are redacted before this event reaches desktop.
 							</div>

@@ -4,6 +4,7 @@ import { Switch } from '@heroui/react/switch';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import { ChevronDown, Frame, Layers3, LoaderCircle, Sparkles } from 'lucide-react';
 import type { CSSProperties } from 'react';
+import { InfoPopover } from '@/components/ui';
 import type { SimulatorCapture } from '../../shared/simulator-protocol';
 import {
 	CAPTURE_CANVAS_PRESETS,
@@ -160,10 +161,12 @@ export function CaptureCompositionEditor({
 		<section className="sim-capture-inspector-section sim-composition-editor">
 			<header>
 				<div>
-					<p className="sim-eyebrow">Native design studio</p>
-					<h2>Composition</h2>
+					<h2>Edit screenshot</h2>
 				</div>
-				<span>{nativeAvailable ? 'Available' : 'Unavailable'}</span>
+				<InfoPopover label="Screenshot editing">
+					Add a frame, background, or comparison image. Save a new capture to keep your
+					original screenshot.
+				</InfoPopover>
 			</header>
 			<Switch
 				isDisabled={!canEdit}
@@ -176,8 +179,7 @@ export function CaptureCompositionEditor({
 						<Sparkles className="h-3.5 w-3.5" />
 					</span>
 					<span className="sim-switch-copy">
-						<strong>Preview treatments</strong>
-						<small>Render nondestructively into a new capture.</small>
+						<strong>Enable editing</strong>
 					</span>
 				</Switch.Content>
 				<Switch.Control>
@@ -351,7 +353,7 @@ export function CaptureCompositionEditor({
 						) : (
 							<Sparkles className="h-3.5 w-3.5" />
 						)}
-						{isRendering ? 'Rendering…' : 'Render as new capture'}
+						{isRendering ? 'Saving…' : 'Save edited copy'}
 					</Button>
 					{parsed ? null : (
 						<p className="sim-field-error" role="alert">
@@ -360,15 +362,13 @@ export function CaptureCompositionEditor({
 						</p>
 					)}
 				</div>
-			) : (
+			) : !canEdit ? (
 				<p className="sim-inline-note">
 					{!nativeAvailable
 						? 'The signed native compositor is unavailable in this desktop build.'
-						: canEdit
-							? 'Turn on Preview treatments to open the nondestructive editor.'
-							: 'Select a completed PNG or JPEG screenshot to enable nondestructive editing.'}
+						: 'Select a PNG or JPEG screenshot to edit.'}
 				</p>
-			)}
+			) : null}
 		</section>
 	);
 }

@@ -2,13 +2,13 @@ package authorization
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +19,22 @@ const (
 	expectedHelperIdentifier = "pumpd-sim-helper"
 	expectedTeamIdentifier   = "434X69L4Z5"
 )
+
+// CS_* status flags from <sys/codesign.h>, as reported by csops(CS_OPS_STATUS).
+const (
+	csValid uint32 = 0x00000001
+	csAdhoc uint32 = 0x00000002
+)
+
+// LiveCodeIdentity is the kernel's own view of a running process: the
+// CodeDirectory hash attached at exec time and the current code-signing status
+// flags. Nothing that happens to the executable on disk after launch changes it.
+type LiveCodeIdentity struct {
+	CodeDirectoryHash [20]byte
+	Flags             uint32
+}
+
+type liveCodeIdentityReader func(pid int) (LiveCodeIdentity, error)
 
 type SystemParentAttestor struct{}
 
@@ -57,10 +73,24 @@ func (SystemParentAttestor) Attest(ctx context.Context, parentPID int) error {
 		return errors.New("broker executable is not a regular file")
 	}
 
-	if err := verifyLiveCode(attestationContext, parentPID, expectedBrokerIdentifier, execCombinedOutput); err != nil {
+	if err := verifyLiveCode(
+		attestationContext,
+		parentPID,
+		parentPath,
+		expectedBrokerIdentifier,
+		kernelLiveCodeIdentity,
+		execCombinedOutput,
+	); err != nil {
 		return fmt.Errorf("verify live broker signature: %w", err)
 	}
-	if err := verifyLiveCode(attestationContext, os.Getpid(), expectedHelperIdentifier, execCombinedOutput); err != nil {
+	if err := verifyLiveCode(
+		attestationContext,
+		os.Getpid(),
+		helperPath,
+		expectedHelperIdentifier,
+		kernelLiveCodeIdentity,
+		execCombinedOutput,
+	); err != nil {
 		return fmt.Errorf("verify live helper signature: %w", err)
 	}
 	if os.Getppid() != parentPID {
@@ -99,14 +129,48 @@ func execCombinedOutput(ctx context.Context, executable string, arguments ...str
 	return exec.CommandContext(ctx, executable, arguments...).CombinedOutput()
 }
 
-func verifyLiveCode(ctx context.Context, pid int, identifier string, run combinedOutputRunner) error {
+// verifyLiveCode proves that the code running as pid satisfies the pinned
+// designated requirement.
+//
+// codesign's "+pid" verification form is deliberately not used. On current
+// macOS it cannot evaluate an explicit requirement against a process (exit 3
+// even for a satisfied requirement, exit 1 as soon as --verbose is added), so
+// an attestor built on it can never succeed. Instead the kernel reports the
+// process's own CodeDirectory hash through csops(2), and that exact hash is
+// bound into a static requirement evaluated against the executable. A file
+// swapped after exec cannot carry the running image's hash, so the static
+// check still speaks for the live code, exactly as the Swift host binds
+// cdhash into its own requirements.
+func verifyLiveCode(
+	ctx context.Context,
+	pid int,
+	executablePath string,
+	identifier string,
+	readIdentity liveCodeIdentityReader,
+	run combinedOutputRunner,
+) error {
 	if pid <= 1 || (identifier != expectedBrokerIdentifier && identifier != expectedHelperIdentifier) {
 		return errors.New("live code identity is invalid")
 	}
+	if !filepath.IsAbs(executablePath) {
+		return errors.New("live code executable path must be absolute")
+	}
+	identity, err := readIdentity(pid)
+	if err != nil {
+		return fmt.Errorf("read live code identity: %w", err)
+	}
+	if identity.Flags&csValid == 0 {
+		return errors.New("the kernel does not consider the live code signature valid")
+	}
+	if identity.Flags&csAdhoc != 0 {
+		return errors.New("the live code is ad-hoc signed rather than production-signed")
+	}
+	codeDirectoryHash := hex.EncodeToString(identity.CodeDirectoryHash[:])
 	requirement := fmt.Sprintf(
-		`anchor apple generic and identifier %q and certificate leaf[subject.OU] = %q`,
+		`anchor apple generic and identifier %q and certificate leaf[subject.OU] = %q and cdhash H"%s"`,
 		identifier,
 		expectedTeamIdentifier,
+		codeDirectoryHash,
 	)
 	output, err := run(
 		ctx,
@@ -115,10 +179,15 @@ func verifyLiveCode(ctx context.Context, pid int, identifier string, run combine
 		"--strict",
 		"--verbose=2",
 		"-R="+requirement,
-		"+"+strconv.Itoa(pid),
+		executablePath,
 	)
 	if err != nil {
-		return fmt.Errorf("live codesign requirement failed: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf(
+			"static codesign requirement bound to live cdhash %s failed for %s: %s",
+			codeDirectoryHash,
+			executablePath,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	return nil
 }

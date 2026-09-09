@@ -193,6 +193,88 @@ afterEach(async () => {
 });
 
 describe('simulator service', () => {
+	it('creates, boots, and opens only the device returned by Xcode', async () => {
+		const provider = new FakeProvider();
+		const originalRun = provider.runSimctl.getMockImplementation();
+		provider.runSimctl.mockImplementation(async (args, options = {}) => {
+			if (args[0] === 'create') {
+				provider.deviceState = 'shutdown';
+				return { stdout: `${UDID}\n`, stderr: '', exitCode: 0 };
+			}
+			if (!originalRun) throw new Error('Missing fake runner');
+			return originalRun(args, options);
+		});
+		const { service } = await createService(provider);
+		try {
+			const receipt = service.runAction(
+				parsedAction({
+					actionId: 'create-and-open',
+					kind: 'device.create',
+					name: 'PUMPD Review',
+					deviceTypeIdentifier: DEVICE_TYPE,
+					runtimeIdentifier: RUNTIME,
+					bootAfterCreate: true,
+				})
+			);
+			const job = await waitForJob(service, receipt.jobId ?? '');
+			expect(job.deviceUdid).toBe(UDID);
+			expect(provider.commands.map((command) => command.args)).toEqual([
+				['boot', UDID],
+				['bootstatus', UDID, '-b'],
+			]);
+			expect(provider.opened).toEqual([UDID]);
+			expect(service.getState().devices[0]?.state).toBe('booted');
+		} finally {
+			await service.stop();
+		}
+	});
+
+	it('does not boot a guessed target when create returns an invalid identifier', async () => {
+		const { service, provider } = await createService();
+		try {
+			const receipt = service.runAction(
+				parsedAction({
+					actionId: 'invalid-created-id',
+					kind: 'device.create',
+					name: 'PUMPD Review',
+					deviceTypeIdentifier: DEVICE_TYPE,
+					bootAfterCreate: true,
+				})
+			);
+			const job = await waitForJob(service, receipt.jobId ?? '', 'failed');
+			expect(job.message).toContain('did not return a valid device ID');
+			expect(provider.commands.some((command) => command.args[0] === 'boot')).toBe(
+				false
+			);
+			expect(provider.opened).toEqual([]);
+		} finally {
+			await service.stop();
+		}
+	});
+
+	it('pauses idle scans while hidden and refreshes when visible again', async () => {
+		vi.useFakeTimers();
+		const { service, provider } = await createService();
+		try {
+			const metrics = vi.spyOn(service, 'refreshMetrics');
+			provider.inventory.mockClear();
+			service.setPollingActive(false);
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(provider.inventory).not.toHaveBeenCalled();
+			expect(metrics).not.toHaveBeenCalled();
+			// Explicit user/recipe work must still function while background polling pauses.
+			await service.refresh();
+			expect(provider.inventory).toHaveBeenCalledTimes(1);
+			service.setPollingActive(true);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(provider.inventory).toHaveBeenCalledTimes(2);
+			expect(metrics).toHaveBeenCalledTimes(1);
+		} finally {
+			await service.stop();
+			vi.useRealTimers();
+		}
+	});
+
 	it('resolves destructive confirmation copy from a fresh exact inventory', async () => {
 		const provider = new FakeProvider();
 		const { service } = await createService(provider);

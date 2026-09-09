@@ -1085,6 +1085,14 @@ function registerIpc(
 	);
 }
 
+function updateSimulatorPolling(): void {
+	const visible = [...windows].some(
+		(window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized()
+	);
+	simulatorService?.setPollingActive(visible);
+	slimmingService?.setPollingActive(visible);
+}
+
 function createWindow(): BrowserWindow {
 	const window = new BrowserWindow({
 		width: 1480,
@@ -1116,7 +1124,14 @@ function createWindow(): BrowserWindow {
 		},
 	});
 	windows.add(window);
-	window.on('closed', () => windows.delete(window));
+	window.on('closed', () => {
+		windows.delete(window);
+		updateSimulatorPolling();
+	});
+	window.on('show', updateSimulatorPolling);
+	window.on('hide', updateSimulatorPolling);
+	window.on('minimize', updateSimulatorPolling);
+	window.on('restore', updateSimulatorPolling);
 	const senderId = window.webContents.id;
 	stagedCertificateStore?.registerSender(senderId);
 	window.webContents.once('destroyed', () => {
@@ -1238,6 +1253,12 @@ if (!app.requestSingleInstanceLock()) {
 				mutationCoordinator: simulatorMutationCoordinator,
 			});
 			slimmingService = new SlimmingService({
+				...(!app.isPackaged
+					? {
+							mutationUnavailableReason:
+								'Preview is available. Applying or restoring services requires a signed, packaged PUMPD Devtools app.',
+						}
+					: {}),
 				resourceDirectory: nativeResourceDirectory,
 				persistenceDirectory: path.join(app.getPath('userData'), 'simulator-slimming'),
 				appVersion: app.getVersion(),

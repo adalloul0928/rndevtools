@@ -625,6 +625,9 @@ func TestRollbackFailureReturnsNeedsAttentionWithEvidence(t *testing.T) {
 	if !ok || evidence.FailureCode != "apply_delta_failed" || evidence.Rollback.ErrorCode != "rollback_delta_failed" {
 		t.Fatalf("rollback failure evidence drifted: %#v", apiError.Details)
 	}
+	if evidence.FailureDetail == "" {
+		t.Fatalf("the apply layer's own failure reason was dropped from the evidence: %#v", evidence)
+	}
 }
 
 func TestBlockedTupleCannotBeOverriddenAndUnknownNeedsExactAcknowledgement(t *testing.T) {

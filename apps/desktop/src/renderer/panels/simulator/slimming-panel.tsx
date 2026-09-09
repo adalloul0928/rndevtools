@@ -22,10 +22,9 @@ import {
 	ShieldAlert,
 	Sparkles,
 	Square,
-	SquareCheckBig,
 	Undo2,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
 	DenseVirtualList,
 	formatBytes,
@@ -34,7 +33,9 @@ import {
 } from '@/components/simulator-ui';
 import {
 	ConfirmAction,
+	Disclosure,
 	EmptyPanel,
+	InfoPopover,
 	KeyValue,
 	PanelNotice,
 	StatusPill,
@@ -64,8 +65,10 @@ import {
 const MAX_BATCH_SIZE = 20;
 const DEFAULT_DOCTOR_CAPABILITIES = [
 	'push-notifications',
+	'storekit',
+	'healthkit',
 	'universal-links',
-	'icloud-sync',
+	'photo-library',
 ] as const;
 
 export function SlimmingPanel() {
@@ -90,15 +93,26 @@ export function SlimmingPanel() {
 		setSelectedProfileId(state.profiles[0]?.id ?? '');
 	}, [selectedProfileId, state.profiles]);
 
+	// A convenience default belongs only on the first populated discovery. Seeding
+	// it whenever the selection is empty makes the last target impossible to clear:
+	// unticking it immediately re-adds the first booted Simulator.
+	const hasSeededSelection = useRef(false);
+
 	useEffect(() => {
 		const available = new Set(state.simulators.map((simulator) => simulator.udid));
+		const seedDefault = !hasSeededSelection.current && state.simulators.length > 0;
+		if (state.simulators.length > 0) hasSeededSelection.current = true;
 		setSelectedUdids((current) => {
 			const retained = current.filter((udid) => available.has(udid));
-			if (retained.length > 0 || state.simulators.length === 0) return retained;
-			const initial =
-				state.simulators.find((simulator) => simulator.state === 'booted') ??
-				state.simulators[0];
-			return initial ? [initial.udid] : [];
+			if (seedDefault && retained.length === 0) {
+				const initial =
+					state.simulators.find((simulator) => simulator.state === 'booted') ??
+					state.simulators[0];
+				if (initial) return [initial.udid];
+			}
+			// Discovery re-runs on every refresh. Returning a fresh array of the same
+			// targets would re-render the virtualized list continuously and drop clicks.
+			return retained.length === current.length ? current : retained;
 		});
 	}, [state.simulators]);
 
@@ -112,13 +126,19 @@ export function SlimmingPanel() {
 		.filter((status): status is SlimmingSimulatorStatus => Boolean(status));
 	const selectedPlans = selectedUdids
 		.map((udid) => state.previewBySimulator[udid])
-		.filter((plan): plan is SlimmingPlan => Boolean(plan));
-	const selectedDoctors = selectedUdids
-		.map((udid) => state.doctorBySimulator[udid])
-		.filter((result): result is SlimmingDoctorResult => Boolean(result));
+		.filter((plan): plan is SlimmingPlan =>
+			Boolean(plan && plan.profileId === selectedProfileId)
+		);
 	const currentMetricSamples = selectedUdids
 		.map((udid) => simulatorRuntime.state.metrics.byDevice[udid])
-		.filter((metrics) => metrics !== undefined);
+		.filter(
+			(metrics): metrics is NonNullable<typeof metrics> =>
+				metrics !== undefined &&
+				!metrics.error &&
+				simulatorRuntime.state.devices.some(
+					(device) => device.udid === metrics.deviceUdid && device.state === 'booted'
+				)
+		);
 	const hasCompleteCurrentMetrics =
 		selectedUdids.length > 0 && currentMetricSamples.length === selectedUdids.length;
 	const currentMemoryBytes = hasCompleteCurrentMetrics
@@ -136,9 +156,6 @@ export function SlimmingPanel() {
 				.map((id) => categoryById.get(id))
 				.filter((category) => category !== undefined)
 		: [];
-	const estimatedCategoryCount = profileCategories.filter(
-		(category) => category.approxMemoryMb > 0
-	).length;
 	const changingServices = selectedPlans.reduce(
 		(total, plan) =>
 			total + plan.toDisableServiceIds.length + plan.toEnableServiceIds.length,
@@ -154,6 +171,7 @@ export function SlimmingPanel() {
 	const mutationAvailable =
 		isBridgeAvailable &&
 		state.helper.status === 'available' &&
+		!state.helper.mutationUnavailableReason &&
 		state.setting.experimentalMutationsEnabled;
 	const canApply =
 		mutationAvailable &&
@@ -164,24 +182,12 @@ export function SlimmingPanel() {
 	const managedStatuses = managedUdids
 		.map((udid) => state.statusBySimulator[udid])
 		.filter((status): status is SlimmingSimulatorStatus => Boolean(status));
-	const activeJobs = state.jobs.filter((job) =>
-		['queued', 'preflight', 'running', 'verifying', 'rolling-back'].includes(job.status)
-	);
 	const needsAttention = selectedStatuses.filter(
 		(status) => status.condition === 'needs-attention'
 	).length;
 
 	const submit = (action: SlimmingActionInput, successMessage: string) =>
 		void runAction(action, { successMessage });
-	const toggleTarget = (simulator: SlimmingSimulator) => {
-		setSelectedUdids((current) => {
-			if (current.includes(simulator.udid)) {
-				return current.filter((udid) => udid !== simulator.udid);
-			}
-			if (current.length >= MAX_BATCH_SIZE) return current;
-			return [...current, simulator.udid];
-		});
-	};
 
 	return (
 		<section className="panel-root">
@@ -219,8 +225,12 @@ export function SlimmingPanel() {
 				actions={
 					<div className="sim-slimming-header-actions">
 						<Switch
-							aria-label="Enable experimental Simulator mutations"
-							isDisabled={!isBridgeAvailable || state.helper.status !== 'available'}
+							aria-label="Enable SimSlim"
+							isDisabled={
+								!isBridgeAvailable ||
+								state.helper.status !== 'available' ||
+								Boolean(state.helper.mutationUnavailableReason)
+							}
 							isSelected={state.setting.experimentalMutationsEnabled}
 							size="sm"
 							onChange={(selected) => {
@@ -239,9 +249,7 @@ export function SlimmingPanel() {
 							}}
 						>
 							<Switch.Content>
-								<span className="sim-slimming-switch-label">
-									Experimental mutations
-								</span>
+								<span className="sim-slimming-switch-label">Enable SimSlim</span>
 							</Switch.Content>
 							<Switch.Control>
 								<Switch.Thumb />
@@ -259,10 +267,10 @@ export function SlimmingPanel() {
 						</Button>
 					</div>
 				}
-				description="Preview, apply, verify, and safely roll back versioned Simulator service profiles through the app-pinned SimSlim core. Mutations are experimental, local, checkpointed, and processed sequentially."
+				description="Reduce background services on existing simulators. Create a test simulator in Simulators first, then choose a profile, preview its changes, and apply. SimSlim is experimental and may restart the simulator. A checkpoint allows you to undo changes."
 				eyebrow="Experimental resource profiles"
 				meta={<HelperStatus status={state.helper.status} />}
-				title="Simulator Slimming"
+				title="SimSlim"
 			/>
 			{runtimeError ? (
 				<PanelNotice title="Slimming helper unavailable." tone="danger">
@@ -274,24 +282,9 @@ export function SlimmingPanel() {
 					{state.helper.error}
 				</PanelNotice>
 			) : null}
-			{state.helper.status === 'available' ? (
-				<PanelNotice title="Pinned SimSlim core is embedded." tone="info">
-					The signed PUMPD helper runs the audited, app-bundled library; it does not
-					require a separate SimSlim installation or download code at runtime.
-					{state.helper.catalogVersion
-						? ` Catalog ${state.helper.catalogVersion}.`
-						: ''}
-				</PanelNotice>
-			) : null}
 			{state.setting.warning ? (
 				<PanelNotice title="Managed overrides remain in place." tone="warning">
 					{state.setting.warning}
-				</PanelNotice>
-			) : null}
-			{!state.setting.experimentalMutationsEnabled ? (
-				<PanelNotice title="Read-only mode is active." tone="info">
-					Preview, verify, and doctor checks remain available. Apply, undo, and restore
-					stay blocked until you explicitly enable experimental mutations.
 				</PanelNotice>
 			) : null}
 			<Toolbar>
@@ -322,9 +315,7 @@ export function SlimmingPanel() {
 						</NativeSelect.Trigger>
 					</NativeSelect>
 				</div>
-				<span className="sim-toolbar-meta">
-					{selectedUdids.length}/{MAX_BATCH_SIZE} selected · sequential execution
-				</span>
+				<span className="sim-toolbar-meta">{selectedUdids.length} selected</span>
 				<span className="sim-toolbar-spacer" />
 				<Button
 					isDisabled={
@@ -333,7 +324,7 @@ export function SlimmingPanel() {
 						!selectedProfile
 					}
 					size="sm"
-					variant="secondary"
+					variant={plansReady ? 'secondary' : 'primary'}
 					onPress={() =>
 						submit(
 							{
@@ -345,7 +336,7 @@ export function SlimmingPanel() {
 						)
 					}
 				>
-					<ClipboardCheck className="h-3.5 w-3.5" /> Preview
+					<ClipboardCheck className="h-3.5 w-3.5" /> Preview changes
 				</Button>
 				<Button
 					isDisabled={
@@ -366,26 +357,21 @@ export function SlimmingPanel() {
 						)
 					}
 				>
-					<BadgeCheck className="h-3.5 w-3.5" /> Verify
+					<BadgeCheck className="h-3.5 w-3.5" /> Check profile
 				</Button>
 			</Toolbar>
 			<div className="sim-metric-grid">
 				<SimulatorMetric
 					detail="selected targets"
 					icon={<Gauge className="h-3.5 w-3.5" />}
-					label="Batch"
+					label="Selected"
 					value={String(selectedUdids.length)}
 				/>
 				<SimulatorMetric
-					detail="non-additive category medians"
+					detail="selected running simulators"
 					icon={<Cpu className="h-3.5 w-3.5" />}
-					label="Memory evidence"
-					tone={estimatedCategoryCount > 0 ? 'info' : 'default'}
-					value={
-						estimatedCategoryCount > 0
-							? `${estimatedCategoryCount} categor${estimatedCategoryCount === 1 ? 'y' : 'ies'}`
-							: '—'
-					}
+					label="Memory now"
+					value={currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)}
 				/>
 				<SimulatorMetric
 					detail="planned changes"
@@ -423,7 +409,8 @@ export function SlimmingPanel() {
 								variant="ghost"
 								onPress={() => {
 									setSelectedUdids(
-										selectedUdids.length === state.simulators.length
+										selectedUdids.length ===
+											Math.min(MAX_BATCH_SIZE, state.simulators.length)
 											? []
 											: state.simulators
 													.slice(0, MAX_BATCH_SIZE)
@@ -431,9 +418,10 @@ export function SlimmingPanel() {
 									);
 								}}
 							>
-								{selectedUdids.length === state.simulators.length
-									? 'Clear'
-									: 'Select 20'}
+								{selectedUdids.length ===
+								Math.min(MAX_BATCH_SIZE, state.simulators.length)
+									? 'Clear selection'
+									: `Select ${Math.min(MAX_BATCH_SIZE, state.simulators.length)}`}
 							</Button>
 						</header>
 						<DenseVirtualList
@@ -443,26 +431,30 @@ export function SlimmingPanel() {
 							getId={(simulator) => simulator.udid}
 							rowHeight={62}
 							textValue={(simulator) => simulator.name}
-							onSelect={toggleTarget}
+							selectedIds={selectedUdids}
+							onSelectedIdsChange={(ids) =>
+								setSelectedUdids(ids.slice(0, MAX_BATCH_SIZE))
+							}
 							renderItem={(simulator) => {
 								const status = state.statusBySimulator[simulator.udid];
-								const selected = selectedUdids.includes(simulator.udid);
 								return (
 									<>
-										<span
-											className={`sim-selection-box ${selected ? 'is-selected' : ''}`}
-										>
-											{selected ? (
-												<SquareCheckBig className="h-3.5 w-3.5" />
-											) : (
-												<Square className="h-3.5 w-3.5" />
-											)}
-										</span>
 										<div className="sim-list-copy">
 											<strong>{simulator.name}</strong>
-											<span>{simulator.runtimeIdentifier}</span>
+											<span>
+												{simulator.runtimeIdentifier
+													.replace('com.apple.CoreSimulator.SimRuntime.', '')
+													.replace('-', ' ')
+													.replaceAll('-', '.')}{' '}
+												· {simulator.state === 'booted' ? 'Running' : 'Off'}
+											</span>
 										</div>
-										<ConditionPill condition={status?.condition} />
+										{status &&
+										['needs-attention', 'drifted', 'partial'].includes(
+											status.condition
+										) ? (
+											<ConditionPill condition={status.condition} />
+										) : null}
 									</>
 								);
 							}}
@@ -470,13 +462,11 @@ export function SlimmingPanel() {
 					</section>
 					<section className="sim-surface panel-scroll">
 						<ProfileWorkspace
-							activeJobs={activeJobs}
 							canApply={canApply}
 							categories={profileCategories}
 							cancelJob={(jobId) => void cancelJob(jobId)}
 							currentMemoryBytes={currentMemoryBytes}
 							currentProcessCount={currentProcessCount}
-							doctors={selectedDoctors}
 							mutationAvailable={mutationAvailable}
 							onRun={submit}
 							plans={selectedPlans}
@@ -508,8 +498,6 @@ function ProfileWorkspace({
 	selectedSimulators,
 	selectedStatuses,
 	plans,
-	doctors: _doctors,
-	activeJobs: _activeJobs,
 	currentMemoryBytes,
 	currentProcessCount,
 	mutationAvailable,
@@ -531,8 +519,6 @@ function ProfileWorkspace({
 	selectedSimulators: SlimmingSimulator[];
 	selectedStatuses: SlimmingSimulatorStatus[];
 	plans: SlimmingPlan[];
-	doctors: SlimmingDoctorResult[];
-	activeJobs: SlimmingJob[];
 	currentMemoryBytes: number | null;
 	currentProcessCount: number | null;
 	mutationAvailable: boolean;
@@ -566,11 +552,28 @@ function ProfileWorkspace({
 			<header className="sim-report-heading">
 				<div>
 					<p className="sim-eyebrow">Selected profile</p>
-					<h2>{profile.name}</h2>
-					<span>{profile.description}</span>
+					<div className="flex items-center gap-2">
+						<h2>{profile.name}</h2>
+						<InfoPopover label={profile.name}>
+							<p>{profile.description}</p>
+							{Boolean(profile.preservedServiceIds?.length) && (
+								<>
+									<p className="mt-2">
+										These services stay enabled because they remained registered after
+										reboot during iOS 26.5 testing:
+									</p>
+									<ul className="mt-2 space-y-1 font-mono text-[12px] break-all">
+										{profile.preservedServiceIds?.map((serviceId) => (
+											<li key={serviceId}>{serviceId}</li>
+										))}
+									</ul>
+								</>
+							)}
+						</InfoPopover>
+					</div>
 				</div>
-				<StatusPill tone={profile.experimental ? 'warning' : 'success'}>
-					{profile.experimental ? 'Experimental' : 'Verified'}
+				<StatusPill tone={profile.experimental ? 'warning' : 'default'}>
+					{profile.experimental ? 'Experimental' : 'Built-in profile'}
 				</StatusPill>
 			</header>
 
@@ -590,7 +593,7 @@ function ProfileWorkspace({
 						isDisabled={!canApply}
 						title={`Apply ${profile.name}?`}
 						triggerIcon={<Sparkles className="h-3.5 w-3.5" />}
-						triggerLabel="Apply"
+						triggerLabel="Apply profile"
 						triggerVariant="primary"
 						tone="warning"
 						onConfirm={() =>
@@ -611,7 +614,7 @@ function ProfileWorkspace({
 						isDisabled={!canUndo}
 						title="Undo the last managed mutation?"
 						triggerIcon={<Undo2 className="h-3.5 w-3.5" />}
-						triggerLabel="Undo"
+						triggerLabel="Undo last change"
 						triggerVariant="secondary"
 						tone="warning"
 						onConfirm={() =>
@@ -633,7 +636,7 @@ function ProfileWorkspace({
 						}
 						title="Restore all managed services?"
 						triggerIcon={<ListRestart className="h-3.5 w-3.5" />}
-						triggerLabel="Restore"
+						triggerLabel="Restore services"
 						triggerVariant="ghost"
 						onConfirm={() =>
 							onRun(
@@ -661,16 +664,16 @@ function ProfileWorkspace({
 							)
 						}
 					>
-						<HeartPulse className="h-3.5 w-3.5" /> Doctor
+						<HeartPulse className="h-3.5 w-3.5" /> Check PUMPD features
 					</Button>
 				</div>
 				{!mutationAvailable ? (
 					<p className="sim-inline-note is-warning">
-						Enable experimental mutations and verify the signed helper before changing a
-						Simulator.
+						{state.helper.mutationUnavailableReason ??
+							'Enable SimSlim to apply a profile.'}
 					</p>
 				) : null}
-				{hasUnknownTuple && unknownTupleBinding ? (
+				{mutationAvailable && hasUnknownTuple && unknownTupleBinding ? (
 					<UnknownTupleAcknowledgementDialog
 						binding={unknownTupleBinding}
 						onAcknowledge={onAcknowledgeUnknownTuple}
@@ -679,64 +682,54 @@ function ProfileWorkspace({
 				) : null}
 			</section>
 
-			<section className="sim-slimming-grid">
-				<div className="sim-detail-section">
-					<div className="sim-section-heading">
-						<div>
-							<h3>Profile categories</h3>
-							<p>Versioned allowlist and explicit tradeoffs</p>
-						</div>
-						<span>{categories.length}</span>
-					</div>
-					<div className="sim-profile-categories">
-						{categories.map((category) => (
-							<div key={category.id}>
-								<Check className="h-3.5 w-3.5" />
-								<span>
-									<strong>{category.name}</strong>
-									<small>{category.description}</small>
-									<em>{category.downside}</em>
-								</span>
+			<Disclosure title="Service groups, tradeoffs & resource use">
+				<section className="sim-slimming-grid">
+					<div className="sim-detail-section">
+						<div className="sim-section-heading">
+							<div>
+								<h3>Profile categories</h3>
 							</div>
-						))}
-					</div>
-				</div>
-				<div className="sim-detail-section">
-					<div className="sim-section-heading">
-						<div>
-							<h3>Before / after evidence</h3>
-							<p>Measured host and Simulator process footprint</p>
+							<span>{categories.length}</span>
 						</div>
-						<Cpu className="h-3.5 w-3.5" />
-					</div>
-					<div className="sim-evidence-grid">
-						<div>
-							<span>Current RAM</span>
-							<strong>
-								{currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)}
-							</strong>
-						</div>
-						<div>
-							<span>After RAM</span>
-							<strong>—</strong>
-						</div>
-						<div>
-							<span>Current processes</span>
-							<strong>{currentProcessCount ?? '—'}</strong>
-						</div>
-						<div>
-							<span>After processes</span>
-							<strong>—</strong>
+						<div className="sim-profile-categories">
+							{categories.map((category) => (
+								<div key={category.id}>
+									<Check className="h-3.5 w-3.5" />
+									<span>
+										<strong>{category.name}</strong>
+										<InfoPopover label={category.name}>
+											{category.description}
+										</InfoPopover>
+										<em>{category.downside}</em>
+									</span>
+								</div>
+							))}
 						</div>
 					</div>
-					<p className="sim-inline-note">
-						Current readings come from the strict Fleet metrics projection. Historical
-						before/after samples are not captured in this milestone, so profile
-						estimates are never presented as measured savings.
-					</p>
-				</div>
-			</section>
-
+					<div className="sim-detail-section">
+						<div className="sim-section-heading">
+							<h3>Current resource use</h3>
+							<InfoPopover label="Current resource use">
+								Live process footprint from the selected running simulators. These
+								readings do not measure savings. Compare the same PUMPD workload before
+								and after a successful apply.
+							</InfoPopover>
+						</div>
+						<div className="sim-evidence-grid">
+							<div>
+								<span>Memory</span>
+								<strong>
+									{currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)}
+								</strong>
+							</div>
+							<div>
+								<span>Processes</span>
+								<strong>{currentProcessCount ?? '—'}</strong>
+							</div>
+						</div>
+					</div>
+				</section>
+			</Disclosure>
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
@@ -748,7 +741,8 @@ function ProfileWorkspace({
 				<div className="sim-target-status-table">
 					{selectedSimulators.map((simulator) => {
 						const status = state.statusBySimulator[simulator.udid];
-						const plan = state.previewBySimulator[simulator.udid];
+						const preview = state.previewBySimulator[simulator.udid];
+						const plan = preview?.profileId === profile.id ? preview : undefined;
 						const doctor = state.doctorBySimulator[simulator.udid];
 						const checkpoint = state.checkpointBySimulator[simulator.udid];
 						return (
@@ -790,7 +784,7 @@ function ProfileWorkspace({
 										}
 									/>
 									<KeyValue
-										label="Doctor"
+										label="PUMPD feature services"
 										value={
 											doctor
 												? doctor.healthy
@@ -800,6 +794,7 @@ function ProfileWorkspace({
 										}
 									/>
 								</dl>
+								{doctor ? <FeatureChecks result={doctor} /> : null}
 							</details>
 						);
 					})}
@@ -809,8 +804,11 @@ function ProfileWorkspace({
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
-						<h3>Sequential jobs</h3>
-						<p>One target mutates at a time; verification follows each target</p>
+						<h3>Recent activity</h3>
+						<InfoPopover label="SimSlim activity">
+							Each simulator is changed and verified in sequence. An unsuccessful change
+							triggers recovery.
+						</InfoPopover>
 					</div>
 					<History className="h-3.5 w-3.5" />
 				</div>
@@ -818,12 +816,47 @@ function ProfileWorkspace({
 					<p className="sim-section-empty">No Slimming operations have run.</p>
 				) : (
 					<div className="sim-slimming-jobs">
-						{state.jobs.slice(0, 8).map((job) => (
-							<JobRow job={job} key={job.id} onCancel={() => cancelJob(job.id)} />
-						))}
+						{state.jobs
+							.toReversed()
+							.slice(0, 8)
+							.map((job) => (
+								<JobRow job={job} key={job.id} onCancel={() => cancelJob(job.id)} />
+							))}
 					</div>
 				)}
 			</section>
+		</div>
+	);
+}
+
+function FeatureChecks({ result }: { result: SlimmingDoctorResult }) {
+	const labels: Record<string, string> = {
+		'push-notifications': 'Push notifications',
+		storekit: 'StoreKit',
+		healthkit: 'HealthKit',
+		'universal-links': 'Universal links',
+		'photo-library': 'Photos',
+	};
+	return (
+		<div className="p-3">
+			<div className="flex items-center gap-2">
+				<strong>PUMPD service checks</strong>
+				<InfoPopover label="PUMPD service checks">
+					Checks whether simulator service overrides block these features. Use PUMPD to
+					test actual purchases, permissions, notifications, and links after applying a
+					profile.
+				</InfoPopover>
+			</div>
+			<ul className="mt-2 space-y-2 text-sm" aria-label="PUMPD service check results">
+				{result.capabilities.map((capability) => (
+					<li key={capability.id} className="flex items-center justify-between gap-3">
+						<span>{labels[capability.id] ?? capability.id}</span>
+						<StatusPill tone={capability.available ? 'success' : 'danger'}>
+							{capability.available ? 'Available' : 'Blocked'}
+						</StatusPill>
+					</li>
+				))}
+			</ul>
 		</div>
 	);
 }
@@ -852,7 +885,7 @@ function UnknownTupleAcknowledgementDialog({
 			<AlertDialog.Trigger className="sim-unknown-ack">
 				<Square className="h-4 w-4" />
 				<span>
-					<strong>Type to acknowledge the current compatibility tuple</strong>
+					<strong>Review system compatibility</strong>
 					<small>
 						Apply, undo, and restore remain blocked until the exact acknowledgement is
 						entered for this tuple set.
@@ -918,7 +951,7 @@ function UnknownTupleAcknowledgementDialog({
 								variant="primary"
 								onPress={() => onAcknowledge({ binding, value: typedValue })}
 							>
-								Acknowledge exact tuple
+								Acknowledge this system
 							</Button>
 						</AlertDialog.Footer>
 					</AlertDialog.Dialog>
@@ -1065,7 +1098,7 @@ function HelperStatus({
 			) : (
 				<CircleAlert className="h-3 w-3" />
 			)}
-			{status === 'available' ? 'Embedded helper ready' : status}
+			{status === 'available' ? 'Ready' : status}
 		</span>
 	);
 }
@@ -1079,7 +1112,17 @@ function ConditionPill({ condition }: { condition: SlimmingCondition | undefined
 				: condition === 'needs-attention'
 					? 'danger'
 					: 'default';
-	return <StatusPill tone={tone}>{condition ?? 'not checked'}</StatusPill>;
+	const labels: Record<SlimmingCondition, string> = {
+		'managed-clean': 'Unmodified',
+		'profile-match': 'Profile applied',
+		drifted: 'Changed',
+		partial: 'Partial',
+		unknown: 'Not checked',
+		'needs-attention': 'Check required',
+	};
+	return (
+		<StatusPill tone={tone}>{condition ? labels[condition] : 'Not checked'}</StatusPill>
+	);
 }
 
 function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
@@ -1095,8 +1138,18 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 		<div className="sim-slimming-job">
 			<header>
 				<span>
-					<strong>{job.kind}</strong>
-					<code>{job.phase}</code>
+					<strong>
+						{
+							{
+								'profile.preview': 'Preview profile',
+								'profile.verify': 'Check profile',
+								'profile.apply': 'Apply profile',
+								'profile.restore': 'Restore services',
+								'profile.undo': 'Undo last change',
+								'doctor.run': 'Check PUMPD features',
+							}[job.kind]
+						}
+					</strong>
 				</span>
 				<StatusPill
 					tone={

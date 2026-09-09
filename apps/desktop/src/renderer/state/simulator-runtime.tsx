@@ -182,6 +182,26 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 		kind: 'idle',
 		message: '',
 	});
+	const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
+	useEffect(() => {
+		const job = state.jobs.find((candidate) => candidate.id === submittedJobId);
+		if (!job) return;
+		const kind =
+			job.status === 'complete'
+				? ('success' as const)
+				: ['failed', 'needs-attention'].includes(job.status)
+					? ('error' as const)
+					: job.status === 'cancelled'
+						? ('success' as const)
+						: ('pending' as const);
+		setActionStatus((current) =>
+			current.kind === kind && current.message === job.message
+				? current
+				: { kind, message: job.message }
+		);
+		if (kind !== 'pending') setSubmittedJobId(null);
+	}, [state.jobs, submittedJobId]);
+
 	const pendingActionKeysRef = useRef(new Set<string>());
 	const pendingCaptureOperationKeysRef = useRef(new Set<string>());
 	const pendingOnboardingKeysRef = useRef(new Set<string>());
@@ -194,7 +214,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 		try {
 			unsubscribe = bridge.subscribeSimulatorState((nextState) => {
 				if (!active) return;
-				setState(nextState);
+				setState((current) =>
+					nextState.revision >= current.revision ? nextState : current
+				);
 				setRuntimeError(null);
 				setIsLoading(false);
 			});
@@ -207,7 +229,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			.getSimulatorState()
 			.then((nextState) => {
 				if (!active) return;
-				setState(nextState);
+				setState((current) =>
+					nextState.revision >= current.revision ? nextState : current
+				);
 				setRuntimeError(null);
 			})
 			.catch((error: unknown) => {
@@ -252,7 +276,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 		setIsLoading(true);
 		try {
 			const nextState = await bridge.refreshSimulators();
-			setState(nextState);
+			setState((current) =>
+				nextState.revision >= current.revision ? nextState : current
+			);
 			setRuntimeError(null);
 		} catch (error) {
 			setRuntimeError(simulatorErrorText(error));
@@ -287,6 +313,7 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			let action = { ...actionInput, actionId } as SimulatorAction;
 			pendingActionKeysRef.current.add(actionKey);
 			latestActionIdRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({
 				kind: 'pending',
 				message: messages.pendingMessage ?? 'Submitting Simulator action…',
@@ -312,11 +339,14 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				}
 				const receipt = await bridge.runSimulatorAction(action);
 				if (latestActionIdRef.current === actionId) {
+					if (receipt.accepted && receipt.jobId) setSubmittedJobId(receipt.jobId);
 					setActionStatus(
 						receipt.accepted
 							? {
-									kind: 'success',
-									message: messages.successMessage ?? 'Action accepted.',
+									kind: receipt.jobId ? 'pending' : 'success',
+									message: receipt.jobId
+										? 'Action queued…'
+										: (messages.successMessage ?? 'Action accepted.'),
 								}
 							: {
 									kind: 'error',
@@ -410,6 +440,7 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 
 			pendingCaptureOperationKeysRef.current.add(operationKey);
 			latestActionIdRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({
 				kind: 'pending',
 				message: messages.pendingMessage ?? 'Submitting capture operation…',
@@ -472,6 +503,7 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			}
 			pendingOnboardingKeysRef.current.add(key);
 			latestActionIdRef.current = actionId;
+			setSubmittedJobId(null);
 			setActionStatus({ kind: 'pending', message: 'Opening the trusted setup flow…' });
 			try {
 				const receipt = await bridge.runSimulatorOnboardingOperation({
@@ -507,6 +539,7 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 	);
 
 	const clearActionStatus = useCallback(() => {
+		setSubmittedJobId(null);
 		setActionStatus({ kind: 'idle', message: '' });
 	}, []);
 

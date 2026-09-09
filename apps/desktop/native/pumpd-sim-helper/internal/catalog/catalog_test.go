@@ -107,6 +107,32 @@ func TestBuiltInProfilesAreTheThreeApprovedImmutablePresets(t *testing.T) {
 	}
 }
 
+func TestPUMDPresetsKeepPersistentLaunchdJobsEnabledAndRestorable(t *testing.T) {
+	kept := []string{
+		"com.apple.MapKit.SnapshotService",
+		"com.apple.siri.acousticsignature",
+		"com.apple.siri.context.service",
+	}
+	for _, profileID := range []string{"pumpd-development", "pumpd-ui-automation"} {
+		desired, err := DesiredServiceIDs(profileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile, _ := ProfileByID(profileID)
+		for _, label := range kept {
+			if slices.Contains(desired, label) {
+				t.Errorf("%s still disables persistent launchd job %s", profileID, label)
+			}
+			if !slices.Contains(ManagedServiceIDs(), label) {
+				t.Errorf("legacy override for %s can no longer be restored", label)
+			}
+			if !slices.Contains(profile.PreservedServiceIDs, label) {
+				t.Errorf("%s does not disclose preserved service %s", profileID, label)
+			}
+		}
+	}
+}
+
 func TestSharedServiceStaysEnabledWhenAnyOwningCategoryIsKept(t *testing.T) {
 	desired, err := desiredForCategories([]string{"store"})
 	if err != nil {

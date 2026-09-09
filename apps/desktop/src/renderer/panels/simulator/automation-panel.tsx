@@ -47,6 +47,7 @@ import {
 	ConfirmAction,
 	CopyButton,
 	EmptyPanel,
+	InfoPopover,
 	PanelNotice,
 	SearchControl,
 	Toolbar,
@@ -508,7 +509,7 @@ export function AutomationPanel() {
 						/>
 					</Button>
 				}
-				description="Author versioned, bounded Simulator recipes; run them against exact UDIDs with native approval; inspect local evidence without exposing filesystem paths."
+				description="Combine simulator actions into reusable recipes. Choose your simulators, review the steps, and run. Execution history and captured results stay on this Mac."
 				eyebrow="Recipes"
 				meta={`${recipeRuntime.state.recipes.length} saved · ${recipeRuntime.state.runs.length} runs`}
 				title="Automation"
@@ -539,7 +540,7 @@ export function AutomationPanel() {
 				<span className="sim-toolbar-meta">{visibleRecipes.length} recipes</span>
 				<div className="sim-toolbar-spacer" />
 				<Button size="sm" variant="secondary" onPress={createRecipe}>
-					<Plus className="h-3.5 w-3.5" /> New
+					<Plus className="h-3.5 w-3.5" /> New recipe
 				</Button>
 				<Button
 					isDisabled={!recipeRuntime.isBridgeAvailable}
@@ -575,7 +576,7 @@ export function AutomationPanel() {
 					) : (
 						<DenseVirtualList
 							ariaLabel="Recipe catalog"
-							emptyDescription="Create a bounded recipe or import a signed local definition."
+							emptyDescription="Create a recipe or import a JSON file."
 							emptyTitle={query ? 'No recipes match' : 'No recipes yet'}
 							items={visibleRecipes}
 							getId={(summary) => summary.id}
@@ -753,74 +754,79 @@ export function AutomationPanel() {
 									<Plus className="h-3.5 w-3.5" /> Create recipe
 								</Button>
 							}
-							description="Start with a typed, versioned definition. Every run remains bounded to allowlisted operations and exact Simulator UDIDs."
+							description="Save a sequence of simulator actions to run again."
 							icon={<FileJson />}
 							title="Select or create a recipe"
 						/>
 					)}
 				</section>
-				<aside className="sim-automation-inspector recipe-run-inspector panel-scroll">
-					<RunInspector
-						activeRun={activeRun}
-						activeRunUnknownSlimmingStatuses={activeRunUnknownSlimmingStatuses}
-						approval={approval}
-						canRun={canRun}
-						concurrency={concurrency}
-						concurrencyValid={concurrencyValid}
-						draft={draft}
-						isDirty={selectedEntry?.dirty ?? false}
-						runs={runsForRecipe}
-						selectedRun={selectedRun}
-						summary={selectedSummary}
-						targetUdids={targetUdids}
-						devices={simulatorRuntime.state.devices}
-						onCancel={(runId) => void recipeRuntime.cancelRun(runId)}
-						onApprove={(run, acknowledgement) =>
-							void approvePendingRun(run, acknowledgement)
-						}
-						onConcurrencyChange={setConcurrency}
-						onExportRecipe={() =>
-							draft
-								? void recipeRuntime.runFileOperation({
-										kind: 'recipe.export',
-										recipeId: draft.id,
-									})
-								: undefined
-						}
-						onRun={() => void startRun()}
-						onSelectRun={(runId) => {
-							setSelectedRunId(runId);
-							setView('evidence');
-						}}
-						onToggleTarget={toggleTarget}
-					/>
-					<div className="recipe-inspector-footer-actions">
-						<ConfirmAction
-							confirmLabel={
-								persistedById.has(selectedRecipeId ?? '') ? 'Continue' : 'Discard draft'
+				{draft ? (
+					<aside className="sim-automation-inspector recipe-run-inspector panel-scroll">
+						<RunInspector
+							activeRun={activeRun}
+							activeRunUnknownSlimmingStatuses={activeRunUnknownSlimmingStatuses}
+							approval={approval}
+							canRun={canRun}
+							concurrency={concurrency}
+							concurrencyValid={concurrencyValid}
+							draft={draft}
+							isDirty={selectedEntry?.dirty ?? false}
+							runs={runsForRecipe}
+							selectedRun={selectedRun}
+							summary={selectedSummary}
+							targetUdids={targetUdids}
+							devices={simulatorRuntime.state.devices}
+							onCancel={(runId) => void recipeRuntime.cancelRun(runId)}
+							onApprove={(run, acknowledgement) =>
+								void approvePendingRun(run, acknowledgement)
 							}
-							description={
-								persistedById.has(selectedRecipeId ?? '')
-									? 'The desktop will open a second native warning bound to this exact recipe before deleting its local definition. Run evidence remains separate.'
-									: 'Discard this unsaved in-memory draft. It has never been written to local recipe storage.'
+							onConcurrencyChange={setConcurrency}
+							onExportRecipe={() =>
+								draft
+									? void recipeRuntime.runFileOperation({
+											kind: 'recipe.export',
+											recipeId: draft.id,
+										})
+									: undefined
 							}
-							isDisabled={!draft}
-							title={
-								persistedById.has(selectedRecipeId ?? '')
-									? 'Delete saved recipe?'
-									: 'Discard draft?'
-							}
-							triggerIcon={<Trash2 className="h-3 w-3" />}
-							triggerLabel={
-								persistedById.has(selectedRecipeId ?? '')
-									? 'Delete recipe'
-									: 'Discard draft'
-							}
-							triggerVariant="danger"
-							onConfirm={() => void removeSelectedRecipe()}
+							onRun={() => void startRun()}
+							onSelectRun={(runId) => {
+								setSelectedRunId(runId);
+								setView('evidence');
+							}}
+							onToggleTarget={toggleTarget}
 						/>
-					</div>
-				</aside>
+						<div className="recipe-inspector-footer-actions">
+							<ConfirmAction
+								confirmLabel={
+									persistedById.has(selectedRecipeId ?? '')
+										? 'Continue'
+										: 'Discard draft'
+								}
+								description={
+									persistedById.has(selectedRecipeId ?? '')
+										? 'The desktop will open a second native warning bound to this exact recipe before deleting its local definition. Run evidence remains separate.'
+										: 'Discard this unsaved in-memory draft. It has never been written to local recipe storage.'
+								}
+								isDisabled={!draft}
+								title={
+									persistedById.has(selectedRecipeId ?? '')
+										? 'Delete saved recipe?'
+										: 'Discard draft?'
+								}
+								triggerIcon={<Trash2 className="h-3 w-3" />}
+								triggerLabel={
+									persistedById.has(selectedRecipeId ?? '')
+										? 'Delete recipe'
+										: 'Discard draft'
+								}
+								triggerVariant="ghost"
+								tone="danger"
+								onConfirm={() => void removeSelectedRecipe()}
+							/>
+						</div>
+					</aside>
+				) : null}
 			</div>
 		</section>
 	);
@@ -1041,8 +1047,11 @@ function RunInspector({
 	return (
 		<>
 			<header>
-				<p className="sim-eyebrow">Run policy</p>
-				<h2>Exact local execution</h2>
+				<h2>Run settings</h2>
+				<InfoPopover label="Running recipes">
+					Review the selected simulators and steps before running. The desktop app
+					confirms sensitive actions and saves the results locally.
+				</InfoPopover>
 			</header>
 			<section className="recipe-run-section">
 				<div className="recipe-section-title">
@@ -1128,16 +1137,6 @@ function RunInspector({
 				onCancel={onCancel}
 			/>
 			<RunHistory runs={runs} selectedRun={selectedRun} onSelect={onSelectRun} />
-			<section className="recipe-agent-safety">
-				<ShieldAlert className="h-3.5 w-3.5" />
-				<div>
-					<strong>One confirmation path</strong>
-					<p>
-						Desktop and agent-triggered runs use the same exact recipe, target list, and
-						short-lived native token. No recipe step opens a shell or bypasses approval.
-					</p>
-				</div>
-			</section>
 		</>
 	);
 }
@@ -1150,6 +1149,16 @@ function ApprovalPreview({
 	requiresApproval: boolean;
 }) {
 	const hasFindings = approval.findings.length > 0 || requiresApproval;
+	if (!hasFindings)
+		return (
+			<div className="recipe-approval-preview">
+				<strong>No sensitive steps detected</strong>
+				<InfoPopover label="Recipe review">
+					The desktop checks the full recipe again before running. Steps that erase
+					data, change permissions, or apply SimSlim need additional review.
+				</InfoPopover>
+			</div>
+		);
 	return (
 		<section className={`recipe-approval-preview ${hasFindings ? 'is-required' : ''}`}>
 			<header>

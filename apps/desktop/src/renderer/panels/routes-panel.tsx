@@ -85,7 +85,7 @@ export function RoutesPanel() {
 					value={query}
 					onChange={setQuery}
 				/>
-				<span className="ml-auto font-mono text-[10px] text-(--text-3)">
+				<span className="ml-auto font-mono text-xs text-(--text-3)">
 					{filtered.length} of {routes.length} routes · {events.length} transitions
 				</span>
 			</Toolbar>
@@ -128,7 +128,7 @@ export function RoutesPanel() {
 												<StatusPill tone="info">Current</StatusPill>
 											) : null}
 										</div>
-										<p className="mb-0 mt-1 truncate font-mono text-[10px] text-(--text-3)">
+										<p className="mb-0 mt-1 truncate font-mono text-xs text-(--text-3)">
 											{route.path}
 										</p>
 									</div>
@@ -143,7 +143,7 @@ export function RoutesPanel() {
 						<>
 							<div className="mb-4 flex items-start justify-between gap-3">
 								<div>
-									<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Route descriptor
 									</p>
 									<h2 className="mb-0 mt-1 text-sm font-semibold text-(--foreground)">
@@ -192,7 +192,7 @@ export function RoutesPanel() {
 										: 'Parameters required on device'}
 							</Button>
 							{selected.filename ? (
-								<div className="mt-3 flex items-start gap-2 rounded-md border border-white/8 bg-white/[0.025] p-3 text-[10px] leading-5 text-(--text-3)">
+								<div className="mt-3 flex items-start gap-2 rounded-md border border-white/8 bg-white/[0.025] p-3 text-xs leading-5 text-(--text-3)">
 									<FileCode2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
 									<span className="break-all font-mono">{selected.filename}</span>
 								</div>
@@ -200,7 +200,7 @@ export function RoutesPanel() {
 						</>
 					) : null}
 					<div className="mt-6 border-t border-white/8 pt-4">
-						<div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+						<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							<History className="h-3.5 w-3.5" /> Recent navigation
 						</div>
 						{events.length === 0 ? (
@@ -221,15 +221,15 @@ export function RoutesPanel() {
 														{event.phase}
 													</StatusPill>
 												) : null}
-												<span className="truncate font-mono text-[10px] text-(--foreground)">
+												<span className="truncate font-mono text-xs text-(--foreground)">
 													{event.route}
 												</span>
 											</div>
-											<span className="shrink-0 font-mono text-[9px] text-(--text-3)">
+											<span className="shrink-0 font-mono text-xs text-(--text-3)">
 												{formatClock(event.at)}
 											</span>
 										</div>
-										<p className="mb-0 mt-1 text-[9px] text-(--text-3)">
+										<p className="mb-0 mt-1 text-xs text-(--text-3)">
 											{[
 												event.source,
 												event.durationMs === undefined
@@ -242,7 +242,7 @@ export function RoutesPanel() {
 												.join(' · ')}
 										</p>
 										{event.error ? (
-											<p className="mb-0 mt-2 text-[10px] leading-4 text-red-300">
+											<p className="mb-0 mt-2 text-xs leading-4 text-red-300">
 												{event.error}
 											</p>
 										) : null}

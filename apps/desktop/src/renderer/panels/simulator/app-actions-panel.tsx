@@ -27,6 +27,7 @@ import {
 	Upload,
 } from 'lucide-react';
 import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import { InfoPopover } from '@/components/ui';
 import type { SimulatorCapability } from '../../../shared/simulator-protocol';
 import {
 	BridgeUnavailableNotice,
@@ -279,7 +280,7 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	},
 	{
 		id: 'pasteboard-to-simulator',
-		label: 'Pasteboard to Simulator',
+		label: 'Paste into simulator',
 		description: 'Synchronize the host pasteboard into the exact Simulator target.',
 		category: 'Data',
 		icon: Clipboard,
@@ -288,7 +289,7 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	},
 	{
 		id: 'pasteboard-from-simulator',
-		label: 'Pasteboard from Simulator',
+		label: 'Copy from simulator',
 		description: 'Synchronize the exact Simulator pasteboard back to the host.',
 		category: 'Data',
 		icon: Clipboard,
@@ -572,11 +573,9 @@ function ActionWorkbench({
 				<Icon className="h-5 w-5" />
 			</div>
 			<p className="sim-eyebrow">{action.category} action</p>
-			<h2>{action.label}</h2>
-			<p className="sim-workbench-description">{action.description}</p>
-			<div className="sim-command-preview">
-				<span>Action ID</span>
-				<code>{action.id}</code>
+			<div className="panel-heading">
+				<h2>{action.label}</h2>
+				<InfoPopover label={action.label}>{action.description}</InfoPopover>
 			</div>
 			<div className="sim-form-stack">
 				<ActionConfiguration
@@ -638,7 +637,7 @@ function ActionWorkbench({
 						if (actionInput) onRun(actionInput);
 					}}
 				>
-					<Command className="h-3.5 w-3.5" /> Run action
+					<Command className="h-3.5 w-3.5" /> {action.label}
 				</Button>
 			</div>
 		</div>

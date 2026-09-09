@@ -609,6 +609,23 @@ private func brokerError(_ message: String) -> NativeHostError {
   NativeHostError(code: "mutation_authorization_required", message: message)
 }
 
+/// A helper that dies without a protocol response explains itself only on
+/// stderr. Keep a bounded, single-line copy so the failure is diagnosable from
+/// Electron instead of collapsing into one fixed sentence.
+private func helperFailureMessage(status: Int32, standardError: Data) -> String {
+  let base = "The authenticated simulator helper process failed with status \(status)."
+  let space: Unicode.Scalar = " "
+  let scalars = String(decoding: standardError.prefix(8 * 1024), as: UTF8.self)
+    .unicodeScalars
+    .map { CharacterSet.newlines.contains($0) ? space : $0 }
+    .filter { !CharacterSet.controlCharacters.contains($0) }
+  let detail = String(String.UnicodeScalarView(scalars))
+    .split(separator: " ", omittingEmptySubsequences: true)
+    .joined(separator: " ")
+    .prefix(1_024)
+  return detail.isEmpty ? base : "\(base) \(detail)"
+}
+
 final class SystemSimulatorMutationProcessRunner: SimulatorMutationProcessRunning {
   private static let timeout: TimeInterval = 32 * 60
   private let spawnedHelperVerifier: any SpawnedSimulatorHelperVerifying
@@ -744,11 +761,11 @@ final class SystemSimulatorMutationProcessRunner: SimulatorMutationProcessRunnin
       controlPipe.closeWrite()
       terminateSurvivingGroup(processID)
       let outputData = output.finish()
-      _ = standardError.finish()
+      let standardErrorData = standardError.finish()
       guard status == 0 || status == 1, !outputData.isEmpty else {
         throw NativeHostError(
           code: "simulator_helper_failed",
-          message: "The authenticated simulator helper process failed."
+          message: helperFailureMessage(status: status, standardError: standardErrorData)
         )
       }
       guard !output.isOversized else {

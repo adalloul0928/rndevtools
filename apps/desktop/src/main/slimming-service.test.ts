@@ -95,7 +95,7 @@ const COMPATIBILITY: SimHelperCompatibility = {
 		hostArchitecture: 'arm64',
 		helperVersion: '0.1.0',
 		helperBuildCommit: 'a'.repeat(40),
-		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 	},
 	verifiedOperations: [],
 };
@@ -168,7 +168,7 @@ class FakeHelper implements SlimmingHelperProvider {
 			protocolVersion: 2 as const,
 			platform: 'darwin' as const,
 			architecture: 'arm64' as const,
-			catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+			catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 			catalogSource: {
 				repository: 'https://github.com/MobAI-App/simslim' as const,
 				commit: 'b'.repeat(40),
@@ -220,7 +220,7 @@ class FakeHelper implements SlimmingHelperProvider {
 		}))
 	);
 	listProfiles = vi.fn(async () => ({
-		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1',
+		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
 		categories: [
 			{
 				id: 'telemetry',
@@ -537,6 +537,29 @@ afterEach(async () => {
 });
 
 describe('slimming service', () => {
+	it('exposes the desktop mutation restriction while retaining read-only discovery', async () => {
+		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-preview-'));
+		temporaryDirectories.push(directory);
+		const service = new SlimmingService({
+			resourceDirectory: '/unused',
+			persistenceDirectory: directory,
+			appVersion: '0.1.0',
+			helper: new FakeHelper(),
+			mutationUnavailableReason: 'Use a signed, packaged desktop app to apply changes.',
+		});
+		try {
+			await service.start();
+			expect(service.getState().helper).toMatchObject({
+				status: 'available',
+				readOnlyAvailable: true,
+				mutationUnavailableReason:
+					'Use a signed, packaged desktop app to apply changes.',
+			});
+			expect(service.getState().profiles).not.toHaveLength(0);
+		} finally {
+			await service.stop();
+		}
+	});
 	it('serializes direct Fleet actions behind a Slimming mutation on the same UDID', async () => {
 		const coordinator = new SimulatorMutationCoordinator();
 		const helper = new FakeHelper();
@@ -947,6 +970,90 @@ describe('slimming service', () => {
 		await service.stop();
 	});
 
+	it('surfaces the helper failure code, reason, and unverified services for a rolled-back apply', async () => {
+		const helper = new FakeHelper();
+		const { directory, service } = await createService(helper);
+		await enableAndAcknowledge(service, 'rolled-back');
+		const attempted = mutation('apply_profile', [], ['com.apple.feedbackd']);
+		helper.applyError = new SimHelperError(
+			'mutation_failed_rolled_back',
+			'The mutation failed and the helper restored the verified pre-operation state.',
+			false,
+			{
+				...attempted,
+				failureCode: 'apply_delta_failed',
+				failureDetail:
+					'the disable overrides did not survive the reboot (1 of 1 changes lost)',
+				changed: true,
+				verification: {
+					...attempted.verification,
+					verified: false,
+					disabledLaunchdJobRegistrationsAbsent: false,
+					registeredDisabledLaunchdJobIds: ['com.apple.feedbackd'],
+				},
+				rollback: { attempted: true, succeeded: true, rebooted: true },
+			}
+		);
+
+		const job = await runApply(service, 'rolled-back-apply');
+		expect(job.status).toBe('failed');
+		const target = job.targets[0];
+		expect(target).toMatchObject({
+			status: 'failed',
+			errorCode: 'mutation_failed_rolled_back',
+		});
+		for (const expected of [
+			'restored the verified pre-operation state',
+			'helper failure apply_delta_failed',
+			'did not survive the reboot (1 of 1 changes lost)',
+			'still registered: com.apple.feedbackd',
+			'rollback succeeded',
+		]) {
+			expect(target?.message).toContain(expected);
+		}
+		expect(
+			(await readPersistedState(directory)).pendingMutations[UDID]
+		).toBeUndefined();
+		await service.stop();
+	});
+
+	it('reports a refused helper authorization as a plain no-mutation failure with its reason', async () => {
+		const helper = new FakeHelper();
+		const { directory, service } = await createService(helper);
+		await enableAndAcknowledge(service, 'refused');
+		const reason =
+			"The helper's parent is not an authenticated PUMPD mutation broker: verify live broker signature failed";
+		helper.applyError = new SimHelperError(
+			'mutation_authorization_required',
+			reason,
+			false
+		);
+
+		const job = await runApply(service, 'refused-apply');
+		// The helper denies before it constructs the simulator service, so nothing
+		// was mutated and nothing needs restart reconciliation.
+		expect(job).toMatchObject({
+			status: 'failed',
+			targets: [
+				{
+					status: 'failed',
+					condition: 'unknown',
+					errorCode: 'mutation_authorization_required',
+					message: expect.stringContaining(
+						'not an authenticated PUMPD mutation broker'
+					),
+				},
+			],
+		});
+		expect(
+			(await readPersistedState(directory)).pendingMutations[UDID]
+		).toBeUndefined();
+		expect(service.getState().statusBySimulator[UDID]?.condition).not.toBe(
+			'needs-attention'
+		);
+		await service.stop();
+	});
+
 	it('durably records the prepared checkpoint before invoking the helper mutation', async () => {
 		const helper = new FakeHelper();
 		const { directory, service } = await createService(helper);
@@ -969,6 +1076,58 @@ describe('slimming service', () => {
 		await rename(savedDirectory, directory);
 		await service.stop();
 	});
+
+	it.each([false, true])(
+		'clears outdated inspections before and after a mutation (failure: %s)',
+		async (fails) => {
+			const { helper, service } = await createService();
+			await enableAndAcknowledge(service, 'inspection-cache');
+			const inspect = async (prefix: string) => {
+				for (const kind of ['profile.preview', 'doctor.run'] as const) {
+					const receipt = service.runAction(
+						action({
+							actionId: `${prefix}-${kind}`,
+							kind,
+							simulatorUdids: [UDID],
+							...(kind === 'profile.preview'
+								? { profileId: PROFILE }
+								: { requiredCapabilities: ['storekit'] }),
+						})
+					);
+					expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe(
+						'complete'
+					);
+				}
+				expect(service.getState().previewBySimulator[UDID]).toBeDefined();
+				expect(service.getState().doctorBySimulator[UDID]).toBeDefined();
+			};
+			await inspect('before');
+			const apply = helper.applyProfile.getMockImplementation();
+			if (!apply) throw new Error('Fake apply implementation is unavailable.');
+			helper.applyProfile.mockImplementationOnce(async (...arguments_) => {
+				expect(service.getState().previewBySimulator[UDID]).toBeUndefined();
+				expect(service.getState().doctorBySimulator[UDID]).toBeUndefined();
+				await inspect('during');
+				return apply(...arguments_);
+			});
+			if (fails) {
+				helper.applyError = new SimHelperError(
+					'mutation_authorization_required',
+					'Injected authorization refusal.',
+					false
+				);
+			}
+			try {
+				expect((await runApply(service, 'inspection-cache-apply')).status).toBe(
+					fails ? 'failed' : 'complete'
+				);
+				expect(service.getState().previewBySimulator[UDID]).toBeUndefined();
+				expect(service.getState().doctorBySimulator[UDID]).toBeUndefined();
+			} finally {
+				await service.stop();
+			}
+		}
+	);
 
 	it('preserves the last real-change checkpoint across an idempotent apply before undo', async () => {
 		const { directory, helper, service } = await createService();

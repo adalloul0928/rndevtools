@@ -148,7 +148,7 @@ export function ScenariosPanel() {
 							triggerIcon={<RotateCcw className="h-3.5 w-3.5" />}
 							title={`Undo ${runtime.active.scenarioName}?`}
 							description="The app will restore every reversible value captured before this scenario ran, in reverse dependency order."
-							confirmLabel="Undo safely"
+							confirmLabel="Undo changes"
 							tone="warning"
 							isDisabled={!canRunAction('scenarios', 'undo')}
 							onConfirm={() => {
@@ -168,10 +168,10 @@ export function ScenariosPanel() {
 			<div className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)]">
 				<div className="panel-scroll border-r border-white/8 p-4">
 					<div className="mb-2 flex items-center justify-between px-1">
-						<span className="text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Available scenarios
 						</span>
-						<span className="font-mono text-[9px] text-(--text-3)">
+						<span className="font-mono text-xs text-(--text-3)">
 							{scenarios.length}
 						</span>
 					</div>
@@ -197,7 +197,7 @@ export function ScenariosPanel() {
 											<p className="m-0 truncate text-xs font-medium text-(--foreground)">
 												{scenario.name}
 											</p>
-											<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+											<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
 												{scenario.id} · v{scenario.version}
 											</p>
 										</div>
@@ -215,7 +215,7 @@ export function ScenariosPanel() {
 						</div>
 						<TextArea
 							aria-label="Scenario import JSON"
-							className="min-h-36 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-[10px] leading-4 text-(--foreground) outline-none focus:border-white/25"
+							className="min-h-36 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-4 text-(--foreground) outline-none focus:border-white/25"
 							maxLength={512 * 1024}
 							value={importText}
 							onChange={(event) => setImportText(event.currentTarget.value)}
@@ -315,7 +315,7 @@ export function ScenariosPanel() {
 									</h3>
 									<div className="mt-3 grid grid-cols-2 gap-3">
 										{selected.variables.map((variable) => (
-											<label className="text-[10px] text-(--muted)" key={variable.id}>
+											<label className="text-xs text-(--muted)" key={variable.id}>
 												{variable.label}
 												{variable.required ? ' *' : ''}
 												<input
@@ -335,15 +335,13 @@ export function ScenariosPanel() {
 										))}
 									</div>
 									{variableError ? (
-										<p className="mb-0 mt-2 text-[10px] text-red-300">
-											{variableError}
-										</p>
+										<p className="mb-0 mt-2 text-xs text-red-300">{variableError}</p>
 									) : null}
 								</div>
 							) : null}
 							<div className="grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
 								<div className="border-r border-white/8 p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Steps
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -351,7 +349,7 @@ export function ScenariosPanel() {
 									</p>
 								</div>
 								<div className="border-r border-white/8 p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Variables
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -359,7 +357,7 @@ export function ScenariosPanel() {
 									</p>
 								</div>
 								<div className="p-4">
-									<p className="m-0 text-[9px] uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Preconditions
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
@@ -373,14 +371,14 @@ export function ScenariosPanel() {
 										className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/[0.02] p-3"
 										key={step.id}
 									>
-										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 font-mono text-[10px] text-(--muted)">
+										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 font-mono text-xs text-(--muted)">
 											{index + 1}
 										</span>
 										<div>
 											<p className="m-0 text-xs font-medium text-(--foreground)">
 												{step.label ?? step.id}
 											</p>
-											<p className="mb-0 mt-1 font-mono text-[9px] text-(--text-3)">
+											<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
 												{step.type}
 											</p>
 										</div>
@@ -397,7 +395,7 @@ export function ScenariosPanel() {
 											{latestReceipt.status}
 										</StatusPill>
 									</div>
-									<p className="mb-0 mt-2 text-[10px] text-(--text-3)">
+									<p className="mb-0 mt-2 text-xs text-(--text-3)">
 										{formatRelativeTime(latestReceipt.completedAt)} ·{' '}
 										{latestReceipt.stepResults.length} step results
 									</p>

@@ -241,6 +241,23 @@ async function copyComposedOutput(
 	}
 }
 
+/**
+ * A failure the signed native host reported itself, as opposed to a spawn or
+ * transport failure. The host's code stays attached so a refused attestation
+ * can be told apart from a helper that died mid-operation.
+ */
+export class NativeHostResponseError extends Error {
+	readonly code: string;
+	readonly retryable: boolean;
+
+	constructor(code: string, message: string, retryable: boolean) {
+		super(message);
+		this.name = 'NativeHostResponseError';
+		this.code = code;
+		this.retryable = retryable;
+	}
+}
+
 export class NativeHostClient {
 	readonly #resourceDirectory: string;
 	readonly #appVersion: string;
@@ -492,7 +509,13 @@ export class NativeHostClient {
 		if (response.requestId !== requestId) {
 			throw new Error('Native host response identifier did not match the request.');
 		}
-		if (!response.ok) throw new Error(response.error.message);
+		if (!response.ok) {
+			throw new NativeHostResponseError(
+				response.error.code,
+				response.error.message,
+				response.error.retryable
+			);
+		}
 		return response.result;
 	}
 }

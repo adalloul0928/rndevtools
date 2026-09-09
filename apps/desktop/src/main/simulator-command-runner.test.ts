@@ -66,6 +66,45 @@ describe('simulator command runner', () => {
 		});
 	});
 
+	it('reserves descriptor 3 as an unpollable character device', async () => {
+		// 'ignore' above descriptor 2 yields a pollable FIFO. The helper's Go runtime
+		// registers that with its netpoll kqueue, and the helper's exactly-once close
+		// of the spent authorization descriptor then kills the process mid-run. Only a
+		// character device (S_IFCHR) is safe here; descriptor 4 stays the control pipe.
+		const S_IFCHR = 0o20000;
+		const result = await runSimulatorCommand(
+			process.execPath,
+			[
+				'-e',
+				"const fs=require('node:fs'); const kind=(fd)=>{try{return (fs.fstatSync(fd).mode & 0o170000).toString(8)}catch(error){return String(error.code)}}; process.stdout.write('3:'+kind(3)+' 4:'+kind(4))",
+			],
+			{ gracefulCancellationPipe: true }
+		);
+		const [authorization, control] = result.stdout.split(' ');
+		expect(authorization).toBe(`3:${S_IFCHR.toString(8)}`);
+		// The control pipe must stay a real pollable channel, whatever Node backs it
+		// with on this platform, so closing it still cancels the helper.
+		expect(control).not.toBe(`4:${S_IFCHR.toString(8)}`);
+		expect(control).toMatch(/^4:\d+$/);
+	});
+
+	it('reports the helper exit code and stderr when a command dies without output', async () => {
+		let failure: unknown;
+		try {
+			await runSimulatorCommand(process.execPath, [
+				'-e',
+				"process.stderr.write('fatal error: runtime: netpoll failed'); process.exit(2)",
+			]);
+		} catch (error) {
+			failure = error;
+		}
+		expect(failure).toBeInstanceOf(SimulatorCommandError);
+		expect(failure).toMatchObject({
+			exitCode: 2,
+			stderr: 'fatal error: runtime: netpoll failed',
+		});
+	});
+
 	it('returns bounded failure details without including arguments in its message', async () => {
 		const secretArgument = 'private-token-value';
 		let failure: unknown;

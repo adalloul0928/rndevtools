@@ -89,18 +89,18 @@ export function IdentityPanel() {
 							<ArrowRight className="h-3.5 w-3.5 text-(--text-3)" />
 							<span>{active.target.label}</span>
 						</div>
-						<p className="mb-0 mt-1 text-[10px] text-(--muted)">
+						<p className="mb-0 mt-1 text-xs text-(--muted)">
 							Started {formatRelativeTime(active.startedAt)}. Stop restores the exact
 							original actor session.
 						</p>
 						{active.error ? (
-							<p className="mb-0 mt-1 text-[10px] text-red-300">{active.error}</p>
+							<p className="mb-0 mt-1 text-xs text-red-300">{active.error}</p>
 						) : null}
 					</div>
 				</div>
 			) : null}
 			<div className="panel-scroll p-5">
-				<h2 className="mb-3 mt-0 text-[10px] font-medium uppercase tracking-[0.08em] text-(--text-3)">
+				<h2 className="mb-3 mt-0 text-xs font-medium uppercase tracking-[0.08em] text-(--text-3)">
 					Seeded identities
 				</h2>
 				{session.personas.length === 0 ? (
@@ -130,9 +130,7 @@ export function IdentityPanel() {
 													<StatusPill tone="warning">ACTIVE</StatusPill>
 												) : null}
 											</div>
-											<p className="mb-0 mt-1 text-[10px] text-(--muted)">
-												{persona.note}
-											</p>
+											<p className="mb-0 mt-1 text-xs text-(--muted)">{persona.note}</p>
 										</div>
 										<ConfirmAction
 											confirmLabel="Start identity"
@@ -158,7 +156,7 @@ export function IdentityPanel() {
 					</div>
 				)}
 
-				<h2 className="mb-3 mt-6 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.08em] text-(--text-3)">
+				<h2 className="mb-3 mt-6 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-(--text-3)">
 					<History className="h-3.5 w-3.5" /> Recent sessions
 				</h2>
 				{session.history.length === 0 ? (
@@ -173,7 +171,7 @@ export function IdentityPanel() {
 								<div className="min-w-0 flex-1 text-xs text-(--foreground)">
 									{`${entry.actor.label} → ${entry.target.label}`}
 								</div>
-								<span className="text-[10px] text-(--text-3)">
+								<span className="text-xs text-(--text-3)">
 									{formatRelativeTime(entry.startedAt)}
 								</span>
 								<StatusPill

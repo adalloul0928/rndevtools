@@ -1,5 +1,6 @@
 import { AlertDialog } from '@heroui/react/alert-dialog';
 import { Button } from '@heroui/react/button';
+import { Popover } from '@heroui/react/popover';
 import { SearchField } from '@heroui/react/search-field';
 import { Tooltip } from '@heroui/react/tooltip';
 import { EmptyState } from '@heroui-pro/react/empty-state';
@@ -18,8 +19,55 @@ import { copyText } from '@/lib/format';
 
 export { StatusPill } from '@/components/status-ui';
 
+export function InfoPopover({
+	label,
+	children,
+}: {
+	label: string;
+	children: ReactNode;
+}) {
+	return (
+		<Popover>
+			<Button
+				aria-label={`About ${label}`}
+				className="info-button"
+				isIconOnly
+				variant="ghost"
+			>
+				<Info aria-hidden="true" className="h-4 w-4" />
+			</Button>
+			<Popover.Content className="info-popover" placement="bottom start">
+				<Popover.Dialog>
+					<Popover.Heading>{label}</Popover.Heading>
+					<div className="info-popover-copy">{children}</div>
+				</Popover.Dialog>
+			</Popover.Content>
+		</Popover>
+	);
+}
+
+export function Disclosure({
+	title,
+	children,
+	defaultOpen = false,
+}: {
+	title: string;
+	children: ReactNode;
+	defaultOpen?: boolean;
+}) {
+	return (
+		<details className="panel-disclosure" open={defaultOpen || undefined}>
+			<summary>
+				<ChevronRight aria-hidden="true" className="h-4 w-4" />
+				{title}
+			</summary>
+			<div className="panel-disclosure-content">{children}</div>
+		</details>
+	);
+}
+
 export function PanelHeader({
-	eyebrow,
+	eyebrow: _eyebrow,
 	title,
 	description,
 	meta,
@@ -33,26 +81,14 @@ export function PanelHeader({
 }) {
 	return (
 		<header className="panel-header">
-			<div className="min-w-0">
-				<div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.09em] text-(--text-3)">
-					<span>{eyebrow}</span>
-					{meta ? (
-						<>
-							<span className="text-white/20">/</span>
-							{meta}
-						</>
-					) : null}
-				</div>
-				<h1 className="m-0 truncate text-xl font-semibold tracking-[-0.035em] text-(--foreground)">
+			<div className="panel-heading">
+				<h1 className="m-0 text-xl font-semibold tracking-[-0.025em] text-(--foreground)">
 					{title}
 				</h1>
-				<p className="mb-0 mt-1 max-w-[740px] text-xs leading-5 text-(--muted)">
-					{description}
-				</p>
+				<InfoPopover label={title}>{description}</InfoPopover>
+				{meta ? <span className="panel-heading-meta">{meta}</span> : null}
 			</div>
-			{actions ? (
-				<div className="flex shrink-0 items-center gap-2">{actions}</div>
-			) : null}
+			{actions ? <div className="panel-header-actions">{actions}</div> : null}
 		</header>
 	);
 }
@@ -70,10 +106,18 @@ export function PanelNotice({
 	children: ReactNode;
 	tone?: 'warning' | 'danger' | 'info';
 }) {
-	const Icon = tone === 'danger' ? CircleX : tone === 'info' ? Info : AlertTriangle;
+	if (tone === 'info') {
+		return (
+			<div className="panel-info-note">
+				<span>{title.replace(/\.$/, '')}</span>
+				<InfoPopover label={title.replace(/\.$/, '')}>{children}</InfoPopover>
+			</div>
+		);
+	}
+	const Icon = tone === 'danger' ? CircleX : AlertTriangle;
 	return (
 		<div
-			className={`flex shrink-0 items-start gap-2 border-b px-4 py-2.5 text-[10px] leading-5 ${statusToneClassName[tone]}`}
+			className={`flex shrink-0 items-start gap-2 border-b px-4 py-2.5 text-xs leading-5 ${statusToneClassName[tone]}`}
 			role={tone === 'danger' ? 'alert' : 'status'}
 		>
 			<Icon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -108,7 +152,7 @@ export function SearchControl({
 			<SearchField.Group className="h-8 rounded-md border border-white/10 bg-black/30 shadow-none transition-colors focus-within:border-white/25">
 				<Search className="ml-2.5 h-3.5 w-3.5 text-(--text-3)" aria-hidden="true" />
 				<SearchField.Input
-					className="h-full min-w-0 flex-1 bg-transparent px-2 text-xs text-(--foreground) outline-none placeholder:text-(--text-3)"
+					className="h-full min-w-0 flex-1 bg-transparent px-2 text-sm text-(--foreground) outline-none placeholder:text-(--text-3)"
 					placeholder={placeholder}
 				/>
 				<SearchField.ClearButton className="mr-1 grid h-6 w-6 place-items-center rounded text-(--text-3) hover:bg-white/8 hover:text-(--foreground)">
@@ -168,13 +212,13 @@ export function CodePreview({
 	return (
 		<div className="overflow-hidden rounded-md border border-white/8 bg-black/35">
 			{label ? (
-				<div className="flex h-8 items-center justify-between border-b border-white/8 px-3 font-mono text-[10px] uppercase tracking-[0.06em] text-(--text-3)">
+				<div className="flex h-8 items-center justify-between border-b border-white/8 px-3 font-mono text-xs uppercase tracking-[0.06em] text-(--text-3)">
 					<span>{label}</span>
 					<CopyButton value={value} />
 				</div>
 			) : null}
 			<pre
-				className="m-0 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-[1.65] text-[#d4d4d4]"
+				className="m-0 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-[1.65] text-[#d4d4d4]"
 				style={{ maxHeight }}
 			>
 				{displayValue}
@@ -233,7 +277,7 @@ export function KeyValue({
 		<div className="grid grid-cols-[132px_minmax(0,1fr)] gap-4 border-b border-white/[0.06] py-2.5 last:border-0">
 			<dt className="text-xs text-(--text-3)">{label}</dt>
 			<dd
-				className={`m-0 min-w-0 break-words text-xs text-(--foreground) ${mono ? 'font-mono text-[11px]' : ''}`}
+				className={`m-0 min-w-0 break-words text-xs text-(--foreground) ${mono ? 'font-mono text-xs' : ''}`}
 			>
 				{value}
 			</dd>

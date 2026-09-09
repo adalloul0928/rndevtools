@@ -132,10 +132,10 @@ export function QueryPanel() {
 				isRowHeader: true,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
-						<div className="truncate font-mono text-[11px] text-(--foreground)">
+						<div className="truncate font-mono text-xs text-(--foreground)">
 							{entry.keyText}
 						</div>
-						<div className="mt-0.5 truncate font-mono text-[9px] text-(--text-3)">
+						<div className="mt-0.5 truncate font-mono text-xs text-(--text-3)">
 							{entry.hash}
 						</div>
 					</div>
@@ -157,9 +157,7 @@ export function QueryPanel() {
 				width: 90,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-[11px] text-(--muted)">
-						{entry.observers}
-					</span>
+					<span className="font-mono text-xs text-(--muted)">{entry.observers}</span>
 				),
 			},
 			{
@@ -168,7 +166,7 @@ export function QueryPanel() {
 				width: 100,
 				align: 'end',
 				cell: (entry) => (
-					<span className="text-[10px] text-(--text-3)">
+					<span className="text-xs text-(--text-3)">
 						{queryUpdatedLabel(entry.updatedAt)}
 					</span>
 				),
@@ -195,7 +193,7 @@ export function QueryPanel() {
 					{(['queries', 'mutations'] as const).map((value) => (
 						<Button
 							aria-pressed={tab === value}
-							className="h-7 rounded px-3 text-[11px]"
+							className="h-7 rounded px-3 text-xs"
 							key={value}
 							size="sm"
 							variant={tab === value ? 'secondary' : 'ghost'}
@@ -219,7 +217,7 @@ export function QueryPanel() {
 							(value) => (
 								<Button
 									aria-pressed={filter === value}
-									className="h-7 rounded-md px-2 text-[11px] capitalize"
+									className="h-7 rounded-md px-2 text-xs capitalize"
 									key={value}
 									size="sm"
 									variant={filter === value ? 'secondary' : 'ghost'}
@@ -236,7 +234,7 @@ export function QueryPanel() {
 				<div className="mx-5 mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3">
 					<div className="flex items-start justify-between gap-4">
 						<div>
-							<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+							<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 								Query simulation
 							</p>
 							<p className="mb-0 mt-1 text-xs text-(--foreground)">
@@ -244,7 +242,7 @@ export function QueryPanel() {
 									? `${simulation.active.familyLabel} · ${SIMULATION_LABELS[simulation.active.mode]} active`
 									: selectedFamily.label}
 							</p>
-							<p className="mb-0 mt-1 text-[10px] text-(--text-3)">
+							<p className="mb-0 mt-1 text-xs text-(--text-3)">
 								{selectedFamily.description ??
 									'Only explicitly registered query-family adapters can be changed.'}
 							</p>
@@ -272,7 +270,7 @@ export function QueryPanel() {
 							{simulation.families.map((family) => (
 								<Button
 									aria-pressed={family.id === selectedFamily.id}
-									className="h-7 px-2 text-[10px]"
+									className="h-7 px-2 text-xs"
 									key={family.id}
 									size="sm"
 									variant={family.id === selectedFamily.id ? 'secondary' : 'ghost'}
@@ -304,7 +302,7 @@ export function QueryPanel() {
 						))}
 					</div>
 					{selectedFamily.modes.some((mode) => !mode.supported) ? (
-						<ul className="mb-0 mt-2 space-y-1 pl-4 text-[10px] text-(--text-3)">
+						<ul className="mb-0 mt-2 space-y-1 pl-4 text-xs text-(--text-3)">
 							{selectedFamily.modes
 								.filter((mode) => !mode.supported)
 								.map((mode) => (
@@ -360,7 +358,7 @@ export function QueryPanel() {
 											<p className="m-0 font-mono text-xs text-(--foreground)">
 												{mutation.keyText}
 											</p>
-											<p className="mb-0 mt-1 text-[10px] text-(--text-3)">
+											<p className="mb-0 mt-1 text-xs text-(--text-3)">
 												{mutation.submittedAt
 													? formatRelativeTime(mutation.submittedAt)
 													: 'Not submitted'}
@@ -420,7 +418,7 @@ export function QueryPanel() {
 							<div className="h-full overflow-auto p-4">
 								<div className="mb-4 flex items-start justify-between gap-3">
 									<div className="min-w-0">
-										<p className="m-0 text-[10px] uppercase tracking-[0.08em] text-(--text-3)">
+										<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 											Query key
 										</p>
 										<h2 className="mb-0 mt-1 break-all font-mono text-xs leading-5 text-(--foreground)">
