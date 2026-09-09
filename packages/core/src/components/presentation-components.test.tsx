@@ -230,7 +230,9 @@ describe('presentation components', () => {
 		);
 
 		expect(screen.getByTestId('system-icon-xmark').props.size).toBe(18);
-		expect(screen.getByTestId('system-icon-chevron.right').props.size).toBe(12);
+		expect(screen.getByTestId('system-icon-chevron.right').props.width).toBe(
+			12,
+		);
 		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		fireEvent.press(screen.getByLabelText('Pill presentation'));
 		fireEvent.press(screen.getByLabelText('Close developer tools'));

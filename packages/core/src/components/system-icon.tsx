@@ -5,13 +5,36 @@ import {
 } from '@expo/ui';
 import { Host, Image } from '@expo/ui/swift-ui';
 import { frame } from '@expo/ui/swift-ui/modifiers';
-import {
-	type ColorValue,
-	Platform,
-	PlatformColor,
-	StyleSheet,
-	View,
-} from 'react-native';
+import Alert02Icon from '@hugeicons/core-free-icons/Alert02Icon';
+import ArrowRight01Icon from '@hugeicons/core-free-icons/ArrowRight01Icon';
+import BubbleChatIcon from '@hugeicons/core-free-icons/BubbleChatIcon';
+import CloudIcon from '@hugeicons/core-free-icons/CloudIcon';
+import ComputerIcon from '@hugeicons/core-free-icons/ComputerIcon';
+import DatabaseIcon from '@hugeicons/core-free-icons/DatabaseIcon';
+import Delete02Icon from '@hugeicons/core-free-icons/Delete02Icon';
+import Edit02Icon from '@hugeicons/core-free-icons/Edit02Icon';
+import HardDriveIcon from '@hugeicons/core-free-icons/HardDriveIcon';
+import HourglassIcon from '@hugeicons/core-free-icons/HourglassIcon';
+import InformationCircleIcon from '@hugeicons/core-free-icons/InformationCircleIcon';
+import Link01Icon from '@hugeicons/core-free-icons/Link01Icon';
+import LinkSquare02Icon from '@hugeicons/core-free-icons/LinkSquare02Icon';
+import Location01Icon from '@hugeicons/core-free-icons/Location01Icon';
+import MoreHorizontalIcon from '@hugeicons/core-free-icons/MoreHorizontalIcon';
+import PauseIcon from '@hugeicons/core-free-icons/PauseIcon';
+import PinIcon from '@hugeicons/core-free-icons/PinIcon';
+import PlayIcon from '@hugeicons/core-free-icons/PlayIcon';
+import RefreshIcon from '@hugeicons/core-free-icons/RefreshIcon';
+import Search01Icon from '@hugeicons/core-free-icons/Search01Icon';
+import Settings01Icon from '@hugeicons/core-free-icons/Settings01Icon';
+import Shield01Icon from '@hugeicons/core-free-icons/Shield01Icon';
+import Tick02Icon from '@hugeicons/core-free-icons/Tick02Icon';
+import Timer01Icon from '@hugeicons/core-free-icons/Timer01Icon';
+import ToolsIcon from '@hugeicons/core-free-icons/ToolsIcon';
+import UserGroupIcon from '@hugeicons/core-free-icons/UserGroupIcon';
+import UserIcon from '@hugeicons/core-free-icons/UserIcon';
+import Wifi01Icon from '@hugeicons/core-free-icons/Wifi01Icon';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { type ColorValue, Platform, PlatformColor, View } from 'react-native';
 import type { DevToolsSystemImage } from '../types';
 
 type SystemIconProps = {
@@ -143,92 +166,136 @@ const materialIcons = {
 	}),
 } as const satisfies Record<string, IconName>;
 
-export function universalIconForSystemImage(
+function iconKeyForSystemImage(
 	systemName: DevToolsSystemImage,
-): IconName {
-	if (systemName === 'chevron.left') return materialIcons.back;
-	if (systemName === 'chevron.right') return materialIcons.forward;
-	if (systemName === 'xmark' || systemName.startsWith('xmark.'))
-		return materialIcons.close;
-	if (systemName.includes('checkmark')) return materialIcons.check;
-	if (systemName.includes('trash')) return materialIcons.delete;
-	if (systemName.includes('pencil')) return materialIcons.edit;
-	if (systemName.includes('magnifyingglass')) return materialIcons.search;
-	if (systemName.includes('person.2')) return materialIcons.group;
-	if (systemName.includes('person')) return materialIcons.person;
-	if (systemName.includes('bubble')) return materialIcons.message;
+): keyof typeof materialIcons {
+	if (systemName === 'chevron.left') return 'back';
+	if (systemName === 'chevron.right') return 'forward';
+	if (systemName === 'xmark' || systemName.startsWith('xmark.')) return 'close';
+	if (systemName.includes('checkmark')) return 'check';
+	if (systemName.includes('trash')) return 'delete';
+	if (systemName.includes('pencil')) return 'edit';
+	if (systemName.includes('magnifyingglass')) return 'search';
+	if (systemName.includes('person.2')) return 'group';
+	if (systemName.includes('person')) return 'person';
+	if (systemName.includes('bubble')) return 'message';
 	if (systemName.includes('network') || systemName.includes('wifi'))
-		return materialIcons.network;
+		return 'network';
 	if (systemName.includes('externaldrive') || systemName.includes('storage'))
-		return materialIcons.storage;
+		return 'storage';
 	if (systemName.includes('stack') || systemName.includes('database'))
-		return materialIcons.database;
-	if (systemName.includes('gear')) return materialIcons.settings;
+		return 'database';
+	if (systemName.includes('gear')) return 'settings';
 	if (systemName.includes('shield') || systemName.includes('lock'))
-		return materialIcons.shield;
+		return 'shield';
 	if (systemName.includes('timer') || systemName.includes('clock'))
-		return materialIcons.timer;
-	if (systemName.includes('hourglass')) return materialIcons.hourglass;
-	if (systemName.includes('location')) return materialIcons.location;
-	if (systemName.includes('link')) return materialIcons.link;
-	if (systemName.includes('pause')) return materialIcons.pause;
-	if (systemName.includes('play')) return materialIcons.play;
+		return 'timer';
+	if (systemName.includes('hourglass')) return 'hourglass';
+	if (systemName.includes('location')) return 'location';
+	if (systemName.includes('link')) return 'link';
+	if (systemName.includes('pause')) return 'pause';
+	if (systemName.includes('play')) return 'play';
 	if (
 		systemName.includes('clockwise') ||
 		systemName.includes('counterclockwise') ||
 		systemName.includes('circlepath')
 	)
-		return materialIcons.refresh;
-	if (systemName.includes('exclamationmark')) return materialIcons.warning;
-	if (systemName.includes('info')) return materialIcons.info;
-	if (systemName.includes('pin')) return materialIcons.pin;
+		return 'refresh';
+	if (systemName.includes('exclamationmark')) return 'warning';
+	if (systemName.includes('info')) return 'info';
+	if (systemName.includes('pin')) return 'pin';
 	if (
 		systemName.includes('arrow.up') ||
 		systemName.includes('square.and.arrow.up')
 	)
-		return materialIcons.open;
-	if (systemName.includes('window')) return materialIcons.window;
-	if (systemName.includes('ellipsis')) return materialIcons.more;
+		return 'open';
+	if (systemName.includes('window')) return 'window';
+	if (systemName.includes('ellipsis')) return 'more';
 	if (systemName.includes('icloud') || systemName.includes('cloud'))
-		return materialIcons.cloud;
-	return materialIcons.build;
+		return 'cloud';
+	return 'build';
 }
+
+export function universalIconForSystemImage(
+	systemName: DevToolsSystemImage,
+): IconName {
+	return materialIcons[iconKeyForSystemImage(systemName)];
+}
+
+// Content icons use Hugeicons; NavIconButton keeps native platform symbols.
+const contentIcons = {
+	build: ToolsIcon,
+	check: Tick02Icon,
+	cloud: CloudIcon,
+	database: DatabaseIcon,
+	delete: Delete02Icon,
+	edit: Edit02Icon,
+	forward: ArrowRight01Icon,
+	group: UserGroupIcon,
+	hourglass: HourglassIcon,
+	info: InformationCircleIcon,
+	link: Link01Icon,
+	location: Location01Icon,
+	message: BubbleChatIcon,
+	more: MoreHorizontalIcon,
+	network: Wifi01Icon,
+	open: LinkSquare02Icon,
+	pause: PauseIcon,
+	person: UserIcon,
+	pin: PinIcon,
+	play: PlayIcon,
+	refresh: RefreshIcon,
+	search: Search01Icon,
+	settings: Settings01Icon,
+	shield: Shield01Icon,
+	storage: HardDriveIcon,
+	timer: Timer01Icon,
+	warning: Alert02Icon,
+	window: ComputerIcon,
+} as const;
 
 export function SystemIcon({
 	systemName,
 	size = 20,
 	color = Platform.OS === 'ios' ? PlatformColor('systemBlueColor') : '#6750A4',
 }: SystemIconProps) {
-	if (Platform.OS !== 'ios') {
+	const key = iconKeyForSystemImage(systemName);
+	if (key === 'back' || key === 'close') {
+		if (Platform.OS !== 'ios') {
+			return (
+				<View pointerEvents="none" style={{ height: size, width: size }}>
+					<UniversalHost matchContents style={{ flex: 1 }}>
+						<UniversalIcon
+							color={color}
+							name={universalIconForSystemImage(systemName)}
+							size={size}
+							testID={`system-icon-${systemName}`}
+						/>
+					</UniversalHost>
+				</View>
+			);
+		}
 		return (
 			<View pointerEvents="none" style={{ height: size, width: size }}>
-				<UniversalHost matchContents style={styles.host}>
-					<UniversalIcon
+				<Host style={{ flex: 1 }}>
+					<Image
 						color={color}
-						name={universalIconForSystemImage(systemName)}
+						modifiers={[frame({ width: size, height: size })]}
 						size={size}
-						testID={`system-icon-${systemName}`}
+						systemName={systemName}
 					/>
-				</UniversalHost>
+				</Host>
 			</View>
 		);
 	}
 	return (
 		<View pointerEvents="none" style={{ height: size, width: size }}>
-			<Host style={styles.host}>
-				<Image
-					color={color}
-					modifiers={[frame({ width: size, height: size })]}
-					size={size}
-					systemName={systemName}
-				/>
-			</Host>
+			<HugeiconsIcon
+				icon={contentIcons[key]}
+				color={color}
+				size={size}
+				testID={`system-icon-${systemName}`}
+			/>
 		</View>
 	);
 }
-
-const styles = StyleSheet.create({
-	host: {
-		flex: 1,
-	},
-});
