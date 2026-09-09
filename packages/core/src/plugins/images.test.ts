@@ -1,11 +1,11 @@
-import { DevtoolsEventStore } from '../core/event-store';
 import {
 	analyzeImageDiagnostic,
 	createImageDiagnosticsPlugin,
 	describeImageSource,
 	type ImageDiagnosticEntry,
 	summarizeImageDiagnostics,
-} from './images';
+} from '@pumpd/devtools/plugins/images';
+import { DevtoolsEventStore } from '../core/event-store';
 
 function install(
 	diagnostics: ReturnType<typeof createImageDiagnosticsPlugin>,

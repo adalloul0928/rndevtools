@@ -1,3 +1,5 @@
+// Production staff tools import this barrel. Keep development-only plugins
+// on dedicated subpaths so hosts can prune them without relying on tree shaking.
 export type {
 	NetworkSimulationPreference,
 	NetworkSimulationProfile,
@@ -100,26 +102,8 @@ export {
 	validateImageOverlayRemoteUrl,
 	validateImageOverlaySource,
 } from './image-overlay';
-export {
-	analyzeImageDiagnostic,
-	createImageDiagnosticsPlugin,
-	describeImageSource,
-	type ImageCachePolicy,
-	type ImageCacheType,
-	type ImageContentFit,
-	type ImageDiagnosticAnalysis,
-	type ImageDiagnosticEntry,
-	type ImageDiagnosticFindingStatus,
-	type ImageDiagnosticSize,
-	type ImageDiagnosticState,
-	type ImageDiagnosticsPlugin,
-	type ImageDiagnosticsPluginOptions,
-	type ImageDiagnosticsSummary,
-	type ImageLoadStartInput,
-	type ImageLoadSuccessInput,
-	type ImageSourceDescriptor,
-	summarizeImageDiagnostics,
-} from './images';
+// Image diagnostics live at `@pumpd/devtools/plugins/images`; the mobile host
+// replaces their adapter with a no-op in production.
 export {
 	buildNavigationRoutePath,
 	createNavigationPlugin,
@@ -244,8 +228,8 @@ export {
 // The storage plugin is deliberately absent from this barrel and lives at
 // `@pumpd/devtools/plugins/storage`. It edits, deletes, and clears host storage,
 // so a host that ships diagnostics to production can take the rest of the
-// barrel without pulling an editor it must not expose. Metro does not
-// tree-shake, so the split is what keeps that module out of the bundle.
+// barrel without pulling an editor it must not expose. The split keeps that
+// module out of the bundle even when the host does not enable tree shaking.
 export {
 	changedZustandKeys,
 	createZustandPlugin,

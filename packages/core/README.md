@@ -51,6 +51,11 @@ available from the dedicated `@pumpd/devtools/plugins` entry point. Keeping the
 entry points separate prevents hosts that only need the shell from traversing
 optional diagnostic dependencies.
 
+Image diagnostics and the storage editor use the separate
+`@pumpd/devtools/plugins/images` and `@pumpd/devtools/plugins/storage` entry points.
+They are excluded from the shared plugins barrel so hosts can prune their adapters
+from production bundles without depending on tree shaking.
+
 Collectors install when `InternalTools` is enabled and remain active while its
 panel is closed. The runtime reconciles collectors by plugin ID and installer,
 so adding an application action does not restart unrelated collectors. Network

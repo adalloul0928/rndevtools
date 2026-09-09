@@ -13,6 +13,7 @@
 		"./scenario-model": "./src/scenario-model.ts",
 		"./serialize": "./src/core/serialize.ts",
 		"./plugins": "./src/plugins/index.ts",
+		"./plugins/images": "./src/plugins/images.tsx",
 		"./plugins/storage": "./src/plugins/storage.tsx",
 		"./plugins/network-presentation": "./src/plugins/network-presentation.ts",
 		"./package.json": "./package.json"
