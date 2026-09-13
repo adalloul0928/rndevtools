@@ -37,6 +37,8 @@ describe('desktop diagnostic projections', () => {
 
 	it('bounds header names, values, and field count', () => {
 		const headers: Record<string, string> = {
+			['n'.repeat(257)]: 'ignored',
+			['名'.repeat(100)]: 'ignored',
 			authorization: 'Bearer opaque-secret',
 			'x-context': '{"password":"private-value"}',
 			'x-too-long': 'x'.repeat(600_000),
@@ -45,8 +47,6 @@ describe('desktop diagnostic projections', () => {
 				Array.from({ length: 205 }, (_, index) => [`x-${index}`, 'value'])
 			),
 		};
-		headers['n'.repeat(257)] = 'ignored';
-		headers['名'.repeat(100)] = 'ignored';
 		const projected = projectDesktopHeaders(headers) ?? {};
 
 		expect(Object.keys(projected).length).toBeLessThanOrEqual(200);
