@@ -27,8 +27,8 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit --pretty false -p tsconfig.node.json && tsc --noEmit --pretty false -p tsconfig.renderer.json",
-		"check:unused": "knip --treat-config-hints-as-errors",
-		"check:cycles": "knip --cycles --treat-config-hints-as-errors",
+		"check:unused": "knip --directory ../.. --workspace apps/devtools-desktop --treat-config-hints-as-errors",
+		"check:cycles": "knip --directory ../.. --workspace apps/devtools-desktop --cycles --treat-config-hints-as-errors",
 		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "vitest run",
 		"quality": "pnpm lint && pnpm typecheck && pnpm check:dead-code && pnpm test:run && pnpm build"

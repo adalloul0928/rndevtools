@@ -21,8 +21,8 @@
 	"scripts": {
 		"lint": "biome check src",
 		"typecheck": "tsc --noEmit",
-		"check:unused": "knip --treat-config-hints-as-errors",
-		"check:cycles": "knip --cycles --treat-config-hints-as-errors",
+		"check:unused": "knip --directory ../.. --workspace packages/devtools --treat-config-hints-as-errors",
+		"check:cycles": "knip --directory ../.. --workspace packages/devtools --cycles --treat-config-hints-as-errors",
 		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "jest --runInBand",
 		"test:coverage": "jest --runInBand --coverage",
