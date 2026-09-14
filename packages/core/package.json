@@ -47,29 +47,29 @@
 		}
 	},
 	"devDependencies": {
-		"test-renderer": "1.2.0",
+		"test-renderer": "catalog:",
 		"@biomejs/biome": "catalog:",
 		"@expo/material-symbols": "catalog:",
-		"@expo/ui": "catalog:upgrade-expo-ui-patch-57-0-16",
-		"@tanstack/react-query": "catalog:upgrade-tanstack-react-query-exact-5-102-8",
+		"@expo/ui": "catalog:",
+		"@tanstack/react-query": "catalog:",
 		"@testing-library/react-native": "catalog:",
 		"@types/jest": "catalog:",
-		"@types/react": "catalog:types-react-19-2-18",
-		"expo": "catalog:upgrade-expo-patch-57-0-20",
+		"@types/react": "catalog:",
+		"expo": "catalog:",
 		"jest": "catalog:",
-		"jest-expo": "catalog:upgrade-jest-expo-patch-57-0-5",
+		"jest-expo": "catalog:",
 		"knip": "catalog:",
 		"react": "catalog:",
-		"react-native": "catalog:upgrade-react-native-exact-0-86-3",
-		"react-native-gesture-handler": "catalog:react-native-gesture-handler-2-32-0",
+		"react-native": "catalog:",
+		"react-native-gesture-handler": "catalog:",
 		"react-native-reanimated": "catalog:",
-		"react-native-safe-area-context": "catalog:react-native-safe-area-context-5-8-0",
+		"react-native-safe-area-context": "catalog:",
 		"react-native-worklets": "catalog:",
-		"typescript": "catalog:typescript-7-0-2",
-		"react-native-svg": "catalog:react-native-svg-15-15-5"
+		"typescript": "catalog:",
+		"react-native-svg": "catalog:"
 	},
 	"dependencies": {
-		"@hugeicons/core-free-icons": "catalog:hugeicons-core-free-icons-4-3-0",
-		"@hugeicons/react-native": "catalog:hugeicons-react-native-1-0-16"
+		"@hugeicons/core-free-icons": "catalog:",
+		"@hugeicons/react-native": "catalog:"
 	}
 }
