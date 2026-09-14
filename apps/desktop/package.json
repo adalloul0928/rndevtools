@@ -69,7 +69,7 @@
 		"vite": "catalog:",
 		"vitest": "catalog:vitest-range-4-1-11",
 		"ws": "^8.21.3",
-		"zod": "catalog:zod-range-4-3-6"
+		"zod": "catalog:upgrade-zod-exact-4-5-4"
 	},
 	"build": {
 		"appId": "com.avadtechnologies.pumpd.devtools",
