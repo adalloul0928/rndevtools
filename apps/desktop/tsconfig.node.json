@@ -3,10 +3,9 @@
 	"compilerOptions": {
 		"lib": ["ES2023"],
 		"types": ["node"],
-		"baseUrl": ".",
 		"paths": {
-			"@main/*": ["src/main/*"],
-			"@shared/*": ["src/shared/*"]
+			"@main/*": ["./src/main/*"],
+			"@shared/*": ["./src/shared/*"]
 		}
 	},
 	"include": [
