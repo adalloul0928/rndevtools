@@ -109,23 +109,23 @@ describe('InternalTools', () => {
 
 	it('opens plugins imperatively and preserves selection across presentations', async () => {
 		const ref = createRef<InternalToolsHandle>();
-		render(<InternalTools enabled plugins={[plugin]} ref={ref} />);
+		await render(<InternalTools enabled plugins={[plugin]} ref={ref} />);
 
-		act(() => ref.current?.openPlugin('example'));
+		await act(() => ref.current?.openPlugin('example'));
 		expect(screen.getByTestId('sheet')).toBeOnTheScreen();
 		expect(screen.getByText('example')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('to-window'));
+		await fireEvent.press(screen.getByTestId('to-window'));
 		expect(screen.getByTestId('window')).toBeOnTheScreen();
 		expect(screen.getByText('example')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('to-pill'));
+		await fireEvent.press(screen.getByTestId('to-pill'));
 		expect(screen.getByTestId('pill')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('restore-pill'));
+		await fireEvent.press(screen.getByTestId('restore-pill'));
 		expect(screen.getByTestId('window')).toBeOnTheScreen();
 
-		act(() => ref.current?.close());
+		await act(() => ref.current?.close());
 		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
 	});
 
@@ -133,7 +133,7 @@ describe('InternalTools', () => {
 		const setItem = jest.fn();
 		const storage = { getItem: jest.fn(() => null), setItem };
 		const ref = createRef<InternalToolsHandle>();
-		render(
+		await render(
 			<InternalTools
 				enabled
 				persistence={{ storage, key: 'quick-actions' }}
@@ -143,9 +143,9 @@ describe('InternalTools', () => {
 		);
 		await act(async () => Promise.resolve());
 
-		act(() => ref.current?.openPlugin('state'));
-		fireEvent.press(screen.getByTestId('pin-quick-action'));
-		act(() => ref.current?.setPresentationMode('pill'));
+		await act(() => ref.current?.openPlugin('state'));
+		await fireEvent.press(screen.getByTestId('pin-quick-action'));
+		await act(() => ref.current?.setPresentationMode('pill'));
 		await act(async () => Promise.resolve());
 
 		expect(screen.getByText('state')).toBeOnTheScreen();
@@ -168,7 +168,7 @@ describe('InternalTools', () => {
 			setItem,
 		};
 		const ref = createRef<InternalToolsHandle>();
-		render(
+		await render(
 			<InternalTools
 				enabled
 				persistence={{ storage, key: 'test-tools' }}
@@ -178,9 +178,9 @@ describe('InternalTools', () => {
 		);
 		await act(async () => Promise.resolve());
 
-		act(() => ref.current?.open());
+		await act(() => ref.current?.open());
 		expect(screen.getByTestId('window')).toBeOnTheScreen();
-		act(() => ref.current?.setPresentationMode('pill'));
+		await act(() => ref.current?.setPresentationMode('pill'));
 		await act(async () => Promise.resolve());
 
 		expect(setItem).toHaveBeenLastCalledWith(
@@ -203,7 +203,7 @@ describe('InternalTools', () => {
 			},
 		};
 		const ref = createRef<InternalToolsHandle>();
-		render(
+		await render(
 			<InternalTools
 				enabled
 				onError={onError}
@@ -241,7 +241,7 @@ describe('InternalTools', () => {
 			onPress: action,
 		};
 		const ref = createRef<InternalToolsHandle>();
-		render(
+		await render(
 			<InternalTools
 				enabled
 				onAuditEvent={onAuditEvent}
@@ -261,21 +261,23 @@ describe('InternalTools', () => {
 		);
 	});
 
-	it('keeps collectors installed while the launcher is hidden', () => {
+	it('keeps collectors installed while the launcher is hidden', async () => {
 		const dispose = jest.fn();
 		const install = jest.fn(() => dispose);
 		const hiddenPlugin: DevToolsPlugin = { ...plugin, install };
-		const view = render(
+		const view = await render(
 			<InternalTools enabled plugins={[hiddenPlugin]} visible={false} />,
 		);
 
 		expect(install).toHaveBeenCalledTimes(1);
 		expect(screen.queryByTestId('launcher')).toBeNull();
-		view.rerender(<InternalTools enabled plugins={[hiddenPlugin]} visible />);
+		await view.rerender(
+			<InternalTools enabled plugins={[hiddenPlugin]} visible />,
+		);
 		expect(screen.getByTestId('launcher')).toBeOnTheScreen();
 		expect(install).toHaveBeenCalledTimes(1);
 
-		view.unmount();
+		await view.unmount();
 		expect(dispose).toHaveBeenCalledTimes(1);
 	});
 
@@ -291,7 +293,7 @@ describe('InternalTools', () => {
 			setItem: jest.fn(),
 		};
 		const ref = createRef<InternalToolsHandle>();
-		render(
+		await render(
 			<InternalTools
 				enabled
 				persistence={{ storage }}
@@ -300,7 +302,7 @@ describe('InternalTools', () => {
 			/>,
 		);
 
-		act(() => ref.current?.setPresentationMode('window'));
+		await act(() => ref.current?.setPresentationMode('window'));
 		await act(async () => {
 			resolveHydration?.(
 				JSON.stringify({
@@ -311,7 +313,7 @@ describe('InternalTools', () => {
 			);
 			await Promise.resolve();
 		});
-		act(() => ref.current?.open());
+		await act(() => ref.current?.open());
 
 		expect(screen.getByTestId('window')).toBeOnTheScreen();
 	});
@@ -331,7 +333,7 @@ describe('InternalTools', () => {
 			),
 			setItem: jest.fn(),
 		};
-		const view = render(
+		const view = await render(
 			<InternalTools
 				enabled
 				persistence={{ storage: firstStorage, key: 'same-key' }}
@@ -340,7 +342,7 @@ describe('InternalTools', () => {
 		);
 		await act(async () => Promise.resolve());
 
-		view.rerender(
+		await view.rerender(
 			<InternalTools
 				enabled
 				persistence={{ storage: secondStorage, key: 'same-key' }}
@@ -367,7 +369,7 @@ describe('InternalTools', () => {
 			setItem: jest.fn(),
 		};
 
-		render(
+		await render(
 			<InternalTools
 				enabled
 				onError={onError}
@@ -389,7 +391,7 @@ describe('InternalTools', () => {
 			setItem: jest.fn(),
 		};
 
-		render(
+		await render(
 			<InternalTools
 				enabled
 				onError={onError}

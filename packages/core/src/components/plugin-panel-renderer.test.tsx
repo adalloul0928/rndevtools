@@ -78,7 +78,7 @@ const panelProps: DevToolsPanelProps = {
 };
 
 describe('PluginPanelRenderer', () => {
-	it('contains a panel crash and reports the plugin identity', () => {
+	it('contains a panel crash and reports the plugin identity', async () => {
 		const consoleError = jest.spyOn(console, 'error').mockImplementation();
 		const onError = jest.fn();
 		const plugin: DevToolsPanelPlugin = {
@@ -91,7 +91,7 @@ describe('PluginPanelRenderer', () => {
 			},
 		};
 
-		render(
+		await render(
 			<PluginPanelRenderer
 				onError={onError}
 				panelProps={panelProps}
@@ -102,7 +102,7 @@ describe('PluginPanelRenderer', () => {
 		expect(screen.getByText('This tool could not render')).toBeOnTheScreen();
 		expect(screen.getByText('panel exploded')).toBeOnTheScreen();
 		expect(onError).toHaveBeenCalledWith(expect.any(Error), 'broken');
-		fireEvent.press(screen.getByText('Return to tools'));
+		await fireEvent.press(screen.getByText('Return to tools'));
 		expect(panelProps.onBack).toHaveBeenCalledTimes(1);
 		consoleError.mockRestore();
 	});
@@ -122,12 +122,14 @@ describe('PluginPanelRenderer', () => {
 			},
 		});
 
-		render(<PluginPanelRenderer panelProps={panelProps} plugin={plugin} />);
+		await render(
+			<PluginPanelRenderer panelProps={panelProps} plugin={plugin} />,
+		);
 
 		expect(
 			await screen.findByText('This tool could not render'),
 		).toBeOnTheScreen();
-		fireEvent.press(screen.getByText('Retry'));
+		await fireEvent.press(screen.getByText('Retry'));
 		expect(await screen.findByText('Recovered panel')).toBeOnTheScreen();
 		expect(attempts).toBe(2);
 		consoleError.mockRestore();

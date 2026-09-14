@@ -34,7 +34,14 @@ jest.mock('@expo/ui/swift-ui', () => {
 		}: {
 			children?: React.ReactNode;
 			testID?: string;
-		}) => ReactRuntime.createElement(Native.View, { testID }, children),
+		}) =>
+			ReactRuntime.createElement(
+				Native.View,
+				{
+					testID,
+				},
+				children,
+			),
 		HStack: Container,
 		VStack: Container,
 		List: Container,
@@ -70,7 +77,10 @@ jest.mock('@expo/ui/swift-ui', () => {
 		}) =>
 			ReactRuntime.createElement(
 				Native.Pressable,
-				{ accessibilityLabel: label, onPress },
+				{
+					accessibilityLabel: label,
+					onPress,
+				},
 				children ?? ReactRuntime.createElement(Native.Text, null, label),
 			),
 		DisclosureGroup: ({
@@ -134,7 +144,6 @@ jest.mock('@expo/ui/swift-ui', () => {
 			}),
 	};
 });
-
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	autocorrectionDisabled: (value: unknown) => value,
 	buttonStyle: (value: unknown) => value,
@@ -151,7 +160,6 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	textInputAutocapitalization: (value: unknown) => value,
 	tint: (value: unknown) => value,
 }));
-
 const panelProps: DevToolsPanelProps = {
 	onBack: jest.fn(),
 	onClose: jest.fn(),
@@ -164,17 +172,14 @@ const panelProps: DevToolsPanelProps = {
 		}),
 	},
 };
-
-function renderPanel(plugin: DevToolsPanelPlugin) {
+async function renderPanel(plugin: DevToolsPanelPlugin) {
 	const Panel = plugin.Panel;
-	return render(<Panel {...panelProps} />);
+	return await render(<Panel {...panelProps} />);
 }
-
-afterEach(() => {
+afterEach(async () => {
 	for (const path of [...getPinnedRoutes()]) setRoutePinned(path, false);
-	cleanup();
+	await cleanup();
 });
-
 describe('createNavigationPlugin', () => {
 	it('tracks requested, committed, and focused route transitions with one correlation', async () => {
 		let at = 100;
@@ -188,7 +193,6 @@ describe('createNavigationPlugin', () => {
 			now: () => at,
 			onNavigate: jest.fn(),
 		});
-
 		await navigation.navigate('/profile', {
 			correlationId: 'desktop-action-17',
 			source: 'desktop',
@@ -205,7 +209,6 @@ describe('createNavigationPlugin', () => {
 				visible: true,
 			},
 		]);
-
 		expect(navigation.getTransitions()).toEqual([
 			expect.objectContaining({
 				phase: 'requested',
@@ -213,8 +216,14 @@ describe('createNavigationPlugin', () => {
 				source: 'desktop',
 				correlationId: 'desktop-action-17',
 			}),
-			expect.objectContaining({ phase: 'committed', durationMs: 25 }),
-			expect.objectContaining({ phase: 'focused', durationMs: 40 }),
+			expect.objectContaining({
+				phase: 'committed',
+				durationMs: 25,
+			}),
+			expect.objectContaining({
+				phase: 'focused',
+				durationMs: 40,
+			}),
 		]);
 		expect(eventStore.getSnapshot().events.map((event) => event.kind)).toEqual([
 			'transition-requested',
@@ -225,11 +234,11 @@ describe('createNavigationPlugin', () => {
 			eventStore.getSnapshot().events.map((event) => event.correlationId),
 		).toEqual(['desktop-action-17', 'desktop-action-17', 'desktop-action-17']);
 	});
-
 	it('tracks direct app navigation as requested, committed, then focused', () => {
 		let at = 200;
-		const navigation = createNavigationPlugin({ now: () => at });
-
+		const navigation = createNavigationPlugin({
+			now: () => at,
+		});
 		navigation.record('/home');
 		at = 215;
 		navigation.updateStack([
@@ -241,36 +250,38 @@ describe('createNavigationPlugin', () => {
 				visible: true,
 			},
 		]);
-
 		expect(
 			navigation.getTransitions().map((transition) => transition.phase),
 		).toEqual(['requested', 'committed', 'focused']);
 		expect(navigation.getTransitions().at(-1)?.durationMs).toBe(15);
 	});
-
 	it('fails rejected navigation and does not invoke context accessors', async () => {
 		const getter = jest.fn(() => 'desktop');
 		const context = {} as NavigationTransitionContext;
-		Object.defineProperty(context, 'source', { enumerable: true, get: getter });
+		Object.defineProperty(context, 'source', {
+			enumerable: true,
+			get: getter,
+		});
 		const navigation = createNavigationPlugin({
 			onNavigate: jest.fn(async () => {
 				throw new Error('router rejected');
 			}),
 		});
-
 		await expect(navigation.navigate('/blocked', context)).rejects.toThrow(
 			'router rejected',
 		);
 		expect(getter).not.toHaveBeenCalled();
 		expect(navigation.getTransitions()).toEqual([
-			expect.objectContaining({ phase: 'requested', source: 'panel' }),
+			expect.objectContaining({
+				phase: 'requested',
+				source: 'panel',
+			}),
 			expect.objectContaining({
 				phase: 'failed',
 				error: 'router rejected',
 			}),
 		]);
 	});
-
 	it('rejects stale transition failures and clears all navigation diagnostics', () => {
 		const navigation = createNavigationPlugin();
 		const transitionId = navigation.beginTransition('/settings');
@@ -283,38 +294,42 @@ describe('createNavigationPlugin', () => {
 		expect(navigation.getEvents()).toEqual([]);
 		expect(navigation.getTransitions()).toEqual([]);
 	});
-
 	it('bounds pending transitions and fails the oldest request', () => {
-		const navigation = createNavigationPlugin({ maxEvents: 2 });
+		const navigation = createNavigationPlugin({
+			maxEvents: 2,
+		});
 		const first = navigation.beginTransition('/first');
 		navigation.beginTransition('/second');
 		navigation.beginTransition('/third');
-
 		expect(navigation.getTransitions()).toEqual([
 			expect.objectContaining({
 				phase: 'failed',
 				route: '/first',
 				error: expect.stringContaining('pending transition limit'),
 			}),
-			expect.objectContaining({ phase: 'requested', route: '/third' }),
+			expect.objectContaining({
+				phase: 'requested',
+				route: '/third',
+			}),
 		]);
 		expect(() => navigation.failTransition(first, 'late failure')).toThrow(
 			'no longer pending',
 		);
 	});
-
 	it('records route changes and deduplicates identical consecutive routes', () => {
 		const navigation = createNavigationPlugin();
-		navigation.record('/home', { segments: ['(tabs)', 'home'] });
-		navigation.record('/home', { segments: ['(tabs)', 'home'] });
+		navigation.record('/home', {
+			segments: ['(tabs)', 'home'],
+		});
+		navigation.record('/home', {
+			segments: ['(tabs)', 'home'],
+		});
 		navigation.record('/profile');
-
 		expect(navigation.getEvents().map((event) => event.route)).toEqual([
 			'/home',
 			'/profile',
 		]);
 	});
-
 	it('stores route inventory and live stack snapshots', () => {
 		const navigation = createNavigationPlugin();
 		navigation.updateRoutes([
@@ -325,18 +340,27 @@ describe('createNavigationPlugin', () => {
 			},
 		]);
 		navigation.updateStack([
-			{ key: 'home', name: 'index', depth: 0, visible: true },
+			{
+				key: 'home',
+				name: 'index',
+				depth: 0,
+				visible: true,
+			},
 		]);
-
 		expect(navigation.getRoutes()[0]?.kind).toBe('dynamic');
 		expect(navigation.getStack()[0]?.visible).toBe(true);
 	});
-
 	it('keeps pinned routes when the route catalog has not resolved yet', () => {
 		const pluginId = 'navigation-empty-catalog';
-		const navigation = createNavigationPlugin({ id: pluginId });
+		const navigation = createNavigationPlugin({
+			id: pluginId,
+		});
 		navigation.updateRoutes([
-			{ id: 'home', path: '/home', kind: inferNavigationRouteKind('/home') },
+			{
+				id: 'home',
+				path: '/home',
+				kind: inferNavigationRouteKind('/home'),
+			},
 		]);
 		setRoutePinned('/home', true, pluginId);
 		expect(getPinnedRoutes(pluginId)).toEqual(['/home']);
@@ -348,66 +372,121 @@ describe('createNavigationPlugin', () => {
 
 		// A populated inventory that genuinely drops the route still prunes it.
 		navigation.updateRoutes([
-			{ id: 'other', path: '/other', kind: inferNavigationRouteKind('/other') },
+			{
+				id: 'other',
+				path: '/other',
+				kind: inferNavigationRouteKind('/other'),
+			},
 		]);
 		expect(getPinnedRoutes(pluginId)).toEqual([]);
 	});
-
 	it('records metadata changes and identifies grouped layout routes as layouts', () => {
 		const navigation = createNavigationPlugin();
-		navigation.record('/home', { metadata: { source: 'tab' } });
-		navigation.record('/home', { metadata: { source: 'deep-link' } });
-
+		navigation.record('/home', {
+			metadata: {
+				source: 'tab',
+			},
+		});
+		navigation.record('/home', {
+			metadata: {
+				source: 'deep-link',
+			},
+		});
 		expect(navigation.getEvents()).toHaveLength(2);
 		expect(inferNavigationRouteKind('(tabs)/_layout')).toBe('layout');
 	});
-
 	it('detaches and redacts retained route metadata and stack params', () => {
 		const navigation = createNavigationPlugin();
-		const metadata = { email: 'person@example.com', nested: { count: 1 } };
-		const params = { accessToken: 'secret', nested: { count: 2 } };
-		navigation.record('/profile/person@example.com', { metadata });
+		const metadata = {
+			email: 'person@example.com',
+			nested: {
+				count: 1,
+			},
+		};
+		const params = {
+			accessToken: 'secret',
+			nested: {
+				count: 2,
+			},
+		};
+		navigation.record('/profile/person@example.com', {
+			metadata,
+		});
 		navigation.updateStack([
-			{ key: 'profile', name: 'profile', depth: 0, visible: true, params },
+			{
+				key: 'profile',
+				name: 'profile',
+				depth: 0,
+				visible: true,
+				params,
+			},
 		]);
 		metadata.nested.count = 9;
 		params.nested.count = 9;
-
 		expect(navigation.getEvents()[0]).toMatchObject({
 			route: '/profile/[REDACTED EMAIL]',
-			metadata: { email: '[REDACTED]', nested: { count: 1 } },
+			metadata: {
+				email: '[REDACTED]',
+				nested: {
+					count: 1,
+				},
+			},
 		});
 		expect(navigation.getStack()[0]?.params).toMatchObject({
 			accessToken: '[REDACTED]',
-			nested: { count: 2 },
+			nested: {
+				count: 2,
+			},
 		});
 	});
-
 	it('bounds route and stack inventories', () => {
 		const navigation = createNavigationPlugin({
 			maxRoutes: 2,
 			maxStackEntries: 1,
 		});
 		navigation.updateRoutes([
-			{ id: 'c', path: '/c', kind: 'static' },
-			{ id: 'a', path: '/a', kind: 'static' },
-			{ id: 'b', path: '/b', kind: 'static' },
+			{
+				id: 'c',
+				path: '/c',
+				kind: 'static',
+			},
+			{
+				id: 'a',
+				path: '/a',
+				kind: 'static',
+			},
+			{
+				id: 'b',
+				path: '/b',
+				kind: 'static',
+			},
 		]);
 		navigation.updateStack([
-			{ key: 'a', name: 'a', depth: 0, visible: true },
-			{ key: 'b', name: 'b', depth: 1, visible: false },
+			{
+				key: 'a',
+				name: 'a',
+				depth: 0,
+				visible: true,
+			},
+			{
+				key: 'b',
+				name: 'b',
+				depth: 1,
+				visible: false,
+			},
 		]);
-
 		expect(navigation.getRoutes().map((route) => route.path)).toEqual([
 			'/a',
 			'/b',
 		]);
 		expect(navigation.getStack()).toHaveLength(1);
 	});
-
 	it('does not invoke accessors while normalizing route diagnostics', () => {
 		const getter = jest.fn(() => '/unsafe');
-		const route = { id: 'unsafe', kind: 'static' } as Record<string, unknown>;
+		const route = {
+			id: 'unsafe',
+			kind: 'static',
+		} as Record<string, unknown>;
 		Object.defineProperty(route, 'path', {
 			enumerable: true,
 			get: getter,
@@ -419,30 +498,36 @@ describe('createNavigationPlugin', () => {
 		});
 		segmentList.length = 1;
 		const navigation = createNavigationPlugin();
-
 		navigation.updateRoutes([route] as unknown as Parameters<
 			typeof navigation.updateRoutes
 		>[0]);
-		navigation.record('/safe', { segments: segmentList });
-
+		navigation.record('/safe', {
+			segments: segmentList,
+		});
 		expect(getter).not.toHaveBeenCalled();
 		expect(navigation.getRoutes()).toEqual([]);
-		expect(navigation.getEvents()[0]).toMatchObject({ route: '/safe' });
+		expect(navigation.getEvents()[0]).toMatchObject({
+			route: '/safe',
+		});
 	});
-
 	it('caps navigation configuration at safe upper bounds', () => {
-		expect(() => createNavigationPlugin({ maxRoutes: 10_001 })).toThrow(
-			'maxRoutes cannot exceed',
-		);
-		expect(() => createNavigationPlugin({ maxEvents: 10_001 })).toThrow(
-			'maxEvents cannot exceed',
-		);
+		expect(() =>
+			createNavigationPlugin({
+				maxRoutes: 10_001,
+			}),
+		).toThrow('maxRoutes cannot exceed');
+		expect(() =>
+			createNavigationPlugin({
+				maxEvents: 10_001,
+			}),
+		).toThrow('maxEvents cannot exceed');
 	});
-
 	it('encodes dynamic and catch-all route values', () => {
-		expect(buildNavigationRoutePath('/users/[id]', { id: 'a/b c' })).toBe(
-			'/users/a%2Fb%20c',
-		);
+		expect(
+			buildNavigationRoutePath('/users/[id]', {
+				id: 'a/b c',
+			}),
+		).toBe('/users/a%2Fb%20c');
 		expect(
 			buildNavigationRoutePath('/docs/[...slug]', {
 				slug: 'guide/a b',
@@ -450,18 +535,18 @@ describe('createNavigationPlugin', () => {
 		).toBe('/docs/guide/a%20b');
 		const getter = jest.fn(() => 'unsafe');
 		const values = {} as Record<string, string>;
-		Object.defineProperty(values, 'id', { enumerable: true, get: getter });
+		Object.defineProperty(values, 'id', {
+			enumerable: true,
+			get: getter,
+		});
 		expect(buildNavigationRoutePath('/users/[id]', values)).toBe('/users/[id]');
 		expect(getter).not.toHaveBeenCalled();
 	});
-
 	it('defaults to the Screens title while keeping the navigation plugin id', () => {
 		const navigation = createNavigationPlugin();
-
 		expect(navigation.plugin.title).toBe('Screens');
 		expect(navigation.plugin.id).toBe('navigation');
 	});
-
 	it('derives human names from the last meaningful path segment', () => {
 		expect(navigationRouteDisplayName('/(tabs)/(home)')).toBe('Home');
 		expect(navigationRouteDisplayName('/train/session/[sessionId]')).toBe(
@@ -473,9 +558,8 @@ describe('createNavigationPlugin', () => {
 		expect(navigationRouteDisplayName('/')).toBe('Root');
 	});
 });
-
 describe('Screens panel', () => {
-	it('collects dynamic route parameters before navigating on Android', () => {
+	it('collects dynamic route parameters before navigating on Android', async () => {
 		const originalPlatform = Platform.OS;
 		Object.defineProperty(Platform, 'OS', {
 			configurable: true,
@@ -483,32 +567,46 @@ describe('Screens panel', () => {
 		});
 		try {
 			const onNavigate = jest.fn();
-			const navigation = createNavigationPlugin({ onNavigate });
+			const navigation = createNavigationPlugin({
+				onNavigate,
+			});
 			navigation.record('/plan');
 			navigation.updateRoutes([
-				{ id: 'block', path: '/plan/block/[blockId]', kind: 'dynamic' },
+				{
+					id: 'block',
+					path: '/plan/block/[blockId]',
+					kind: 'dynamic',
+				},
 			]);
 			navigation.updateStack([
-				{ key: 'plan', name: 'plan', depth: 0, visible: true },
+				{
+					key: 'plan',
+					name: 'plan',
+					depth: 0,
+					visible: true,
+				},
 			]);
-
-			renderPanel(navigation.plugin);
+			await renderPanel(navigation.plugin);
 			expect(screen.getByText('Stack · 1')).toBeOnTheScreen();
-			fireEvent.press(screen.getByText('Pin screen'));
+			await fireEvent.press(screen.getByText('Pin screen'));
 			expect(getPinnedRoutes()).toContain('/plan/block/[blockId]');
 			const blockRoute = screen.getAllByText('Block Id')[0];
 			if (!blockRoute) throw new Error('Expected an Android route row.');
-			fireEvent.press(blockRoute);
-			fireEvent.changeText(screen.getByPlaceholderText('blockId'), 'blk_81');
-			fireEvent.press(screen.getByText('Go'));
-
+			await fireEvent.press(blockRoute);
+			await fireEvent.changeText(
+				screen.getByPlaceholderText('blockId'),
+				'blk_81',
+			);
+			await fireEvent.press(screen.getByText('Go'));
 			expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
-			fireEvent.press(screen.getByText('Clear history'));
+			await fireEvent.press(screen.getByText('Clear history'));
 			expect(navigation.getEvents()).toEqual([]);
 			expect(panelProps.actions.run).toHaveBeenCalledWith(
 				expect.objectContaining({
 					label: 'Clear navigation history',
-					confirmation: expect.objectContaining({ destructive: true }),
+					confirmation: expect.objectContaining({
+						destructive: true,
+					}),
 				}),
 			);
 		} finally {
@@ -518,16 +616,28 @@ describe('Screens panel', () => {
 			});
 		}
 	});
-
 	it('renders the current route, stack summary, and back host action', async () => {
 		const backRun = jest.fn();
 		const navigation = createNavigationPlugin({
-			actions: [{ id: 'back', title: 'Go back', run: backRun }],
+			actions: [
+				{
+					id: 'back',
+					title: 'Go back',
+					run: backRun,
+				},
+			],
 			onNavigate: jest.fn(),
 		});
-		navigation.record('/(tabs)/(home)', { segments: ['(tabs)', '(home)'] });
+		navigation.record('/(tabs)/(home)', {
+			segments: ['(tabs)', '(home)'],
+		});
 		navigation.updateStack([
-			{ key: 'tabs', name: '(tabs)', depth: 0, visible: true },
+			{
+				key: 'tabs',
+				name: '(tabs)',
+				depth: 0,
+				visible: true,
+			},
 			{
 				key: 'home',
 				name: '(home)',
@@ -536,102 +646,114 @@ describe('Screens panel', () => {
 				visible: false,
 			},
 		]);
-
-		renderPanel(navigation.plugin);
+		await renderPanel(navigation.plugin);
 		expect(screen.getByText('Screens')).toBeOnTheScreen();
 		expect(screen.getByText('Home')).toBeOnTheScreen();
 		expect(screen.getByText('/(tabs)/(home)')).toBeOnTheScreen();
 		expect(
 			screen.getByText('tabs › home — 2 mounted, 1 visible'),
 		).toBeOnTheScreen();
-
-		fireEvent.press(screen.getByLabelText('Back'));
+		await fireEvent.press(screen.getByLabelText('Back'));
 		await Promise.resolve();
 		expect(panelProps.actions.run).toHaveBeenCalledWith(
-			expect.objectContaining({ pluginId: 'navigation', label: 'Go back' }),
+			expect.objectContaining({
+				pluginId: 'navigation',
+				label: 'Go back',
+			}),
 		);
 		expect(backRun).toHaveBeenCalledTimes(1);
-
 		expect(screen.queryByText('Visible')).not.toBeOnTheScreen();
-		fireEvent.press(screen.getByText(/Stack · \d+/));
+		await fireEvent.press(screen.getByText(/Stack · \d+/));
 		expect(screen.getByText('Visible')).toBeOnTheScreen();
 		expect(screen.getByText('Mounted')).toBeOnTheScreen();
 	});
-
-	it('jumps to routes, expands dynamic params, and remembers the last value', () => {
+	it('jumps to routes, expands dynamic params, and remembers the last value', async () => {
 		const onNavigate = jest.fn();
 		const makePlugin = () => {
-			const navigation = createNavigationPlugin({ onNavigate });
+			const navigation = createNavigationPlugin({
+				onNavigate,
+			});
 			navigation.updateRoutes([
-				{ id: 'train', path: '/(tabs)/(train)', kind: 'group' },
-				{ id: 'block', path: '/plan/block/[blockId]', kind: 'dynamic' },
-				{ id: 'layout', path: '/(tabs)/_layout', kind: 'layout' },
+				{
+					id: 'train',
+					path: '/(tabs)/(train)',
+					kind: 'group',
+				},
+				{
+					id: 'block',
+					path: '/plan/block/[blockId]',
+					kind: 'dynamic',
+				},
+				{
+					id: 'layout',
+					path: '/(tabs)/_layout',
+					kind: 'layout',
+				},
 			]);
 			return navigation;
 		};
-
-		const first = renderPanel(makePlugin().plugin);
+		const first = await renderPanel(makePlugin().plugin);
 		expect(screen.getByText('TABS')).toBeOnTheScreen();
 		expect(screen.getByText('All screens · 2')).toBeOnTheScreen();
-
-		fireEvent.press(screen.getByText('Train'));
+		await fireEvent.press(screen.getByText('Train'));
 		expect(onNavigate).toHaveBeenCalledWith('/(tabs)/(train)');
-
-		fireEvent.press(screen.getByText('Block Id'));
-		fireEvent.changeText(
+		await fireEvent.press(screen.getByText('Block Id'));
+		await fireEvent.changeText(
 			screen.getByPlaceholderText(/^blockId(?: — last: blk_81)?$/),
 			'blk_81',
 		);
-		fireEvent.press(screen.getByLabelText('Go'));
+		await fireEvent.press(screen.getByLabelText('Go'));
 		expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
-
 		expect(screen.queryByText('/(tabs)/_layout')).not.toBeOnTheScreen();
-		fireEvent.press(screen.getByText('Internal & layouts · 1'));
+		await fireEvent.press(screen.getByText('Internal & layouts · 1'));
 		expect(screen.getByText('/(tabs)/_layout')).toBeOnTheScreen();
-
-		first.unmount();
-		renderPanel(makePlugin().plugin);
-		fireEvent.press(screen.getByText('Block Id'));
+		await first.unmount();
+		await renderPanel(makePlugin().plugin);
+		await fireEvent.press(screen.getByText('Block Id'));
 		expect(
 			screen.getByPlaceholderText('blockId — last: blk_81'),
 		).toBeOnTheScreen();
 	});
-
-	it('pins and unpins routes through swipe actions and the module store', () => {
+	it('pins and unpins routes through swipe actions and the module store', async () => {
 		const pinListener = jest.fn();
 		const unsubscribe = subscribePinnedRoutes(pinListener);
-		const navigation = createNavigationPlugin({ onNavigate: jest.fn() });
+		const navigation = createNavigationPlugin({
+			onNavigate: jest.fn(),
+		});
 		navigation.updateRoutes([
-			{ id: 'coach', path: '/(tabs)/(coach)', kind: 'group' },
+			{
+				id: 'coach',
+				path: '/(tabs)/(coach)',
+				kind: 'group',
+			},
 		]);
-
-		renderPanel(navigation.plugin);
+		await renderPanel(navigation.plugin);
 		expect(screen.getByText('Nothing pinned yet.')).toBeOnTheScreen();
 		expect(
 			screen.getByText('Swipe any screen to pin it here.'),
 		).toBeOnTheScreen();
-
-		fireEvent.press(screen.getByLabelText('Pin'));
+		await fireEvent.press(screen.getByLabelText('Pin'));
 		expect(getPinnedRoutes()).toEqual(['/(tabs)/(coach)']);
 		expect(pinListener).toHaveBeenCalled();
 		expect(screen.getAllByText('/(tabs)/(coach)')).toHaveLength(2);
 		expect(screen.getByTestId('sf-star.fill')).toBeOnTheScreen();
-
 		const [unpinButton] = screen.getAllByLabelText('Unpin');
 		if (!unpinButton) throw new Error('missing Unpin swipe action');
-		fireEvent.press(unpinButton);
+		await fireEvent.press(unpinButton);
 		expect(getPinnedRoutes()).toEqual([]);
 		expect(screen.getByText('Nothing pinned yet.')).toBeOnTheScreen();
 		unsubscribe();
 	});
-
-	it('hides jump and deep link affordances when the host handlers are absent', () => {
+	it('hides jump and deep link affordances when the host handlers are absent', async () => {
 		const navigation = createNavigationPlugin();
 		navigation.updateRoutes([
-			{ id: 'settings', path: '/settings', kind: 'static' },
+			{
+				id: 'settings',
+				path: '/settings',
+				kind: 'static',
+			},
 		]);
-
-		renderPanel(navigation.plugin);
+		await renderPanel(navigation.plugin);
 		expect(screen.getByText('/settings')).toBeOnTheScreen();
 		expect(screen.queryByTestId('sf-chevron.right')).not.toBeOnTheScreen();
 		expect(screen.queryByPlaceholderText('pumpd://…')).not.toBeOnTheScreen();
@@ -639,7 +761,6 @@ describe('Screens panel', () => {
 			screen.queryByTestId('devtools-navigation-deeplink'),
 		).not.toBeOnTheScreen();
 	});
-
 	it('opens deep links and filters route rows by search', async () => {
 		const onOpenDeepLink = jest.fn();
 		const navigation = createNavigationPlugin({
@@ -647,28 +768,34 @@ describe('Screens panel', () => {
 			onOpenDeepLink,
 		});
 		navigation.updateRoutes([
-			{ id: 'train', path: '/(tabs)/(train)', kind: 'group' },
-			{ id: 'onboarding', path: '/(onboarding)', kind: 'group' },
+			{
+				id: 'train',
+				path: '/(tabs)/(train)',
+				kind: 'group',
+			},
+			{
+				id: 'onboarding',
+				path: '/(onboarding)',
+				kind: 'group',
+			},
 		]);
-
-		renderPanel(navigation.plugin);
+		await renderPanel(navigation.plugin);
 		expect(
 			screen.getByTestId('devtools-navigation-deeplink'),
 		).toBeOnTheScreen();
-		fireEvent.changeText(
+		await fireEvent.changeText(
 			screen.getByPlaceholderText('pumpd://…'),
 			'pumpd://train',
 		);
-		fireEvent.press(screen.getByLabelText('Open'));
+		await fireEvent.press(screen.getByLabelText('Open'));
 		expect(onOpenDeepLink).toHaveBeenCalledWith('pumpd://train');
 		await waitFor(() =>
 			expect(
 				navigation.getTransitions().map((transition) => transition.phase),
 			).toEqual(['requested', 'committed']),
 		);
-
 		expect(screen.getByText('/(onboarding)')).toBeOnTheScreen();
-		fireEvent.changeText(
+		await fireEvent.changeText(
 			screen.getByPlaceholderText('Jump to any screen…'),
 			'train',
 		);
@@ -676,26 +803,24 @@ describe('Screens panel', () => {
 		expect(screen.getByText('/(tabs)/(train)')).toBeOnTheScreen();
 		expect(screen.getByText('All screens · 1')).toBeOnTheScreen();
 	});
-
-	it('lists recent distinct routes and the full history disclosure', () => {
+	it('lists recent distinct routes and the full history disclosure', async () => {
 		const onNavigate = jest.fn();
-		const navigation = createNavigationPlugin({ onNavigate });
+		const navigation = createNavigationPlugin({
+			onNavigate,
+		});
 		navigation.record('/subscribe');
 		navigation.record('/train/complete');
 		navigation.record('/subscribe');
 		navigation.record('/home');
-
-		renderPanel(navigation.plugin);
+		await renderPanel(navigation.plugin);
 		expect(screen.getByText('Recent')).toBeOnTheScreen();
 		expect(screen.getAllByText(/\/subscribe · /)).toHaveLength(1);
 		expect(screen.getByText(/\/train\/complete · /)).toBeOnTheScreen();
-
-		fireEvent.press(screen.getByText('Subscribe'));
+		await fireEvent.press(screen.getByText('Subscribe'));
 		expect(onNavigate).toHaveBeenCalledWith('/subscribe');
-
-		fireEvent.press(screen.getByText('History · 4'));
+		await fireEvent.press(screen.getByText('History · 4'));
 		expect(screen.getAllByText('/subscribe').length).toBeGreaterThanOrEqual(2);
-		fireEvent.press(screen.getByLabelText('Clear history'));
+		await fireEvent.press(screen.getByLabelText('Clear history'));
 		expect(navigation.getEvents()).toHaveLength(0);
 	});
 });

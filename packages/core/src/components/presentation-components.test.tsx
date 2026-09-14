@@ -141,9 +141,9 @@ const plugin: DevToolsPlugin = {
 };
 
 describe('presentation components', () => {
-	it('opens from the draggable launcher', () => {
+	it('opens from the draggable launcher', async () => {
 		const onOpen = jest.fn();
-		render(
+		await render(
 			<FloatingLauncher
 				bottomObstructionInset={84}
 				label="Open diagnostics"
@@ -151,13 +151,13 @@ describe('presentation components', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Open diagnostics'));
+		await fireEvent.press(screen.getByLabelText('Open diagnostics'));
 		expect(onOpen).toHaveBeenCalledTimes(1);
 	});
 
-	it('restores the tools from the mini pill', () => {
+	it('restores the tools from the mini pill', async () => {
 		const onRestore = jest.fn();
-		render(
+		await render(
 			<MiniPill
 				actions={actions}
 				bottomObstructionInset={84}
@@ -167,12 +167,12 @@ describe('presentation components', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Network'));
+		await fireEvent.press(screen.getByLabelText('Network'));
 		expect(onRestore).toHaveBeenCalledTimes(1);
 		expect(screen.queryByLabelText('Close developer tools')).toBeNull();
 	});
 
-	it('runs and removes pinned quick actions from the mini pill', () => {
+	it('runs and removes pinned quick actions from the mini pill', async () => {
 		const quickAction = jest.fn();
 		const onQuickActionPinnedChange = jest.fn();
 		const quickActionPlugin: DevToolsPluginWithPillQuickAction = {
@@ -188,7 +188,7 @@ describe('presentation components', () => {
 				],
 			},
 		};
-		render(
+		await render(
 			<MiniPill
 				actions={{
 					run: jest.fn(async (request) => {
@@ -203,8 +203,8 @@ describe('presentation components', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Mock data'));
-		fireEvent.press(screen.getByLabelText('Remove from Pill'));
+		await fireEvent.press(screen.getByLabelText('Mock data'));
+		await fireEvent.press(screen.getByLabelText('Remove from Pill'));
 
 		expect(quickAction).toHaveBeenCalledTimes(1);
 		expect(onQuickActionPinnedChange).toHaveBeenCalledWith(
@@ -213,11 +213,11 @@ describe('presentation components', () => {
 		);
 	});
 
-	it('selects tools and switches modes in the floating window', () => {
+	it('selects tools and switches modes in the floating window', async () => {
 		const onSelectPlugin = jest.fn();
 		const onPresentationModeChange = jest.fn();
 		const onClose = jest.fn();
-		render(
+		await render(
 			<FloatingWindow
 				actions={actions}
 				onBack={jest.fn()}
@@ -233,17 +233,17 @@ describe('presentation components', () => {
 		expect(screen.getByTestId('system-icon-chevron.right').props.width).toBe(
 			12,
 		);
-		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
-		fireEvent.press(screen.getByLabelText('Pill presentation'));
-		fireEvent.press(screen.getByLabelText('Close developer tools'));
+		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
+		await fireEvent.press(screen.getByLabelText('Pill presentation'));
+		await fireEvent.press(screen.getByLabelText('Close developer tools'));
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);
 		expect(onPresentationModeChange).toHaveBeenCalledWith('pill');
 		expect(onClose).toHaveBeenCalledTimes(1);
 	});
 
-	it('exposes an adjustable resize handle for the floating window', () => {
+	it('exposes an adjustable resize handle for the floating window', async () => {
 		const onSizeChange = jest.fn();
-		render(
+		await render(
 			<FloatingWindow
 				actions={actions}
 				initialSize={{ width: 320, height: 480 }}
@@ -259,20 +259,22 @@ describe('presentation components', () => {
 
 		const handle = screen.getByTestId('devtools-window-resize-handle');
 		expect(handle.props.accessibilityRole).toBe('adjustable');
-		fireEvent(handle, 'accessibilityAction', {
+		await fireEvent(handle, 'accessibilityAction', {
 			nativeEvent: { actionName: 'increment' },
 		});
 		expect(onSizeChange).toHaveBeenCalledWith({ width: 360, height: 520 });
 	});
 
-	it('marks and changes the selected presentation', () => {
+	it('marks and changes the selected presentation', async () => {
 		const onModeChange = jest.fn();
-		render(<PresentationSwitcher mode="sheet" onModeChange={onModeChange} />);
+		await render(
+			<PresentationSwitcher mode="sheet" onModeChange={onModeChange} />,
+		);
 
 		expect(
 			screen.getByLabelText('Sheet presentation').props.accessibilityState,
 		).toEqual({ selected: true });
-		fireEvent.press(screen.getByLabelText('Window presentation'));
+		await fireEvent.press(screen.getByLabelText('Window presentation'));
 		expect(onModeChange).toHaveBeenCalledWith('window');
 	});
 });

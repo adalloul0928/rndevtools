@@ -89,9 +89,9 @@ const panelProps: DevToolsPanelProps = {
 	presentationMode: 'sheet',
 };
 
-function renderPanel(plugin: DevToolsPanelPlugin) {
+async function renderPanel(plugin: DevToolsPanelPlugin) {
 	const Panel = plugin.Panel;
-	return render(<Panel {...panelProps} />);
+	return await render(<Panel {...panelProps} />);
 }
 
 describe('advanced Android diagnostic panels', () => {
@@ -99,7 +99,7 @@ describe('advanced Android diagnostic panels', () => {
 		expect(Platform.OS).toBe('android');
 	});
 
-	it('renders logger-backed Console content without SwiftUI', () => {
+	it('renders logger-backed Console content without SwiftUI', async () => {
 		let listener: ((event: ConsoleLogInput) => void) | undefined;
 		const diagnostics = createConsolePlugin({
 			source: {
@@ -114,14 +114,14 @@ describe('advanced Android diagnostic panels', () => {
 		const dispose = diagnostics.plugin.install?.();
 		listener?.({ level: 'info', message: 'Ready' });
 
-		renderPanel(diagnostics.plugin);
+		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Logs · 1')).toBeOnTheScreen();
 		expect(screen.getByText('Ready')).toBeOnTheScreen();
 		dispose?.();
 	});
 
-	it('renders Zustand projections and changes without SwiftUI', () => {
+	it('renders Zustand projections and changes without SwiftUI', async () => {
 		let state = { count: 1 };
 		const diagnostics = createZustandPlugin({
 			stores: [
@@ -143,7 +143,7 @@ describe('advanced Android diagnostic panels', () => {
 		});
 		const dispose = diagnostics.plugin.install?.();
 
-		renderPanel(diagnostics.plugin);
+		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Stores · 1')).toBeOnTheScreen();
 		expect(screen.getByText('Counter')).toBeOnTheScreen();
@@ -153,25 +153,25 @@ describe('advanced Android diagnostic panels', () => {
 		dispose?.();
 	});
 
-	it('renders restore-point controls without SwiftUI', () => {
+	it('renders restore-point controls without SwiftUI', async () => {
 		const diagnostics = createRestorePointsPlugin({ sources: [] });
 
-		renderPanel(diagnostics.plugin);
+		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Capture restore point')).toBeOnTheScreen();
 		expect(screen.getByText('No restore points')).toBeOnTheScreen();
 	});
 
-	it('renders the performance-review workflow without SwiftUI', () => {
+	it('renders the performance-review workflow without SwiftUI', async () => {
 		const diagnostics = createPerformancePlugin();
 
-		renderPanel(diagnostics.plugin);
+		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Start review')).toBeOnTheScreen();
 		expect(screen.getByText('No performance samples')).toBeOnTheScreen();
 	});
 
-	it('renders registered component targets without SwiftUI', () => {
+	it('renders registered component targets without SwiftUI', async () => {
 		const diagnostics = createComponentInspectorPlugin({
 			source: {
 				getSnapshot: () => [
@@ -187,7 +187,7 @@ describe('advanced Android diagnostic panels', () => {
 		});
 		const dispose = diagnostics.plugin.install?.();
 
-		renderPanel(diagnostics.plugin);
+		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Registered targets')).toBeOnTheScreen();
 		expect(screen.getByText('Unscoped · Exercise card')).toBeOnTheScreen();

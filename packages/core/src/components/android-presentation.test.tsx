@@ -205,22 +205,22 @@ const plugin: DevToolsPanelPlugin = {
 const actions = { run: jest.fn(async () => true) };
 
 describe('Android presentation boundary', () => {
-	it('renders and opens the launcher without mounting SwiftUI', () => {
+	it('renders and opens the launcher without mounting SwiftUI', async () => {
 		const onOpen = jest.fn();
-		render(<FloatingLauncher label="Open diagnostics" onOpen={onOpen} />);
+		await render(<FloatingLauncher label="Open diagnostics" onOpen={onOpen} />);
 
-		fireEvent.press(screen.getByLabelText('Open diagnostics'));
+		await fireEvent.press(screen.getByLabelText('Open diagnostics'));
 		expect(onOpen).toHaveBeenCalledTimes(1);
 		expect(
 			screen.getByTestId('system-icon-wrench.and.screwdriver.fill'),
 		).toBeOnTheScreen();
 	});
 
-	it('uses the scrollable React Native sheet and community menu on Android', () => {
+	it('uses the scrollable React Native sheet and community menu on Android', async () => {
 		const onPresentationModeChange = jest.fn();
 		const onSelectPlugin = jest.fn();
 		const onClose = jest.fn();
-		render(
+		await render(
 			<ToolsSheet
 				actions={actions}
 				isPresented
@@ -236,16 +236,16 @@ describe('Android presentation boundary', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Window'));
-		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
-		fireEvent.press(screen.getByTestId('devtools-sheet-close'));
+		await fireEvent.press(screen.getByLabelText('Window'));
+		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
+		await fireEvent.press(screen.getByTestId('devtools-sheet-close'));
 
 		expect(onPresentationModeChange).toHaveBeenCalledWith('window');
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);
 		expect(onClose).toHaveBeenCalledTimes(1);
 	});
 
-	it('uses the community menu for Android pill quick actions', () => {
+	it('uses the community menu for Android pill quick actions', async () => {
 		const quickAction = jest.fn();
 		const quickActionPlugin: DevToolsPluginWithPillQuickAction = {
 			...plugin,
@@ -253,7 +253,7 @@ describe('Android presentation boundary', () => {
 				options: [{ id: 'run', label: 'Run action', action: quickAction }],
 			},
 		};
-		render(
+		await render(
 			<MiniPill
 				actions={{
 					run: jest.fn(async (request) => {
@@ -268,7 +268,7 @@ describe('Android presentation boundary', () => {
 			/>,
 		);
 
-		fireEvent.press(screen.getByLabelText('Run action'));
+		await fireEvent.press(screen.getByLabelText('Run action'));
 		expect(quickAction).toHaveBeenCalledTimes(1);
 	});
 });

@@ -175,10 +175,10 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	tint: (value: unknown) => ({ tint: value }),
 }));
 
-function renderPanel(plugin: QueryPlugin) {
+async function renderPanel(plugin: QueryPlugin) {
 	const run = jest.fn(async () => true);
 	const Panel = plugin.Panel;
-	render(
+	await render(
 		<Panel
 			actions={{ run }}
 			onBack={jest.fn()}
@@ -474,12 +474,12 @@ describe('createQueryPlugin', () => {
 		const queryClient = new QueryClient();
 		const plugin = createQueryPlugin({ queryClient, simulation });
 		const dispose = plugin.install?.();
-		const run = renderPanel(plugin);
+		const run = await renderPanel(plugin);
 
 		expect(
 			screen.getByText('Loading requires an explicit presentation adapter.'),
 		).toBeOnTheScreen();
-		fireEvent.press(screen.getByLabelText('Simulate Offline'));
+		await fireEvent.press(screen.getByLabelText('Simulate Offline'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({ label: 'Simulate query offline' }),
 		);
@@ -533,7 +533,7 @@ describe('createMutationSnapshot', () => {
 });
 
 describe('QueryPanel', () => {
-	it('keeps cache-wide confirmations on Android', () => {
+	it('keeps cache-wide confirmations on Android', async () => {
 		const originalPlatform = Platform.OS;
 		Object.defineProperty(Platform, 'OS', {
 			configurable: true,
@@ -544,9 +544,9 @@ describe('QueryPanel', () => {
 			queryClient.setQueryData(['profile', 'detail'], { ready: true });
 			const plugin = createQueryPlugin({ queryClient, captureData: true });
 			const dispose = plugin.install?.();
-			const run = renderPanel(plugin);
+			const run = await renderPanel(plugin);
 
-			fireEvent.press(screen.getByText('Invalidate all'));
+			await fireEvent.press(screen.getByText('Invalidate all'));
 			expect(run).toHaveBeenCalledWith(
 				expect.objectContaining({
 					confirmation: expect.objectContaining({
@@ -554,19 +554,19 @@ describe('QueryPanel', () => {
 					}),
 				}),
 			);
-			fireEvent.press(screen.getByText('Clear query cache'));
+			await fireEvent.press(screen.getByText('Clear query cache'));
 			expect(run).toHaveBeenCalledWith(
 				expect.objectContaining({
 					confirmation: expect.objectContaining({ destructive: true }),
 				}),
 			);
 			run.mockClear();
-			fireEvent.press(screen.getByText('detail'));
+			await fireEvent.press(screen.getByText('detail'));
 			expect(screen.getByText('Diagnostic ID')).toBeOnTheScreen();
 			expect(screen.getByText(/"ready": true/)).toBeOnTheScreen();
-			fireEvent.press(screen.getByText('Invalidate query'));
-			fireEvent.press(screen.getByText('Refetch query'));
-			fireEvent.press(screen.getByText('Remove query'));
+			await fireEvent.press(screen.getByText('Invalidate query'));
+			await fireEvent.press(screen.getByText('Refetch query'));
+			await fireEvent.press(screen.getByText('Remove query'));
 			expect(run).toHaveBeenCalledWith(
 				expect.objectContaining({ label: 'Invalidate query' }),
 			);
@@ -590,14 +590,14 @@ describe('QueryPanel', () => {
 		}
 	});
 
-	it('groups queries by first key segment with a summary header and search', () => {
+	it('groups queries by first key segment with a summary header and search', async () => {
 		const queryClient = new QueryClient();
 		queryClient.setQueryData(['workouts', 'list', 'week-12'], { items: [1] });
 		queryClient.setQueryData(['workouts', 'detail', 'wko_1'], { id: 'wko_1' });
 		queryClient.setQueryData(['stats', 'weekly-volume'], { total: 3 });
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
-		renderPanel(plugin);
+		await renderPanel(plugin);
 
 		expect(
 			screen.getByText('3 CACHED · 0 FETCHING · 0 STALE · 0 ERRORS'),
@@ -608,7 +608,7 @@ describe('QueryPanel', () => {
 		expect(screen.getByText('weekly-volume')).toBeOnTheScreen();
 		expect(screen.getAllByText('0 observers · fresh')).toHaveLength(3);
 
-		fireEvent.changeText(
+		await fireEvent.changeText(
 			screen.getByPlaceholderText('Search query keys'),
 			'stats',
 		);
@@ -619,15 +619,15 @@ describe('QueryPanel', () => {
 		queryClient.clear();
 	});
 
-	it('expands a query row into metadata rows and lazy data previews', () => {
+	it('expands a query row into metadata rows and lazy data previews', async () => {
 		const queryClient = new QueryClient();
 		queryClient.setQueryData(['home', 'snapshot'], { count: 2 });
 		const plugin = createQueryPlugin({ queryClient, captureData: true });
 		const dispose = plugin.install?.();
-		renderPanel(plugin);
+		await renderPanel(plugin);
 
 		expect(screen.queryByText('Hash')).toBeNull();
-		fireEvent.press(screen.getByText('snapshot'));
+		await fireEvent.press(screen.getByText('snapshot'));
 		expect(screen.getByText('Hash')).toBeOnTheScreen();
 		expect(screen.getByText('Status')).toBeOnTheScreen();
 		expect(screen.getByText('Fetch status')).toBeOnTheScreen();
@@ -652,7 +652,7 @@ describe('QueryPanel', () => {
 		});
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
-		renderPanel(plugin);
+		await renderPanel(plugin);
 
 		expect(
 			screen.getByText('1 CACHED · 0 FETCHING · 1 STALE · 1 ERROR'),
@@ -666,14 +666,14 @@ describe('QueryPanel', () => {
 		queryClient.clear();
 	});
 
-	it('runs row swipe actions through the action service', () => {
+	it('runs row swipe actions through the action service', async () => {
 		const queryClient = new QueryClient();
 		queryClient.setQueryData(['workouts', 'list'], { items: [] });
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
-		const run = renderPanel(plugin);
+		const run = await renderPanel(plugin);
 
-		fireEvent.press(screen.getByLabelText('Refetch'));
+		await fireEvent.press(screen.getByLabelText('Refetch'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
 				pluginId: 'queries',
@@ -681,11 +681,11 @@ describe('QueryPanel', () => {
 				confirmation: undefined,
 			}),
 		);
-		fireEvent.press(screen.getByLabelText('Invalidate'));
+		await fireEvent.press(screen.getByLabelText('Invalidate'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({ label: 'Invalidate query' }),
 		);
-		fireEvent.press(screen.getByLabelText('Remove'));
+		await fireEvent.press(screen.getByLabelText('Remove'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
 				label: 'Remove query',
@@ -700,7 +700,7 @@ describe('QueryPanel', () => {
 		queryClient.clear();
 	});
 
-	it('switches to the mutations tab and expands mutation details', () => {
+	it('switches to the mutations tab and expands mutation details', async () => {
 		const queryClient = new QueryClient({
 			defaultOptions: { mutations: { gcTime: Number.POSITIVE_INFINITY } },
 		});
@@ -710,13 +710,13 @@ describe('QueryPanel', () => {
 		});
 		const plugin = createQueryPlugin({ queryClient, captureData: true });
 		const dispose = plugin.install?.();
-		renderPanel(plugin);
+		await renderPanel(plugin);
 
-		fireEvent.press(screen.getByRole('tab', { name: 'Mutations' }));
+		await fireEvent.press(screen.getByRole('tab', { name: 'Mutations' }));
 		expect(screen.getByPlaceholderText('Search mutations')).toBeOnTheScreen();
 		expect(screen.getByText('recent · 1')).toBeOnTheScreen();
 		expect(screen.getByText('0 failures')).toBeOnTheScreen();
-		fireEvent.press(screen.getByText('save-workout'));
+		await fireEvent.press(screen.getByText('save-workout'));
 		expect(screen.getByText('Submitted at')).toBeOnTheScreen();
 		expect(screen.getByText('Paused')).toBeOnTheScreen();
 
@@ -724,17 +724,17 @@ describe('QueryPanel', () => {
 		queryClient.clear();
 	});
 
-	it('renders an empty state per tab', () => {
+	it('renders an empty state per tab', async () => {
 		const queryClient = new QueryClient();
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
-		renderPanel(plugin);
+		await renderPanel(plugin);
 
 		expect(screen.getByText('No queries to show')).toBeOnTheScreen();
 		expect(
 			screen.getByText('Query cache activity will appear here.'),
 		).toBeOnTheScreen();
-		fireEvent.press(screen.getByRole('tab', { name: 'Mutations' }));
+		await fireEvent.press(screen.getByRole('tab', { name: 'Mutations' }));
 		expect(screen.getByText('No mutations yet')).toBeOnTheScreen();
 		expect(
 			screen.getByText('Mutation activity will appear here.'),
@@ -743,13 +743,13 @@ describe('QueryPanel', () => {
 		dispose?.();
 	});
 
-	it('offers cache-wide actions with confirmations', () => {
+	it('offers cache-wide actions with confirmations', async () => {
 		const queryClient = new QueryClient();
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
-		const run = renderPanel(plugin);
+		const run = await renderPanel(plugin);
 
-		fireEvent.press(screen.getByLabelText('Invalidate all'));
+		await fireEvent.press(screen.getByLabelText('Invalidate all'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
 				label: 'Invalidate all queries',
@@ -758,7 +758,7 @@ describe('QueryPanel', () => {
 				}),
 			}),
 		);
-		fireEvent.press(screen.getByLabelText('Clear query cache'));
+		await fireEvent.press(screen.getByLabelText('Clear query cache'));
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
 				label: 'Clear query cache',

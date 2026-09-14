@@ -73,14 +73,14 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 }));
 
 describe('EnvironmentPanel', () => {
-	it('names both sides of a failing value check', () => {
+	it('names both sides of a failing value check', async () => {
 		const plugin = createEnvironmentPlugin({
 			sections: [{ title: 'Device', values: { PLATFORM: 'android' } }],
 			rules: [{ key: 'PLATFORM', section: 'Device', expectedValue: 'ios' }],
 		});
 		const Panel = plugin.Panel;
 
-		render(
+		await render(
 			<Panel
 				actions={{ run: jest.fn(async () => true) }}
 				onBack={jest.fn()}
@@ -101,7 +101,7 @@ describe('EnvironmentPanel', () => {
 		expect(screen.getAllByText('android')).toHaveLength(2);
 	});
 
-	it('redacts sensitive environment entries', () => {
+	it('redacts sensitive environment entries', async () => {
 		const plugin = createEnvironmentPlugin({
 			sections: [
 				{
@@ -112,7 +112,7 @@ describe('EnvironmentPanel', () => {
 		});
 		const Panel = plugin.Panel;
 
-		render(
+		await render(
 			<Panel
 				actions={{ run: jest.fn(async () => true) }}
 				onBack={jest.fn()}

@@ -27,7 +27,7 @@ describe('lazy custom plugins', () => {
 				}),
 		});
 		const Panel = plugin.Panel;
-		render(<Panel {...panelProps} />);
+		await render(<Panel {...panelProps} />);
 
 		expect(screen.getByLabelText('Loading Lazy fixtures')).toBeOnTheScreen();
 		resolvePanel?.(() => <Text>Application tool loaded</Text>);

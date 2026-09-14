@@ -47,11 +47,12 @@
 		}
 	},
 	"devDependencies": {
+		"test-renderer": "1.2.0",
 		"@biomejs/biome": "catalog:",
 		"@expo/material-symbols": "catalog:",
 		"@expo/ui": "catalog:upgrade-expo-ui-patch-57-0-16",
 		"@tanstack/react-query": "catalog:upgrade-tanstack-react-query-exact-5-102-8",
-		"@testing-library/react-native": "catalog:testing-library-react-native-13-3-3",
+		"@testing-library/react-native": "catalog:",
 		"@types/jest": "catalog:",
 		"@types/react": "catalog:types-react-19-2-18",
 		"expo": "catalog:upgrade-expo-patch-57-0-20",
@@ -64,7 +65,6 @@
 		"react-native-reanimated": "catalog:",
 		"react-native-safe-area-context": "catalog:react-native-safe-area-context-5-8-0",
 		"react-native-worklets": "catalog:",
-		"react-test-renderer": "catalog:",
 		"typescript": "catalog:typescript-7-0-2",
 		"react-native-svg": "catalog:react-native-svg-15-15-5"
 	},

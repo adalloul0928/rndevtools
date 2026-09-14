@@ -139,14 +139,14 @@ const plugin: DevToolsPanelPlugin = {
 
 const actions = { run: jest.fn(async () => true) };
 
-function renderSheet(overrides: Record<string, unknown> = {}) {
+async function renderSheet(overrides: Record<string, unknown> = {}) {
 	const handlers = {
 		onSelectPlugin: jest.fn(),
 		onPresentationModeChange: jest.fn(),
 		onClose: jest.fn(),
 		onOpenPlugin: jest.fn(),
 	};
-	render(
+	await render(
 		<ToolsSheet
 			actions={actions}
 			isPresented
@@ -167,27 +167,27 @@ function renderSheet(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ToolsSheet', () => {
-	it('selects a tool, switches presentation from the menu, and handles native dismissal', () => {
-		const handlers = renderSheet();
+	it('selects a tool, switches presentation from the menu, and handles native dismissal', async () => {
+		const handlers = await renderSheet();
 
-		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
-		fireEvent.press(screen.getByLabelText('Window'));
-		fireEvent.press(screen.getByLabelText('Dismiss native sheet'));
+		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
+		await fireEvent.press(screen.getByLabelText('Window'));
+		await fireEvent.press(screen.getByLabelText('Dismiss native sheet'));
 		expect(handlers.onSelectPlugin).toHaveBeenCalledWith(plugin);
 		expect(handlers.onPresentationModeChange).toHaveBeenCalledWith('window');
 		expect(handlers.onClose).toHaveBeenCalledTimes(1);
 	});
 
-	it('closes from the header control', () => {
-		const handlers = renderSheet();
-		fireEvent.press(screen.getByTestId('devtools-sheet-close'));
+	it('closes from the header control', async () => {
+		const handlers = await renderSheet();
+		await fireEvent.press(screen.getByTestId('devtools-sheet-close'));
 		expect(handlers.onClose).toHaveBeenCalledTimes(1);
 	});
 
-	it('filters tool rows from the search field', () => {
-		renderSheet();
+	it('filters tool rows from the search field', async () => {
+		await renderSheet();
 		expect(screen.getByTestId('devtools-tool-row-example')).toBeOnTheScreen();
-		fireEvent.changeText(screen.getByLabelText('Search tools'), 'zzz');
+		await fireEvent.changeText(screen.getByLabelText('Search tools'), 'zzz');
 		expect(
 			screen.queryByTestId('devtools-tool-row-example'),
 		).not.toBeOnTheScreen();
@@ -195,31 +195,34 @@ describe('ToolsSheet', () => {
 
 	// The native search field unmounts with the home branch, so a query that
 	// outlived it would filter the tool list behind an empty search box.
-	it('drops the search when a tool opens', () => {
+	it('drops the search when a tool opens', async () => {
 		const other: DevToolsPanelPlugin = {
 			...plugin,
 			id: 'other',
 			title: 'Other',
 		};
-		const handlers = renderSheet({ plugins: [plugin, other] });
+		const handlers = await renderSheet({ plugins: [plugin, other] });
 
-		fireEvent.changeText(screen.getByLabelText('Search tools'), 'example');
+		await fireEvent.changeText(
+			screen.getByLabelText('Search tools'),
+			'example',
+		);
 		expect(
 			screen.queryByTestId('devtools-tool-row-other'),
 		).not.toBeOnTheScreen();
-		fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
+		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 
 		expect(handlers.onSelectPlugin).toHaveBeenCalledWith(plugin);
 		expect(screen.getByTestId('devtools-tool-row-other')).toBeOnTheScreen();
 	});
 
-	it('drops the search when a status row opens its plugin', () => {
+	it('drops the search when a status row opens its plugin', async () => {
 		const other: DevToolsPanelPlugin = {
 			...plugin,
 			id: 'other',
 			title: 'Other',
 		};
-		const handlers = renderSheet({
+		const handlers = await renderSheet({
 			plugins: [plugin, other],
 			homeStatus: [
 				{
@@ -231,15 +234,18 @@ describe('ToolsSheet', () => {
 			],
 		});
 
-		fireEvent.changeText(screen.getByLabelText('Search tools'), 'example');
-		fireEvent.press(screen.getByText('Backend'));
+		await fireEvent.changeText(
+			screen.getByLabelText('Search tools'),
+			'example',
+		);
+		await fireEvent.press(screen.getByText('Backend'));
 
 		expect(handlers.onOpenPlugin).toHaveBeenCalledWith('example');
 		expect(screen.getByTestId('devtools-tool-row-other')).toBeOnTheScreen();
 	});
 
-	it('renders status rows and opens the linked plugin', () => {
-		const handlers = renderSheet({
+	it('renders status rows and opens the linked plugin', async () => {
+		const handlers = await renderSheet({
 			homeStatus: [
 				{
 					id: 'backend',
@@ -252,12 +258,12 @@ describe('ToolsSheet', () => {
 		});
 		expect(screen.getByText('Backend')).toBeOnTheScreen();
 		expect(screen.getByText('PREVIEW')).toBeOnTheScreen();
-		fireEvent.press(screen.getByText('Backend'));
+		await fireEvent.press(screen.getByText('Backend'));
 		expect(handlers.onOpenPlugin).toHaveBeenCalledWith('example');
 	});
 
-	it('hosts a selected React Native panel in sheet mode', () => {
-		renderSheet({ selectedPlugin: plugin });
+	it('hosts a selected React Native panel in sheet mode', async () => {
+		await renderSheet({ selectedPlugin: plugin });
 		expect(screen.getByText('Panel in sheet · top 59')).toBeOnTheScreen();
 	});
 });

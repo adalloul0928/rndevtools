@@ -259,8 +259,10 @@ async function flushCapture(): Promise<void> {
 	for (let index = 0; index < 32; index += 1) await Promise.resolve();
 }
 
-function disposeDiagnostics(dispose: (() => void) | undefined): void {
-	act(() => dispose?.());
+async function disposeDiagnostics(
+	dispose: (() => void) | undefined,
+): Promise<void> {
+	await act(() => dispose?.());
 }
 
 function createActions(): DevToolsActionServices & { run: jest.Mock } {
@@ -309,21 +311,21 @@ async function seededDiagnostics() {
 describe('NetworkPanel', () => {
 	it('lists requests, hides system traffic by default, and filters segments', async () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
 		expect(screen.getByText('workouts')).toBeOnTheScreen();
 		expect(screen.queryByTestId('devtools-network-row-2')).toBeNull();
 		expect(screen.getByText('1 hidden')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('devtools-network-hide-system'));
+		await fireEvent.press(screen.getByTestId('devtools-network-hide-system'));
 		expect(screen.getByTestId('devtools-network-row-2')).toBeOnTheScreen();
 		expect(screen.getByText('1 shown')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByLabelText('network-filter-errors'));
+		await fireEvent.press(screen.getByLabelText('network-filter-errors'));
 		expect(screen.queryByText('workouts')).toBeNull();
 		expect(screen.getByText('No matches')).toBeOnTheScreen();
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('removes an idle owner capture from a mounted panel synchronously', async () => {
@@ -342,42 +344,42 @@ describe('NetworkPanel', () => {
 		await diagnostics.instrumentFetch(
 			jest.fn(async () => response('{}')) as unknown as typeof fetch,
 		)('https://example.test/owner-a-private');
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 		expect(screen.getByText('owner-a-private')).toBeOnTheScreen();
 
-		act(() => {
+		await act(() => {
 			owner = 'owner-b';
 			authorityListener();
 		});
 
 		expect(screen.queryByText('owner-a-private')).toBeNull();
 		expect(screen.getByText('No requests')).toBeOnTheScreen();
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('opens the request detail sub-view and returns to the list', async () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
 		// The native search field does not survive the detail round trip, so the
 		// list must come back unfiltered rather than behind an empty search box.
-		fireEvent.changeText(
+		await fireEvent.changeText(
 			screen.getByTestId('devtools-network-search'),
 			'workouts',
 		);
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
 		expect(screen.getByText('GET workouts')).toBeOnTheScreen();
 		expect(screen.getByText('Overview')).toBeOnTheScreen();
 		expect(screen.getByText('Timing')).toBeOnTheScreen();
 		expect(screen.getByText('Transport / response')).toBeOnTheScreen();
 		expect(screen.getByTestId('devtools-network-share')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('devtools-panel-back'));
+		await fireEvent.press(screen.getByTestId('devtools-panel-back'));
 		expect(screen.getByTestId('devtools-network-search')).toBeOnTheScreen();
-		fireEvent.press(screen.getByTestId('devtools-network-hide-system'));
+		await fireEvent.press(screen.getByTestId('devtools-network-hide-system'));
 		expect(screen.getByTestId('devtools-network-row-2')).toBeOnTheScreen();
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('reports app-scoped capability state and changes profiles through policy actions', async () => {
@@ -389,7 +391,7 @@ describe('NetworkPanel', () => {
 		});
 		const dispose = diagnostics.plugin.install?.();
 		const actions = createActions();
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
 		expect(screen.getByText('Network conditions')).toBeOnTheScreen();
 		expect(
@@ -398,7 +400,7 @@ describe('NetworkPanel', () => {
 		expect(
 			screen.getByText(/No native SDK, WebSocket, or other-app traffic/),
 		).toBeOnTheScreen();
-		fireEvent.press(screen.getByLabelText('network-filter-offline'));
+		await fireEvent.press(screen.getByLabelText('network-filter-offline'));
 
 		await waitFor(() => {
 			expect(diagnostics.getSimulationProfile().id).toBe('offline');
@@ -407,7 +409,7 @@ describe('NetworkPanel', () => {
 			).toHaveTextContent('Offline');
 		});
 		expect(actions.run).not.toHaveBeenCalled();
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('treats a cancelled profile confirmation as cancellation, not failure', async () => {
@@ -433,9 +435,9 @@ describe('NetworkPanel', () => {
 				}
 			}),
 		};
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(screen.getByLabelText('network-filter-offline'));
+		await fireEvent.press(screen.getByLabelText('network-filter-offline'));
 		await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
 
 		expect(actionFailure).toBeUndefined();
@@ -444,7 +446,7 @@ describe('NetworkPanel', () => {
 			expect.objectContaining({ status: 'cancelled' }),
 		);
 		expect(diagnostics.getSimulationProfile().id).toBe('none');
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('shows aggregate duplicate and cache insights', async () => {
@@ -467,21 +469,21 @@ describe('NetworkPanel', () => {
 		await instrumented('https://example.test/items');
 		await instrumented('https://example.test/items');
 		await flushCapture();
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
 		expect(screen.getByText('Insights')).toBeOnTheScreen();
 		expect(screen.getByText('Duplicate requests')).toBeOnTheScreen();
 		expect(screen.getByText('HTTP cache evidence')).toBeOnTheScreen();
 		expect(screen.getByText('2 hit')).toBeOnTheScreen();
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('clears requests through a destructive confirmation', async () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
 		const actions = createActions();
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(
+		await fireEvent.press(
 			within(screen.getByTestId('devtools-network-clear')).getByRole('button'),
 		);
 
@@ -495,7 +497,7 @@ describe('NetworkPanel', () => {
 		);
 		expect(diagnostics.getEvents()).toEqual([]);
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('cancels a live body reader when the panel clears requests', async () => {
@@ -520,32 +522,32 @@ describe('NetworkPanel', () => {
 		await diagnostics.instrumentFetch(jest.fn(async () => stalledResponse))(
 			'https://example.test/panel-clear-reader',
 		);
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
-		fireEvent.press(
+		await fireEvent.press(
 			within(screen.getByTestId('devtools-network-clear')).getByRole('button'),
 		);
 		await flushCapture();
 
 		expect(cancel).toHaveBeenCalledTimes(1);
 		expect(diagnostics.getEvents()).toEqual([]);
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('toggles capture pause from the nav bar', async () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
-		fireEvent.press(
+		await fireEvent.press(
 			within(screen.getByTestId('devtools-network-pause')).getByRole('button'),
 		);
 		expect(diagnostics.isPaused()).toBe(true);
-		fireEvent.press(
+		await fireEvent.press(
 			within(screen.getByTestId('devtools-network-pause')).getByRole('button'),
 		);
 		expect(diagnostics.isPaused()).toBe(false);
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('does not let a delayed pause action cross tools sessions', async () => {
@@ -557,18 +559,18 @@ describe('NetworkPanel', () => {
 				return true;
 			}),
 		};
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(
+		await fireEvent.press(
 			within(screen.getByTestId('devtools-network-pause')).getByRole('button'),
 		);
 		expect(pendingRequest).toEqual(
 			expect.objectContaining({ label: 'Pause network capture' }),
 		);
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 		let disposeNextSession: (() => void) | undefined;
-		act(() => {
+		await act(() => {
 			disposeNextSession = diagnostics.plugin.install?.();
 		});
 		expect(diagnostics.isPaused()).toBe(false);
@@ -577,7 +579,7 @@ describe('NetworkPanel', () => {
 			Promise.resolve().then(() => pendingRequest?.action()),
 		).rejects.toThrow('network tools session changed');
 		expect(diagnostics.isPaused()).toBe(false);
-		disposeDiagnostics(disposeNextSession);
+		await disposeDiagnostics(disposeNextSession);
 	});
 
 	it('re-sends the captured request and shares a cURL command from the detail view', async () => {
@@ -588,10 +590,10 @@ describe('NetworkPanel', () => {
 			.mockResolvedValue({ action: 'sharedAction' } as Awaited<
 				ReturnType<typeof Share.share>
 			>);
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		fireEvent.press(screen.getByTestId('devtools-network-resend'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 		await waitFor(() => {
 			expect(baseFetch).toHaveBeenCalledWith(
 				'https://abc.supabase.co/rest/v1/workouts?select=id',
@@ -602,13 +604,13 @@ describe('NetworkPanel', () => {
 			expect.objectContaining({ label: 'Re-send request' }),
 		);
 
-		fireEvent.press(screen.getByTestId('devtools-network-copy-curl'));
+		await fireEvent.press(screen.getByTestId('devtools-network-copy-curl'));
 		expect(shareSpy).toHaveBeenCalledWith({
 			message: expect.stringContaining("curl -X 'GET'"),
 		});
 
 		shareSpy.mockRestore();
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('binds replay to immutable request details after confirmation starts', async () => {
@@ -620,10 +622,10 @@ describe('NetworkPanel', () => {
 				return true;
 			}),
 		};
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		fireEvent.press(screen.getByTestId('devtools-network-resend'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 		const confirmedEvent = diagnostics.getEvents()[0];
 		try {
 			Reflect.set(confirmedEvent ?? {}, 'url', 'https://attacker.test');
@@ -644,7 +646,7 @@ describe('NetworkPanel', () => {
 			'https://abc.supabase.co/rest/v1/workouts?select=id',
 			expect.objectContaining({ method: 'GET', headers: {} }),
 		);
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('rejects replay when the owned global fetch changes during confirmation', async () => {
@@ -656,9 +658,9 @@ describe('NetworkPanel', () => {
 				return true;
 			}),
 		};
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		fireEvent.press(screen.getByTestId('devtools-network-resend'));
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 		if (!pendingRequest) throw new Error('Expected a pending replay action.');
 		const ownedFetch = globalThis.fetch;
 		const replacementFetch = jest
@@ -675,7 +677,7 @@ describe('NetworkPanel', () => {
 			expect(baseFetch).toHaveBeenCalledTimes(2);
 		} finally {
 			globalThis.fetch = ownedFetch;
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 		}
 	});
 
@@ -688,17 +690,17 @@ describe('NetworkPanel', () => {
 				return true;
 			}),
 		};
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		fireEvent.press(screen.getByTestId('devtools-network-resend'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 		expect(pendingRequest).toEqual(
 			expect.objectContaining({ label: 'Re-send request' }),
 		);
 
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 		let disposeNextSession: (() => void) | undefined;
-		act(() => {
+		await act(() => {
 			disposeNextSession = diagnostics.plugin.install?.();
 		});
 		if (!pendingRequest) throw new Error('Expected a pending replay action.');
@@ -707,7 +709,7 @@ describe('NetworkPanel', () => {
 		).rejects.toThrow('network tools session changed');
 		expect(baseFetch).toHaveBeenCalledTimes(2);
 
-		disposeDiagnostics(disposeNextSession);
+		await disposeDiagnostics(disposeNextSession);
 	});
 
 	it('does not let a delayed replay cross capability authorities', async () => {
@@ -743,13 +745,13 @@ describe('NetworkPanel', () => {
 					return true;
 				}),
 			};
-			render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
-			fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-			fireEvent.press(screen.getByTestId('devtools-network-resend'));
+			await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+			await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+			await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 			if (!pendingRequest) throw new Error('Expected a pending replay action.');
 
 			capabilityId = 'network.set-profile.authority-b';
-			act(() => capabilityListener());
+			await act(() => capabilityListener());
 
 			expect(diagnostics.getEvents()).toEqual([]);
 			await expect(
@@ -757,7 +759,7 @@ describe('NetworkPanel', () => {
 			).rejects.toThrow('network tools session changed');
 			expect(baseFetch).toHaveBeenCalledTimes(1);
 		} finally {
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 			globalThis.fetch = previousFetch;
 		}
 	});
@@ -771,9 +773,9 @@ describe('NetworkPanel', () => {
 				.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch,
 		)('https://example.test/read-only');
 		await flushCapture();
-		render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
 
 		expect(screen.queryByTestId('devtools-network-resend')).toBeNull();
 		expect(
@@ -781,7 +783,7 @@ describe('NetworkPanel', () => {
 				'Re-send unavailable: Request replay is disabled by this host.',
 			),
 		).toBeOnTheScreen();
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 
 	it('does not replay an explicit client through the global fetch transport', async () => {
@@ -808,9 +810,9 @@ describe('NetworkPanel', () => {
 			);
 			await flushCapture();
 			const actions = createActions();
-			render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+			await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-			fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+			await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
 
 			expect(screen.queryByTestId('devtools-network-resend')).toBeNull();
 			expect(
@@ -821,7 +823,7 @@ describe('NetworkPanel', () => {
 				expect.objectContaining({ label: 'Re-send request' }),
 			);
 		} finally {
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 			globalThis.fetch = previousFetch;
 		}
 	});
@@ -852,9 +854,11 @@ describe('NetworkPanel', () => {
 					requestProjectionComplete: true,
 				}),
 			);
-			render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
-			fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-			fireEvent.press(screen.getByTestId('devtools-network-resend'));
+			await render(
+				<diagnostics.plugin.Panel {...panelProps(createActions())} />,
+			);
+			await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+			await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 
 			await waitFor(() => expect(baseFetch).toHaveBeenCalledTimes(2));
 			expect(baseFetch).toHaveBeenLastCalledWith(
@@ -862,7 +866,7 @@ describe('NetworkPanel', () => {
 				expect.objectContaining({ method: 'POST', body }),
 			);
 		} finally {
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 			globalThis.fetch = previousFetch;
 		}
 	});
@@ -888,16 +892,18 @@ describe('NetworkPanel', () => {
 					requestProjectionComplete: true,
 				}),
 			);
-			render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
-			fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-			fireEvent.press(screen.getByTestId('devtools-network-resend'));
+			await render(
+				<diagnostics.plugin.Panel {...panelProps(createActions())} />,
+			);
+			await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+			await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 
 			await waitFor(() => expect(baseFetch).toHaveBeenCalledTimes(2));
 			const replayInit = baseFetch.mock.calls[1]?.[1];
 			expect(replayInit).toEqual({ method: 'POST', headers: {} });
 			expect(replayInit).not.toHaveProperty('body');
 		} finally {
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 			globalThis.fetch = previousFetch;
 		}
 	});
@@ -926,13 +932,15 @@ describe('NetworkPanel', () => {
 			expect(JSON.stringify(diagnostics.getEvents()[0])).not.toContain(
 				'shared-secret',
 			);
-			render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
-			fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+			await render(
+				<diagnostics.plugin.Panel {...panelProps(createActions())} />,
+			);
+			await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
 
 			expect(screen.queryByTestId('devtools-network-resend')).toBeNull();
 			expect(baseFetch).toHaveBeenCalledTimes(1);
 		} finally {
-			disposeDiagnostics(dispose);
+			await disposeDiagnostics(dispose);
 			globalThis.fetch = previousFetch;
 		}
 	});
@@ -964,9 +972,9 @@ describe('NetworkPanel', () => {
 			.fn()
 			.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch;
 		globalThis.fetch = fetchMock;
-		render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
+		await render(<diagnostics.plugin.Panel {...panelProps(actions)} />);
 
-		fireEvent.press(screen.getByTestId('devtools-network-row-1'));
+		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
 
 		expect(screen.queryByTestId('devtools-network-resend')).toBeNull();
 		expect(
@@ -978,6 +986,6 @@ describe('NetworkPanel', () => {
 		);
 
 		globalThis.fetch = previousFetch;
-		disposeDiagnostics(dispose);
+		await disposeDiagnostics(dispose);
 	});
 });

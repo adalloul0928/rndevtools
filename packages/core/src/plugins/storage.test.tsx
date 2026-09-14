@@ -273,7 +273,7 @@ describe('storage panel UI', () => {
 		await storage.refresh();
 		const { props } = createPanelProps();
 		const Panel = storage.plugin.Panel;
-		render(<Panel {...props} />);
+		await render(<Panel {...props} />);
 
 		expect(screen.getByText('ON THIS DEVICE · 5 B')).toBeOnTheScreen();
 		expect(screen.getByText('App Storage')).toBeOnTheScreen();
@@ -291,13 +291,13 @@ describe('storage panel UI', () => {
 		expect(screen.getByText('settings/theme')).toBeOnTheScreen();
 		expect(screen.getByText(/App Storage · (now|\d+[smhd])/)).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByText('See all activity'));
+		await fireEvent.press(screen.getByText('See all activity'));
 		expect(screen.getByText('JUST NOW')).toBeOnTheScreen();
 		expect(
 			screen.getByTestId('devtools-storage-clear-activity'),
 		).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByTestId('devtools-panel-back'));
+		await fireEvent.press(screen.getByTestId('devtools-panel-back'));
 		expect(props.onBack).toHaveBeenCalledTimes(1);
 	});
 
@@ -321,7 +321,7 @@ describe('storage panel UI', () => {
 		await storage.refresh();
 		const { props } = createPanelProps();
 		const Panel = storage.plugin.Panel;
-		render(<Panel {...props} />);
+		await render(<Panel {...props} />);
 
 		expect(screen.getByText('1 of 1 check failing')).toBeOnTheScreen();
 		expect(screen.getByText('flags/enabled — Missing')).toBeOnTheScreen();
@@ -354,9 +354,9 @@ describe('storage panel UI', () => {
 		await storage.refresh();
 		const { props, run } = createPanelProps();
 		const Panel = storage.plugin.Panel;
-		render(<Panel {...props} />);
+		await render(<Panel {...props} />);
 
-		fireEvent.press(screen.getByText('App Storage'));
+		await fireEvent.press(screen.getByText('App Storage'));
 		expect(screen.getByLabelText('Search 3 keys')).toBeOnTheScreen();
 		expect(screen.getByText('SETTINGS · 2 KEYS')).toBeOnTheScreen();
 		expect(screen.getByText('other · 1 key')).toBeOnTheScreen();
@@ -366,16 +366,19 @@ describe('storage panel UI', () => {
 		expect(screen.getByText('boolean')).toBeOnTheScreen();
 		expect(screen.getByText('string · 30 chars')).toBeOnTheScreen();
 
-		fireEvent.changeText(screen.getByLabelText('Search 3 keys'), 'haptics');
+		await fireEvent.changeText(
+			screen.getByLabelText('Search 3 keys'),
+			'haptics',
+		);
 		expect(screen.queryByText('theme-preference')).not.toBeOnTheScreen();
 		expect(screen.getByText('haptics')).toBeOnTheScreen();
-		fireEvent.changeText(screen.getByLabelText('Search 3 keys'), '');
+		await fireEvent.changeText(screen.getByLabelText('Search 3 keys'), '');
 
-		fireEvent.press(screen.getByText('theme-preference'));
+		await fireEvent.press(screen.getByText('theme-preference'));
 		expect(screen.getByText('settings/theme-preference')).toBeOnTheScreen();
-		fireEvent.changeText(screen.getByLabelText('Value'), 'light');
+		await fireEvent.changeText(screen.getByLabelText('Value'), 'light');
 		await act(async () => {
-			fireEvent.press(screen.getByText('Save'));
+			await fireEvent.press(screen.getByText('Save'));
 		});
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({ label: 'Save storage value' }),
@@ -383,7 +386,7 @@ describe('storage panel UI', () => {
 		expect(setValue).toHaveBeenCalledWith('settings/theme-preference', 'light');
 
 		await act(async () => {
-			fireEvent.press(screen.getByText('Delete key'));
+			await fireEvent.press(screen.getByText('Delete key'));
 		});
 		expect(run).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -397,7 +400,7 @@ describe('storage panel UI', () => {
 		expect(removeValue).toHaveBeenCalledWith('settings/theme-preference');
 
 		await act(async () => {
-			fireEvent.press(
+			await fireEvent.press(
 				within(screen.getByTestId('devtools-storage-clear-store')).getByRole(
 					'button',
 				),
@@ -414,10 +417,10 @@ describe('storage panel UI', () => {
 		);
 		expect(clear).toHaveBeenCalledTimes(1);
 
-		fireEvent.press(screen.getByTestId('devtools-panel-back'));
+		await fireEvent.press(screen.getByTestId('devtools-panel-back'));
 		expect(screen.getByText(/ON THIS DEVICE/)).toBeOnTheScreen();
 		expect(props.onBack).not.toHaveBeenCalled();
-		fireEvent.press(screen.getByTestId('devtools-panel-back'));
+		await fireEvent.press(screen.getByTestId('devtools-panel-back'));
 		expect(props.onBack).toHaveBeenCalledTimes(1);
 	});
 
@@ -445,16 +448,16 @@ describe('storage panel UI', () => {
 			await storage.refresh();
 			const { props, run } = createPanelProps();
 			const Panel = storage.plugin.Panel;
-			render(<Panel {...props} />);
+			await render(<Panel {...props} />);
 
-			fireEvent.press(screen.getByText('App Storage'));
-			fireEvent.press(screen.getByText('settings/theme'));
-			fireEvent.changeText(screen.getByPlaceholderText('Value'), 'light');
+			await fireEvent.press(screen.getByText('App Storage'));
+			await fireEvent.press(screen.getByText('settings/theme'));
+			await fireEvent.changeText(screen.getByPlaceholderText('Value'), 'light');
 			await act(async () => {
-				fireEvent.press(screen.getByText('Save value'));
+				await fireEvent.press(screen.getByText('Save value'));
 			});
 			await act(async () => {
-				fireEvent.press(screen.getByText('Delete key'));
+				await fireEvent.press(screen.getByText('Delete key'));
 			});
 
 			expect(run).toHaveBeenCalledWith(
@@ -487,9 +490,9 @@ describe('storage panel UI', () => {
 		await storage.refresh();
 		const { props, run } = createPanelProps();
 		const Panel = storage.plugin.Panel;
-		render(<Panel {...props} />);
+		await render(<Panel {...props} />);
 
-		fireEvent.press(screen.getByRole('tab', { name: 'Activity' }));
+		await fireEvent.press(screen.getByRole('tab', { name: 'Activity' }));
 		expect(screen.getByText('JUST NOW')).toBeOnTheScreen();
 		expect(screen.getByText('Updated')).toBeOnTheScreen();
 		expect(screen.getByText(/App Storage · .+ · 6 chars/)).toBeOnTheScreen();
@@ -497,7 +500,7 @@ describe('storage panel UI', () => {
 		expect(screen.getByText('+ second')).toBeOnTheScreen();
 
 		await act(async () => {
-			fireEvent.press(
+			await fireEvent.press(
 				within(screen.getByTestId('devtools-storage-clear-activity')).getByRole(
 					'button',
 				),
@@ -535,14 +538,14 @@ describe('storage panel UI', () => {
 		await storage.refresh();
 		const { props } = createPanelProps();
 		const Panel = storage.plugin.Panel;
-		render(<Panel {...props} />);
+		await render(<Panel {...props} />);
 
-		fireEvent.press(screen.getByText('Secure Storage'));
+		await fireEvent.press(screen.getByText('Secure Storage'));
 		expect(screen.getByLabelText('Search 1 key')).toBeOnTheScreen();
 		expect(screen.getByText('AUTH · 1 KEY')).toBeOnTheScreen();
 		expect(screen.getByText('Value protected')).toBeOnTheScreen();
 
-		fireEvent.press(screen.getByText('token'));
+		await fireEvent.press(screen.getByText('token'));
 		expect(
 			screen.getByText(
 				'This store exposes key metadata only. Its values are never read.',
@@ -569,13 +572,13 @@ describe('storage panel UI', () => {
 		});
 		await storage.refresh();
 		const { props, run } = createPanelProps();
-		render(<storage.plugin.Panel {...props} />);
+		await render(<storage.plugin.Panel {...props} />);
 
-		fireEvent.press(screen.getByText('Secure Storage'));
-		fireEvent.press(screen.getByText('persona'));
+		await fireEvent.press(screen.getByText('Secure Storage'));
+		await fireEvent.press(screen.getByText('persona'));
 		expect(revealValue).not.toHaveBeenCalled();
 		await act(async () => {
-			fireEvent.press(screen.getByText('Reveal on this device'));
+			await fireEvent.press(screen.getByText('Reveal on this device'));
 		});
 
 		expect(run).toHaveBeenCalledWith(
@@ -606,10 +609,10 @@ describe('storage panel UI', () => {
 		});
 		await storage.refresh();
 		const { props } = createPanelProps();
-		render(<storage.plugin.Panel {...props} />);
+		await render(<storage.plugin.Panel {...props} />);
 
-		fireEvent.press(screen.getByText('Secure Storage'));
-		fireEvent.press(screen.getByText('encryption-key'));
+		await fireEvent.press(screen.getByText('Secure Storage'));
+		await fireEvent.press(screen.getByText('encryption-key'));
 		expect(screen.queryByText('Reveal on this device')).not.toBeOnTheScreen();
 		expect(revealValue).not.toHaveBeenCalled();
 	});
