@@ -39,7 +39,9 @@ describe('Build Insights IPC', () => {
 		});
 
 		expect(assertTrustedRenderer).toHaveBeenCalledOnce();
-		expect(service.importXcresult).toHaveBeenCalledWith('/private/result.xcresult');
+		expect(service.importXcresult).toHaveBeenCalledWith(
+			'/private/result.xcresult'
+		);
 		expect(receipt).toMatchObject({ completed: true, state });
 	});
 

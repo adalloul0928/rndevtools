@@ -82,7 +82,11 @@ export class BrokerActionRouter {
 		if (session.device.status === 'simulated') {
 			try {
 				session.device = applyDemoAction(session.device, action, this.#now());
-				this.#record('info', action.tool, `Demo action completed: ${action.command}.`);
+				this.#record(
+					'info',
+					action.tool,
+					`Demo action completed: ${action.command}.`
+				);
 				this.#emit();
 				return { actionId: action.actionId, ok: true };
 			} catch (error) {
@@ -200,7 +204,10 @@ export class BrokerActionRouter {
 			actionId: message.actionId,
 			ok: message.ok,
 			error: message.error
-				? truncateText(redactDiagnosticText(message.error), MAX_ACTION_ERROR_BYTES).text
+				? truncateText(
+						redactDiagnosticText(message.error),
+						MAX_ACTION_ERROR_BYTES
+					).text
 				: undefined,
 		});
 	}

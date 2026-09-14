@@ -88,7 +88,15 @@ if (selection.swift) {
 	const swiftEnvironment = allowlistedCheckEnvironment();
 	run(
 		'swift',
-		['format', 'lint', '--strict', '--recursive', 'Package.swift', 'Sources', 'Tests'],
+		[
+			'format',
+			'lint',
+			'--strict',
+			'--recursive',
+			'Package.swift',
+			'Sources',
+			'Tests',
+		],
 		swiftPackage,
 		swiftEnvironment
 	);
@@ -120,7 +128,9 @@ function requireCommand(command, arguments_, env) {
 		env,
 	});
 	if (result.error?.code === 'ENOENT') {
-		fail(`${command} is required for native-helper checks but is not installed.`);
+		fail(
+			`${command} is required for native-helper checks but is not installed.`
+		);
 	}
 	if (result.status !== 0) {
 		fail(`${command} is present but could not run successfully.`);
@@ -140,7 +150,9 @@ function run(command, arguments_, cwd, env) {
 function capture(command, arguments_, cwd, env) {
 	const result = spawnSync(command, arguments_, { cwd, encoding: 'utf8', env });
 	if (result.error?.code === 'ENOENT') {
-		fail(`${command} is required for native-helper checks but is not installed.`);
+		fail(
+			`${command} is required for native-helper checks but is not installed.`
+		);
 	}
 	if (result.status !== 0) {
 		process.stderr.write(result.stderr);
@@ -170,7 +182,12 @@ function declaredVendoredModules(directory, environment) {
 	// Modern Go intentionally rejects `go list -m all` in vendor mode. Read the
 	// main identity and the checked-in go.mod declarations without resolving the
 	// network; vendor/modules.txt is independently covered by the byte manifest.
-	const mainModule = capture('go', ['list', '-m'], directory, environment).trim();
+	const mainModule = capture(
+		'go',
+		['list', '-m'],
+		directory,
+		environment
+	).trim();
 	const moduleFile = JSON.parse(
 		capture('go', ['mod', 'edit', '-json'], directory, environment)
 	);

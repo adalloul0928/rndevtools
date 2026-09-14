@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
 	"root": false,
 	"files": {
 		"includes": [
@@ -29,7 +29,7 @@
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab",
-		"lineWidth": 88,
+		"lineWidth": 80,
 		"lineEnding": "lf"
 	},
 	"linter": {

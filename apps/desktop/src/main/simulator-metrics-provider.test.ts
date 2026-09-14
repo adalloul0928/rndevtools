@@ -23,7 +23,9 @@ describe('simulator metrics parsing', () => {
 				return { stdout: '{}', stderr: '', durationMs: 1, exitCode: 0 };
 			});
 		try {
-			const result = await new SimulatorMetricsProvider({ platform: 'darwin' }).sample([
+			const result = await new SimulatorMetricsProvider({
+				platform: 'darwin',
+			}).sample([
 				{
 					udid: UDID,
 					name: 'PUMPD Test',
@@ -108,7 +110,9 @@ PID    MEM
 			cpuPercent: 12.5,
 		});
 		// Resident size is no longer read at all; a trailing RSS column is ignored.
-		expect(parseProcessSamples(' 123 12.5 2048 /private/process\n').get(123)).toEqual({
+		expect(
+			parseProcessSamples(' 123 12.5 2048 /private/process\n').get(123)
+		).toEqual({
 			processId: 123,
 			cpuPercent: 12.5,
 		});

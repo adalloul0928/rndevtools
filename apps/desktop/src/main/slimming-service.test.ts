@@ -18,8 +18,14 @@ import {
 	SimulatorMutationCoordinator,
 	type SimulatorMutationCoordinatorPort,
 } from './simulator-mutation-coordinator';
-import { type SimulatorHostProvider, SimulatorService } from './simulator-service';
-import { type SlimmingHelperProvider, SlimmingService } from './slimming-service';
+import {
+	type SimulatorHostProvider,
+	SimulatorService,
+} from './simulator-service';
+import {
+	type SlimmingHelperProvider,
+	SlimmingService,
+} from './slimming-service';
 
 const UDID = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 const SECOND_UDID = '11111111-2222-3333-4444-555555555555';
@@ -215,7 +221,8 @@ class FakeHelper implements SlimmingHelperProvider {
 			name: `Simulator ${index + 1}`,
 			state: this.deviceState,
 			runtimeIdentifier: RUNTIME,
-			deviceTypeIdentifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',
+			deviceTypeIdentifier:
+				'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',
 			available: true,
 		}))
 	);
@@ -272,8 +279,10 @@ class FakeHelper implements SlimmingHelperProvider {
 		simulatorId,
 		profileId,
 		verified: true,
-		currentManagedDisabledServiceIds: this.managedByDevice.get(simulatorId) ?? [],
-		desiredManagedDisabledServiceIds: this.managedByDevice.get(simulatorId) ?? [],
+		currentManagedDisabledServiceIds:
+			this.managedByDevice.get(simulatorId) ?? [],
+		desiredManagedDisabledServiceIds:
+			this.managedByDevice.get(simulatorId) ?? [],
 		overridesMatch: true,
 		missingDisabledServiceIds: [],
 		unexpectedDisabledServiceIds: [],
@@ -325,8 +334,12 @@ class FakeHelper implements SlimmingHelperProvider {
 				before: { managedDisabledServiceIds: before, count: before.length },
 				desired: { managedDisabledServiceIds: desired, count: desired.length },
 				plan: {
-					toDisableServiceIds: desired.filter((value) => !before.includes(value)),
-					toEnableServiceIds: before.filter((value) => !desired.includes(value)),
+					toDisableServiceIds: desired.filter(
+						(value) => !before.includes(value)
+					),
+					toEnableServiceIds: before.filter(
+						(value) => !desired.includes(value)
+					),
 				},
 				verification: {
 					verified: this.preflightVerificationVerified,
@@ -427,7 +440,8 @@ async function createService(
 	mutationCoordinator?: SimulatorMutationCoordinatorPort
 ) {
 	const directory =
-		persistenceDirectory ?? (await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-')));
+		persistenceDirectory ??
+		(await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-')));
 	if (!persistenceDirectory) temporaryDirectories.push(directory);
 	const service = new SlimmingService({
 		resourceDirectory: '/unused',
@@ -453,7 +467,10 @@ async function createFleetService(
 		captureDirectory,
 		provider,
 		metricsProvider: {
-			sample: vi.fn(async () => ({ status: 'available' as const, byDevice: {} })),
+			sample: vi.fn(async () => ({
+				status: 'available' as const,
+				byDevice: {},
+			})),
 		},
 		mutationCoordinator,
 		pollIntervalMs: 60_000,
@@ -465,10 +482,14 @@ async function createFleetService(
 async function waitForJob(service: SlimmingService, jobId: string) {
 	const deadline = Date.now() + 2_000;
 	while (Date.now() < deadline) {
-		const job = service.getState().jobs.find((candidate) => candidate.id === jobId);
+		const job = service
+			.getState()
+			.jobs.find((candidate) => candidate.id === jobId);
 		if (
 			job &&
-			['complete', 'failed', 'needs-attention', 'cancelled'].includes(job.status)
+			['complete', 'failed', 'needs-attention', 'cancelled'].includes(
+				job.status
+			)
 		) {
 			return job;
 		}
@@ -483,14 +504,20 @@ async function waitForFleetJob(
 	status: 'cancelled' | 'complete' | 'failed' = 'complete'
 ) {
 	await vi.waitFor(() => {
-		expect(service.getState().jobs.find((job) => job.id === jobId)?.status).toBe(
-			status
-		);
+		expect(
+			service.getState().jobs.find((job) => job.id === jobId)?.status
+		).toBe(status);
 	});
 }
 
-async function enableAndAcknowledge(service: SlimmingService, actionPrefix: string) {
-	await service.setEnabled({ actionId: `${actionPrefix}-enable`, enabled: true });
+async function enableAndAcknowledge(
+	service: SlimmingService,
+	actionPrefix: string
+) {
+	await service.setEnabled({
+		actionId: `${actionPrefix}-enable`,
+		enabled: true,
+	});
 	const receipt = await service.acknowledgeCompatibility({
 		actionId: `${actionPrefix}-ack`,
 		simulatorUdids: [UDID],
@@ -514,7 +541,9 @@ async function runApply(service: SlimmingService, actionId: string) {
 }
 
 async function readPersistedState(directory: string) {
-	return JSON.parse(await readFile(path.join(directory, 'state-v1.json'), 'utf8')) as {
+	return JSON.parse(
+		await readFile(path.join(directory, 'state-v1.json'), 'utf8')
+	) as {
 		checkpoints: Record<string, { token: string; metadata: unknown }>;
 		pendingMutations: Record<
 			string,
@@ -538,14 +567,17 @@ afterEach(async () => {
 
 describe('slimming service', () => {
 	it('exposes the desktop mutation restriction while retaining read-only discovery', async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-preview-'));
+		const directory = await mkdtemp(
+			path.join(tmpdir(), 'pumpd-slimming-preview-')
+		);
 		temporaryDirectories.push(directory);
 		const service = new SlimmingService({
 			resourceDirectory: '/unused',
 			persistenceDirectory: directory,
 			appVersion: '0.1.0',
 			helper: new FakeHelper(),
-			mutationUnavailableReason: 'Use a signed, packaged desktop app to apply changes.',
+			mutationUnavailableReason:
+				'Use a signed, packaged desktop app to apply changes.',
 		});
 		try {
 			await service.start();
@@ -594,9 +626,9 @@ describe('slimming service', () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(fleet.provider.commands).toEqual([]);
 		releaseMutation.resolve();
-		expect((await waitForJob(slimming.service, applyReceipt.jobId ?? '')).status).toBe(
-			'complete'
-		);
+		expect(
+			(await waitForJob(slimming.service, applyReceipt.jobId ?? '')).status
+		).toBe('complete');
 		await waitForFleetJob(fleet.service, fleetReceipt.jobId ?? '');
 		expect(fleet.provider.commands[0]?.[0]).toBe('launch');
 		await Promise.all([slimming.service.stop(), fleet.service.stop()]);
@@ -635,9 +667,9 @@ describe('slimming service', () => {
 			})
 		);
 		expect(slimming.service.cancelJob(applyReceipt.jobId ?? '')).toBe(true);
-		expect((await waitForJob(slimming.service, applyReceipt.jobId ?? '')).status).toBe(
-			'cancelled'
-		);
+		expect(
+			(await waitForJob(slimming.service, applyReceipt.jobId ?? '')).status
+		).toBe('cancelled');
 		expect(helper.prepareMutation).not.toHaveBeenCalled();
 		releaseFleet.resolve();
 		await waitForFleetJob(fleet.service, fleetReceipt.jobId ?? '');
@@ -683,7 +715,9 @@ describe('slimming service', () => {
 			})
 		);
 		expect(accepted.accepted).toBe(true);
-		expect((await waitForJob(service, accepted.jobId ?? '')).status).toBe('complete');
+		expect((await waitForJob(service, accepted.jobId ?? '')).status).toBe(
+			'complete'
+		);
 		expect(helper.order).toEqual([UDID]);
 		expect(helper.acknowledgements).toEqual(['EXPERIMENTAL']);
 		await service.stop();
@@ -718,7 +752,9 @@ describe('slimming service', () => {
 		expect(helper.simulatorStatus).not.toHaveBeenCalled();
 		expect(service.getState().statusBySimulator[UDID]).toMatchObject({
 			condition: 'unknown',
-			message: expect.stringContaining('temporary, automatically restored boot'),
+			message: expect.stringContaining(
+				'temporary, automatically restored boot'
+			),
 		});
 
 		const preview = service.runAction(
@@ -729,7 +765,9 @@ describe('slimming service', () => {
 				profileId: PROFILE,
 			})
 		);
-		expect((await waitForJob(service, preview.jobId ?? '')).status).toBe('complete');
+		expect((await waitForJob(service, preview.jobId ?? '')).status).toBe(
+			'complete'
+		);
 		await service.setEnabled({ actionId: 'shutdown-enable', enabled: true });
 		const acknowledgement = await service.acknowledgeCompatibility({
 			actionId: 'shutdown-ack',
@@ -748,7 +786,9 @@ describe('slimming service', () => {
 				confirmation: SLIMMING_CONFIRMATIONS.apply,
 			})
 		);
-		expect((await waitForJob(service, apply.jobId ?? '')).status).toBe('complete');
+		expect((await waitForJob(service, apply.jobId ?? '')).status).toBe(
+			'complete'
+		);
 		await service.stop();
 	});
 
@@ -857,7 +897,9 @@ describe('slimming service', () => {
 			experimentalMutationsEnabled: true,
 			disabledDisposition: 'restore-pending',
 		});
-		expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe('complete');
+		expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe(
+			'complete'
+		);
 		expect(helper.order).toEqual([UDID, SECOND_UDID]);
 		expect(service.getState().setting).toMatchObject({
 			experimentalMutationsEnabled: false,
@@ -962,7 +1004,9 @@ describe('slimming service', () => {
 			targets: [
 				{
 					status: 'failed',
-					message: expect.stringContaining('unacknowledged compatibility tuple'),
+					message: expect.stringContaining(
+						'unacknowledged compatibility tuple'
+					),
 				},
 			],
 		});
@@ -1132,7 +1176,9 @@ describe('slimming service', () => {
 	it('preserves the last real-change checkpoint across an idempotent apply before undo', async () => {
 		const { directory, helper, service } = await createService();
 		await enableAndAcknowledge(service, 'idempotent');
-		expect((await runApply(service, 'idempotent-first')).status).toBe('complete');
+		expect((await runApply(service, 'idempotent-first')).status).toBe(
+			'complete'
+		);
 		const firstPersisted = await readPersistedState(directory);
 		const firstCheckpoint = firstPersisted.checkpoints[UDID];
 		expect(firstCheckpoint).toBeDefined();
@@ -1154,7 +1200,9 @@ describe('slimming service', () => {
 				confirmation: SLIMMING_CONFIRMATIONS.undo,
 			})
 		);
-		expect((await waitForJob(service, undo.jobId ?? '')).status).toBe('complete');
+		expect((await waitForJob(service, undo.jobId ?? '')).status).toBe(
+			'complete'
+		);
 		expect(helper.managedByDevice.get(UDID)).toEqual([]);
 		await service.stop();
 	});
@@ -1163,8 +1211,12 @@ describe('slimming service', () => {
 		const helper = new FakeHelper();
 		const { directory, service } = await createService(helper);
 		await enableAndAcknowledge(service, 'rollback-safe');
-		expect((await runApply(service, 'rollback-safe-first')).status).toBe('complete');
-		const firstCheckpoint = (await readPersistedState(directory)).checkpoints[UDID];
+		expect((await runApply(service, 'rollback-safe-first')).status).toBe(
+			'complete'
+		);
+		const firstCheckpoint = (await readPersistedState(directory)).checkpoints[
+			UDID
+		];
 		helper.managedByDevice.set(UDID, []);
 		helper.applyError = new SimHelperError(
 			'mutation_failed',
@@ -1193,7 +1245,9 @@ describe('slimming service', () => {
 		const helper = new FakeHelper();
 		const first = await createService(helper);
 		await enableAndAcknowledge(first.service, 'restart-before');
-		helper.applyError = new Error('Injected helper process exit before mutation.');
+		helper.applyError = new Error(
+			'Injected helper process exit before mutation.'
+		);
 		const interrupted = await runApply(first.service, 'restart-before-apply');
 		expect(interrupted.status).toBe('needs-attention');
 		const persistedBeforeRestart = await readPersistedState(first.directory);
@@ -1247,7 +1301,9 @@ describe('slimming service', () => {
 		const reconciled = await readPersistedState(first.directory);
 		expect(reconciled.pendingMutations[UDID]).toBeUndefined();
 		expect(reconciled.checkpoints[UDID]?.token).toBe(pending?.checkpointToken);
-		expect(restarted.service.getState().checkpointBySimulator[UDID]).toBeDefined();
+		expect(
+			restarted.service.getState().checkpointBySimulator[UDID]
+		).toBeDefined();
 		await restarted.service.stop();
 	});
 
@@ -1257,7 +1313,8 @@ describe('slimming service', () => {
 		await enableAndAcknowledge(first.service, 'restart-unverified');
 		helper.applyError = new Error('Injected exit after prepare.');
 		await runApply(first.service, 'restart-unverified-apply');
-		const pending = (await readPersistedState(first.directory)).pendingMutations[UDID];
+		const pending = (await readPersistedState(first.directory))
+			.pendingMutations[UDID];
 		await first.service.stop();
 
 		const restartedHelper = new FakeHelper();
@@ -1283,9 +1340,8 @@ describe('slimming service', () => {
 		await enableAndAcknowledge(first.service, 'manual-unverified');
 		helper.applyError = new Error('Injected exit after durable preparation.');
 		await runApply(first.service, 'manual-unverified-apply');
-		const pendingBefore = (await readPersistedState(first.directory)).pendingMutations[
-			UDID
-		];
+		const pendingBefore = (await readPersistedState(first.directory))
+			.pendingMutations[UDID];
 		expect(pendingBefore).toBeDefined();
 		await first.service.stop();
 
@@ -1312,9 +1368,9 @@ describe('slimming service', () => {
 		);
 		const undo = await waitForJob(restarted.service, receipt.jobId ?? '');
 		expect(undo.status).toBe('needs-attention');
-		expect((await readPersistedState(first.directory)).pendingMutations[UDID]).toEqual(
-			pendingBefore
-		);
+		expect(
+			(await readPersistedState(first.directory)).pendingMutations[UDID]
+		).toEqual(pendingBefore);
 		expect(restarted.service.getState().statusBySimulator[UDID]).toMatchObject({
 			condition: 'needs-attention',
 			checkpointAvailable: true,
@@ -1328,9 +1384,8 @@ describe('slimming service', () => {
 		await enableAndAcknowledge(first.service, 'manual-drift');
 		helper.applyError = new Error('Injected exit after durable preparation.');
 		await runApply(first.service, 'manual-drift-apply');
-		const pendingBefore = (await readPersistedState(first.directory)).pendingMutations[
-			UDID
-		];
+		const pendingBefore = (await readPersistedState(first.directory))
+			.pendingMutations[UDID];
 		expect(pendingBefore).toBeDefined();
 		await first.service.stop();
 
@@ -1362,9 +1417,9 @@ describe('slimming service', () => {
 		);
 		const undo = await waitForJob(restarted.service, receipt.jobId ?? '');
 		expect(undo.status).toBe('needs-attention');
-		expect((await readPersistedState(first.directory)).pendingMutations[UDID]).toEqual(
-			pendingBefore
-		);
+		expect(
+			(await readPersistedState(first.directory)).pendingMutations[UDID]
+		).toEqual(pendingBefore);
 		expect(restarted.service.getState().statusBySimulator[UDID]).toMatchObject({
 			condition: 'needs-attention',
 			checkpointAvailable: true,

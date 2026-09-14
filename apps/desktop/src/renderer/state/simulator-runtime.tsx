@@ -33,7 +33,8 @@ type WithoutActionId<T> = T extends { actionId: string }
 	? Omit<T, 'actionId' | 'confirmationToken'>
 	: never;
 export type SimulatorActionInput = WithoutActionId<SimulatorAction>;
-export type SimulatorCaptureOperationInput = WithoutActionId<SimulatorCaptureOperation>;
+export type SimulatorCaptureOperationInput =
+	WithoutActionId<SimulatorCaptureOperation>;
 export type SimulatorOnboardingOperationInput =
 	WithoutActionId<SimulatorOnboardingOperation>;
 
@@ -42,7 +43,10 @@ type RunSimulatorActionMessages = {
 	successMessage?: string;
 };
 
-type CancelSimulatorJobMessages = Pick<RunSimulatorActionMessages, 'successMessage'>;
+type CancelSimulatorJobMessages = Pick<
+	RunSimulatorActionMessages,
+	'successMessage'
+>;
 
 type SimulatorRuntimeValue = {
 	state: SimulatorState;
@@ -59,8 +63,13 @@ type SimulatorRuntimeValue = {
 		action: SimulatorActionInput,
 		messages?: RunSimulatorActionMessages
 	) => Promise<SimulatorActionReceipt>;
-	cancelJob: (jobId: string, messages?: CancelSimulatorJobMessages) => Promise<boolean>;
-	getCaptureAccess: (captureId: string) => Promise<SimulatorCaptureAccessResult>;
+	cancelJob: (
+		jobId: string,
+		messages?: CancelSimulatorJobMessages
+	) => Promise<boolean>;
+	getCaptureAccess: (
+		captureId: string
+	) => Promise<SimulatorCaptureAccessResult>;
 	getCaptureRetention: () => Promise<SimulatorCaptureRetentionState>;
 	runCaptureOperation: (
 		operation: SimulatorCaptureOperationInput,
@@ -71,7 +80,9 @@ type SimulatorRuntimeValue = {
 	) => Promise<SimulatorOnboardingReceipt>;
 };
 
-const SimulatorRuntimeContext = createContext<SimulatorRuntimeValue | null>(null);
+const SimulatorRuntimeContext = createContext<SimulatorRuntimeValue | null>(
+	null
+);
 const SELECTED_DEVICE_KEY = 'pumpd.desktop.simulator.selected-device';
 
 const EMPTY_SIMULATOR_STATE: SimulatorState = {
@@ -166,7 +177,11 @@ export function simulatorJobCancellationStatus(
 		: { kind: 'error', message: 'The job could not be cancelled.' };
 }
 
-export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) {
+export function SimulatorRuntimeProvider({
+	children,
+}: {
+	children: ReactNode;
+}) {
 	const bridge = useMemo(getSimulatorBridge, []);
 	const [state, setState] = useState<SimulatorState>(EMPTY_SIMULATOR_STATE);
 	const [isLoading, setIsLoading] = useState(Boolean(bridge));
@@ -175,9 +190,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			? null
 			: 'Simulator controls require the secure desktop bridge. Open this workspace in the installed desktop app.'
 	);
-	const [selectedDeviceUdid, setSelectedDeviceUdidState] = useState<string | null>(
-		readSelectedDeviceUdid
-	);
+	const [selectedDeviceUdid, setSelectedDeviceUdidState] = useState<
+		string | null
+	>(readSelectedDeviceUdid);
 	const [actionStatus, setActionStatus] = useState<SimulatorActionStatus>({
 		kind: 'idle',
 		message: '',
@@ -305,7 +320,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				return { actionId, accepted: false, error };
 			}
 			if (pendingActionKeysRef.current.size >= 32) {
-				const error = 'The Simulator submission queue is full. Wait for a receipt.';
+				const error =
+					'The Simulator submission queue is full. Wait for a receipt.';
 				setActionStatus({ kind: 'error', message: error });
 				return { actionId, accepted: false, error };
 			}
@@ -321,7 +337,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			try {
 				const confirmation = await bridge.requestSimulatorConfirmation(action);
 				if (!confirmation.confirmed) {
-					const error = confirmation.error ?? 'Action cancelled by the operator.';
+					const error =
+						confirmation.error ?? 'Action cancelled by the operator.';
 					if (latestActionIdRef.current === actionId) {
 						setActionStatus({ kind: 'error', message: error });
 					}
@@ -329,7 +346,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				}
 				if (confirmation.required) {
 					if (!confirmation.token) {
-						const error = 'Native confirmation did not issue a valid action token.';
+						const error =
+							'Native confirmation did not issue a valid action token.';
 						if (latestActionIdRef.current === actionId) {
 							setActionStatus({ kind: 'error', message: error });
 						}
@@ -339,7 +357,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				}
 				const receipt = await bridge.runSimulatorAction(action);
 				if (latestActionIdRef.current === actionId) {
-					if (receipt.accepted && receipt.jobId) setSubmittedJobId(receipt.jobId);
+					if (receipt.accepted && receipt.jobId)
+						setSubmittedJobId(receipt.jobId);
 					setActionStatus(
 						receipt.accepted
 							? {
@@ -350,7 +369,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 								}
 							: {
 									kind: 'error',
-									message: receipt.error ?? 'The Simulator action was rejected.',
+									message:
+										receipt.error ?? 'The Simulator action was rejected.',
 								}
 					);
 				}
@@ -404,7 +424,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 	const getCaptureRetention =
 		useCallback(async (): Promise<SimulatorCaptureRetentionState> => {
 			if (!bridge) {
-				throw new Error('Capture retention requires the secure desktop bridge.');
+				throw new Error(
+					'Capture retention requires the secure desktop bridge.'
+				);
 			}
 			return bridge.getSimulatorCaptureRetention();
 		}, [bridge]);
@@ -416,7 +438,9 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 		): Promise<SimulatorCaptureOperationReceipt> => {
 			const actionId = `capture-${crypto.randomUUID()}`;
 			const operationKey = JSON.stringify(operationInput);
-			const failedReceipt = (error: string): SimulatorCaptureOperationReceipt => ({
+			const failedReceipt = (
+				error: string
+			): SimulatorCaptureOperationReceipt => ({
 				actionId,
 				kind: operationInput.kind,
 				completed: false,
@@ -428,12 +452,14 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				return failedReceipt(error);
 			}
 			if (pendingCaptureOperationKeysRef.current.has(operationKey)) {
-				const error = 'This exact capture operation is already being submitted.';
+				const error =
+					'This exact capture operation is already being submitted.';
 				setActionStatus({ kind: 'error', message: error });
 				return failedReceipt(error);
 			}
 			if (pendingCaptureOperationKeysRef.current.size >= 8) {
-				const error = 'The capture operation queue is full. Wait for a receipt.';
+				const error =
+					'The capture operation queue is full. Wait for a receipt.';
 				setActionStatus({ kind: 'error', message: error });
 				return failedReceipt(error);
 			}
@@ -455,7 +481,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 						receipt.completed
 							? {
 									kind: 'success',
-									message: messages.successMessage ?? 'Capture operation completed.',
+									message:
+										messages.successMessage ?? 'Capture operation completed.',
 								}
 							: receipt.cancelled
 								? { kind: 'success', message: 'Capture operation cancelled.' }
@@ -491,7 +518,8 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 				error,
 			});
 			if (!bridge) {
-				const error = 'Simulator onboarding requires the secure desktop bridge.';
+				const error =
+					'Simulator onboarding requires the secure desktop bridge.';
 				setActionStatus({ kind: 'error', message: error });
 				return failed(error);
 			}
@@ -504,13 +532,19 @@ export function SimulatorRuntimeProvider({ children }: { children: ReactNode }) 
 			pendingOnboardingKeysRef.current.add(key);
 			latestActionIdRef.current = actionId;
 			setSubmittedJobId(null);
-			setActionStatus({ kind: 'pending', message: 'Opening the trusted setup flow…' });
+			setActionStatus({
+				kind: 'pending',
+				message: 'Opening the trusted setup flow…',
+			});
 			try {
 				const receipt = await bridge.runSimulatorOnboardingOperation({
 					...operationInput,
 					actionId,
 				} as SimulatorOnboardingOperation);
-				if (receipt.actionId !== actionId || receipt.kind !== operationInput.kind) {
+				if (
+					receipt.actionId !== actionId ||
+					receipt.kind !== operationInput.kind
+				) {
 					const error = 'Onboarding returned a mismatched action receipt.';
 					setActionStatus({ kind: 'error', message: error });
 					return failed(error);

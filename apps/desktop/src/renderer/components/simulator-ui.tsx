@@ -39,7 +39,11 @@ export function SimulatorPanelHeader({
 	);
 }
 
-export function RefreshSimulatorsButton({ compact = false }: { compact?: boolean }) {
+export function RefreshSimulatorsButton({
+	compact = false,
+}: {
+	compact?: boolean;
+}) {
 	const { isBridgeAvailable, isLoading, refresh } = useSimulatorRuntime();
 	return (
 		<Tooltip delay={500}>
@@ -52,7 +56,9 @@ export function RefreshSimulatorsButton({ compact = false }: { compact?: boolean
 				variant="secondary"
 				onPress={() => void refresh()}
 			>
-				<RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+				<RefreshCw
+					className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`}
+				/>
 				{compact ? null : isLoading ? 'Scanning…' : 'Refresh'}
 			</Button>
 			<Tooltip.Content>
@@ -64,10 +70,18 @@ export function RefreshSimulatorsButton({ compact = false }: { compact?: boolean
 	);
 }
 
-export function SimulatorTargetSelect({ className = '' }: { className?: string }) {
-	const { selectedDevice, setSelectedDeviceUdid, state } = useSimulatorRuntime();
+export function SimulatorTargetSelect({
+	className = '',
+}: {
+	className?: string;
+}) {
+	const { selectedDevice, setSelectedDeviceUdid, state } =
+		useSimulatorRuntime();
 	return (
-		<NativeSelect className={`sim-target-select ${className}`} fullWidth={false}>
+		<NativeSelect
+			className={`sim-target-select ${className}`}
+			fullWidth={false}
+		>
 			<NativeSelect.Trigger
 				aria-label="Simulator target"
 				disabled={state.devices.length === 0}
@@ -75,7 +89,9 @@ export function SimulatorTargetSelect({ className = '' }: { className?: string }
 				onChange={(event) => setSelectedDeviceUdid(event.currentTarget.value)}
 			>
 				{state.devices.length === 0 ? (
-					<NativeSelect.Option value="">No target discovered</NativeSelect.Option>
+					<NativeSelect.Option value="">
+						No target discovered
+					</NativeSelect.Option>
 				) : null}
 				{state.devices.map((device) => (
 					<NativeSelect.Option key={device.udid} value={device.udid}>
@@ -183,11 +199,15 @@ export function DenseVirtualList<T extends object>({
 						: selectedId === itemId;
 				return (
 					<ListView.Item
-						aria-current={selectionMode === 'single' && selected ? 'true' : undefined}
+						aria-current={
+							selectionMode === 'single' && selected ? 'true' : undefined
+						}
 						className={`sim-list-item ${selected ? 'is-selected' : ''}`}
 						id={itemId}
 						textValue={textValue(item)}
-						{...(selectionMode === 'none' ? { onAction: () => onSelect?.(item) } : {})}
+						{...(selectionMode === 'none'
+							? { onAction: () => onSelect?.(item) }
+							: {})}
 					>
 						{renderItem(item)}
 					</ListView.Item>
@@ -197,7 +217,11 @@ export function DenseVirtualList<T extends object>({
 	);
 }
 
-export function TargetStatePill({ state }: { state: SimulatorDevice['state'] }) {
+export function TargetStatePill({
+	state,
+}: {
+	state: SimulatorDevice['state'];
+}) {
 	const tone =
 		state === 'booted'
 			? 'success'
@@ -213,7 +237,11 @@ export function TargetStatePill({ state }: { state: SimulatorDevice['state'] }) 
 	);
 }
 
-export function NoSimulatorTarget({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export function NoSimulatorTarget({
+	onOpenSettings,
+}: {
+	onOpenSettings?: () => void;
+}) {
 	return (
 		<EmptyPanel
 			action={

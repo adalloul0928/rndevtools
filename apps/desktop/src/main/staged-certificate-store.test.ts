@@ -53,7 +53,9 @@ const CANONICAL_SHA256 = createHash('sha256')
 const temporaryDirectories: string[] = [];
 
 async function setup(now: () => number = Date.now) {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-certificate-test-'));
+	const directory = await mkdtemp(
+		path.join(tmpdir(), 'pumpd-certificate-test-')
+	);
 	temporaryDirectories.push(directory);
 	const sourcePath = path.join(directory, 'source.pem');
 	await writeFile(sourcePath, CERTIFICATE);
@@ -88,17 +90,23 @@ describe('staged certificate store', () => {
 
 		await writeFile(sourcePath, 'replaced after selection');
 		store.bind('confirmation-source-replaced', 7, ACTION, artifact);
-		const claimed = await store.claim('confirmation-source-replaced', 7, ACTION);
+		const claimed = await store.claim(
+			'confirmation-source-replaced',
+			7,
+			ACTION
+		);
 		expect(claimed?.identity).toEqual(artifact.identity);
 		expect(claimed?.bytes).toEqual(approvedBytes);
 		const materialized = await claimed?.materialize();
 		expect(materialized).toBeDefined();
 		expect(await readFile(materialized?.path ?? '')).toEqual(approvedBytes);
-		expect((await stat(path.dirname(materialized?.path ?? ''))).mode & 0o777).toBe(
-			0o700
-		);
+		expect(
+			(await stat(path.dirname(materialized?.path ?? ''))).mode & 0o777
+		).toBe(0o700);
 		expect((await stat(materialized?.path ?? '')).mode & 0o777).toBe(0o400);
-		await expect(claimed?.materialize()).rejects.toThrow('already been materialized');
+		await expect(claimed?.materialize()).rejects.toThrow(
+			'already been materialized'
+		);
 		await materialized?.cleanup();
 		await expect(readFile(materialized?.path ?? '')).rejects.toThrow();
 		await claimed?.cleanup();
@@ -150,7 +158,11 @@ describe('staged certificate store', () => {
 			const { sourcePath, store } = await setup();
 			const artifact = await store.stage(sourcePath, 7);
 			store.bind('confirmation-cleanup-retry', 7, ACTION, artifact);
-			const claimed = await store.claim('confirmation-cleanup-retry', 7, ACTION);
+			const claimed = await store.claim(
+				'confirmation-cleanup-retry',
+				7,
+				ACTION
+			);
 			const materialized = await claimed?.materialize();
 			const stagingRoot = path.dirname(path.dirname(materialized?.path ?? ''));
 			await chmod(stagingRoot, 0o500);
@@ -160,14 +172,18 @@ describe('staged certificate store', () => {
 				await chmod(stagingRoot, 0o700);
 			}
 			await materialized?.cleanup();
-			await expect(access(path.dirname(materialized?.path ?? ''))).rejects.toThrow();
+			await expect(
+				access(path.dirname(materialized?.path ?? ''))
+			).rejects.toThrow();
 			await claimed?.cleanup();
 			await store.stop();
 		}
 	);
 
 	it('removes stale materialized artifacts and restores private root permissions', async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-certificate-stale-'));
+		const directory = await mkdtemp(
+			path.join(tmpdir(), 'pumpd-certificate-stale-')
+		);
 		temporaryDirectories.push(directory);
 		const stagedDirectory = path.join(directory, 'staged');
 		const staleDirectory = path.join(stagedDirectory, 'certificate-stale');
@@ -185,8 +201,13 @@ describe('staged certificate store', () => {
 		const { sourcePath, store } = await setup();
 		const artifact = await store.stage(sourcePath, 7);
 		store.bind('confirmation-mismatch', 7, ACTION, artifact);
-		const mismatched = { ...ACTION, udid: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE' };
-		expect(await store.claim('confirmation-mismatch', 7, mismatched)).toBeUndefined();
+		const mismatched = {
+			...ACTION,
+			udid: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+		};
+		expect(
+			await store.claim('confirmation-mismatch', 7, mismatched)
+		).toBeUndefined();
 		expect(artifact.bytes.every((byte) => byte === 0)).toBe(true);
 		await store.stop();
 	});
@@ -196,7 +217,9 @@ describe('staged certificate store', () => {
 		const artifact = await store.stage(sourcePath, 7);
 		store.bind('confirmation-tampered', 7, ACTION, artifact);
 		artifact.bytes[0] = artifact.bytes[0] === 0 ? 1 : 0;
-		expect(await store.claim('confirmation-tampered', 7, ACTION)).toBeUndefined();
+		expect(
+			await store.claim('confirmation-tampered', 7, ACTION)
+		).toBeUndefined();
 		expect(artifact.bytes.every((byte) => byte === 0)).toBe(true);
 		await store.stop();
 	});
@@ -225,7 +248,9 @@ describe('staged certificate store', () => {
 		await store.revokeSender(7);
 		expect(artifact.bytes.some((byte) => byte !== 0)).toBe(true);
 		const materialized = await claimed?.materialize();
-		expect(await readFile(materialized?.path ?? '')).toEqual(CANONICAL_CERTIFICATE);
+		expect(await readFile(materialized?.path ?? '')).toEqual(
+			CANONICAL_CERTIFICATE
+		);
 		await materialized?.cleanup();
 		await claimed?.cleanup();
 		expect(artifact.bytes.every((byte) => byte === 0)).toBe(true);
@@ -238,7 +263,9 @@ describe('staged certificate store', () => {
 		const artifact = await store.stage(sourcePath, 7);
 		store.bind('confirmation-expired', 7, ACTION, artifact);
 		now = 102;
-		expect(await store.claim('confirmation-expired', 7, ACTION)).toBeUndefined();
+		expect(
+			await store.claim('confirmation-expired', 7, ACTION)
+		).toBeUndefined();
 		expect(artifact.bytes.every((byte) => byte === 0)).toBe(true);
 		await store.stop();
 	});

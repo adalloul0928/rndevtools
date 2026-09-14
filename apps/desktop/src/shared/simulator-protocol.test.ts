@@ -181,9 +181,9 @@ describe('simulator protocol', () => {
 			aps: { alert: '💪'.repeat(1_100) },
 		});
 		expect(multibytePayload.length).toBeLessThan(16 * 1024);
-		expect(new TextEncoder().encode(multibytePayload).byteLength).toBeGreaterThan(
-			4_096
-		);
+		expect(
+			new TextEncoder().encode(multibytePayload).byteLength
+		).toBeGreaterThan(4_096);
 		expect(
 			simulatorActionSchema.safeParse({
 				actionId: 'push-multibyte',
@@ -205,7 +205,10 @@ describe('simulator protocol', () => {
 	});
 
 	it('allows universal and custom deep links but rejects local or executable schemes', () => {
-		for (const url of ['https://example.com/path', 'pumpdmobileapp://workout/1']) {
+		for (const url of [
+			'https://example.com/path',
+			'pumpdmobileapp://workout/1',
+		]) {
 			expect(
 				simulatorActionSchema.safeParse({
 					actionId: `url-${url}`,
@@ -298,8 +301,10 @@ describe('simulator protocol', () => {
 		};
 		expect(simulatorStateSchema.parse(state)).toEqual(state);
 		expect(
-			simulatorStateSchema.safeParse({ ...state, captureDirectory: '/private/path' })
-				.success
+			simulatorStateSchema.safeParse({
+				...state,
+				captureDirectory: '/private/path',
+			}).success
 		).toBe(false);
 	});
 
@@ -348,7 +353,12 @@ describe('simulator protocol', () => {
 		const recipe = captureCompositionRecipeSchema.parse({
 			outputFormat: 'png',
 			canvas: {
-				size: { mode: 'aspect', ratioWidth: 9, ratioHeight: 16, longEdge: 2_736 },
+				size: {
+					mode: 'aspect',
+					ratioWidth: 9,
+					ratioHeight: 16,
+					longEdge: 2_736,
+				},
 				background: {
 					kind: 'linear_gradient',
 					startColor: '#090909',

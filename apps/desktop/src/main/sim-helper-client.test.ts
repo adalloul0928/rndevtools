@@ -28,7 +28,8 @@ function verified(): VerifiedSimulatorHelper {
 				patchSet: 'pumpd.1',
 				upstreamSourceManifestSha256:
 					'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
-				patchSha256: '69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+				patchSha256:
+					'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
 				vendoredSourceManifestSha256:
 					'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 			},
@@ -71,7 +72,8 @@ function handshakeResult() {
 			patchSet: 'pumpd.1',
 			upstreamSourceManifestSha256:
 				'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
-			patchSha256: '69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+			patchSha256:
+				'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
 			vendoredSourceManifestSha256:
 				'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 		},
@@ -139,9 +141,11 @@ describe('sim helper client', () => {
 		] as const;
 
 		for (const candidate of expected) {
-			const runner = vi.fn(async (..._args: Parameters<typeof runSimulatorCommand>) => {
-				throw new Error('stop after option capture');
-			});
+			const runner = vi.fn(
+				async (..._args: Parameters<typeof runSimulatorCommand>) => {
+					throw new Error('stop after option capture');
+				}
+			);
 			const mutationBroker = {
 				runSimulatorMutation: vi.fn(
 					async (
@@ -280,7 +284,9 @@ describe('sim helper client', () => {
 			categoryIds: ['caches'],
 			confirmation: 'CLEAN_SIMULATOR_DISK',
 		});
-		await expect(client.cleanDisk(UDID, ['caches', 'caches'])).rejects.toBeDefined();
+		await expect(
+			client.cleanDisk(UDID, ['caches', 'caches'])
+		).rejects.toBeDefined();
 		expect(runner).toHaveBeenCalledOnce();
 		expect(mutationBroker.runSimulatorMutation).toHaveBeenCalledOnce();
 	});
@@ -423,11 +429,13 @@ describe('sim helper client', () => {
 			trustVerifier: vi.fn(async () => verified()),
 			mutationBroker,
 		});
-		await expect(client.cloneSimulator(UDID, ' PUMPD Clone ')).resolves.toEqual({
-			sourceSimulatorId: UDID,
-			simulatorId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
-			name: 'PUMPD Clone',
-		});
+		await expect(client.cloneSimulator(UDID, ' PUMPD Clone ')).resolves.toEqual(
+			{
+				sourceSimulatorId: UDID,
+				simulatorId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+				name: 'PUMPD Clone',
+			}
+		);
 		await expect(
 			client.cloneSimulator('booted; rm -rf /', 'Unsafe')
 		).rejects.toBeDefined();
@@ -509,6 +517,8 @@ describe('sim helper client', () => {
 			runner,
 			trustVerifier: vi.fn(async () => verified()),
 		});
-		await expect(client.handshake()).rejects.toBeInstanceOf(NativeHelperTrustError);
+		await expect(client.handshake()).rejects.toBeInstanceOf(
+			NativeHelperTrustError
+		);
 	});
 });

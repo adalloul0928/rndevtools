@@ -41,7 +41,9 @@ export function StoragePanel() {
 	const summary = selectedDevice?.tools.storageSummary;
 	const [query, setQuery] = useState('');
 	const [adapter, setAdapter] = useState('all');
-	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		entries[0]?.id ?? null
+	);
 	const [draftState, setDraftState] = useState({
 		deviceId: null as string | null,
 		entryId: null as string | null,
@@ -80,7 +82,8 @@ export function StoragePanel() {
 				? events
 						.filter(
 							(event) =>
-								event.adapterId === selected.adapterId && event.key === selected.key
+								event.adapterId === selected.adapterId &&
+								event.key === selected.key
 						)
 						.sort((left, right) => right.at - left.at)
 				: [],
@@ -199,7 +202,8 @@ export function StoragePanel() {
 					))}
 				</div>
 				<span className="ml-auto font-mono text-xs text-(--text-3)">
-					{summary?.totalKeyCount ?? entries.length} keys · {events.length} changes
+					{summary?.totalKeyCount ?? entries.length} keys · {events.length}{' '}
+					changes
 				</span>
 			</Toolbar>
 			{summary && (summary.truncated || summary.errors.length > 0) ? (
@@ -255,7 +259,11 @@ export function StoragePanel() {
 								</StatusPill>
 							</div>
 							<dl className="mb-4">
-								<KeyValue label="Size" value={formatBytes(selected.bytes)} mono />
+								<KeyValue
+									label="Size"
+									value={formatBytes(selected.bytes)}
+									mono
+								/>
 								<KeyValue
 									label="Updated"
 									value={
@@ -264,7 +272,10 @@ export function StoragePanel() {
 											: 'Unknown'
 									}
 								/>
-								<KeyValue label="Writable" value={selected.editable ? 'Yes' : 'No'} />
+								<KeyValue
+									label="Writable"
+									value={selected.editable ? 'Yes' : 'No'}
+								/>
 							</dl>
 							{selected.sensitive ? (
 								<div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
@@ -272,8 +283,8 @@ export function StoragePanel() {
 										<EyeOff className="h-4 w-4" /> Encrypted value hidden
 									</div>
 									<p className="mb-0 mt-2 text-xs leading-5 text-amber-100/60">
-										The key is listed for diagnostics, but its value is never read or
-										transmitted to desktop.
+										The key is listed for diagnostics, but its value is never
+										read or transmitted to desktop.
 									</p>
 								</div>
 							) : selected.editable ? (
@@ -320,7 +331,11 @@ export function StoragePanel() {
 									</div>
 								</TextField>
 							) : (
-								<CodePreview label="Value" value={selected.valueText} maxHeight={300} />
+								<CodePreview
+									label="Value"
+									value={selected.valueText}
+									maxHeight={300}
+								/>
 							)}
 							<div className="mt-5 border-t border-white/8 pt-4">
 								<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">

@@ -22,7 +22,9 @@ function verifyNativeResources(resourcesDirectory) {
 		const helper = manifest.helpers[key];
 		const digest = createHash('sha256').update(data).digest('hex');
 		if (stats.size !== helper.size || digest !== helper.sha256) {
-			throw new Error(`Native helper ${key} does not match its integrity manifest.`);
+			throw new Error(
+				`Native helper ${key} does not match its integrity manifest.`
+			);
 		}
 	}
 	return manifest;
@@ -38,7 +40,8 @@ function readSupportedManifest(resolvedDirectory) {
 		manifest.protocolVersion !== 2 ||
 		manifest.compatibilityMatrixVersion !== '2026-09-03-v2' ||
 		manifest.catalog?.version !== 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2' ||
-		manifest.catalog?.upstreamCommit !== '09fc9cbbca35db5230e6d571a0a366fe6876266e' ||
+		manifest.catalog?.upstreamCommit !==
+			'09fc9cbbca35db5230e6d571a0a366fe6876266e' ||
 		manifest.catalog?.patchSet !== 'pumpd.1' ||
 		manifest.catalog?.upstreamSourceManifestSha256 !==
 			'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08' ||
@@ -53,7 +56,9 @@ function readSupportedManifest(resolvedDirectory) {
 		typeof manifest.buildCommit !== 'string' ||
 		!/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/.test(manifest.buildCommit)
 	) {
-		throw new Error('Native resource manifest has an unsupported build identity.');
+		throw new Error(
+			'Native resource manifest has an unsupported build identity.'
+		);
 	}
 	for (const [key, expectedFile] of Object.entries(expectedHelperFiles)) {
 		const helper = manifest.helpers?.[key];
@@ -108,11 +113,15 @@ function refreshNativeResourceManifest(resourcesDirectory, verifiedManifest) {
 	const refreshedManifest = { ...manifest, helpers };
 	const temporaryPath = `${manifestPath}.tmp-${process.pid}-${randomUUID()}`;
 	try {
-		writeFileSync(temporaryPath, `${JSON.stringify(refreshedManifest, null, 2)}\n`, {
-			encoding: 'utf8',
-			flag: 'wx',
-			mode: 0o644,
-		});
+		writeFileSync(
+			temporaryPath,
+			`${JSON.stringify(refreshedManifest, null, 2)}\n`,
+			{
+				encoding: 'utf8',
+				flag: 'wx',
+				mode: 0o644,
+			}
+		);
 		renameSync(temporaryPath, manifestPath);
 	} catch (error) {
 		try {
@@ -146,7 +155,9 @@ if (require.main === module) {
 			`Verified native resources for mac-${manifest.architecture}.\n`
 		);
 	} catch (error) {
-		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		process.stderr.write(
+			`${error instanceof Error ? error.message : String(error)}\n`
+		);
 		process.exit(1);
 	}
 }

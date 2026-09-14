@@ -38,9 +38,13 @@ const nativeResourceManifestSchema = z.strictObject({
 		upstreamRepository: z.literal('https://github.com/MobAI-App/simslim'),
 		upstreamCommit: z.literal(EXPECTED_UPSTREAM_COMMIT),
 		patchSet: z.literal(EXPECTED_PATCH_SET),
-		upstreamSourceManifestSha256: z.literal(EXPECTED_UPSTREAM_SOURCE_MANIFEST_SHA256),
+		upstreamSourceManifestSha256: z.literal(
+			EXPECTED_UPSTREAM_SOURCE_MANIFEST_SHA256
+		),
 		patchSha256: z.literal(EXPECTED_PATCH_SHA256),
-		vendoredSourceManifestSha256: z.literal(EXPECTED_VENDORED_SOURCE_MANIFEST_SHA256),
+		vendoredSourceManifestSha256: z.literal(
+			EXPECTED_VENDORED_SOURCE_MANIFEST_SHA256
+		),
 	}),
 	helpers: z.strictObject({
 		simulator: helperManifestEntrySchema,
@@ -84,11 +88,14 @@ async function verifyCodeSignature(executablePath: string): Promise<void> {
 
 async function sha256File(filePath: string): Promise<Buffer> {
 	const hash = createHash('sha256');
-	for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+	for await (const chunk of createReadStream(filePath))
+		hash.update(chunk as Buffer);
 	return hash.digest();
 }
 
-function expectedArchitecture(architecture: NodeJS.Architecture): 'arm64' | 'x64' {
+function expectedArchitecture(
+	architecture: NodeJS.Architecture
+): 'arm64' | 'x64' {
 	if (architecture === 'arm64' || architecture === 'x64') return architecture;
 	throw new NativeHelperTrustError(
 		`Native Simulator helpers do not support ${architecture}.`,
@@ -98,7 +105,9 @@ function expectedArchitecture(architecture: NodeJS.Architecture): 'arm64' | 'x64
 
 function containedPath(root: string, candidate: string): boolean {
 	const relative = path.relative(root, candidate);
-	return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+	return (
+		relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
+	);
 }
 
 async function verifyNativeHelper({
@@ -214,7 +223,11 @@ async function verifyNativeHelper({
 		) {
 			throw new Error('helper changed during verification');
 		}
-		return { executablePath: resolvedExecutable, manifest, verifiedAt: Date.now() };
+		return {
+			executablePath: resolvedExecutable,
+			manifest,
+			verifiedAt: Date.now(),
+		};
 	} catch (cause) {
 		throw new NativeHelperTrustError(
 			'Bundled Simulator helper failed integrity or code-signature verification.',

@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+	chmod,
+	mkdtemp,
+	realpath,
+	rm,
+	symlink,
+	writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -40,7 +47,8 @@ async function fixture() {
 			patchSet: 'pumpd.1',
 			upstreamSourceManifestSha256:
 				'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
-			patchSha256: '69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+			patchSha256:
+				'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
 			vendoredSourceManifestSha256:
 				'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 		},
@@ -50,7 +58,10 @@ async function fixture() {
 			cli: entry('pumpd-devtools', 'agent cli'),
 		},
 	};
-	await writeFile(path.join(directory, 'manifest.json'), JSON.stringify(manifest));
+	await writeFile(
+		path.join(directory, 'manifest.json'),
+		JSON.stringify(manifest)
+	);
 	return { directory, executable };
 }
 

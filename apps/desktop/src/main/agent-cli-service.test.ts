@@ -30,13 +30,23 @@ async function fixture(
 	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-agent-cli-'));
 	temporaryDirectories.push(directory);
 	const socketPath = path.join(directory, 'agent', 'pumpd-devtools.sock');
-	const service = new AgentCliService({ socketPath, handler, platform: 'darwin' });
+	const service = new AgentCliService({
+		socketPath,
+		handler,
+		platform: 'darwin',
+	});
 	services.push(service);
-	expect(await service.start()).toMatchObject({ status: 'available', socketPath });
+	expect(await service.start()).toMatchObject({
+		status: 'available',
+		socketPath,
+	});
 	return { service, socketPath };
 }
 
-async function request(socketPath: string, body: unknown): Promise<AgentCliResponse> {
+async function request(
+	socketPath: string,
+	body: unknown
+): Promise<AgentCliResponse> {
 	return await new Promise((resolve, reject) => {
 		const socket = connect(socketPath);
 		const chunks: Buffer[] = [];
@@ -44,7 +54,9 @@ async function request(socketPath: string, body: unknown): Promise<AgentCliRespo
 		socket.on('data', (chunk: Buffer) => chunks.push(chunk));
 		socket.once('end', () => {
 			try {
-				resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as AgentCliResponse);
+				resolve(
+					JSON.parse(Buffer.concat(chunks).toString('utf8')) as AgentCliResponse
+				);
 			} catch (error) {
 				reject(error);
 			}
@@ -107,7 +119,9 @@ describe('agent CLI service', () => {
 			socket.once('end', () => {
 				try {
 					resolve(
-						JSON.parse(Buffer.concat(chunks).toString('utf8')) as AgentCliResponse
+						JSON.parse(
+							Buffer.concat(chunks).toString('utf8')
+						) as AgentCliResponse
 					);
 				} catch (error) {
 					reject(error);
@@ -143,7 +157,8 @@ describe('agent CLI service', () => {
 		const { socketPath } = await fixture(async () => {
 			throw new AgentCliError({
 				code: 'approval_required',
-				message: 'Approval is required for https://example.com/path?token=secret',
+				message:
+					'Approval is required for https://example.com/path?token=secret',
 				recovery: 'Approve the exact action in the desktop app.',
 			});
 		});
@@ -188,7 +203,9 @@ describe('agent CLI service', () => {
 	});
 
 	it('caps serialized command results', async () => {
-		const { socketPath } = await fixture(async () => ({ value: 'x'.repeat(600_000) }));
+		const { socketPath } = await fixture(async () => ({
+			value: 'x'.repeat(600_000),
+		}));
 		const response = await request(socketPath, {
 			protocol: PUMPD_AGENT_CLI_PROTOCOL,
 			id: 'request-4',
@@ -215,7 +232,9 @@ describe('agent CLI service', () => {
 	});
 
 	it('does not publish a socket when packaged CLI verification fails', async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-agent-untrusted-'));
+		const directory = await mkdtemp(
+			path.join(tmpdir(), 'pumpd-agent-untrusted-')
+		);
 		temporaryDirectories.push(directory);
 		const socketPath = path.join(directory, 'agent', 'pumpd-devtools.sock');
 		const service = new AgentCliService({

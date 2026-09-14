@@ -23,7 +23,9 @@ const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const evidenceMessageSchema = z.string().max(256);
 const cleanupFailureSchema = z.string().max(1_024);
 const timestampSchema = z.number().finite().nonnegative();
-const udidSchema = z.string().regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
 const bundleIdentifierSchema = z
 	.string()
 	.trim()
@@ -49,7 +51,8 @@ const timeZoneSchema = z
 	.max(128)
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9][A-Za-z0-9._+-]*){0,3}$/)
 	.refine(
-		(value) => value.split('/').every((segment) => segment !== '.' && segment !== '..'),
+		(value) =>
+			value.split('/').every((segment) => segment !== '.' && segment !== '..'),
 		{ message: 'Invalid time-zone identifier.' }
 	);
 const timeoutSchema = z
@@ -80,7 +83,8 @@ const targetUdidsSchema = z
 	.max(MAX_RECIPE_TARGETS)
 	.refine(
 		(values) =>
-			new Set(values.map((value) => value.toUpperCase())).size === values.length,
+			new Set(values.map((value) => value.toUpperCase())).size ===
+			values.length,
 		{ message: 'Recipe target UDIDs must be unique.' }
 	);
 
@@ -169,14 +173,17 @@ const statusBarOverridesSchema = z
 			.optional(),
 		wifiMode: z.enum(['searching', 'failed', 'active']).optional(),
 		wifiBars: z.number().int().min(0).max(3).optional(),
-		cellularMode: z.enum(['notSupported', 'searching', 'failed', 'active']).optional(),
+		cellularMode: z
+			.enum(['notSupported', 'searching', 'failed', 'active'])
+			.optional(),
 		cellularBars: z.number().int().min(0).max(4).optional(),
 		operatorName: z.string().max(64).optional(),
 		batteryState: z.enum(['charging', 'charged', 'discharging']).optional(),
 		batteryLevel: z.number().int().min(0).max(100).optional(),
 	})
 	.refine(
-		(overrides) => Object.values(overrides).some((value) => value !== undefined),
+		(overrides) =>
+			Object.values(overrides).some((value) => value !== undefined),
 		{ message: 'At least one status-bar override is required.' }
 	);
 
@@ -211,13 +218,19 @@ const simulatorTemplateSchema = z.union([
 		.strictObject({
 			operation: z.literal('location.start'),
 			waypoints: z.array(coordinateSchema).min(2).max(500),
-			speedMetersPerSecond: z.number().finite().positive().max(1_000).optional(),
+			speedMetersPerSecond: z
+				.number()
+				.finite()
+				.positive()
+				.max(1_000)
+				.optional(),
 			distanceMeters: z.number().finite().positive().max(1_000_000).optional(),
 			intervalSeconds: z.number().finite().positive().max(3_600).optional(),
 		})
 		.refine(
 			(action) =>
-				action.distanceMeters === undefined || action.intervalSeconds === undefined,
+				action.distanceMeters === undefined ||
+				action.intervalSeconds === undefined,
 			{ message: 'Location distance and interval are mutually exclusive.' }
 		),
 	z.strictObject({
@@ -265,7 +278,8 @@ const simulatorTemplateSchema = z.union([
 		})
 		.refine(
 			(action) =>
-				(action.setting === 'appearance' && ['light', 'dark'].includes(action.value)) ||
+				(action.setting === 'appearance' &&
+					['light', 'dark'].includes(action.value)) ||
 				(action.setting === 'increase_contrast' &&
 					['enabled', 'disabled'].includes(action.value)) ||
 				(action.setting === 'content_size' &&
@@ -281,8 +295,14 @@ const simulatorTemplateSchema = z.union([
 ]);
 
 const semanticActionSchema = z.discriminatedUnion('action', [
-	z.strictObject({ action: z.literal('highlight'), componentId: identifierSchema }),
-	z.strictObject({ action: z.literal('activate'), componentId: identifierSchema }),
+	z.strictObject({
+		action: z.literal('highlight'),
+		componentId: identifierSchema,
+	}),
+	z.strictObject({
+		action: z.literal('activate'),
+		componentId: identifierSchema,
+	}),
 	z.strictObject({ action: z.literal('focus'), componentId: identifierSchema }),
 	z.strictObject({
 		action: z.literal('setText'),
@@ -307,7 +327,10 @@ const cameraFixtureSchema = z.discriminatedUnion('fixtureKind', [
 			.min(4)
 			.max(MAX_CAMERA_BASE64)
 			.regex(/^[A-Za-z0-9+/]*={0,2}$/)
-			.refine((value) => value.length % 4 === 0, 'Camera fixture base64 is invalid.'),
+			.refine(
+				(value) => value.length % 4 === 0,
+				'Camera fixture base64 is invalid.'
+			),
 		width: z.number().int().positive().max(16_384),
 		height: z.number().int().positive().max(16_384),
 	}),
@@ -320,7 +343,10 @@ const cameraFixtureSchema = z.discriminatedUnion('fixtureKind', [
 			.min(4)
 			.max(MAX_CAMERA_BASE64)
 			.regex(/^[A-Za-z0-9+/]*={0,2}$/)
-			.refine((value) => value.length % 4 === 0, 'Camera fixture base64 is invalid.'),
+			.refine(
+				(value) => value.length % 4 === 0,
+				'Camera fixture base64 is invalid.'
+			),
 		width: z.number().int().positive().max(16_384),
 		height: z.number().int().positive().max(16_384),
 		durationMs: z
@@ -513,7 +539,10 @@ export const recipeDefinitionSchema = z
 		}
 		const ids = [...recipe.steps, ...recipe.teardown].map((step) => step.id);
 		if (new Set(ids).size !== ids.length) {
-			context.addIssue({ code: 'custom', message: 'Recipe step IDs must be unique.' });
+			context.addIssue({
+				code: 'custom',
+				message: 'Recipe step IDs must be unique.',
+			});
 		}
 		if (recipe.updatedAt < recipe.createdAt) {
 			context.addIssue({
@@ -522,7 +551,8 @@ export const recipeDefinitionSchema = z
 			});
 		}
 		if (
-			new TextEncoder().encode(JSON.stringify(recipe)).byteLength > MAX_RECIPE_BYTES
+			new TextEncoder().encode(JSON.stringify(recipe)).byteLength >
+			MAX_RECIPE_BYTES
 		) {
 			context.addIssue({
 				code: 'custom',
@@ -616,7 +646,8 @@ export const recipeRunSchema = z
 			context.addIssue({
 				code: 'custom',
 				path: ['pendingRequest'],
-				message: 'Only a run awaiting approval may carry its exact pending request.',
+				message:
+					'Only a run awaiting approval may carry its exact pending request.',
 			});
 		}
 	});
@@ -626,7 +657,14 @@ const evidenceTimelineEventSchema = z.strictObject({
 	sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 	at: timestampSchema,
 	phase: z.enum(['run', 'step', 'teardown', 'recovery']),
-	status: z.enum(['started', 'complete', 'failed', 'cancelled', 'interrupted', 'info']),
+	status: z.enum([
+		'started',
+		'complete',
+		'failed',
+		'cancelled',
+		'interrupted',
+		'info',
+	]),
 	message: evidenceMessageSchema,
 	targetUdid: udidSchema.optional(),
 	stepId: identifierSchema.optional(),
@@ -667,12 +705,15 @@ export const recipeEvidenceManifestSchema = z
 		status: recipeRunSchema.shape.status,
 		targets: z.array(evidenceTargetSchema).min(1).max(MAX_RECIPE_TARGETS),
 		timeline: z.array(evidenceTimelineEventSchema).max(MAX_TIMELINE_EVENTS),
-		captureIds: z.array(captureIdSchema).max(MAX_RECIPE_STEPS * MAX_RECIPE_TARGETS),
+		captureIds: z
+			.array(captureIdSchema)
+			.max(MAX_RECIPE_STEPS * MAX_RECIPE_TARGETS),
 		diagnosticCorrelationIds: z.array(identifierSchema).max(2_000),
 	})
 	.superRefine((evidence, context) => {
 		if (
-			new TextEncoder().encode(JSON.stringify(evidence)).byteLength > MAX_EVIDENCE_BYTES
+			new TextEncoder().encode(JSON.stringify(evidence)).byteLength >
+			MAX_EVIDENCE_BYTES
 		) {
 			context.addIssue({
 				code: 'custom',
@@ -680,7 +721,9 @@ export const recipeEvidenceManifestSchema = z
 			});
 		}
 	});
-export type RecipeEvidenceManifest = z.infer<typeof recipeEvidenceManifestSchema>;
+export type RecipeEvidenceManifest = z.infer<
+	typeof recipeEvidenceManifestSchema
+>;
 
 export const recipeStateSchema = z.strictObject({
 	revision: z.number().int().nonnegative(),
@@ -721,7 +764,10 @@ export type RecipeRunConfirmationResult = z.infer<
 >;
 
 export const recipeFileOperationSchema = z.discriminatedUnion('kind', [
-	z.strictObject({ actionId: identifierSchema, kind: z.literal('recipe.import') }),
+	z.strictObject({
+		actionId: identifierSchema,
+		kind: z.literal('recipe.import'),
+	}),
 	z.strictObject({
 		actionId: identifierSchema,
 		kind: z.literal('recipe.export'),
@@ -742,7 +788,12 @@ export type RecipeFileOperation = z.infer<typeof recipeFileOperationSchema>;
 
 export const recipeFileOperationReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
-	kind: z.enum(['recipe.import', 'recipe.export', 'recipe.delete', 'evidence.export']),
+	kind: z.enum([
+		'recipe.import',
+		'recipe.export',
+		'recipe.delete',
+		'evidence.export',
+	]),
 	completed: z.boolean(),
 	cancelled: z.boolean().optional(),
 	recipe: recipeSummarySchema.optional(),
@@ -762,7 +813,9 @@ export type RecipeBridge = {
 	getRecipeState: () => Promise<RecipeState>;
 	subscribeRecipeState: (listener: (state: RecipeState) => void) => () => void;
 	getRecipe: (recipeId: string) => Promise<RecipeDefinition | null>;
-	getRecipeEvidence: (evidenceId: string) => Promise<RecipeEvidenceManifest | null>;
+	getRecipeEvidence: (
+		evidenceId: string
+	) => Promise<RecipeEvidenceManifest | null>;
 	saveRecipe: (recipe: RecipeDefinition) => Promise<RecipeSummary>;
 	runRecipe: (request: RecipeRunRequest) => Promise<RecipeRunReceipt>;
 	requestRecipeRunConfirmation: (

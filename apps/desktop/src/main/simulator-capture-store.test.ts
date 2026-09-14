@@ -51,8 +51,13 @@ afterEach(async () => {
 describe('simulator capture store', () => {
 	it('persists opaque, sanitized capture metadata without publishing local paths', async () => {
 		const { root, store } = await fixture();
-		const pending = await reserveScreenshot(store, '../../Health account screenshot');
-		expect(pending.path.startsWith(`${await realpath(root)}${path.sep}`)).toBe(true);
+		const pending = await reserveScreenshot(
+			store,
+			'../../Health account screenshot'
+		);
+		expect(pending.path.startsWith(`${await realpath(root)}${path.sep}`)).toBe(
+			true
+		);
 		expect(path.basename(pending.path)).toBe(`${pending.id}.png`);
 		expect(path.basename(pending.path)).not.toContain('..');
 		await writeFile(pending.path, Buffer.from('image'));
@@ -171,7 +176,9 @@ describe('simulator capture store', () => {
 		await truncate(second.path, Math.floor(1.25 * GIBIBYTE));
 		const secondCapture = await store.commit(second);
 
-		expect(store.list().map((capture) => capture.id)).toEqual([secondCapture.id]);
+		expect(store.list().map((capture) => capture.id)).toEqual([
+			secondCapture.id,
+		]);
 		await expect(store.openForRead(firstCapture.id)).rejects.toThrow();
 		expect(store.retentionState().totalBytes).toBe(Math.floor(1.25 * GIBIBYTE));
 	});
@@ -214,7 +221,9 @@ describe('simulator capture store', () => {
 			.spyOn(fileHandlePrototype, 'sync')
 			.mockRejectedValueOnce(new Error('injected fsync failure'));
 
-		await expect(reserveScreenshot(store)).rejects.toThrow('injected fsync failure');
+		await expect(reserveScreenshot(store)).rejects.toThrow(
+			'injected fsync failure'
+		);
 		sync.mockRestore();
 		expect(
 			(await readdir(path.join(root, 'records'))).filter((name) =>

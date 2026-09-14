@@ -10,7 +10,10 @@ import {
 	PUMPD_DESKTOP_TOOL_IDS,
 	parseDesktopDeviceAction,
 } from '@pumpd/devtools/desktop-protocol';
-import { isSensitiveDiagnosticKey, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	isSensitiveDiagnosticKey,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import { z } from 'zod';
 
 export const DESKTOP_PROTOCOL_VERSION = PUMPD_DESKTOP_PROTOCOL_VERSION;
@@ -38,7 +41,9 @@ function redactWithinLength(value: string, maxLength: number): string {
 	const clamped = redacted.slice(0, maxLength);
 	const lastUnit = clamped.charCodeAt(maxLength - 1);
 	// Never end on a high surrogate; that would leave a lone surrogate behind.
-	return lastUnit >= 0xd800 && lastUnit <= 0xdbff ? clamped.slice(0, -1) : clamped;
+	return lastUnit >= 0xd800 && lastUnit <= 0xdbff
+		? clamped.slice(0, -1)
+		: clamped;
 }
 
 const identifierSchema = z.string().trim().min(1).max(256);
@@ -60,7 +65,11 @@ const rawLongTextSchema = z.string().max(LONG_TEXT_MAX_LENGTH);
 const longTextSchema = rawLongTextSchema.transform((value) =>
 	redactWithinLength(value, LONG_TEXT_MAX_LENGTH)
 );
-const timestampSchema = z.number().finite().nonnegative().max(8_640_000_000_000_000);
+const timestampSchema = z
+	.number()
+	.finite()
+	.nonnegative()
+	.max(8_640_000_000_000_000);
 const optionalTextSchema = shortTextSchema.optional();
 const headerRecordSchema = z
 	.record(z.string().max(256), longTextSchema)
@@ -78,7 +87,13 @@ const headerRecordSchema = z
 const toolIdSchema = z.enum(PUMPD_DESKTOP_TOOL_IDS);
 export type ToolId = z.infer<typeof toolIdSchema>;
 
-const devicePlatformSchema = z.enum(['ios', 'android', 'web', 'simulator', 'unknown']);
+const devicePlatformSchema = z.enum([
+	'ios',
+	'android',
+	'web',
+	'simulator',
+	'unknown',
+]);
 const simulatorUdidSchema = z
 	.string()
 	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
@@ -113,9 +128,8 @@ const deviceInfoObjectSchema = z.strictObject({
 		.default([]),
 });
 type DeviceInfoObject = z.infer<typeof deviceInfoObjectSchema>;
-type ContractCompatibleDeviceInfo = DeviceInfoObject extends DesktopDeviceInfoSnapshot
-	? DeviceInfoObject
-	: never;
+type ContractCompatibleDeviceInfo =
+	DeviceInfoObject extends DesktopDeviceInfoSnapshot ? DeviceInfoObject : never;
 const deviceInfoSchema = deviceInfoObjectSchema.transform(
 	(device: ContractCompatibleDeviceInfo) => device
 );
@@ -155,14 +169,24 @@ const consoleEntrySchema = z.strictObject({
 	scope: shortTextSchema.optional(),
 	correlationId: identifierSchema.optional(),
 	groupId: identifierSchema.optional(),
-	repeatCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+	repeatCount: z
+		.number()
+		.int()
+		.positive()
+		.max(Number.MAX_SAFE_INTEGER)
+		.optional(),
 	errorName: shortTextSchema.optional(),
 	errorStack: longTextSchema.optional(),
 	sourceLocation: z
 		.strictObject({
 			file: longTextSchema,
 			line: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-			column: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+			column: z
+				.number()
+				.int()
+				.positive()
+				.max(Number.MAX_SAFE_INTEGER)
+				.optional(),
 		})
 		.optional(),
 });
@@ -175,7 +199,14 @@ const storageEntrySchema = z
 		adapterTitle: shortTextSchema,
 		key: longTextSchema,
 		valueText: rawLongTextSchema.optional(),
-		valueType: z.enum(['string', 'number', 'boolean', 'json', 'binary', 'hidden']),
+		valueType: z.enum([
+			'string',
+			'number',
+			'boolean',
+			'json',
+			'binary',
+			'hidden',
+		]),
 		bytes: z.number().int().nonnegative(),
 		sensitive: z.boolean().default(false),
 		editable: z.boolean().default(false),
@@ -183,7 +214,9 @@ const storageEntrySchema = z
 	})
 	.transform((entry) => {
 		const redactedValue =
-			entry.valueText === undefined ? undefined : redactDiagnosticText(entry.valueText);
+			entry.valueText === undefined
+				? undefined
+				: redactDiagnosticText(entry.valueText);
 		const mustHide =
 			entry.sensitive ||
 			(entry.valueText !== undefined && redactedValue !== entry.valueText);
@@ -213,7 +246,9 @@ const storageEventSchema = z.strictObject({
 	nextText: longTextSchema.optional(),
 	bookmarked: z.boolean().optional(),
 	undoAvailable: z.boolean().optional(),
-	undoStatus: z.enum(['available', 'expired', 'succeeded', 'failed']).optional(),
+	undoStatus: z
+		.enum(['available', 'expired', 'succeeded', 'failed'])
+		.optional(),
 	structuralDiff: z
 		.array(
 			z.strictObject({
@@ -226,7 +261,11 @@ const storageEventSchema = z.strictObject({
 		.max(200)
 		.optional(),
 });
-const boundedCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const boundedCountSchema = z
+	.number()
+	.int()
+	.nonnegative()
+	.max(Number.MAX_SAFE_INTEGER);
 
 const storageSummarySchema = z.strictObject({
 	adapterCount: boundedCountSchema,
@@ -274,7 +313,12 @@ const querySummarySchema = z.strictObject({
 	omittedMutationCount: boundedCountSchema,
 	truncated: z.boolean(),
 });
-const querySimulationModeSchema = z.enum(['loading', 'error', 'paused', 'offline']);
+const querySimulationModeSchema = z.enum([
+	'loading',
+	'error',
+	'paused',
+	'offline',
+]);
 const querySimulationSchema = z
 	.strictObject({
 		families: z
@@ -349,7 +393,8 @@ const querySimulationSchema = z
 			) {
 				context.addIssue({
 					code: 'custom',
-					message: 'Active query simulation must reference a supported family mode.',
+					message:
+						'Active query simulation must reference a supported family mode.',
 					path: ['active'],
 				});
 			}
@@ -359,7 +404,14 @@ const routeEntrySchema = z.strictObject({
 	id: identifierSchema,
 	path: longTextSchema,
 	name: shortTextSchema,
-	kind: z.enum(['static', 'dynamic', 'catchAll', 'layout', 'group', 'internal']),
+	kind: z.enum([
+		'static',
+		'dynamic',
+		'catchAll',
+		'layout',
+		'group',
+		'internal',
+	]),
 	filename: longTextSchema.optional(),
 	isCurrent: z.boolean().default(false),
 	isVisible: z.boolean().default(false),
@@ -388,11 +440,19 @@ const environmentEntrySchema = z
 		section: shortTextSchema,
 		key: shortTextSchema,
 		valueText: longTextSchema,
-		status: z.enum(['valid', 'missing', 'typeMismatch', 'valueMismatch', 'unchecked']),
+		status: z.enum([
+			'valid',
+			'missing',
+			'typeMismatch',
+			'valueMismatch',
+			'unchecked',
+		]),
 		description: longTextSchema.optional(),
 	})
 	.transform((entry) =>
-		isSensitiveDiagnosticKey(entry.key) ? { ...entry, valueText: '[REDACTED]' } : entry
+		isSensitiveDiagnosticKey(entry.key)
+			? { ...entry, valueText: '[REDACTED]' }
+			: entry
 	);
 export type EnvironmentEntry = z.infer<typeof environmentEntrySchema>;
 
@@ -492,7 +552,12 @@ const restoreReceiptSchema = z.strictObject({
 	pointLabel: shortTextSchema,
 	startedAt: timestampSchema,
 	completedAt: timestampSchema,
-	status: z.enum(['complete', 'preflight-failed', 'rolled-back', 'needs-attention']),
+	status: z.enum([
+		'complete',
+		'preflight-failed',
+		'rolled-back',
+		'needs-attention',
+	]),
 	error: longTextSchema.optional(),
 	sourceResults: z
 		.array(restoreSourceResultSchema)
@@ -591,7 +656,9 @@ const scenarioDefinitionSummarySchema = z.strictObject({
 		)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioSteps),
 });
-export type ScenarioDefinitionSummary = z.infer<typeof scenarioDefinitionSummarySchema>;
+export type ScenarioDefinitionSummary = z.infer<
+	typeof scenarioDefinitionSummarySchema
+>;
 const activeScenarioSchema = z.strictObject({
 	receiptId: identifierSchema,
 	scenarioId: identifierSchema,
@@ -629,7 +696,12 @@ const scenarioReceiptSchema = z.strictObject({
 	scenarioName: shortTextSchema,
 	startedAt: timestampSchema,
 	completedAt: timestampSchema,
-	status: z.enum(['complete', 'preflight-failed', 'rolled-back', 'needs-attention']),
+	status: z.enum([
+		'complete',
+		'preflight-failed',
+		'rolled-back',
+		'needs-attention',
+	]),
 	error: longTextSchema.optional(),
 	stepResults: z
 		.array(scenarioStepReceiptSchema)
@@ -755,7 +827,11 @@ const componentSummarySchema = z.strictObject({
 	registrationDiagnostics: z
 		.array(
 			z.strictObject({
-				code: z.enum(['duplicate-target-id', 'orphan-parent', 'invalid-hierarchy']),
+				code: z.enum([
+					'duplicate-target-id',
+					'orphan-parent',
+					'invalid-hierarchy',
+				]),
 				targetId: identifierSchema,
 				instanceIds: z
 					.array(identifierSchema)
@@ -773,7 +849,13 @@ const cameraFixtureSchema = z
 		kind: z.enum(['still', 'qr', 'video', 'unavailable', 'error']).optional(),
 		label: shortTextSchema.optional(),
 		mimeType: z
-			.enum(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'])
+			.enum([
+				'image/jpeg',
+				'image/png',
+				'image/webp',
+				'video/mp4',
+				'video/quicktime',
+			])
 			.optional(),
 		bytes: z
 			.number()
@@ -845,7 +927,9 @@ const diagnosticEntrySchema = z.strictObject({
 export type DiagnosticEntry = z.infer<typeof diagnosticEntrySchema>;
 
 const deviceToolsObjectSchema = z.strictObject({
-	network: z.array(networkEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.network),
+	network: z
+		.array(networkEntrySchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.network),
 	networkProfile: z
 		.strictObject({
 			id: z.enum(networkSimulationProfileIds),
@@ -854,18 +938,26 @@ const deviceToolsObjectSchema = z.strictObject({
 			scope: z.literal('instrumented-fetch'),
 		})
 		.optional(),
-	console: z.array(consoleEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.console),
-	storage: z.array(storageEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storage),
+	console: z
+		.array(consoleEntrySchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.console),
+	storage: z
+		.array(storageEntrySchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storage),
 	storageEvents: z
 		.array(storageEventSchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storageEvents),
 	storageSummary: storageSummarySchema,
 	queries: z.array(queryEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.queries),
-	mutations: z.array(mutationEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.mutations),
+	mutations: z
+		.array(mutationEntrySchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.mutations),
 	querySummary: querySummarySchema,
 	querySimulation: querySimulationSchema.optional(),
 	routes: z.array(routeEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routes),
-	routeEvents: z.array(routeEventSchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routeEvents),
+	routeEvents: z
+		.array(routeEventSchema)
+		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routeEvents),
 	environment: z
 		.array(environmentEntrySchema)
 		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.environment),
@@ -922,13 +1014,17 @@ const deviceToolsObjectSchema = z.strictObject({
 
 type DeviceToolsObject = z.infer<typeof deviceToolsObjectSchema>;
 type ContractCompatibleDeviceTools =
-	DeviceToolsObject extends DesktopDeviceToolsSnapshot ? DeviceToolsObject : never;
+	DeviceToolsObject extends DesktopDeviceToolsSnapshot
+		? DeviceToolsObject
+		: never;
 
 function scrubSensitiveStorage(
 	tools: ContractCompatibleDeviceTools
 ): DeviceToolsObject {
 	const sensitiveAdapterIds = new Set(
-		tools.storage.filter((entry) => entry.sensitive).map((entry) => entry.adapterId)
+		tools.storage
+			.filter((entry) => entry.sensitive)
+			.map((entry) => entry.adapterId)
 	);
 	return {
 		...tools,
@@ -944,7 +1040,11 @@ function scrubSensitiveStorage(
 		storageEvents: tools.storageEvents.map((event) => ({
 			...event,
 			...(sensitiveAdapterIds.has(event.adapterId)
-				? { previousText: undefined, nextText: undefined, structuralDiff: undefined }
+				? {
+						previousText: undefined,
+						nextText: undefined,
+						structuralDiff: undefined,
+					}
 				: {
 						structuralDiff: event.structuralDiff
 							? [...event.structuralDiff]
@@ -954,7 +1054,9 @@ function scrubSensitiveStorage(
 	};
 }
 
-const deviceToolsSchema = deviceToolsObjectSchema.transform(scrubSensitiveStorage);
+const deviceToolsSchema = deviceToolsObjectSchema.transform(
+	scrubSensitiveStorage
+);
 export type DeviceTools = z.infer<typeof deviceToolsSchema>;
 
 export function createEmptyDeviceTools(): DeviceTools {

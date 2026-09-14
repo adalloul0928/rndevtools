@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { VerifiedNativeHelper } from './native-helper-trust';
-import { NativeHostClient, NativeHostResponseError } from './native-host-client';
+import {
+	NativeHostClient,
+	NativeHostResponseError,
+} from './native-host-client';
 
 const verified: VerifiedNativeHelper = {
 	executablePath: '/signed/pumpd-native-host',
@@ -23,7 +26,8 @@ const verified: VerifiedNativeHelper = {
 			patchSet: 'pumpd.1',
 			upstreamSourceManifestSha256:
 				'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
-			patchSha256: '69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+			patchSha256:
+				'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
 			vendoredSourceManifestSha256:
 				'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 		},
@@ -114,7 +118,8 @@ describe('native host client', () => {
 					ok: false,
 					error: {
 						code: 'mutation_authorization_required',
-						message: 'The desktop parent failed its live designated requirement.',
+						message:
+							'The desktop parent failed its live designated requirement.',
 						retryable: false,
 					},
 				}),
@@ -178,14 +183,20 @@ describe('native host client', () => {
 								runtimeDownloads: false,
 								capabilityInspection: true,
 								liveCaptureSessions: false,
-								...(request.protocolVersion === 3 ? { imageComposition: true } : {}),
+								...(request.protocolVersion === 3
+									? { imageComposition: true }
+									: {}),
 							},
 						}
 					: request.operation === 'permission_status'
 						? {
 								statuses: [
 									{ id: 'accessibility', value: 'granted', canPrompt: false },
-									{ id: 'screen_recording', value: 'not_granted', canPrompt: false },
+									{
+										id: 'screen_recording',
+										value: 'not_granted',
+										canPrompt: false,
+									},
 								],
 							}
 						: capabilityStatusFixture;
@@ -218,8 +229,12 @@ describe('native host client', () => {
 				{ id: 'screen_recording', value: 'not_granted', canPrompt: false },
 			],
 			advanced: expect.objectContaining({
-				screenCaptureKit: expect.objectContaining({ liveWindowCapture: 'gated' }),
-				networkExtension: expect.objectContaining({ entitlementPresent: false }),
+				screenCaptureKit: expect.objectContaining({
+					liveWindowCapture: 'gated',
+				}),
+				networkExtension: expect.objectContaining({
+					entitlementPresent: false,
+				}),
 			}),
 		});
 		expect(new Set(operations)).toEqual(
@@ -233,7 +248,9 @@ describe('native host client', () => {
 	});
 
 	it('stages bounded inputs and commits a protocol-v3 composition without path disclosure', async () => {
-		const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'native-composer-'));
+		const temporaryDirectory = await mkdtemp(
+			path.join(tmpdir(), 'native-composer-')
+		);
 		const workspaceDirectory = path.join(temporaryDirectory, 'workspaces');
 		const sourcePath = path.join(temporaryDirectory, 'source.png');
 		const outputPath = path.join(temporaryDirectory, 'result.png');

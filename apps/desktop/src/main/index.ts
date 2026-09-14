@@ -142,8 +142,10 @@ let stagedCertificateStore: StagedCertificateStore | undefined;
 
 function rendererEntryUrl(): string {
 	return (
-		trustedDevelopmentRendererUrl(process.env.ELECTRON_RENDERER_URL, app.isPackaged) ??
-		PACKAGED_RENDERER_URL
+		trustedDevelopmentRendererUrl(
+			process.env.ELECTRON_RENDERER_URL,
+			app.isPackaged
+		) ?? PACKAGED_RENDERER_URL
 	);
 }
 
@@ -160,7 +162,10 @@ function registerRendererProtocol(): void {
 		const response = await net.fetch(pathToFileURL(assetPath).href);
 		if (path.extname(assetPath).toLowerCase() !== '.html') return response;
 		const headers = new Headers(response.headers);
-		headers.set('content-security-policy', PACKAGED_RENDERER_CONTENT_SECURITY_POLICY);
+		headers.set(
+			'content-security-policy',
+			PACKAGED_RENDERER_CONTENT_SECURITY_POLICY
+		);
 		return new Response(response.body, {
 			status: response.status,
 			statusText: response.statusText,
@@ -195,7 +200,10 @@ function broadcastState(state: DesktopState): void {
 	for (const window of windows) sendState(window.webContents, state);
 }
 
-function sendSimulatorState(webContents: WebContents, state: SimulatorState): void {
+function sendSimulatorState(
+	webContents: WebContents,
+	state: SimulatorState
+): void {
 	if (webContents.isDestroyed()) return;
 	try {
 		webContents.send(IPC_CHANNELS.simulatorStateChanged, state);
@@ -208,7 +216,10 @@ function broadcastSimulatorState(state: SimulatorState): void {
 	for (const window of windows) sendSimulatorState(window.webContents, state);
 }
 
-function sendSlimmingState(webContents: WebContents, state: SlimmingState): void {
+function sendSlimmingState(
+	webContents: WebContents,
+	state: SlimmingState
+): void {
 	if (webContents.isDestroyed()) return;
 	try {
 		webContents.send(IPC_CHANNELS.slimmingStateChanged, state);
@@ -247,7 +258,8 @@ function sendBuildInsightsState(
 }
 
 function broadcastBuildInsightsState(state: BuildInsightsState): void {
-	for (const window of windows) sendBuildInsightsState(window.webContents, state);
+	for (const window of windows)
+		sendBuildInsightsState(window.webContents, state);
 }
 
 function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow | undefined {
@@ -544,7 +556,8 @@ async function selectBuildInsightsExportDestination(
 		defaultPath: `pumpd-build-insights.${extension}`,
 		filters: [
 			{
-				name: format === 'csv' ? 'Comma-separated values' : 'Build Insights JSON',
+				name:
+					format === 'csv' ? 'Comma-separated values' : 'Build Insights JSON',
 				extensions: [extension],
 			},
 		],
@@ -589,7 +602,9 @@ async function selectSimulatorInput(
 			title: 'Select a certificate',
 			buttonLabel: 'Add Certificate',
 			properties: ['openFile'],
-			filters: [{ name: 'Certificates', extensions: ['cer', 'crt', 'der', 'pem'] }],
+			filters: [
+				{ name: 'Certificates', extensions: ['cer', 'crt', 'der', 'pem'] },
+			],
 		};
 	} else if (action.kind === 'location.importGpx') {
 		options = {
@@ -655,7 +670,8 @@ function registerIpc(
 		service: buildInsights,
 		assertTrustedRenderer,
 		selectXcresult: (event) => selectBuildInsightsSource(event, 'xcresult'),
-		selectWatchRoot: (event) => selectBuildInsightsSource(event, 'derived-data-root'),
+		selectWatchRoot: (event) =>
+			selectBuildInsightsSource(event, 'derived-data-root'),
 		selectExportDestination: selectBuildInsightsExportDestination,
 	});
 	const simulatorOnboardingHandlers = createSimulatorOnboardingIpcHandlers({
@@ -761,7 +777,8 @@ function registerIpc(
 					actionId: action.actionId,
 					required: true,
 					confirmed: false,
-					error: 'The destructive action does not identify an exact Simulator target.',
+					error:
+						'The destructive action does not identify an exact Simulator target.',
 				});
 			}
 			let stagedCertificate:
@@ -778,7 +795,10 @@ function registerIpc(
 							error: 'File selection was cancelled.',
 						});
 					}
-					stagedCertificate = await certificates.stage(selectedPath, event.sender.id);
+					stagedCertificate = await certificates.stage(
+						selectedPath,
+						event.sender.id
+					);
 					if (event.sender.isDestroyed()) {
 						await stagedCertificate.cleanup();
 						return simulatorConfirmationResultSchema.parse({
@@ -809,7 +829,9 @@ function registerIpc(
 				const confirmationTarget = {
 					action,
 					target,
-					...(stagedCertificate ? { certificate: stagedCertificate.identity } : {}),
+					...(stagedCertificate
+						? { certificate: stagedCertificate.identity }
+						: {}),
 				};
 				const confirmation = confirmationStore.issue(
 					'simulator',
@@ -940,7 +962,10 @@ function registerIpc(
 		assertTrustedRenderer(event);
 		return simulator.cancelJob(simulatorJobIdSchema.parse(value));
 	});
-	ipcMain.handle(IPC_CHANNELS.getSimulatorCaptureAccess, captureHandlers.getAccess);
+	ipcMain.handle(
+		IPC_CHANNELS.getSimulatorCaptureAccess,
+		captureHandlers.getAccess
+	);
 	ipcMain.handle(
 		IPC_CHANNELS.getSimulatorCaptureRetention,
 		captureHandlers.getRetention
@@ -995,7 +1020,11 @@ function registerIpc(
 					error: 'Action cancelled by the operator.',
 				});
 			}
-			const confirmation = confirmationStore.issue('slimming', event.sender.id, target);
+			const confirmation = confirmationStore.issue(
+				'slimming',
+				event.sender.id,
+				target
+			);
 			return slimmingConfirmationResultSchema.parse({
 				actionId: target.actionId,
 				required: true,
@@ -1027,7 +1056,9 @@ function registerIpc(
 					error: 'A fresh, exact restore confirmation is required.',
 				});
 			}
-			return slimmingSettingReceiptSchema.parse(await slimming.setEnabled(request));
+			return slimmingSettingReceiptSchema.parse(
+				await slimming.setEnabled(request)
+			);
 		}
 	);
 	ipcMain.handle(
@@ -1077,8 +1108,14 @@ function registerIpc(
 	);
 	ipcMain.handle(IPC_CHANNELS.runRecipe, recipeHandlers.runRecipe);
 	ipcMain.handle(IPC_CHANNELS.cancelRecipeRun, recipeHandlers.cancelRun);
-	ipcMain.handle(IPC_CHANNELS.runRecipeFileOperation, recipeHandlers.runFileOperation);
-	ipcMain.handle(IPC_CHANNELS.getBuildInsightsState, buildInsightsHandlers.getState);
+	ipcMain.handle(
+		IPC_CHANNELS.runRecipeFileOperation,
+		recipeHandlers.runFileOperation
+	);
+	ipcMain.handle(
+		IPC_CHANNELS.getBuildInsightsState,
+		buildInsightsHandlers.getState
+	);
 	ipcMain.handle(
 		IPC_CHANNELS.runBuildInsightsOperation,
 		buildInsightsHandlers.runOperation
@@ -1087,7 +1124,8 @@ function registerIpc(
 
 function updateSimulatorPolling(): void {
 	const visible = [...windows].some(
-		(window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized()
+		(window) =>
+			!window.isDestroyed() && window.isVisible() && !window.isMinimized()
 	);
 	simulatorService?.setPollingActive(visible);
 	slimmingService?.setPollingActive(visible);
@@ -1159,7 +1197,9 @@ function createWindow(): BrowserWindow {
 	);
 
 	window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-	window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+	window.webContents.on('will-attach-webview', (event) =>
+		event.preventDefault()
+	);
 	window.webContents.on('will-navigate', (event, url) => {
 		if (!urlsMatchWithoutHash(url, rendererEntryUrl())) event.preventDefault();
 	});
@@ -1225,7 +1265,10 @@ if (!app.requestSingleInstanceLock()) {
 				path.join(app.getPath('userData'), 'simulator-captures')
 			);
 			stagedCertificateStore = new StagedCertificateStore({
-				directory: path.join(app.getPath('userData'), 'simulator-staged-certificates'),
+				directory: path.join(
+					app.getPath('userData'),
+					'simulator-staged-certificates'
+				),
 			});
 			await stagedCertificateStore.start();
 			registerSimulatorCaptureProtocol(captureStore);
@@ -1260,7 +1303,10 @@ if (!app.requestSingleInstanceLock()) {
 						}
 					: {}),
 				resourceDirectory: nativeResourceDirectory,
-				persistenceDirectory: path.join(app.getPath('userData'), 'simulator-slimming'),
+				persistenceDirectory: path.join(
+					app.getPath('userData'),
+					'simulator-slimming'
+				),
 				appVersion: app.getVersion(),
 				helper: simHelperClient,
 				mutationCoordinator: simulatorMutationCoordinator,
@@ -1278,7 +1324,11 @@ if (!app.requestSingleInstanceLock()) {
 				),
 			});
 			agentCliService = new AgentCliService({
-				socketPath: path.join(app.getPath('userData'), 'agent', 'pumpd-devtools.sock'),
+				socketPath: path.join(
+					app.getPath('userData'),
+					'agent',
+					'pumpd-devtools.sock'
+				),
 				handler: createAgentCommandRouter({
 					broker,
 					simulator: simulatorService,
@@ -1287,7 +1337,8 @@ if (!app.requestSingleInstanceLock()) {
 						list: () => recipeService?.getState().recipes ?? [],
 						get: (recipeId) => recipeService?.getRecipe(recipeId) ?? null,
 						run: (recipeId, udids) => {
-							if (!recipeService) throw new Error('Recipe service is not available.');
+							if (!recipeService)
+								throw new Error('Recipe service is not available.');
 							return recipeService.runRecipe({
 								actionId: `agent-recipe-${randomUUID()}`,
 								recipeId,
@@ -1298,7 +1349,9 @@ if (!app.requestSingleInstanceLock()) {
 						cancel: (runId) => recipeService?.cancelRun(runId) ?? false,
 						status: (runId) => {
 							const runs = recipeService?.getState().runs ?? [];
-							return runId ? (runs.find((run) => run.id === runId) ?? null) : runs;
+							return runId
+								? (runs.find((run) => run.id === runId) ?? null)
+								: runs;
 						},
 					},
 				}),

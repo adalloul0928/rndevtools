@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-const identifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
+const identifierSchema = z
+	.string()
+	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
 const buildInsightIdSchema = z
 	.string()
 	.regex(/^build-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
@@ -95,7 +97,9 @@ export const buildInsightsOperationSchema = z.discriminatedUnion('kind', [
 		format: z.enum(['json', 'csv']),
 	}),
 ]);
-export type BuildInsightsOperation = z.infer<typeof buildInsightsOperationSchema>;
+export type BuildInsightsOperation = z.infer<
+	typeof buildInsightsOperationSchema
+>;
 
 export const buildInsightsOperationReceiptSchema = z.strictObject({
 	actionId: identifierSchema,

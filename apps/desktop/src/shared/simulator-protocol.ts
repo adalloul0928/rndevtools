@@ -9,7 +9,10 @@ const optionalShortTextSchema = shortTextSchema.optional();
 const timestampSchema = z.number().finite().nonnegative();
 export const udidSchema = z
 	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i, 'Invalid simulator UDID.');
+	.regex(
+		/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
+		'Invalid simulator UDID.'
+	);
 const bundleIdentifierSchema = z
 	.string()
 	.trim()
@@ -48,7 +51,8 @@ const timeZoneSchema = z
 	.max(128)
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9][A-Za-z0-9._+-]*){0,3}$/)
 	.refine(
-		(value) => value.split('/').every((segment) => segment !== '.' && segment !== '..'),
+		(value) =>
+			value.split('/').every((segment) => segment !== '.' && segment !== '..'),
 		{ message: 'Invalid time-zone identifier.' }
 	);
 const MAX_PUSH_PAYLOAD_BYTES = 4_096;
@@ -85,13 +89,15 @@ const pushPayloadSchema = z
 	.min(1)
 	.max(16 * 1024)
 	.refine(
-		(value) => new TextEncoder().encode(value).byteLength <= MAX_PUSH_PAYLOAD_BYTES,
+		(value) =>
+			new TextEncoder().encode(value).byteLength <= MAX_PUSH_PAYLOAD_BYTES,
 		'Push payload exceeds the 4,096-byte Simulator limit.'
 	)
 	.refine((value) => {
 		try {
 			const parsed = JSON.parse(value) as unknown;
-			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+				return false;
 			const aps = Object.getOwnPropertyDescriptor(parsed, 'aps');
 			return Boolean(
 				aps &&
@@ -261,7 +267,9 @@ export const simulatorCaptureOperationSchema = z.discriminatedUnion('kind', [
 		policy: simulatorCaptureRetentionPolicySchema,
 	}),
 ]);
-export type SimulatorCaptureOperation = z.infer<typeof simulatorCaptureOperationSchema>;
+export type SimulatorCaptureOperation = z.infer<
+	typeof simulatorCaptureOperationSchema
+>;
 
 export const simulatorCaptureOperationReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
@@ -314,7 +322,9 @@ const simulatorProcessMetricSchema = z.strictObject({
 	memoryBytes: z.number().int().nonnegative(),
 	bundleIdentifier: bundleIdentifierSchema.optional(),
 });
-export type SimulatorProcessMetric = z.infer<typeof simulatorProcessMetricSchema>;
+export type SimulatorProcessMetric = z.infer<
+	typeof simulatorProcessMetricSchema
+>;
 
 const simulatorDeviceMetricsSchema = z.strictObject({
 	deviceUdid: udidSchema,
@@ -333,7 +343,9 @@ const simulatorDeviceMetricsSchema = z.strictObject({
 	processes: z.array(simulatorProcessMetricSchema).max(100),
 	error: optionalShortTextSchema,
 });
-export type SimulatorDeviceMetrics = z.infer<typeof simulatorDeviceMetricsSchema>;
+export type SimulatorDeviceMetrics = z.infer<
+	typeof simulatorDeviceMetricsSchema
+>;
 
 const simulatorMetricsSchema = z.strictObject({
 	status: z.enum(['checking', 'available', 'unavailable']),
@@ -408,7 +420,9 @@ const simulatorDiskInventorySchema = z.strictObject({
 	inspectedAt: timestampSchema,
 	lastCleanup: simulatorDiskCleanupResultSchema.optional(),
 });
-export type SimulatorDiskInventory = z.infer<typeof simulatorDiskInventorySchema>;
+export type SimulatorDiskInventory = z.infer<
+	typeof simulatorDiskInventorySchema
+>;
 
 const nativeAvailabilitySchema = z.enum(['available', 'gated', 'unavailable']);
 const nativePermissionValueSchema = z.enum([
@@ -429,7 +443,9 @@ export const simulatorNativeCapabilitiesSchema = z.strictObject({
 		liveWindowCapture: nativeAvailabilitySchema,
 		systemAudioCapture: nativeAvailabilitySchema,
 		microphoneCapture: nativeAvailabilitySchema,
-		requestableFrameRates: z.array(z.number().int().positive().max(240)).max(10),
+		requestableFrameRates: z
+			.array(z.number().int().positive().max(240))
+			.max(10),
 		windowEnumerationPerformed: z.literal(false),
 		contentPickerPresented: z.literal(false),
 		persistentSessionOperationsExposed: z.literal(false),
@@ -514,7 +530,12 @@ const simulatorNativeStateSchema = z.strictObject({
 	permissions: z
 		.array(
 			z.strictObject({
-				id: z.enum(['accessibility', 'screen_recording', 'camera', 'microphone']),
+				id: z.enum([
+					'accessibility',
+					'screen_recording',
+					'camera',
+					'microphone',
+				]),
 				value: z.enum([
 					'granted',
 					'denied',
@@ -577,7 +598,8 @@ const locationStartActionSchema = z
 	})
 	.refine(
 		(action) =>
-			action.distanceMeters === undefined || action.intervalSeconds === undefined,
+			action.distanceMeters === undefined ||
+			action.intervalSeconds === undefined,
 		{ message: 'Location distance and interval are mutually exclusive.' }
 	);
 
@@ -629,7 +651,8 @@ const uiActionSchema = z
 	})
 	.refine(
 		(action) =>
-			(action.setting === 'appearance' && ['light', 'dark'].includes(action.value)) ||
+			(action.setting === 'appearance' &&
+				['light', 'dark'].includes(action.value)) ||
 			(action.setting === 'increase_contrast' &&
 				['enabled', 'disabled'].includes(action.value)) ||
 			(action.setting === 'content_size' &&
@@ -657,14 +680,17 @@ const statusBarOverridesSchema = z
 			.optional(),
 		wifiMode: z.enum(['searching', 'failed', 'active']).optional(),
 		wifiBars: z.number().int().min(0).max(3).optional(),
-		cellularMode: z.enum(['notSupported', 'searching', 'failed', 'active']).optional(),
+		cellularMode: z
+			.enum(['notSupported', 'searching', 'failed', 'active'])
+			.optional(),
 		cellularBars: z.number().int().min(0).max(4).optional(),
 		operatorName: z.string().max(64).optional(),
 		batteryState: z.enum(['charging', 'charged', 'discharging']).optional(),
 		batteryLevel: z.number().int().min(0).max(100).optional(),
 	})
 	.refine(
-		(overrides) => Object.values(overrides).some((value) => value !== undefined),
+		(overrides) =>
+			Object.values(overrides).some((value) => value !== undefined),
 		{
 			message: 'At least one status-bar override is required.',
 		}
@@ -675,7 +701,9 @@ const captureColorSchema = z.string().regex(/^#[0-9A-F]{6}(?:[0-9A-F]{2})?$/i);
 const isBoundedCaptureMetadata = (value: string): boolean =>
 	new TextEncoder().encode(value).byteLength <= 512 &&
 	value.split('\n').length <= 8 &&
-	value.split('\n').every((line) => new TextEncoder().encode(line).byteLength <= 96) &&
+	value
+		.split('\n')
+		.every((line) => new TextEncoder().encode(line).byteLength <= 96) &&
 	[...value].every((character) => {
 		const codePoint = character.codePointAt(0) ?? 0;
 		return character === '\n' || (codePoint >= 0x20 && codePoint <= 0x7e);
@@ -735,7 +763,12 @@ export const captureCompositionRecipeSchema = z
 				left: z.number().int().min(0).max(2_048),
 			}),
 			contentMode: z.enum(['fit', 'fill']),
-			rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+			rotation: z.union([
+				z.literal(0),
+				z.literal(90),
+				z.literal(180),
+				z.literal(270),
+			]),
 			cornerRadius: z.number().int().min(0).max(1_024),
 			bezel: z.enum(['none', 'pumpd-generic-v1']),
 			shadow: z
@@ -753,7 +786,10 @@ export const captureCompositionRecipeSchema = z
 					.string()
 					.min(1)
 					.max(512)
-					.refine(isBoundedCaptureMetadata, 'Metadata must be bounded printable text.'),
+					.refine(
+						isBoundedCaptureMetadata,
+						'Metadata must be bounded printable text.'
+					),
 				placement: z.enum(['top', 'bottom']),
 				textColor: captureColorSchema,
 				backgroundColor: captureColorSchema,
@@ -795,7 +831,8 @@ export const captureCompositionRecipeSchema = z
 							height: Math.max(
 								1,
 								Math.round(
-									(recipe.canvas.size.longEdge * recipe.canvas.size.ratioHeight) /
+									(recipe.canvas.size.longEdge *
+										recipe.canvas.size.ratioHeight) /
 										recipe.canvas.size.ratioWidth
 								)
 							),
@@ -804,7 +841,8 @@ export const captureCompositionRecipeSchema = z
 							width: Math.max(
 								1,
 								Math.round(
-									(recipe.canvas.size.longEdge * recipe.canvas.size.ratioWidth) /
+									(recipe.canvas.size.longEdge *
+										recipe.canvas.size.ratioWidth) /
 										recipe.canvas.size.ratioHeight
 								)
 							),
@@ -818,9 +856,13 @@ export const captureCompositionRecipeSchema = z
 			});
 		}
 		const contentWidth =
-			canvasSize.width - recipe.layout.padding.left - recipe.layout.padding.right;
+			canvasSize.width -
+			recipe.layout.padding.left -
+			recipe.layout.padding.right;
 		const contentHeight =
-			canvasSize.height - recipe.layout.padding.top - recipe.layout.padding.bottom;
+			canvasSize.height -
+			recipe.layout.padding.top -
+			recipe.layout.padding.bottom;
 		let frameWidth = contentWidth;
 		if (recipe.comparison?.mode === 'side_by_side') {
 			frameWidth = Math.floor((contentWidth - recipe.comparison.gap) / 2);
@@ -828,12 +870,14 @@ export const captureCompositionRecipeSchema = z
 		if (frameWidth <= 0 || contentHeight <= 0) {
 			context.addIssue({
 				code: 'custom',
-				message: 'Composition padding or comparison gap leaves no drawable area.',
+				message:
+					'Composition padding or comparison gap leaves no drawable area.',
 				path: ['layout', 'padding'],
 			});
 		} else {
 			if (
-				recipe.layout.cornerRadius > Math.floor(Math.min(frameWidth, contentHeight) / 2)
+				recipe.layout.cornerRadius >
+				Math.floor(Math.min(frameWidth, contentHeight) / 2)
 			) {
 				context.addIssue({
 					code: 'custom',
@@ -853,7 +897,9 @@ export const captureCompositionRecipeSchema = z
 			}
 		}
 	});
-export type CaptureCompositionRecipe = z.infer<typeof captureCompositionRecipeSchema>;
+export type CaptureCompositionRecipe = z.infer<
+	typeof captureCompositionRecipeSchema
+>;
 
 export const simulatorActionSchema = z.union([
 	z.strictObject({ ...deviceActionBase, kind: z.literal('device.boot') }),
@@ -886,7 +932,8 @@ export const simulatorActionSchema = z.union([
 			categoryIds: z.array(simulatorDiskCleanupCategoryIdSchema).min(1).max(4),
 		})
 		.refine(
-			(action) => new Set(action.categoryIds).size === action.categoryIds.length,
+			(action) =>
+				new Set(action.categoryIds).size === action.categoryIds.length,
 			{
 				message: 'Disk cleanup categories must be unique.',
 			}
@@ -929,8 +976,10 @@ export const simulatorActionSchema = z.union([
 		})
 		.refine(
 			(action) =>
-				(action.container === 'app-group' && action.appGroupIdentifier !== undefined) ||
-				(action.container !== 'app-group' && action.appGroupIdentifier === undefined),
+				(action.container === 'app-group' &&
+					action.appGroupIdentifier !== undefined) ||
+				(action.container !== 'app-group' &&
+					action.appGroupIdentifier === undefined),
 			{ message: 'Only an app-group container requires appGroupIdentifier.' }
 		),
 	z.strictObject({
@@ -998,7 +1047,8 @@ export const simulatorActionSchema = z.union([
 		})
 		.refine(
 			(action) =>
-				Boolean(action.recipe.comparison) === Boolean(action.secondaryCaptureId) &&
+				Boolean(action.recipe.comparison) ===
+					Boolean(action.secondaryCaptureId) &&
 				action.primaryCaptureId !== action.secondaryCaptureId,
 			{
 				message:
@@ -1021,7 +1071,9 @@ export const simulatorActionReceiptSchema = z.strictObject({
 	jobId: simulatorJobIdSchema.optional(),
 	error: z.string().max(MAX_LONG_TEXT).optional(),
 });
-export type SimulatorActionReceipt = z.infer<typeof simulatorActionReceiptSchema>;
+export type SimulatorActionReceipt = z.infer<
+	typeof simulatorActionReceiptSchema
+>;
 
 export const simulatorConfirmationResultSchema = z.strictObject({
 	actionId: identifierSchema,
@@ -1046,7 +1098,12 @@ export const simulatorOnboardingOperationSchema = z.discriminatedUnion('kind', [
 	z.strictObject({
 		actionId: identifierSchema,
 		kind: z.literal('privacy.openSettings'),
-		permission: z.enum(['screen_recording', 'accessibility', 'camera', 'microphone']),
+		permission: z.enum([
+			'screen_recording',
+			'accessibility',
+			'camera',
+			'microphone',
+		]),
 	}),
 	z.strictObject({
 		actionId: identifierSchema,
@@ -1059,7 +1116,11 @@ export type SimulatorOnboardingOperation = z.infer<
 
 export const simulatorOnboardingReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
-	kind: z.enum(['toolchain.selectXcode', 'privacy.openSettings', 'agentCli.reveal']),
+	kind: z.enum([
+		'toolchain.selectXcode',
+		'privacy.openSettings',
+		'agentCli.reveal',
+	]),
 	completed: z.boolean(),
 	cancelled: z.boolean().optional(),
 	requiresRefresh: z.boolean().optional(),
@@ -1071,12 +1132,16 @@ export type SimulatorOnboardingReceipt = z.infer<
 
 export type SimulatorBridge = {
 	getSimulatorState: () => Promise<SimulatorState>;
-	subscribeSimulatorState: (listener: (state: SimulatorState) => void) => () => void;
+	subscribeSimulatorState: (
+		listener: (state: SimulatorState) => void
+	) => () => void;
 	refreshSimulators: () => Promise<SimulatorState>;
 	requestSimulatorConfirmation: (
 		action: SimulatorAction
 	) => Promise<SimulatorConfirmationResult>;
-	runSimulatorAction: (action: SimulatorAction) => Promise<SimulatorActionReceipt>;
+	runSimulatorAction: (
+		action: SimulatorAction
+	) => Promise<SimulatorActionReceipt>;
 	cancelSimulatorJob: (jobId: string) => Promise<boolean>;
 	getSimulatorCaptureAccess: (
 		captureId: string

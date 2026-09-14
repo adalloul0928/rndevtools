@@ -150,7 +150,10 @@ export function SearchControl({
 			onChange={onChange}
 		>
 			<SearchField.Group className="h-8 rounded-md border border-white/10 bg-black/30 shadow-none transition-colors focus-within:border-white/25">
-				<Search className="ml-2.5 h-3.5 w-3.5 text-(--text-3)" aria-hidden="true" />
+				<Search
+					className="ml-2.5 h-3.5 w-3.5 text-(--text-3)"
+					aria-hidden="true"
+				/>
 				<SearchField.Input
 					className="h-full min-w-0 flex-1 bg-transparent px-2 text-sm text-(--foreground) outline-none placeholder:text-(--text-3)"
 					placeholder={placeholder}
@@ -183,7 +186,9 @@ export function EmptyPanel({
 			style={compact ? { minHeight: '100%' } : undefined}
 		>
 			<EmptyState.Header>
-				{icon ? <EmptyState.Media variant="icon">{icon}</EmptyState.Media> : null}
+				{icon ? (
+					<EmptyState.Media variant="icon">{icon}</EmptyState.Media>
+				) : null}
 				<EmptyState.Title className="text-base text-(--foreground)">
 					{title}
 				</EmptyState.Title>
@@ -317,7 +322,9 @@ export function ConfirmAction({
 	}
 	return (
 		<AlertDialog>
-			<AlertDialog.Trigger className={`button button--sm button--${triggerVariant}`}>
+			<AlertDialog.Trigger
+				className={`button button--sm button--${triggerVariant}`}
+			>
 				{triggerIcon}
 				{triggerLabel}
 			</AlertDialog.Trigger>

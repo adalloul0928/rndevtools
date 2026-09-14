@@ -3,7 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const SIMSLIM_UPSTREAM_VERSION = 'v0.8.0';
-export const SIMSLIM_UPSTREAM_COMMIT = '09fc9cbbca35db5230e6d571a0a366fe6876266e';
+export const SIMSLIM_UPSTREAM_COMMIT =
+	'09fc9cbbca35db5230e6d571a0a366fe6876266e';
 export const SIMSLIM_PATCH_SET = 'pumpd.1';
 export const SIMSLIM_VENDORED_MANIFEST_SHA256 =
 	'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7';
@@ -12,7 +13,11 @@ export const SIMSLIM_UPSTREAM_MANIFEST_SHA256 =
 export const SIMSLIM_PATCH_SHA256 =
 	'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083';
 
-const PATCHED_UPSTREAM_FILES = new Set(['clone.go', 'disk_cleanup.go', 'simctl.go']);
+const PATCHED_UPSTREAM_FILES = new Set([
+	'clone.go',
+	'disk_cleanup.go',
+	'simctl.go',
+]);
 
 const EXPECTED_MODULE_FILE = `module github.com/avadtechnologies/pumpd-sim-helper
 
@@ -49,9 +54,9 @@ export function verifyVendoredSimSlim(helperDirectory) {
 		);
 	}
 	const patchText = patchBytes.toString('utf8');
-	const patchedHeaders = [...patchText.matchAll(/^diff --git a\/([^ ]+) b\/\1$/gm)].map(
-		(match) => match[1]
-	);
+	const patchedHeaders = [
+		...patchText.matchAll(/^diff --git a\/([^ ]+) b\/\1$/gm),
+	].map((match) => match[1]);
 	if (
 		patchedHeaders.length !== PATCHED_UPSTREAM_FILES.size ||
 		patchedHeaders.some((file) => !PATCHED_UPSTREAM_FILES.has(file))
@@ -94,7 +99,9 @@ export function verifyVendoredSimSlim(helperDirectory) {
 			);
 		}
 		if (sha256(readFileSync(filePath)) !== digest) {
-			throw new Error(`Vendored SimSlim source checksum mismatch: ${relativePath}`);
+			throw new Error(
+				`Vendored SimSlim source checksum mismatch: ${relativePath}`
+			);
 		}
 		const upstreamName = relativePath.replace(
 			'vendor/github.com/mobai-app/simslim/',
@@ -112,7 +119,9 @@ export function verifyVendoredSimSlim(helperDirectory) {
 				throw new Error(`Declared PUMPD patch did not change ${upstreamName}.`);
 			}
 		} else if (digest !== upstreamDigest) {
-			throw new Error(`Undisclosed vendored SimSlim patch detected: ${upstreamName}`);
+			throw new Error(
+				`Undisclosed vendored SimSlim patch detected: ${upstreamName}`
+			);
 		}
 	}
 	if (
@@ -125,7 +134,8 @@ export function verifyVendoredSimSlim(helperDirectory) {
 	}
 
 	if (
-		readFileSync(resolve(resolvedHelper, 'go.mod'), 'utf8') !== EXPECTED_MODULE_FILE
+		readFileSync(resolve(resolvedHelper, 'go.mod'), 'utf8') !==
+		EXPECTED_MODULE_FILE
 	) {
 		throw new Error(
 			`Simulator helper go.mod must contain only the pinned SimSlim ${SIMSLIM_UPSTREAM_VERSION} dependency.`
@@ -165,7 +175,9 @@ export function verifyVendoredSimSlim(helperDirectory) {
 		'utf8'
 	);
 	if (!simctlSource.includes('func ParseDisabledOutput(')) {
-		throw new Error('The reviewed PUMPD launchd-status parser patch is missing.');
+		throw new Error(
+			'The reviewed PUMPD launchd-status parser patch is missing.'
+		);
 	}
 
 	return {
@@ -199,7 +211,9 @@ function collectRegularFiles(directory) {
 		const entryPath = resolve(directory, entry.name);
 		const metadata = lstatSync(entryPath);
 		if (metadata.isSymbolicLink()) {
-			throw new Error(`Vendored SimSlim source contains a symbolic link: ${entryPath}`);
+			throw new Error(
+				`Vendored SimSlim source contains a symbolic link: ${entryPath}`
+			);
 		}
 		if (metadata.isDirectory()) files.push(...collectRegularFiles(entryPath));
 		else if (metadata.isFile()) files.push(entryPath);

@@ -14,7 +14,10 @@ import {
 	type VerifiedNativeHelper,
 	verifyNativeHost,
 } from './native-helper-trust';
-import { runSimulatorCommand, SimulatorCommandError } from './simulator-command-runner';
+import {
+	runSimulatorCommand,
+	SimulatorCommandError,
+} from './simulator-command-runner';
 
 const INSPECTION_PROTOCOL_VERSION = 2;
 const COMPOSITION_PROTOCOL_VERSION = 3;
@@ -29,7 +32,12 @@ const permissionStatusSchema = z.strictObject({
 	statuses: z
 		.array(
 			z.strictObject({
-				id: z.enum(['accessibility', 'screen_recording', 'camera', 'microphone']),
+				id: z.enum([
+					'accessibility',
+					'screen_recording',
+					'camera',
+					'microphone',
+				]),
 				value: z.enum([
 					'granted',
 					'denied',
@@ -66,7 +74,12 @@ const compositionHandshakeSchema = z.strictObject({
 	capabilities: z.strictObject({
 		operations: z
 			.array(
-				z.enum(['handshake', 'permission_status', 'capability_status', 'compose_image'])
+				z.enum([
+					'handshake',
+					'permission_status',
+					'capability_status',
+					'compose_image',
+				])
 			)
 			.length(4),
 		permissionInspection: z.literal(true),
@@ -154,20 +167,30 @@ async function ensurePrivateDirectory(
 	await mkdir(directory, { recursive, mode: 0o700 });
 	const metadata = await lstat(directory);
 	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error('Image-composition storage must be a private local directory.');
+		throw new Error(
+			'Image-composition storage must be a private local directory.'
+		);
 	}
 	const userId = process.getuid?.();
 	if (userId !== undefined && metadata.uid !== userId) {
-		throw new Error('Image-composition storage must be owned by the current user.');
+		throw new Error(
+			'Image-composition storage must be owned by the current user.'
+		);
 	}
 	await chmod(directory, 0o700);
 	return realpath(directory);
 }
 
-async function stageImage(sourcePath: string, destinationPath: string): Promise<void> {
+async function stageImage(
+	sourcePath: string,
+	destinationPath: string
+): Promise<void> {
 	const sourceMetadata = await lstat(sourcePath);
 	assertOwnedFile(sourceMetadata, 'Capture input');
-	if (sourceMetadata.size <= 0 || sourceMetadata.size > MAX_COMPOSITION_INPUT_BYTES) {
+	if (
+		sourceMetadata.size <= 0 ||
+		sourceMetadata.size > MAX_COMPOSITION_INPUT_BYTES
+	) {
 		throw new Error('Capture input exceeds the 32 MiB composition limit.');
 	}
 	const source = await open(
@@ -286,9 +309,13 @@ export class NativeHostClient {
 		this.#verifier = verifier;
 	}
 
-	async inspectPermissions(signal?: AbortSignal): Promise<SimulatorNativeState> {
+	async inspectPermissions(
+		signal?: AbortSignal
+	): Promise<SimulatorNativeState> {
 		const [handshake, compositionHandshake] = await Promise.all([
-			this.#call('handshake', signal).then((value) => handshakeSchema.parse(value)),
+			this.#call('handshake', signal).then((value) =>
+				handshakeSchema.parse(value)
+			),
 			this.#call('handshake', signal, {
 				protocolVersion: COMPOSITION_PROTOCOL_VERSION,
 			}).then((value) => compositionHandshakeSchema.parse(value)),
@@ -316,7 +343,9 @@ export class NativeHostClient {
 				'untrusted'
 			);
 		}
-		const compositionOperations = new Set(compositionHandshake.capabilities.operations);
+		const compositionOperations = new Set(
+			compositionHandshake.capabilities.operations
+		);
 		if (
 			compositionOperations.size !== 4 ||
 			!compositionOperations.has('handshake') ||
@@ -356,12 +385,17 @@ export class NativeHostClient {
 		signal: AbortSignal
 	): Promise<void> {
 		if (!this.#compositionWorkspaceDirectory) {
-			throw new Error('The native image-composition workspace is not configured.');
+			throw new Error(
+				'The native image-composition workspace is not configured.'
+			);
 		}
 		const recipe = captureCompositionRecipeSchema.parse(input.recipe);
-		const root = await ensurePrivateDirectory(this.#compositionWorkspaceDirectory, {
-			recursive: true,
-		});
+		const root = await ensurePrivateDirectory(
+			this.#compositionWorkspaceDirectory,
+			{
+				recursive: true,
+			}
+		);
 		const workspaceToken = randomBytes(16).toString('hex');
 		const workspace = path.join(root, workspaceToken);
 		const inputs = path.join(workspace, 'inputs');
@@ -386,7 +420,10 @@ export class NativeHostClient {
 			]);
 			await stageImage(input.primaryPath, path.join(inputs, primaryInput));
 			if (input.secondaryPath && secondaryInput) {
-				await stageImage(input.secondaryPath, path.join(inputs, secondaryInput));
+				await stageImage(
+					input.secondaryPath,
+					path.join(inputs, secondaryInput)
+				);
 			}
 			const result = compositionResultSchema.parse(
 				await this.#call('compose_image', signal, {
@@ -408,7 +445,9 @@ export class NativeHostClient {
 				result.metadataRendered !== Boolean(recipe.metadata) ||
 				result.bezelStyle !== recipe.layout.bezel
 			) {
-				throw new Error('Native compositor returned inconsistent result metadata.');
+				throw new Error(
+					'Native compositor returned inconsistent result metadata.'
+				);
 			}
 			await copyComposedOutput(
 				path.join(outputs, output),
@@ -499,15 +538,20 @@ export class NativeHostClient {
 				})
 			).stdout;
 		} catch (error) {
-			if (error instanceof SimulatorCommandError && error.stdout) stdout = error.stdout;
+			if (error instanceof SimulatorCommandError && error.stdout)
+				stdout = error.stdout;
 			else throw error;
 		}
 		const response = responseSchema.parse(JSON.parse(stdout) as unknown);
 		if (response.protocolVersion !== protocolVersion) {
-			throw new Error('Native host response protocol did not match the request.');
+			throw new Error(
+				'Native host response protocol did not match the request.'
+			);
 		}
 		if (response.requestId !== requestId) {
-			throw new Error('Native host response identifier did not match the request.');
+			throw new Error(
+				'Native host response identifier did not match the request.'
+			);
 		}
 		if (!response.ok) {
 			throw new NativeHostResponseError(

@@ -1,7 +1,10 @@
 import { constants } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	SimulatorOnboardingOperation,
@@ -26,23 +29,33 @@ export async function resolveXcodeDeveloperDirectory(
 	}
 	const application = await realpath(applicationPath);
 	const applicationMetadata = await lstat(application);
-	if (!applicationMetadata.isDirectory() || applicationMetadata.isSymbolicLink()) {
+	if (
+		!applicationMetadata.isDirectory() ||
+		applicationMetadata.isSymbolicLink()
+	) {
 		throw new Error('The selected Xcode application is not a real directory.');
 	}
 	const developerDirectory = await realpath(
 		path.join(application, 'Contents', 'Developer')
 	);
-	const relativeDeveloperDirectory = path.relative(application, developerDirectory);
+	const relativeDeveloperDirectory = path.relative(
+		application,
+		developerDirectory
+	);
 	if (
 		!relativeDeveloperDirectory ||
 		relativeDeveloperDirectory.startsWith('..') ||
 		path.isAbsolute(relativeDeveloperDirectory)
 	) {
-		throw new Error('The selected Xcode developer directory escaped its application.');
+		throw new Error(
+			'The selected Xcode developer directory escaped its application.'
+		);
 	}
 	const developerMetadata = await lstat(developerDirectory);
 	if (!developerMetadata.isDirectory() || developerMetadata.isSymbolicLink()) {
-		throw new Error('The selected application has no valid Xcode developer directory.');
+		throw new Error(
+			'The selected application has no valid Xcode developer directory.'
+		);
 	}
 	await access(
 		path.join(developerDirectory, 'usr', 'bin', 'xcodebuild'),
@@ -64,15 +77,21 @@ export async function validateXcodeDeveloperDirectory(
 	const applicationPath = path.dirname(path.dirname(developerDirectory));
 	const resolved = await resolveXcodeDeveloperDirectory(applicationPath);
 	if (resolved !== developerDirectory) {
-		throw new Error('The stored Xcode developer directory changed unexpectedly.');
+		throw new Error(
+			'The stored Xcode developer directory changed unexpectedly.'
+		);
 	}
 	return resolved;
 }
 
 type SimulatorOnboardingIpcDependencies = {
 	assertTrustedRenderer: (event: IpcMainInvokeEvent) => void;
-	selectXcodeApplication: (event: IpcMainInvokeEvent) => Promise<string | undefined>;
-	activateXcodeDeveloperDirectory: (developerDirectory: string) => Promise<void>;
+	selectXcodeApplication: (
+		event: IpcMainInvokeEvent
+	) => Promise<string | undefined>;
+	activateXcodeDeveloperDirectory: (
+		developerDirectory: string
+	) => Promise<void>;
 	openPrivacySettings: (
 		permission: Extract<
 			SimulatorOnboardingOperation,

@@ -160,7 +160,8 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 	const actionUnavailableReason = useCallback(
 		(tool: ToolId, command: string): string | null => {
 			if (!selectedDevice) return 'No device is selected.';
-			if (selectedDevice.status === 'offline') return 'The selected device is offline.';
+			if (selectedDevice.status === 'offline')
+				return 'The selected device is offline.';
 			const capability = desktopActionCapability(tool, command);
 			if (!capability) return `Unsupported desktop action: ${tool}.${command}.`;
 			if (!selectedDevice.info.capabilities.includes(capability)) {
@@ -175,7 +176,8 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 	);
 
 	const canRunAction = useCallback(
-		(tool: ToolId, command: string) => actionUnavailableReason(tool, command) === null,
+		(tool: ToolId, command: string) =>
+			actionUnavailableReason(tool, command) === null,
 		[actionUnavailableReason]
 	);
 
@@ -205,7 +207,10 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 			actionPendingRef.current = true;
 			setActionPending(true);
 			latestActionId.current = actionId;
-			setActionStatus({ kind: 'pending', message: 'Sending action to device…' });
+			setActionStatus({
+				kind: 'pending',
+				message: 'Sending action to device…',
+			});
 			try {
 				const result = await bridge.runAction({
 					actionId,
@@ -288,6 +293,7 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 
 export function useDesktopRuntime(): DesktopRuntimeValue {
 	const value = useContext(DesktopRuntimeContext);
-	if (!value) throw new Error('useDesktopRuntime must be used inside its provider.');
+	if (!value)
+		throw new Error('useDesktopRuntime must be used inside its provider.');
 	return value;
 }

@@ -53,13 +53,15 @@ describe('Simulator App Actions model', () => {
 	});
 
 	it('keeps unsafe URLs and invalid APNs envelopes out of the action bridge', () => {
-		expect(build('open-deep-link', { value: 'file:///private/etc/passwd' })).toBeNull();
+		expect(
+			build('open-deep-link', { value: 'file:///private/etc/passwd' })
+		).toBeNull();
 		expect(
 			build('open-universal-link', { value: 'https://pumpd.com/workouts/1' })
 		).toMatchObject({ kind: 'app.openUniversalLink' });
-		expect(build('open-deep-link', { value: 'pumpd://workout/current' })).toMatchObject(
-			{ kind: 'url.open' }
-		);
+		expect(
+			build('open-deep-link', { value: 'pumpd://workout/current' })
+		).toMatchObject({ kind: 'url.open' });
 		expect(
 			build('open-universal-link', { value: 'pumpd://workout/current' })
 		).toBeNull();
@@ -101,7 +103,9 @@ describe('Simulator App Actions model', () => {
 			bundleIdentifier: BUNDLE_ID,
 			operation: 'reset',
 		});
-		expect(build('reset-permission', { bundleIdentifier: undefined })).toBeNull();
+		expect(
+			build('reset-permission', { bundleIdentifier: undefined })
+		).toBeNull();
 	});
 
 	it('uses explicit custom coordinates for fixed locations and route origins', () => {

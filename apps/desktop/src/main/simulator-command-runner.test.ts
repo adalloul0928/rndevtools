@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { runSimulatorCommand, SimulatorCommandError } from './simulator-command-runner';
+import {
+	runSimulatorCommand,
+	SimulatorCommandError,
+} from './simulator-command-runner';
 
 describe('simulator command runner', () => {
 	it('requires an absolute executable and preserves literal arguments', async () => {
@@ -27,9 +30,13 @@ describe('simulator command runner', () => {
 
 	it('times out and cancels commands', async () => {
 		await expect(
-			runSimulatorCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
-				timeoutMs: 25,
-			})
+			runSimulatorCommand(
+				process.execPath,
+				['-e', 'setInterval(() => {}, 1000)'],
+				{
+					timeoutMs: 25,
+				}
+			)
 		).rejects.toMatchObject({ kind: 'timeout' });
 
 		const controller = new AbortController();
@@ -137,7 +144,8 @@ describe('simulator command runner', () => {
 
 	it('uses a minimal environment and strips secrets and SIMCTL_CHILD overrides', async () => {
 		const previousSecret = process.env.PUMPD_TEST_SECRET;
-		const previousChildOverride = process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES;
+		const previousChildOverride =
+			process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES;
 		process.env.PUMPD_TEST_SECRET = 'must-not-be-inherited';
 		process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES = '/tmp/untrusted.dylib';
 		try {

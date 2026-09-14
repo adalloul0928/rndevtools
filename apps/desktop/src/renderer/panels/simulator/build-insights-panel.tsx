@@ -36,7 +36,9 @@ const EMPTY_STATE: BuildInsightsState = {
 export const BUILD_INSIGHTS_FOUNDATION_COPY =
 	"Current foundation: Apple's public xcresulttool get build-results view. Duration, status, and diagnostic counts are available; scheme, configuration, Xcode version, clean/incremental classification, and Swift FSEvents live watching are deferred.";
 
-type WithoutActionId<T> = T extends { actionId: string } ? Omit<T, 'actionId'> : never;
+type WithoutActionId<T> = T extends { actionId: string }
+	? Omit<T, 'actionId'>
+	: never;
 type BuildInsightsOperationInput = WithoutActionId<BuildInsightsOperation>;
 
 function getBridge(): BuildInsightsBridge | null {
@@ -134,7 +136,10 @@ export function BuildInsightsPanel() {
 		state.builds[0] ??
 		null;
 	const isBusy = action !== null;
-	const execute = (operation: BuildInsightsOperationInput, successMessage: string) =>
+	const execute = (
+		operation: BuildInsightsOperationInput,
+		successMessage: string
+	) =>
 		void runOperation(
 			{
 				...operation,
@@ -153,7 +158,10 @@ export function BuildInsightsPanel() {
 							size="sm"
 							variant="secondary"
 							onPress={() =>
-								execute({ kind: 'build.import-xcresult' }, 'Build result imported.')
+								execute(
+									{ kind: 'build.import-xcresult' },
+									'Build result imported.'
+								)
 							}
 						>
 							<FilePlus2 className="h-3.5 w-3.5" /> Import result
@@ -181,7 +189,9 @@ export function BuildInsightsPanel() {
 								execute({ kind: 'build.refresh' }, 'Build history refreshed.')
 							}
 						>
-							<RefreshCw className={`h-3.5 w-3.5 ${isBusy ? 'animate-spin' : ''}`} />
+							<RefreshCw
+								className={`h-3.5 w-3.5 ${isBusy ? 'animate-spin' : ''}`}
+							/>
 						</Button>
 					</div>
 				}
@@ -192,11 +202,13 @@ export function BuildInsightsPanel() {
 			/>
 			{!bridge ? (
 				<PanelNotice tone="error">
-					The narrow Build Insights bridge is unavailable. Reopen the updated desktop
-					app; this renderer never reads local paths directly.
+					The narrow Build Insights bridge is unavailable. Reopen the updated
+					desktop app; this renderer never reads local paths directly.
 				</PanelNotice>
 			) : null}
-			{message ? <PanelNotice tone={message.kind}>{message.text}</PanelNotice> : null}
+			{message ? (
+				<PanelNotice tone={message.kind}>{message.text}</PanelNotice>
+			) : null}
 			<div className="sim-metric-grid">
 				<SimulatorMetric
 					detail="All retained builds"
@@ -339,10 +351,16 @@ function BuildDetail({
 			</header>
 			<section className="sim-build-facts">
 				<Fact label="Duration" value={formatDuration(build.durationMs)} />
-				<Fact label="Started" value={new Date(build.startedAt).toLocaleString()} />
+				<Fact
+					label="Started"
+					value={new Date(build.startedAt).toLocaleString()}
+				/>
 				<Fact label="Warnings" value={String(build.warnings)} />
 				<Fact label="Errors" value={String(build.errors)} />
-				<Fact label="Analyzer warnings" value={String(build.analyzerWarnings)} />
+				<Fact
+					label="Analyzer warnings"
+					value={String(build.analyzerWarnings)}
+				/>
 				<Fact
 					label="Xcode"
 					value={build.xcodeVersion ?? 'Not reported by build-results'}
@@ -388,7 +406,10 @@ function EmptyBuildDetail({
 }
 
 function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
-	const maximum = Math.max(1, ...state.stats.activity.map((month) => month.count));
+	const maximum = Math.max(
+		1,
+		...state.stats.activity.map((month) => month.count)
+	);
 	return (
 		<>
 			<section className="sim-detail-section">
@@ -407,7 +428,9 @@ function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
 							<div key={source.id}>
 								<span className={`sim-source-status is-${source.status}`} />
 								<strong>{source.label}</strong>
-								<code>{source.kind === 'xcresult' ? 'result' : 'scan root'}</code>
+								<code>
+									{source.kind === 'xcresult' ? 'result' : 'scan root'}
+								</code>
 								{source.error ? <small>{source.error}</small> : null}
 							</div>
 						))
@@ -431,7 +454,9 @@ function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
 								<span>{month.month}</span>
 								<i>
 									<i
-										style={{ width: `${Math.max(4, (month.count / maximum) * 100)}%` }}
+										style={{
+											width: `${Math.max(4, (month.count / maximum) * 100)}%`,
+										}}
 									/>
 								</i>
 								<code>{month.count}</code>
@@ -444,7 +469,11 @@ function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
 	);
 }
 
-function ExportActions({ onExport }: { onExport: (format: 'csv' | 'json') => void }) {
+function ExportActions({
+	onExport,
+}: {
+	onExport: (format: 'csv' | 'json') => void;
+}) {
 	return (
 		<div className="sim-build-export-actions">
 			<Button size="sm" variant="secondary" onPress={() => onExport('json')}>

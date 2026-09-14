@@ -31,7 +31,9 @@ const CAPTURE_FILE_PATTERN =
 	/^(capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(jpeg|mp4|png)$/i;
 const CAPTURE_RECORD_PATTERN =
 	/^(capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/i;
-const udidSchema = z.string().regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
 
 export const DEFAULT_SIMULATOR_CAPTURE_RETENTION_POLICY = {
 	maxAgeDays: 30,
@@ -158,14 +160,16 @@ export class SimulatorCaptureStore {
 	) {
 		this.#root = path.resolve(root);
 		this.#now = now;
-		this.#defaultPolicy = simulatorCaptureRetentionPolicySchema.parse(defaultPolicy);
+		this.#defaultPolicy =
+			simulatorCaptureRetentionPolicySchema.parse(defaultPolicy);
 		this.#policy = this.#defaultPolicy;
 	}
 
 	initialize(): Promise<void> {
 		if (this.#initializePromise) return this.#initializePromise;
 		const initialize = this.#initializeInternal().catch((error: unknown) => {
-			if (this.#initializePromise === initialize) this.#initializePromise = undefined;
+			if (this.#initializePromise === initialize)
+				this.#initializePromise = undefined;
 			throw error;
 		});
 		this.#initializePromise = initialize;
@@ -185,7 +189,9 @@ export class SimulatorCaptureStore {
 	get(captureId: string): SimulatorCapture | undefined {
 		const id = simulatorCaptureIdSchema.parse(captureId);
 		const record = this.#records.get(id);
-		return record?.status === 'pending' ? undefined : record && publicCapture(record);
+		return record?.status === 'pending'
+			? undefined
+			: record && publicCapture(record);
 	}
 
 	retentionState(): SimulatorCaptureRetentionState {
@@ -196,7 +202,9 @@ export class SimulatorCaptureStore {
 			policy: { ...this.#policy },
 			captureCount: captures.length,
 			totalBytes: captures.reduce((total, record) => total + record.bytes, 0),
-			...(this.#lastPrunedAt === undefined ? {} : { lastPrunedAt: this.#lastPrunedAt }),
+			...(this.#lastPrunedAt === undefined
+				? {}
+				: { lastPrunedAt: this.#lastPrunedAt }),
 		};
 	}
 
@@ -215,7 +223,11 @@ export class SimulatorCaptureStore {
 		return this.#mutate(async () => {
 			const id = `capture-${randomUUID()}`;
 			const mimeType =
-				format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'video/mp4';
+				format === 'png'
+					? 'image/png'
+					: format === 'jpeg'
+						? 'image/jpeg'
+						: 'video/mp4';
 			const capturedAt = this.#now();
 			const stem = safeCaptureStem(name, kind);
 			const captureName = `${stem}-${capturedAt}-${id.slice(-8)}.${format}`;
@@ -311,7 +323,9 @@ export class SimulatorCaptureStore {
 			const id = simulatorCaptureIdSchema.parse(captureId);
 			const record = this.#records.get(id);
 			if (!record || record.status === 'pending') {
-				throw Object.assign(new Error('Capture is not available.'), { code: 'ENOENT' });
+				throw Object.assign(new Error('Capture is not available.'), {
+					code: 'ENOENT',
+				});
 			}
 			await this.#safeFileMetadata(record);
 			const capturePath = this.#capturePath(record);
@@ -327,7 +341,9 @@ export class SimulatorCaptureStore {
 					metadata.size > MAX_CAPTURE_BYTES ||
 					metadata.size !== record.bytes
 				) {
-					throw new Error('Capture file no longer matches its trusted metadata.');
+					throw new Error(
+						'Capture file no longer matches its trusted metadata.'
+					);
 				}
 				return { capture: publicCapture(record), handle, size: metadata.size };
 			} catch (error) {
@@ -356,9 +372,15 @@ export class SimulatorCaptureStore {
 		let temporaryPath: string | undefined;
 		try {
 			const requestedDestination = path.resolve(destinationPath);
-			const destinationDirectory = await realpath(path.dirname(requestedDestination));
+			const destinationDirectory = await realpath(
+				path.dirname(requestedDestination)
+			);
 			const destinationName = path.basename(requestedDestination);
-			if (!destinationName || destinationName === '.' || destinationName === '..') {
+			if (
+				!destinationName ||
+				destinationName === '.' ||
+				destinationName === '..'
+			) {
 				throw new Error('Export destination is invalid.');
 			}
 			const canonicalRoot = await realpath(this.#root);
@@ -381,7 +403,12 @@ export class SimulatorCaptureStore {
 			let position = 0;
 			while (position < opened.size) {
 				const length = Math.min(buffer.length, opened.size - position);
-				const { bytesRead } = await opened.handle.read(buffer, 0, length, position);
+				const { bytesRead } = await opened.handle.read(
+					buffer,
+					0,
+					length,
+					position
+				);
 				if (bytesRead === 0) throw new Error('Capture changed during export.');
 				let written = 0;
 				while (written < bytesRead) {
@@ -398,7 +425,10 @@ export class SimulatorCaptureStore {
 			await destinationHandle.sync();
 			await destinationHandle.close();
 			destinationHandle = undefined;
-			await rename(temporaryPath, path.join(destinationDirectory, destinationName));
+			await rename(
+				temporaryPath,
+				path.join(destinationDirectory, destinationName)
+			);
 			temporaryPath = undefined;
 			await syncDirectory(destinationDirectory);
 		} finally {
@@ -439,13 +469,15 @@ export class SimulatorCaptureStore {
 		const recordsDirectory = this.#requiredRecordsDirectory();
 		const filesDirectory = this.#requiredFilesDirectory();
 		const quarantinedIds = new Set<string>();
-		for (const entry of await readdir(recordsDirectory, { withFileTypes: true })) {
+		for (const entry of await readdir(recordsDirectory, {
+			withFileTypes: true,
+		})) {
 			const match = CAPTURE_RECORD_PATTERN.exec(entry.name);
 			if (!match) {
 				if (entry.name.includes('.tmp')) {
-					await rm(path.join(recordsDirectory, entry.name), { force: true }).catch(
-						() => undefined
-					);
+					await rm(path.join(recordsDirectory, entry.name), {
+						force: true,
+					}).catch(() => undefined);
 				}
 				continue;
 			}
@@ -459,7 +491,9 @@ export class SimulatorCaptureStore {
 				const value = await this.#readBoundedJson(recordPath, MAX_RECORD_BYTES);
 				let record = captureRecordSchema.parse(value);
 				if (record.id.toLowerCase() !== id.toLowerCase()) {
-					throw new Error('Capture metadata identifier did not match its filename.');
+					throw new Error(
+						'Capture metadata identifier did not match its filename.'
+					);
 				}
 				const metadata = await this.#safeFileMetadata(record);
 				if (metadata.size === 0) {
@@ -485,7 +519,9 @@ export class SimulatorCaptureStore {
 			}
 		}
 
-		for (const entry of await readdir(filesDirectory, { withFileTypes: true })) {
+		for (const entry of await readdir(filesDirectory, {
+			withFileTypes: true,
+		})) {
 			const match = CAPTURE_FILE_PATTERN.exec(entry.name);
 			if (!match) continue;
 			const id = match[1];
@@ -498,7 +534,10 @@ export class SimulatorCaptureStore {
 		}
 	}
 
-	async #readBoundedJson(filePath: string, maximumBytes: number): Promise<unknown> {
+	async #readBoundedJson(
+		filePath: string,
+		maximumBytes: number
+	): Promise<unknown> {
 		const metadata = await lstat(filePath);
 		if (
 			!metadata.isFile() ||
@@ -671,7 +710,9 @@ export class SimulatorCaptureStore {
 		try {
 			const opened = await handle.stat();
 			if (!opened.isFile() || opened.size !== expected.size) {
-				throw new Error('Simulator capture changed while it was being committed.');
+				throw new Error(
+					'Simulator capture changed while it was being committed.'
+				);
 			}
 			await handle.chmod(0o600);
 			await handle.sync();
@@ -693,7 +734,9 @@ export class SimulatorCaptureStore {
 			pending.kind !== record.kind ||
 			pending.mimeType !== record.mimeType
 		) {
-			throw new Error('Capture reservation no longer matches managed metadata.');
+			throw new Error(
+				'Capture reservation no longer matches managed metadata.'
+			);
 		}
 		return record;
 	}
@@ -721,17 +764,20 @@ export class SimulatorCaptureStore {
 	}
 
 	#requiredFilesDirectory(): string {
-		if (!this.#filesDirectory) throw new Error('Capture storage is not initialized.');
+		if (!this.#filesDirectory)
+			throw new Error('Capture storage is not initialized.');
 		return this.#filesDirectory;
 	}
 
 	#requiredRecordsDirectory(): string {
-		if (!this.#recordsDirectory) throw new Error('Capture storage is not initialized.');
+		if (!this.#recordsDirectory)
+			throw new Error('Capture storage is not initialized.');
 		return this.#recordsDirectory;
 	}
 
 	#requiredPolicyPath(): string {
-		if (!this.#policyPath) throw new Error('Capture storage is not initialized.');
+		if (!this.#policyPath)
+			throw new Error('Capture storage is not initialized.');
 		return this.#policyPath;
 	}
 

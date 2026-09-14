@@ -2,7 +2,13 @@ import { Input } from '@heroui/react/input';
 import { Switch } from '@heroui/react/switch';
 import { TextArea } from '@heroui/react/textarea';
 import { NativeSelect } from '@heroui-pro/react/native-select';
-import { AlertTriangle, ChevronDown, FileImage, FileVideo, Upload } from 'lucide-react';
+import {
+	AlertTriangle,
+	ChevronDown,
+	FileImage,
+	FileVideo,
+	Upload,
+} from 'lucide-react';
 import { useId, useState } from 'react';
 import {
 	createAssertion,
@@ -23,10 +29,16 @@ const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime'] as const;
 type SimulatorStep = Extract<RecipeStep, { kind: 'simulator' }>;
 type SimulatorAction = SimulatorStep['action'];
 type AppLaunchAction = Extract<SimulatorAction, { operation: 'app.launch' }>;
-type LocationRouteAction = Extract<SimulatorAction, { operation: 'location.start' }>;
+type LocationRouteAction = Extract<
+	SimulatorAction,
+	{ operation: 'location.start' }
+>;
 type PrivacyAction = Extract<SimulatorAction, { operation: 'privacy.update' }>;
 type UiUpdateAction = Extract<SimulatorAction, { operation: 'ui.update' }>;
-type StatusBarAction = Extract<SimulatorAction, { operation: 'statusBar.override' }>;
+type StatusBarAction = Extract<
+	SimulatorAction,
+	{ operation: 'statusBar.override' }
+>;
 type SemanticStep = Extract<RecipeStep, { kind: 'semantic' }>;
 type NetworkStep = Extract<RecipeStep, { kind: 'network' }>;
 type CameraStep = Extract<RecipeStep, { kind: 'camera' }>;
@@ -99,7 +111,8 @@ export function RecipeStepEditor({
 					<div>
 						{stepIssues.map((issue) => (
 							<p key={`${issue.path}:${issue.message}`}>
-								<strong>{issue.path.replace(`${path}.`, '')}</strong> {issue.message}
+								<strong>{issue.path.replace(`${path}.`, '')}</strong>{' '}
+								{issue.message}
 							</p>
 						))}
 					</div>
@@ -285,8 +298,8 @@ function SimulatorFields({
 			) : null}
 			{action.operation === 'keychain.reset' ? (
 				<p className="recipe-danger-note">
-					This permanently clears the selected Simulator keychain. A short-lived, exact
-					native confirmation is mandatory at run time.
+					This permanently clears the selected Simulator keychain. A
+					short-lived, exact native confirmation is mandatory at run time.
 				</p>
 			) : null}
 		</>
@@ -375,7 +388,11 @@ function AppLaunchFields({
 					{ value: 'true', label: 'Enabled' },
 					{ value: 'false', label: 'Disabled' },
 				]}
-				value={action.slowAnimations === undefined ? '' : String(action.slowAnimations)}
+				value={
+					action.slowAnimations === undefined
+						? ''
+						: String(action.slowAnimations)
+				}
 				onChange={(value) =>
 					onChange({
 						...step,
@@ -449,7 +466,9 @@ function LocationRouteFields({
 							? ''
 							: String(action.speedMetersPerSecond)
 					}
-					onChange={(value) => updateOptionalNumber('speedMetersPerSecond', value)}
+					onChange={(value) =>
+						updateOptionalNumber('speedMetersPerSecond', value)
+					}
 				/>
 				<LabeledInput
 					label="Distance cadence (m)"
@@ -458,7 +477,9 @@ function LocationRouteFields({
 					step="0.1"
 					type="number"
 					value={
-						action.distanceMeters === undefined ? '' : String(action.distanceMeters)
+						action.distanceMeters === undefined
+							? ''
+							: String(action.distanceMeters)
 					}
 					onChange={(value) => updateOptionalNumber('distanceMeters', value)}
 				/>
@@ -469,14 +490,16 @@ function LocationRouteFields({
 					step="0.1"
 					type="number"
 					value={
-						action.intervalSeconds === undefined ? '' : String(action.intervalSeconds)
+						action.intervalSeconds === undefined
+							? ''
+							: String(action.intervalSeconds)
 					}
 					onChange={(value) => updateOptionalNumber('intervalSeconds', value)}
 				/>
 			</div>
 			<p className="recipe-scope-note">
-				Distance and interval cadence are mutually exclusive; entering one clears the
-				other.
+				Distance and interval cadence are mutually exclusive; entering one
+				clears the other.
 			</p>
 		</>
 	);
@@ -507,7 +530,8 @@ function PrivacyFields({
 							...step,
 							action: {
 								...action,
-								privacyOperation: privacyOperation as PrivacyAction['privacyOperation'],
+								privacyOperation:
+									privacyOperation as PrivacyAction['privacyOperation'],
 							},
 						})
 					}
@@ -519,7 +543,10 @@ function PrivacyFields({
 					onChange={(service) =>
 						onChange({
 							...step,
-							action: { ...action, service: service as PrivacyAction['service'] },
+							action: {
+								...action,
+								service: service as PrivacyAction['service'],
+							},
 						})
 					}
 				/>
@@ -539,8 +566,9 @@ function PrivacyFields({
 				}
 			/>
 			<p className="recipe-danger-note">
-				Privacy reset removes persisted decisions and requires exact native approval.
-				Grant and revoke remain restricted to the allowlisted service and bundle.
+				Privacy reset removes persisted decisions and requires exact native
+				approval. Grant and revoke remain restricted to the allowlisted service
+				and bundle.
 			</p>
 		</>
 	);
@@ -683,7 +711,8 @@ function StatusBarFields({
 					onChange={(cellularBars) =>
 						updateOverrides({
 							...action.overrides,
-							cellularBars: cellularBars === '' ? undefined : Number(cellularBars),
+							cellularBars:
+								cellularBars === '' ? undefined : Number(cellularBars),
 						})
 					}
 				/>
@@ -713,7 +742,8 @@ function StatusBarFields({
 					onChange={(batteryLevel) =>
 						updateOverrides({
 							...action.overrides,
-							batteryLevel: batteryLevel === '' ? undefined : Number(batteryLevel),
+							batteryLevel:
+								batteryLevel === '' ? undefined : Number(batteryLevel),
 						})
 					}
 				/>
@@ -760,7 +790,9 @@ function SemanticFields({
 				<LabeledTextArea
 					label="Text"
 					value={action.text}
-					onChange={(text) => onChange({ ...step, action: { ...action, text } })}
+					onChange={(text) =>
+						onChange({ ...step, action: { ...action, text } })
+					}
 				/>
 			) : null}
 			{action.action === 'scroll' ? (
@@ -825,7 +857,11 @@ function NetworkFields({
 					onChange(
 						operation === 'set'
 							? { ...step, operation, profileId: 'wifi' }
-							: { ...commonStepFields(step), kind: step.kind, operation: 'clear' }
+							: {
+									...commonStepFields(step),
+									kind: step.kind,
+									operation: 'clear',
+								}
 					)
 				}
 			/>
@@ -843,8 +879,8 @@ function NetworkFields({
 				/>
 			) : null}
 			<p className="recipe-scope-note">
-				This shapes only PUMPD’s instrumented fetch client, not Simulator or host
-				traffic.
+				This shapes only PUMPD’s instrumented fetch client, not Simulator or
+				host traffic.
 			</p>
 		</>
 	);
@@ -865,11 +901,16 @@ function CameraFields({
 		setIsPreparing(true);
 		setFileError(null);
 		try {
-			const fixture = await prepareFixtureFile(file, setStep.fixture.fixtureKind);
+			const fixture = await prepareFixtureFile(
+				file,
+				setStep.fixture.fixtureKind
+			);
 			onChange({ ...setStep, fixture });
 		} catch (error) {
 			setFileError(
-				error instanceof Error ? error.message : 'Camera fixture could not be read.'
+				error instanceof Error
+					? error.message
+					: 'Camera fixture could not be read.'
 			);
 		} finally {
 			setIsPreparing(false);
@@ -892,7 +933,11 @@ function CameraFields({
 									operation,
 									fixture: createCameraFixture('unavailable'),
 								}
-							: { ...commonStepFields(step), kind: step.kind, operation: 'clear' }
+							: {
+									...commonStepFields(step),
+									kind: step.kind,
+									operation: 'clear',
+								}
 					)
 				}
 			/>
@@ -950,7 +995,8 @@ function CameraFields({
 								<span>384 KiB raw / 512 KiB encoded; no path is retained.</span>
 							</div>
 							<label>
-								<Upload className="h-3 w-3" /> {isPreparing ? 'Reading…' : 'Choose'}
+								<Upload className="h-3 w-3" />{' '}
+								{isPreparing ? 'Reading…' : 'Choose'}
 								<input
 									accept={
 										setStep.fixture.fixtureKind === 'video'
@@ -972,8 +1018,8 @@ function CameraFields({
 						</p>
 					) : null}
 					<p className="recipe-scope-note">
-						Fixtures target only PUMPD’s instrumented development camera and never
-						change macOS camera permission.
+						Fixtures target only PUMPD’s instrumented development camera and
+						never change macOS camera permission.
 					</p>
 				</>
 			) : null}
@@ -1009,7 +1055,9 @@ function CaptureFields({
 						label: value,
 					}))}
 					value={step.mask}
-					onChange={(mask) => onChange({ ...step, mask: mask as CaptureStep['mask'] })}
+					onChange={(mask) =>
+						onChange({ ...step, mask: mask as CaptureStep['mask'] })
+					}
 				/>
 			</div>
 			<LabeledInput
@@ -1038,7 +1086,9 @@ function WaitFields({
 			min={0}
 			type="number"
 			value={String(step.durationMs)}
-			onChange={(durationMs) => onChange({ ...step, durationMs: Number(durationMs) })}
+			onChange={(durationMs) =>
+				onChange({ ...step, durationMs: Number(durationMs) })
+			}
 		/>
 	);
 }
@@ -1099,7 +1149,10 @@ function WaitForFields({
 					type="number"
 					value={String(waitFor.quietMs)}
 					onChange={(quietMs) =>
-						onChange({ ...step, waitFor: { ...waitFor, quietMs: Number(quietMs) } })
+						onChange({
+							...step,
+							waitFor: { ...waitFor, quietMs: Number(quietMs) },
+						})
 					}
 				/>
 			) : null}
@@ -1249,7 +1302,9 @@ function RestorePointFields({
 				}
 			/>
 			<LabeledInput
-				label={step.operation === 'capture' ? 'Save as' : 'Checkpoint reference'}
+				label={
+					step.operation === 'capture' ? 'Save as' : 'Checkpoint reference'
+				}
 				value={step.operation === 'capture' ? step.saveAs : step.reference}
 				onChange={(value) =>
 					onChange(
@@ -1261,8 +1316,8 @@ function RestorePointFields({
 			/>
 			{step.operation !== 'capture' ? (
 				<p className="recipe-danger-note">
-					Restore and remove can replace or discard managed app state and require native
-					approval before execution.
+					Restore and remove can replace or discard managed app state and
+					require native approval before execution.
 				</p>
 			) : null}
 		</>
@@ -1315,10 +1370,10 @@ function SlimmingFields({
 				/>
 			) : null}
 			<p className="recipe-danger-note">
-				Recipes never store experimental acknowledgement. For an unknown compatibility
-				tuple, type the exact acknowledgement in Simulator Slimming before running;
-				compatibility checks, native confirmation, verification, and rollback remain
-				mandatory.
+				Recipes never store experimental acknowledgement. For an unknown
+				compatibility tuple, type the exact acknowledgement in Simulator
+				Slimming before running; compatibility checks, native confirmation,
+				verification, and rollback remain mandatory.
 			</p>
 		</>
 	);
@@ -1466,19 +1521,31 @@ async function prepareFixtureFile(
 	file: File,
 	fixtureKind: CameraSetStep['fixture']['fixtureKind']
 ): Promise<CameraSetStep['fixture']> {
-	if (fixtureKind !== 'still' && fixtureKind !== 'qr' && fixtureKind !== 'video') {
-		throw new Error('Choose a still, QR, or video fixture before selecting a file.');
+	if (
+		fixtureKind !== 'still' &&
+		fixtureKind !== 'qr' &&
+		fixtureKind !== 'video'
+	) {
+		throw new Error(
+			'Choose a still, QR, or video fixture before selecting a file.'
+		);
 	}
 	if (file.size === 0 || file.size > MAX_FIXTURE_BYTES) {
 		throw new Error('Choose a non-empty fixture no larger than 384 KiB.');
 	}
 	const dataBase64 = await readBase64(file);
-	if (new TextEncoder().encode(dataBase64).byteLength > MAX_ENCODED_FIXTURE_BYTES) {
+	if (
+		new TextEncoder().encode(dataBase64).byteLength > MAX_ENCODED_FIXTURE_BYTES
+	) {
 		throw new Error('The encoded fixture exceeds the 512 KiB recipe envelope.');
 	}
 	if (fixtureKind === 'still' || fixtureKind === 'qr') {
-		if (!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])) {
-			throw new Error('Still and QR fixtures must be JPEG, PNG, or WebP images.');
+		if (
+			!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])
+		) {
+			throw new Error(
+				'Still and QR fixtures must be JPEG, PNG, or WebP images.'
+			);
 		}
 		const bitmap = await createImageBitmap(file);
 		try {
@@ -1494,7 +1561,9 @@ async function prepareFixtureFile(
 			bitmap.close();
 		}
 	}
-	if (!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])) {
+	if (
+		!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])
+	) {
 		throw new Error('Video fixtures must be MP4 or QuickTime files.');
 	}
 	const media = await inspectVideo(file);
@@ -1510,7 +1579,8 @@ async function prepareFixtureFile(
 async function readBase64(file: File): Promise<string> {
 	return await new Promise((resolve, reject) => {
 		const reader = new FileReader();
-		reader.onerror = () => reject(new Error('The selected fixture could not be read.'));
+		reader.onerror = () =>
+			reject(new Error('The selected fixture could not be read.'));
 		reader.onload = () => {
 			const result = reader.result;
 			if (typeof result !== 'string') {
@@ -1536,14 +1606,21 @@ async function inspectVideo(
 		return await new Promise((resolve, reject) => {
 			const video = document.createElement('video');
 			video.preload = 'metadata';
-			video.onerror = () => reject(new Error('Video metadata could not be decoded.'));
+			video.onerror = () =>
+				reject(new Error('Video metadata could not be decoded.'));
 			video.onloadedmetadata = () => {
 				const durationMs = Math.round(video.duration * 1_000);
 				if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-					reject(new Error('The selected video does not report valid dimensions.'));
+					reject(
+						new Error('The selected video does not report valid dimensions.')
+					);
 					return;
 				}
-				if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 600_000) {
+				if (
+					!Number.isFinite(durationMs) ||
+					durationMs <= 0 ||
+					durationMs > 600_000
+				) {
 					reject(new Error('Choose a video between 1 ms and 10 minutes.'));
 					return;
 				}
@@ -1601,7 +1678,10 @@ const UI_SETTINGS: SelectOption[] = [
 	{ value: 'content_size', label: 'Dynamic Type size' },
 ];
 
-const UI_DEFAULT_VALUES: Record<UiUpdateAction['setting'], UiUpdateAction['value']> = {
+const UI_DEFAULT_VALUES: Record<
+	UiUpdateAction['setting'],
+	UiUpdateAction['value']
+> = {
 	appearance: 'dark',
 	increase_contrast: 'enabled',
 	content_size: 'large',

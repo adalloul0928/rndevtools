@@ -47,7 +47,7 @@
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "catalog:biomejs-biome-2-5-10",
+		"@biomejs/biome": "catalog:",
 		"@expo/material-symbols": "catalog:",
 		"@expo/ui": "catalog:expo-ui-57-0-11",
 		"@tanstack/react-query": "catalog:tanstack-react-query-5-101-4",
@@ -57,7 +57,7 @@
 		"expo": "catalog:expo-57-0-13",
 		"jest": "catalog:",
 		"jest-expo": "catalog:jest-expo-57-0-4",
-		"knip": "catalog:knip-range-6-32-2",
+		"knip": "catalog:",
 		"react": "catalog:",
 		"react-native": "catalog:",
 		"react-native-gesture-handler": "catalog:react-native-gesture-handler-2-32-0",

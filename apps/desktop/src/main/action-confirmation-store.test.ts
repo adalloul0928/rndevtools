@@ -19,7 +19,9 @@ describe('action confirmation store', () => {
 				confirmation.token
 			)
 		).toBe(true);
-		expect(store.consume('simulator', 7, action, confirmation.token)).toBe(false);
+		expect(store.consume('simulator', 7, action, confirmation.token)).toBe(
+			false
+		);
 
 		const wrongAction = store.issue('simulator', 7, action);
 		expect(
@@ -32,7 +34,9 @@ describe('action confirmation store', () => {
 		).toBe(false);
 
 		const wrongSender = store.issue('simulator', 7, action);
-		expect(store.consume('simulator', 8, action, wrongSender.token)).toBe(false);
+		expect(store.consume('simulator', 8, action, wrongSender.token)).toBe(
+			false
+		);
 		now = 200;
 		const expired = store.issue('simulator', 7, action);
 		now = 251;

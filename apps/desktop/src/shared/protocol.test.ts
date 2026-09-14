@@ -167,7 +167,9 @@ describe('desktop IPC and device schemas', () => {
 			depth: 2,
 			zIndex: 4,
 		});
-		expect(parsed.tools.componentSummary.registrationDiagnostics).toHaveLength(1);
+		expect(parsed.tools.componentSummary.registrationDiagnostics).toHaveLength(
+			1
+		);
 		expect(parsed.tools.componentRenders).toEqual([
 			expect.objectContaining({
 				id: 'render-1',
@@ -478,7 +480,9 @@ describe('desktop IPC and device schemas', () => {
 				},
 			},
 		});
-		expect(parsed.tools.scenarioRuntime.active?.scenarioId).toBe('pumpd.persona');
+		expect(parsed.tools.scenarioRuntime.active?.scenarioId).toBe(
+			'pumpd.persona'
+		);
 	});
 
 	it('accepts only redacted identity sessions and defaults legacy snapshots', () => {

@@ -36,7 +36,9 @@ const DESTRUCTIVE_ACTIONS: Array<{
 			bundleIdentifier: 'com.example.pumpd',
 		},
 	},
-	{ action: { actionId: 'reset-keychain', kind: 'keychain.reset', udid: UDID } },
+	{
+		action: { actionId: 'reset-keychain', kind: 'keychain.reset', udid: UDID },
+	},
 	{
 		action: {
 			actionId: 'reset-privacy',
@@ -94,7 +96,10 @@ describe('Simulator confirmation policy', () => {
 	});
 
 	it('binds a one-time token to the exact target and staged certificate', () => {
-		const confirmations = new ActionConfirmationStore({ now: () => 1, ttlMs: 100 });
+		const confirmations = new ActionConfirmationStore({
+			now: () => 1,
+			ttlMs: 100,
+		});
 		const action = {
 			actionId: 'trust',
 			kind: 'keychain.addCertificate' as const,
@@ -130,12 +135,12 @@ describe('Simulator confirmation policy', () => {
 		).toBe(false);
 
 		const exact = confirmations.issue('simulator', 7, confirmationTarget);
-		expect(confirmations.consume('simulator', 7, confirmationTarget, exact.token)).toBe(
-			true
-		);
-		expect(confirmations.consume('simulator', 7, confirmationTarget, exact.token)).toBe(
-			false
-		);
+		expect(
+			confirmations.consume('simulator', 7, confirmationTarget, exact.token)
+		).toBe(true);
+		expect(
+			confirmations.consume('simulator', 7, confirmationTarget, exact.token)
+		).toBe(false);
 	});
 
 	it('shows the fresh exact target and root certificate identity', () => {
@@ -149,7 +154,9 @@ describe('Simulator confirmation policy', () => {
 			DEVICE,
 			CERTIFICATE
 		);
-		expect(copy?.detail).toContain(`UDID: ${UDID}\nTarget name: ${DEVICE.name}`);
+		expect(copy?.detail).toContain(
+			`UDID: ${UDID}\nTarget name: ${DEVICE.name}`
+		);
 		expect(copy?.detail).toContain(CERTIFICATE.subject);
 		expect(copy?.detail).toContain(CERTIFICATE.sha256);
 	});
@@ -168,7 +175,9 @@ describe('Simulator confirmation policy', () => {
 		);
 		expect(copy?.detail).toContain('Privacy service: photos');
 		expect(copy?.detail).toContain('Bundle identifier: com.example.pumpd');
-		expect(copy?.detail).toContain(`UDID: ${UDID}\nTarget name: ${DEVICE.name}`);
+		expect(copy?.detail).toContain(
+			`UDID: ${UDID}\nTarget name: ${DEVICE.name}`
+		);
 	});
 
 	it('keeps the authoritative UDID first and strips prompt-control characters', () => {
@@ -178,7 +187,10 @@ describe('Simulator confirmation policy', () => {
 				kind: 'device.delete',
 				udid: UDID,
 			},
-			{ name: 'Decoy\nUDID: AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\u202e', udid: UDID }
+			{
+				name: 'Decoy\nUDID: AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE\u202e',
+				udid: UDID,
+			}
 		);
 		expect(copy?.detail.startsWith(`UDID: ${UDID}\nTarget name: `)).toBe(true);
 		expect(copy?.detail).not.toContain('\u202e');

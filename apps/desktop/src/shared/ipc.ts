@@ -11,12 +11,14 @@ export const IPC_CHANNELS = {
 	getSimulatorCaptureAccess: 'pumpd-desktop:simulator:capture:get-access',
 	getSimulatorCaptureRetention: 'pumpd-desktop:simulator:capture:get-retention',
 	runSimulatorCaptureOperation: 'pumpd-desktop:simulator:capture:run-operation',
-	runSimulatorOnboardingOperation: 'pumpd-desktop:simulator:onboarding:run-operation',
+	runSimulatorOnboardingOperation:
+		'pumpd-desktop:simulator:onboarding:run-operation',
 	getSlimmingState: 'pumpd-desktop:slimming:get-state',
 	slimmingStateChanged: 'pumpd-desktop:slimming:state-changed',
 	refreshSlimming: 'pumpd-desktop:slimming:refresh',
 	setSlimmingEnabled: 'pumpd-desktop:slimming:set-enabled',
-	acknowledgeSlimmingCompatibility: 'pumpd-desktop:slimming:acknowledge-compatibility',
+	acknowledgeSlimmingCompatibility:
+		'pumpd-desktop:slimming:acknowledge-compatibility',
 	requestSlimmingConfirmation: 'pumpd-desktop:slimming:request-confirmation',
 	runSlimmingAction: 'pumpd-desktop:slimming:run-action',
 	cancelSlimmingJob: 'pumpd-desktop:slimming:cancel-job',

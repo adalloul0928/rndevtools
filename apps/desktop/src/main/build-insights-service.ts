@@ -1,7 +1,10 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { lstat, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import { z } from 'zod';
 import type {
 	BuildInsight,
@@ -17,7 +20,15 @@ const MAX_SCAN_ENTRIES = 5_000;
 const MAX_SCAN_RESULTS = 100;
 const MAX_SCAN_DEPTH = 4;
 const WATCH_DEBOUNCE_MS = 1_500;
-const SPREADSHEET_FORMULA_PREFIXES = new Set(['=', '+', '-', '@', '\t', '\r', '\n']);
+const SPREADSHEET_FORMULA_PREFIXES = new Set([
+	'=',
+	'+',
+	'-',
+	'@',
+	'\t',
+	'\r',
+	'\n',
+]);
 
 const externalDestinationSchema = z
 	.object({
@@ -35,7 +46,12 @@ const externalBuildResultSchema = z.object({
 	status: z.string().max(64).optional(),
 	warningCount: z.number().int().nonnegative().max(1_000_000).optional(),
 	errorCount: z.number().int().nonnegative().max(1_000_000).optional(),
-	analyzerWarningCount: z.number().int().nonnegative().max(1_000_000).optional(),
+	analyzerWarningCount: z
+		.number()
+		.int()
+		.nonnegative()
+		.max(1_000_000)
+		.optional(),
 });
 const projectedBuildInsightSchema = buildInsightSchema.omit({
 	id: true,
@@ -44,7 +60,10 @@ const projectedBuildInsightSchema = buildInsightSchema.omit({
 });
 
 type BuildInsightsListener = (state: BuildInsightsState) => void;
-type XcresultRunner = (artifactPath: string, signal?: AbortSignal) => Promise<unknown>;
+type XcresultRunner = (
+	artifactPath: string,
+	signal?: AbortSignal
+) => Promise<unknown>;
 type WatchFactory = (sourcePath: string, listener: () => void) => FSWatcher;
 
 export class BuildInsightsService {
@@ -118,7 +137,10 @@ export class BuildInsightsService {
 	}
 
 	async addWatchRoot(selectedPath: string): Promise<BuildInsightsState> {
-		const sourcePath = await verifiedSourcePath(selectedPath, 'derived-data-root');
+		const sourcePath = await verifiedSourcePath(
+			selectedPath,
+			'derived-data-root'
+		);
 		const source = this.#store.upsertSource({
 			sourcePath,
 			label: sourceLabel(sourcePath),
@@ -138,7 +160,8 @@ export class BuildInsightsService {
 		if (sourceId && sources.length === 0)
 			throw new Error('Build source was not found.');
 		for (const source of sources) {
-			if (source.kind === 'xcresult') await this.#ingest(source, source.sourcePath);
+			if (source.kind === 'xcresult')
+				await this.#ingest(source, source.sourcePath);
 			else await this.#scanRoot(source);
 		}
 		this.#store.prune();
@@ -152,7 +175,10 @@ export class BuildInsightsService {
 			format === 'json'
 				? `${JSON.stringify({ format: 'pumpd-build-insights', version: 1, ...state }, null, 2)}\n`
 				: buildsCsv(state.builds);
-		await writeFile(destinationPath, content, { encoding: 'utf8', mode: 0o600 });
+		await writeFile(destinationPath, content, {
+			encoding: 'utf8',
+			mode: 0o600,
+		});
 	}
 
 	async #scanRoot(
@@ -247,7 +273,8 @@ export class BuildInsightsService {
 				if (current) clearTimeout(current);
 				const timer = setTimeout(() => {
 					this.#watchTimers.delete(source.id);
-					if (!this.#stopped) void this.refresh(source.id).catch(() => undefined);
+					if (!this.#stopped)
+						void this.refresh(source.id).catch(() => undefined);
 				}, WATCH_DEBOUNCE_MS);
 				timer.unref();
 				this.#watchTimers.set(source.id, timer);
@@ -298,7 +325,14 @@ async function readXcresult(
 ): Promise<unknown> {
 	const result = await runSimulatorCommand(
 		'/usr/bin/xcrun',
-		['xcresulttool', 'get', 'build-results', '--path', artifactPath, '--compact'],
+		[
+			'xcresulttool',
+			'get',
+			'build-results',
+			'--path',
+			artifactPath,
+			'--compact',
+		],
 		{
 			...(signal ? { signal } : {}),
 			timeoutMs: 30_000,
@@ -317,7 +351,10 @@ async function verifiedSourcePath(
 	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
 		throw new Error('Build Insights sources must be local directories.');
 	}
-	if (kind === 'xcresult' && path.extname(resolved).toLowerCase() !== '.xcresult') {
+	if (
+		kind === 'xcresult' &&
+		path.extname(resolved).toLowerCase() !== '.xcresult'
+	) {
 		throw new Error('Selected build result must use the .xcresult extension.');
 	}
 	if (kind === 'derived-data-root' && path.parse(resolved).root === resolved) {
@@ -329,7 +366,9 @@ async function verifiedSourcePath(
 function sourceLabel(sourcePath: string): string {
 	const label = path.basename(sourcePath).trim();
 	if (label.length === 0 || label.length > 128) {
-		throw new Error('Build Insights source names must contain 1 to 128 characters.');
+		throw new Error(
+			'Build Insights source names must contain 1 to 128 characters.'
+		);
 	}
 	return label;
 }
@@ -343,7 +382,9 @@ async function discoverXcresults(root: string): Promise<string[]> {
 	while (queue.length > 0 && results.length < MAX_SCAN_RESULTS) {
 		const current = queue.shift();
 		if (!current) break;
-		for (const entry of await readdir(current.directory, { withFileTypes: true })) {
+		for (const entry of await readdir(current.directory, {
+			withFileTypes: true,
+		})) {
 			visited += 1;
 			if (visited > MAX_SCAN_ENTRIES) return results;
 			if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
@@ -359,7 +400,10 @@ async function discoverXcresults(root: string): Promise<string[]> {
 	return results;
 }
 
-function timestamp(value: number | string | undefined, fallback: number): number {
+function timestamp(
+	value: number | string | undefined,
+	fallback: number
+): number {
 	if (typeof value === 'number' && Number.isFinite(value)) {
 		return value < 10_000_000_000 ? value * 1_000 : value;
 	}
@@ -396,7 +440,8 @@ function projectBuildResult(
 				.join(' · ')
 		: 'Unknown destination';
 	return projectedBuildInsightSchema.parse({
-		name: result.actionTitle?.trim() || path.basename(artifactPath, '.xcresult'),
+		name:
+			result.actionTitle?.trim() || path.basename(artifactPath, '.xcresult'),
 		destination,
 		createdAt: endedAt,
 		startedAt,

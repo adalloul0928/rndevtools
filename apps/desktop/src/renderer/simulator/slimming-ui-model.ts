@@ -22,12 +22,15 @@ function hasManagedOverrides(status: SlimmingSimulatorStatus): boolean {
 	return (
 		status.managedDisabledCount > 0 ||
 		(status.checkpointAvailable &&
-			(status.condition === 'unknown' || status.condition === 'needs-attention'))
+			(status.condition === 'unknown' ||
+				status.condition === 'needs-attention'))
 	);
 }
 
 export function managedOverrideUdids(
-	statusBySimulator: Readonly<Record<string, SlimmingSimulatorStatus | undefined>>
+	statusBySimulator: Readonly<
+		Record<string, SlimmingSimulatorStatus | undefined>
+	>
 ): string[] {
 	return Object.values(statusBySimulator)
 		.filter((status): status is SlimmingSimulatorStatus =>
@@ -39,11 +42,15 @@ export function managedOverrideUdids(
 
 export function allSelectedCheckpointsAvailable(
 	selectedUdids: readonly string[],
-	statusBySimulator: Readonly<Record<string, SlimmingSimulatorStatus | undefined>>
+	statusBySimulator: Readonly<
+		Record<string, SlimmingSimulatorStatus | undefined>
+	>
 ): boolean {
 	return (
 		selectedUdids.length > 0 &&
-		selectedUdids.every((udid) => statusBySimulator[udid]?.checkpointAvailable === true)
+		selectedUdids.every(
+			(udid) => statusBySimulator[udid]?.checkpointAvailable === true
+		)
 	);
 }
 

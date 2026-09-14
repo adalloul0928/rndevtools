@@ -50,8 +50,12 @@ export function ConsolePanel() {
 	const [query, setQuery] = useState('');
 	const [level, setLevel] = useState<ConsoleLevel>('all');
 	const [bookmarksOnly, setBookmarksOnly] = useState(false);
-	const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(new Set());
-	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
+	const [bookmarkedIds, setBookmarkedIds] = useState<ReadonlySet<string>>(
+		new Set()
+	);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		entries[0]?.id ?? null
+	);
 
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -217,7 +221,12 @@ export function ConsolePanel() {
 							confirmLabel="Clear events"
 							isDisabled={!canRunAction('console', 'clear')}
 							onConfirm={() =>
-								void runAction('console', 'clear', {}, 'Console buffer cleared.')
+								void runAction(
+									'console',
+									'clear',
+									{},
+									'Console buffer cleared.'
+								)
 							}
 						/>
 					</>
@@ -304,13 +313,18 @@ export function ConsolePanel() {
 								onPress={() => toggleBookmark(selected.id)}
 							>
 								<Bookmark className="h-3.5 w-3.5" />
-								{bookmarkedIds.has(selected.id) ? 'Remove bookmark' : 'Bookmark'}
+								{bookmarkedIds.has(selected.id)
+									? 'Remove bookmark'
+									: 'Bookmark'}
 							</Button>
 							<h2 className="m-0 font-mono text-[13px] font-medium leading-6 text-(--foreground)">
 								{selected.message}
 							</h2>
 							<dl className="mb-4 mt-4">
-								<KeyValue label="Source" value={selected.source ?? 'application'} />
+								<KeyValue
+									label="Source"
+									value={selected.source ?? 'application'}
+								/>
 								<KeyValue label="Scope" value={selected.scope ?? '—'} />
 								<KeyValue
 									label="Repeats"
@@ -354,8 +368,9 @@ export function ConsolePanel() {
 								</div>
 							)}
 							<div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-xs leading-5 text-emerald-200/80">
-								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens, emails,
-								and identifiers are redacted before this event reaches desktop.
+								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens,
+								emails, and identifiers are redacted before this event reaches
+								desktop.
 							</div>
 						</div>
 					) : (

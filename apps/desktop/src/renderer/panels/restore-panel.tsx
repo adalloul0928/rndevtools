@@ -28,25 +28,34 @@ export function RestorePanel() {
 	const rawPoints = selectedDevice?.tools.restorePoints ?? [];
 	const restoreReceipts = selectedDevice?.tools.restoreReceipts ?? [];
 	const points = useMemo(
-		() => [...rawPoints].sort((left, right) => right.createdAt - left.createdAt),
+		() =>
+			[...rawPoints].sort((left, right) => right.createdAt - left.createdAt),
 		[rawPoints]
 	);
 	const [label, setLabel] = useState('Before desktop changes');
-	const [selectedId, setSelectedId] = useState<string | null>(points[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		points[0]?.id ?? null
+	);
 	const [sourceSelections, setSourceSelections] = useState<
 		Readonly<Record<string, readonly string[]>>
 	>({});
-	const [pointLabels, setPointLabels] = useState<Readonly<Record<string, string>>>({});
-	const selected = points.find((point) => point.id === selectedId) ?? points[0] ?? null;
+	const [pointLabels, setPointLabels] = useState<
+		Readonly<Record<string, string>>
+	>({});
+	const selected =
+		points.find((point) => point.id === selectedId) ?? points[0] ?? null;
 	const selectedSourceIds = selected
-		? (sourceSelections[selected.id] ?? selected.sources.map((source) => source.id))
+		? (sourceSelections[selected.id] ??
+			selected.sources.map((source) => source.id))
 		: [];
 	const selectedReceipts = selected
 		? restoreReceipts
 				.filter((receipt) => receipt.pointId === selected.id)
 				.sort((left, right) => right.completedAt - left.completedAt)
 		: [];
-	const pointLabelDraft = selected ? (pointLabels[selected.id] ?? selected.label) : '';
+	const pointLabelDraft = selected
+		? (pointLabels[selected.id] ?? selected.label)
+		: '';
 
 	return (
 		<section className="panel-root">
@@ -56,7 +65,8 @@ export function RestorePanel() {
 				description="Persist, selectively restore, and roll back only state sources the app explicitly declares as safe."
 				meta={
 					<span className="flex items-center gap-1.5 text-emerald-300">
-						<ShieldCheck className="h-3 w-3" /> Rollback guarded · explicit sources
+						<ShieldCheck className="h-3 w-3" /> Rollback guarded · explicit
+						sources
 					</span>
 				}
 			/>
@@ -77,7 +87,9 @@ export function RestorePanel() {
 							</div>
 						</div>
 						<TextField fullWidth value={label} onChange={setLabel}>
-							<Label className="mb-1.5 text-xs text-(--muted)">Checkpoint label</Label>
+							<Label className="mb-1.5 text-xs text-(--muted)">
+								Checkpoint label
+							</Label>
 							<Input
 								className="h-9 rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground)"
 								maxLength={120}
@@ -126,7 +138,9 @@ export function RestorePanel() {
 						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Checkpoints
 						</span>
-						<span className="font-mono text-xs text-(--text-3)">{points.length}</span>
+						<span className="font-mono text-xs text-(--text-3)">
+							{points.length}
+						</span>
 					</div>
 					{points.length === 0 ? (
 						<EmptyPanel
@@ -326,12 +340,16 @@ export function RestorePanel() {
 															setSourceSelections((current) => ({
 																...current,
 																[selected.id]: isSelected
-																	? selectedSourceIds.filter((id) => id !== source.id)
+																	? selectedSourceIds.filter(
+																			(id) => id !== source.id
+																		)
 																	: [...selectedSourceIds, source.id],
 															}))
 														}
 													>
-														{isSelected ? <Check className="h-3.5 w-3.5" /> : null}
+														{isSelected ? (
+															<Check className="h-3.5 w-3.5" />
+														) : null}
 														{isSelected ? 'Included' : 'Include'}
 													</Button>
 												</div>
@@ -366,8 +384,8 @@ export function RestorePanel() {
 									<div className="space-y-1 text-xs text-(--text-3)">
 										{selectedReceipts[0].sourceResults.map((result) => (
 											<p className="m-0" key={result.sourceId}>
-												{result.sourceTitle}: preflight {result.preflight}, apply{' '}
-												{result.apply}, rollback {result.rollback}
+												{result.sourceTitle}: preflight {result.preflight},
+												apply {result.apply}, rollback {result.rollback}
 											</p>
 										))}
 									</div>
@@ -378,9 +396,10 @@ export function RestorePanel() {
 									<ShieldCheck className="h-4 w-4" /> Restore safety boundary
 								</div>
 								<p className="mb-0 mt-2 text-xs leading-5 text-emerald-100/60">
-									Snapshots are JSON-bounded and validated before writes. If a later
-									source fails, PUMPD attempts to reapply the captured rollback data.
-									Secure storage and app user data are not included.
+									Snapshots are JSON-bounded and validated before writes. If a
+									later source fails, PUMPD attempts to reapply the captured
+									rollback data. Secure storage and app user data are not
+									included.
 								</p>
 							</div>
 						</div>

@@ -48,7 +48,8 @@ export function trustedDevelopmentRendererUrl(
 	value: string | undefined,
 	isPackaged: boolean
 ): string | undefined {
-	if (isPackaged || !value || value.length > MAX_EXTERNAL_URL_LENGTH) return undefined;
+	if (isPackaged || !value || value.length > MAX_EXTERNAL_URL_LENGTH)
+		return undefined;
 	try {
 		const url = new URL(value);
 		if (

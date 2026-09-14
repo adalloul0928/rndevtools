@@ -18,7 +18,11 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
-import { boundedTextExport, formatClock, formatRelativeTime } from '@/lib/format';
+import {
+	boundedTextExport,
+	formatClock,
+	formatRelativeTime,
+} from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { DiagnosticEntry } from '../../shared/protocol';
 
@@ -35,7 +39,10 @@ export function DiagnosticsPanel() {
 	const { bootstrap, selectedDevice, state } = useDesktopRuntime();
 	const [query, setQuery] = useState('');
 	const entries = useMemo(
-		() => [...(state?.diagnostics ?? []), ...(selectedDevice?.tools.diagnostics ?? [])],
+		() => [
+			...(state?.diagnostics ?? []),
+			...(selectedDevice?.tools.diagnostics ?? []),
+		],
 		[state?.diagnostics, selectedDevice?.tools.diagnostics]
 	);
 	const matching = useMemo(() => {
@@ -98,9 +105,9 @@ export function DiagnosticsPanel() {
 			</Toolbar>
 			{matching.length > filtered.length || exportText.truncated ? (
 				<PanelNotice title="Diagnostic rendering is bounded." tone="info">
-					Search covers all {matching.length} matching events. The stream and copy
-					action use the newest {MAX_RENDERED_DIAGNOSTICS}, and copied text is capped at
-					2 MB.
+					Search covers all {matching.length} matching events. The stream and
+					copy action use the newest {MAX_RENDERED_DIAGNOSTICS}, and copied text
+					is capped at 2 MB.
 				</PanelNotice>
 			) : null}
 			<div className="panel-scroll p-5">
@@ -110,7 +117,9 @@ export function DiagnosticsPanel() {
 						label="Broker"
 						value={broker?.status ?? 'Starting'}
 						detail={
-							broker ? `${broker.host}:${broker.port}` : 'Creating local listener'
+							broker
+								? `${broker.host}:${broker.port}`
+								: 'Creating local listener'
 						}
 						tone={
 							broker?.status === 'listening'
@@ -130,14 +139,18 @@ export function DiagnosticsPanel() {
 								: 'Waiting for a session'
 						}
 						tone={
-							!selectedDevice || selectedDevice.status === 'offline' ? 'amber' : 'blue'
+							!selectedDevice || selectedDevice.status === 'offline'
+								? 'amber'
+								: 'blue'
 						}
 					/>
 					<HealthCard
 						icon={<Activity className="h-4 w-4" />}
 						label="JS responsiveness"
 						value={
-							latestSample ? `${latestSample.jsFps.toFixed(0)} fps` : 'Unavailable'
+							latestSample
+								? `${latestSample.jsFps.toFixed(0)} fps`
+								: 'Unavailable'
 						}
 						detail={
 							latestSample
@@ -155,7 +168,9 @@ export function DiagnosticsPanel() {
 					<HealthCard
 						icon={<ShieldCheck className="h-4 w-4" />}
 						label="Transport"
-						value={broker?.access === 'token' ? 'Token protected' : 'Loopback only'}
+						value={
+							broker?.access === 'token' ? 'Token protected' : 'Loopback only'
+						}
 						detail={
 							broker?.access === 'token'
 								? `Authenticated access on ${broker.host}; traffic is not encrypted by ws://`
@@ -182,7 +197,8 @@ export function DiagnosticsPanel() {
 									Connection endpoints
 								</Card.Title>
 								<Card.Description className="mb-0 mt-1 text-xs text-(--text-3)">
-									Use the first reachable WebSocket URL from a development device.
+									Use the first reachable WebSocket URL from a development
+									device.
 								</Card.Description>
 							</div>
 							<Radio className="h-4 w-4 text-blue-300" />
@@ -209,7 +225,8 @@ export function DiagnosticsPanel() {
 							) : null}
 							{broker?.error ? (
 								<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-xs leading-5 text-red-200">
-									<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {broker.error}
+									<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{' '}
+									{broker.error}
 								</div>
 							) : null}
 						</Card.Content>
@@ -222,8 +239,14 @@ export function DiagnosticsPanel() {
 							<Cpu className="h-4 w-4 text-(--muted)" /> Runtime
 						</div>
 						<VersionRow label="App" value={bootstrap?.versions.app ?? '—'} />
-						<VersionRow label="Electron" value={bootstrap?.versions.electron ?? '—'} />
-						<VersionRow label="Chromium" value={bootstrap?.versions.chrome ?? '—'} />
+						<VersionRow
+							label="Electron"
+							value={bootstrap?.versions.electron ?? '—'}
+						/>
+						<VersionRow
+							label="Chromium"
+							value={bootstrap?.versions.chrome ?? '—'}
+						/>
 						<VersionRow label="Node" value={bootstrap?.versions.node ?? '—'} />
 						<VersionRow
 							label="Protocol"
@@ -270,8 +293,12 @@ export function DiagnosticsPanel() {
 									<span className="font-mono text-xs text-(--text-3)">
 										{formatClock(entry.at)}
 									</span>
-									<StatusPill tone={levelTone(entry.level)}>{entry.level}</StatusPill>
-									<code className="truncate text-xs text-(--muted)">{entry.scope}</code>
+									<StatusPill tone={levelTone(entry.level)}>
+										{entry.level}
+									</StatusPill>
+									<code className="truncate text-xs text-(--muted)">
+										{entry.scope}
+									</code>
 									<span className="text-xs leading-4 text-(--foreground)">
 										{entry.message}
 									</span>

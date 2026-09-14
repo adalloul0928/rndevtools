@@ -14,7 +14,9 @@ const identifierSchema = z
 	.max(MAX_IDENTIFIER_LENGTH)
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT_LENGTH);
-const udidSchema = z.string().regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
 const timeoutSchema = z
 	.number()
 	.int()
@@ -36,7 +38,10 @@ const SAFE_AGENT_ACTIONS = new Set([
 	'routes.navigate',
 ]);
 
-export function isSafeAgentConnectedAction(tool: string, command: string): boolean {
+export function isSafeAgentConnectedAction(
+	tool: string,
+	command: string
+): boolean {
 	return SAFE_AGENT_ACTIONS.has(`${tool}.${command}`);
 }
 
@@ -56,7 +61,8 @@ const connectedActionTemplateSchema = z
 		if (!isSafeAgentConnectedAction(value.tool, value.command)) {
 			context.addIssue({
 				code: 'custom',
-				message: 'The connected-app action is not safe for unattended agent use.',
+				message:
+					'The connected-app action is not safe for unattended agent use.',
 			});
 			return;
 		}

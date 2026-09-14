@@ -67,7 +67,9 @@ export function parseHostMemoryPressure(
 	};
 }
 
-export function parseSimulatorServiceProcesses(output: string): ServiceProcess[] {
+export function parseSimulatorServiceProcesses(
+	output: string
+): ServiceProcess[] {
 	const lines = output.split(/\r?\n/);
 	const servicesStart = lines.findIndex((line) =>
 		/^\s*services\s*=\s*\{\s*$/.test(line)
@@ -78,7 +80,9 @@ export function parseSimulatorServiceProcesses(output: string): ServiceProcess[]
 	const seen = new Set<number>();
 	for (const line of lines.slice(servicesStart + 1)) {
 		if (/^\s*}\s*$/.test(line)) break;
-		const match = line.match(/^\s*(\d+)\s+(?:\([a-z]+\)|-|\d+)\s+([^\s]+)\s*$/i);
+		const match = line.match(
+			/^\s*(\d+)\s+(?:\([a-z]+\)|-|\d+)\s+([^\s]+)\s*$/i
+		);
 		if (!match) continue;
 		const processId = Number(match[1]);
 		const label = match[2];
@@ -93,7 +97,9 @@ export function parseSimulatorServiceProcesses(output: string): ServiceProcess[]
 			continue;
 		}
 		seen.add(processId);
-		const bundleMatch = label.match(/^UIKitApplication:([A-Za-z0-9][A-Za-z0-9.-]*)\[/);
+		const bundleMatch = label.match(
+			/^UIKitApplication:([A-Za-z0-9][A-Za-z0-9.-]*)\[/
+		);
 		const bundleIdentifier = bundleMatch?.[1];
 		processes.push({
 			processId,
@@ -107,7 +113,9 @@ export function parseSimulatorServiceProcesses(output: string): ServiceProcess[]
 	return processes;
 }
 
-export function parseProcessSamples(output: string): Map<number, ProcessSample> {
+export function parseProcessSamples(
+	output: string
+): Map<number, ProcessSample> {
 	const samples = new Map<number, ProcessSample>();
 	for (const line of output.split(/\r?\n/)) {
 		const match = line.match(/^\s*(\d+)\s+([0-9.]+)(?:\s|$)/);
@@ -162,7 +170,9 @@ export function parseProcessFootprints(output: string): Map<number, number> {
 	return footprints;
 }
 
-export function parseSimulatorDiskAllocations(output: string): Map<string, number> {
+export function parseSimulatorDiskAllocations(
+	output: string
+): Map<string, number> {
 	const root = JSON.parse(output) as unknown;
 	if (!root || typeof root !== 'object' || Array.isArray(root)) {
 		throw new Error('simctl disk inventory was not an object.');
@@ -255,7 +265,11 @@ export class SimulatorMetricsProvider {
 			);
 			// Attach rejection handlers before awaiting slower per-device probes. A
 			// cancelled host command must not become an unhandled rejection in main.
-			const hostSamples = Promise.allSettled([memoryPromise, psPromise, topPromise]);
+			const hostSamples = Promise.allSettled([
+				memoryPromise,
+				psPromise,
+				topPromise,
+			]);
 			const booted = devices
 				.filter((device) => device.state === 'booted' && device.isAvailable)
 				.slice(0, MAX_BOOTED_DEVICES);
@@ -310,7 +324,8 @@ export class SimulatorMetricsProvider {
 			const host = parseHostMemoryPressure(memoryResult.stdout);
 			const processSamples = parseProcessSamples(psResult.stdout);
 			const processFootprints = parseProcessFootprints(topResult.stdout);
-			const byDevice: Record<string, SimulatorDeviceMetrics> = Object.create(null);
+			const byDevice: Record<string, SimulatorDeviceMetrics> =
+				Object.create(null);
 			for (const device of devices.slice(0, 200)) {
 				const services = serviceResults.get(device.udid);
 				const processMetrics: SimulatorProcessMetric[] = [];
@@ -337,19 +352,26 @@ export class SimulatorMetricsProvider {
 						right.cpuPercent - left.cpuPercent ||
 						left.processId - right.processId
 				);
-				const activeApp = processMetrics.find((process) => process.bundleIdentifier);
+				const activeApp = processMetrics.find(
+					(process) => process.bundleIdentifier
+				);
 				byDevice[device.udid] = {
 					deviceUdid: device.udid,
 					sampledAt,
 					cpuPercent: Math.min(
 						100_000,
-						processMetrics.reduce((total, process) => total + process.cpuPercent, 0)
+						processMetrics.reduce(
+							(total, process) => total + process.cpuPercent,
+							0
+						)
 					),
 					memoryBytes: processMetrics.reduce(
 						(total, process) => total + process.memoryBytes,
 						0
 					),
-					processCount: Array.isArray(services) ? Math.min(10_000, services.length) : 0,
+					processCount: Array.isArray(services)
+						? Math.min(10_000, services.length)
+						: 0,
 					...(this.#diskAllocations.has(device.udid)
 						? {
 								diskAllocatedBytes: this.#diskAllocations.get(device.udid),
@@ -379,7 +401,10 @@ export class SimulatorMetricsProvider {
 		}
 	}
 
-	async #refreshDiskAllocations(now: number, signal?: AbortSignal): Promise<void> {
+	async #refreshDiskAllocations(
+		now: number,
+		signal?: AbortSignal
+	): Promise<void> {
 		if (now - this.#diskSampledAt < DISK_REFRESH_INTERVAL_MS) return;
 		const result = await runSimulatorCommand(
 			XCRUN_PATH,

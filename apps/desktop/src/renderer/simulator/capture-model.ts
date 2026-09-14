@@ -16,7 +16,8 @@ export function captureRetentionPolicyFromFields(
 ): SimulatorCaptureRetentionPolicy | null {
 	const maxAgeDays = Number(fields.maxAgeDays);
 	const maxTotalGiB = Number(fields.maxTotalGiB);
-	if (!Number.isInteger(maxAgeDays) || !Number.isFinite(maxTotalGiB)) return null;
+	if (!Number.isInteger(maxAgeDays) || !Number.isFinite(maxTotalGiB))
+		return null;
 	const result = simulatorCaptureRetentionPolicySchema.safeParse({
 		maxAgeDays,
 		maxTotalBytes: Math.round(maxTotalGiB * BYTES_PER_GIBIBYTE),
@@ -29,7 +30,9 @@ export function captureRetentionFieldsFromPolicy(
 ): CaptureRetentionFields {
 	return {
 		maxAgeDays: String(policy.maxAgeDays),
-		maxTotalGiB: String(Number((policy.maxTotalBytes / BYTES_PER_GIBIBYTE).toFixed(2))),
+		maxTotalGiB: String(
+			Number((policy.maxTotalBytes / BYTES_PER_GIBIBYTE).toFixed(2))
+		),
 	};
 }
 

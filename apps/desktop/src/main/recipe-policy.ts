@@ -13,5 +13,7 @@ function recipeStepRequiresRunApproval(step: RecipeStep): boolean {
 }
 
 export function recipeRequiresRunApproval(recipe: RecipeDefinition): boolean {
-	return [...recipe.steps, ...recipe.teardown].some(recipeStepRequiresRunApproval);
+	return [...recipe.steps, ...recipe.teardown].some(
+		recipeStepRequiresRunApproval
+	);
 }

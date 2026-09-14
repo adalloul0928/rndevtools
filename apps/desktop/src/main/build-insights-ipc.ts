@@ -1,4 +1,7 @@
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	BuildInsightsOperationReceipt,
@@ -32,7 +35,10 @@ type BuildInsightsIpcDependencies = {
 };
 
 function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, MAX_ERROR_LENGTH);
+	return redactDiagnosticText(diagnosticErrorText(error)).slice(
+		0,
+		MAX_ERROR_LENGTH
+	);
 }
 
 export function createBuildInsightsIpcHandlers({
@@ -99,7 +105,10 @@ export function createBuildInsightsIpcHandlers({
 						state,
 					});
 				}
-				const destinationPath = await selectExportDestination(event, operation.format);
+				const destinationPath = await selectExportDestination(
+					event,
+					operation.format
+				);
 				if (!destinationPath) {
 					return buildInsightsOperationReceiptSchema.parse({
 						actionId: operation.actionId,

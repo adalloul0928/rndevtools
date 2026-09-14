@@ -1,4 +1,7 @@
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	RecipeDefinition,
@@ -39,7 +42,10 @@ export type RecipeIpcService = {
 	deleteRecipe: (recipeId: string) => Promise<boolean>;
 	importRecipe: (filePath: string) => Promise<RecipeSummary>;
 	exportRecipe: (recipeId: string, destinationPath: string) => Promise<void>;
-	exportEvidence: (evidenceId: string, destinationPath: string) => Promise<void>;
+	exportEvidence: (
+		evidenceId: string,
+		destinationPath: string
+	) => Promise<void>;
 };
 
 type RecipeIpcDependencies = {
@@ -55,7 +61,10 @@ type RecipeIpcDependencies = {
 		request: RecipeRunRequest,
 		recipe: RecipeDefinition
 	) => boolean;
-	confirmDelete: (event: IpcMainInvokeEvent, recipe: RecipeSummary) => Promise<boolean>;
+	confirmDelete: (
+		event: IpcMainInvokeEvent,
+		recipe: RecipeSummary
+	) => Promise<boolean>;
 	selectImportPath: (event: IpcMainInvokeEvent) => Promise<string | undefined>;
 	selectRecipeExportDestination: (
 		event: IpcMainInvokeEvent,
@@ -68,7 +77,10 @@ type RecipeIpcDependencies = {
 };
 
 function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, MAX_ERROR_LENGTH);
+	return redactDiagnosticText(diagnosticErrorText(error)).slice(
+		0,
+		MAX_ERROR_LENGTH
+	);
 }
 
 function failedFileOperation(
@@ -99,7 +111,10 @@ export function createRecipeIpcHandlers({
 			assertTrustedRenderer(event);
 			return recipeStateSchema.parse(service.getState());
 		},
-		getRecipe: (event: IpcMainInvokeEvent, value: unknown): RecipeDefinition | null => {
+		getRecipe: (
+			event: IpcMainInvokeEvent,
+			value: unknown
+		): RecipeDefinition | null => {
 			assertTrustedRenderer(event);
 			return service.getRecipe(recipeIdSchema.parse(value));
 		},
@@ -235,7 +250,10 @@ export function createRecipeIpcHandlers({
 				if (operation.kind === 'recipe.export') {
 					const recipe = service.getRecipe(operation.recipeId);
 					if (!recipe) throw new Error('Recipe was not found.');
-					const destinationPath = await selectRecipeExportDestination(event, recipe);
+					const destinationPath = await selectRecipeExportDestination(
+						event,
+						recipe
+					);
 					if (!destinationPath) {
 						return recipeFileOperationReceiptSchema.parse({
 							actionId: operation.actionId,
@@ -253,7 +271,10 @@ export function createRecipeIpcHandlers({
 				}
 				const evidence = service.getEvidence(operation.evidenceId);
 				if (!evidence) throw new Error('Evidence bundle was not found.');
-				const destinationPath = await selectEvidenceExportDestination(event, evidence);
+				const destinationPath = await selectEvidenceExportDestination(
+					event,
+					evidence
+				);
 				if (!destinationPath) {
 					return recipeFileOperationReceiptSchema.parse({
 						actionId: operation.actionId,

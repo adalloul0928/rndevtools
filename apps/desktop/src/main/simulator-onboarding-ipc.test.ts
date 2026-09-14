@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	realpath,
+	rm,
+	writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -13,7 +20,9 @@ const event = { sender: { id: 7 } } as unknown as IpcMainInvokeEvent;
 const roots: string[] = [];
 
 afterEach(async () => {
-	await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
+	await Promise.all(
+		roots.splice(0).map((root) => rm(root, { recursive: true }))
+	);
 });
 
 describe('Simulator onboarding IPC', () => {
@@ -22,7 +31,12 @@ describe('Simulator onboarding IPC', () => {
 		roots.push(root);
 		const application = path.join(root, 'Xcode Test.app');
 		const developerDirectory = path.join(application, 'Contents', 'Developer');
-		const xcodebuild = path.join(developerDirectory, 'usr', 'bin', 'xcodebuild');
+		const xcodebuild = path.join(
+			developerDirectory,
+			'usr',
+			'bin',
+			'xcodebuild'
+		);
 		await mkdir(path.dirname(xcodebuild), { recursive: true });
 		await writeFile(xcodebuild, '#!/bin/sh\nexit 0\n');
 		await chmod(xcodebuild, 0o755);

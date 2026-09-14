@@ -17,22 +17,25 @@ import {
 const DEMO_DEVICE_ID = 'pumpd-demo-ios';
 
 function samplePerformance(now: number): PerformanceReview {
-	const samples: PerformanceSample[] = Array.from({ length: 36 }, (_, index) => {
-		const dip = index === 13 || index === 14 || index === 27;
-		const lag = dip ? 38 + (index % 3) * 12 : 3 + ((index * 7) % 8);
-		return {
-			id: `perf-${index}`,
-			at: now - (35 - index) * 1_000,
-			jsFps: dip ? 42 + (index % 5) : 57 + (index % 4),
-			uiFps: dip ? 49 + (index % 4) : 59 + (index % 2),
-			cpuPercent: dip ? 43 + (index % 7) : 16 + ((index * 3) % 13),
-			memoryMb: 186 + index * 0.35,
-			eventLoopLagMs: lag,
-			longFrames: dip ? 2 : index % 12 === 0 ? 1 : 0,
-			maxFrameMs: dip ? 66 + index : 17 + (index % 8),
-			route: index < 18 ? '/(tabs)' : '/workout/active',
-		};
-	});
+	const samples: PerformanceSample[] = Array.from(
+		{ length: 36 },
+		(_, index) => {
+			const dip = index === 13 || index === 14 || index === 27;
+			const lag = dip ? 38 + (index % 3) * 12 : 3 + ((index * 7) % 8);
+			return {
+				id: `perf-${index}`,
+				at: now - (35 - index) * 1_000,
+				jsFps: dip ? 42 + (index % 5) : 57 + (index % 4),
+				uiFps: dip ? 49 + (index % 4) : 59 + (index % 2),
+				cpuPercent: dip ? 43 + (index % 7) : 16 + ((index * 3) % 13),
+				memoryMb: 186 + index * 0.35,
+				eventLoopLagMs: lag,
+				longFrames: dip ? 2 : index % 12 === 0 ? 1 : 0,
+				maxFrameMs: dip ? 66 + index : 17 + (index % 8),
+				route: index < 18 ? '/(tabs)' : '/workout/active',
+			};
+		}
+	);
 
 	return {
 		isActive: true,
@@ -47,7 +50,10 @@ function samplePerformance(now: number): PerformanceReview {
 function percentile(values: number[], fraction: number): number {
 	if (values.length === 0) return 0;
 	const sorted = [...values].sort((left, right) => left - right);
-	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0;
+	return (
+		sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ??
+		0
+	);
 }
 
 function summarizePerformance(
@@ -77,7 +83,10 @@ function summarizePerformance(
 		averageEventLoopLagMs: averageLag,
 		p95EventLoopLagMs: p95,
 		maxEventLoopLagMs: Math.max(0, ...lags),
-		longFrameCount: samples.reduce((total, sample) => total + sample.longFrames, 0),
+		longFrameCount: samples.reduce(
+			(total, sample) => total + sample.longFrames,
+			0
+		),
 	};
 }
 
@@ -757,7 +766,8 @@ function demoTools(now: number): DeviceTools {
 				sourceFiles: [
 					'apps/mobile/src/features/active-session/components/rest-timer-overlay.tsx',
 				],
-				instanceText: '{\n  "remainingSeconds": 48,\n  "durationSeconds": 120\n}',
+				instanceText:
+					'{\n  "remainingSeconds": 48,\n  "durationSeconds": 120\n}',
 				instanceTruncated: false,
 				bounds: { x: 16, y: 726, width: 361, height: 92 },
 				isFocused: true,
@@ -860,7 +870,9 @@ function payloadString(action: DesktopAction, key: string): string | undefined {
 	return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function scenarioSummary(definition: ScenarioDefinition): ScenarioDefinitionSummary {
+function scenarioSummary(
+	definition: ScenarioDefinition
+): ScenarioDefinitionSummary {
 	return {
 		id: definition.id,
 		version: definition.version,
@@ -889,13 +901,16 @@ function importedDemoScenarios(
 	if (mode !== 'replace' && mode !== 'merge') {
 		throw new Error('Scenario import mode is invalid.');
 	}
-	const imported = parseScenarioDocumentJson(json).scenarios.map(scenarioSummary);
+	const imported =
+		parseScenarioDocumentJson(json).scenarios.map(scenarioSummary);
 	const bundled = current.filter((scenario) => scenario.bundled);
 	const user = current.filter((scenario) => !scenario.bundled);
 	const bundledIds = new Set(bundled.map((scenario) => scenario.id));
 	for (const scenario of imported) {
 		if (bundledIds.has(scenario.id)) {
-			throw new Error(`Imported scenario conflicts with bundled id: ${scenario.id}`);
+			throw new Error(
+				`Imported scenario conflicts with bundled id: ${scenario.id}`
+			);
 		}
 	}
 	let nextUser: readonly ScenarioDefinitionSummary[];
@@ -942,7 +957,8 @@ export function applyDemoAction(
 	if (action.tool === 'storage' && action.command === 'set') {
 		const id = payloadString(action, 'id');
 		const valueText = payloadString(action, 'valueText');
-		if (!id || valueText === undefined) throw new Error('Storage value is invalid.');
+		if (!id || valueText === undefined)
+			throw new Error('Storage value is invalid.');
 		const entry = next.tools.storage.find((candidate) => candidate.id === id);
 		if (!entry?.editable || entry.sensitive) {
 			throw new Error('This storage entry cannot be edited.');
@@ -966,14 +982,18 @@ export function applyDemoAction(
 	}
 	if (action.tool === 'storage' && action.command === 'bookmark') {
 		const id = payloadString(action, 'id');
-		const event = next.tools.storageEvents.find((candidate) => candidate.id === id);
+		const event = next.tools.storageEvents.find(
+			(candidate) => candidate.id === id
+		);
 		if (!event) throw new Error('Storage history entry was not found.');
 		event.bookmarked = !event.bookmarked;
 		return next;
 	}
 	if (action.tool === 'storage' && action.command === 'undo') {
 		const id = payloadString(action, 'id');
-		const event = next.tools.storageEvents.find((candidate) => candidate.id === id);
+		const event = next.tools.storageEvents.find(
+			(candidate) => candidate.id === id
+		);
 		if (!event?.undoAvailable || event.previousText === undefined) {
 			throw new Error('Storage history entry cannot be undone.');
 		}
@@ -988,7 +1008,10 @@ export function applyDemoAction(
 		event.undoStatus = 'succeeded';
 		return next;
 	}
-	if (action.tool === 'query' && ['invalidate', 'refetch'].includes(action.command)) {
+	if (
+		action.tool === 'query' &&
+		['invalidate', 'refetch'].includes(action.command)
+	) {
 		const id = payloadString(action, 'id');
 		const query = next.tools.queries.find((candidate) => candidate.id === id);
 		if (!query) throw new Error('Query was not found.');
@@ -1024,8 +1047,8 @@ export function applyDemoAction(
 	if (action.tool === 'restore' && action.command === 'capture') {
 		const label = payloadString(action, 'label') ?? 'Desktop checkpoint';
 		const preview =
-			next.tools.zustandStores.find((store) => store.id === 'dev-menu')?.stateText ??
-			'{}';
+			next.tools.zustandStores.find((store) => store.id === 'dev-menu')
+				?.stateText ?? '{}';
 		next.tools.restorePoints.unshift({
 			id: `restore-${now}`,
 			label,
@@ -1072,7 +1095,9 @@ export function applyDemoAction(
 	if (action.tool === 'restore' && action.command === 'rename') {
 		const id = payloadString(action, 'id');
 		const label = payloadString(action, 'label');
-		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		const point = next.tools.restorePoints.find(
+			(candidate) => candidate.id === id
+		);
 		if (!point || !label) throw new Error('Restore point was not found.');
 		point.label = label;
 		return next;
@@ -1080,7 +1105,9 @@ export function applyDemoAction(
 	if (action.tool === 'restore' && action.command === 'duplicate') {
 		const id = payloadString(action, 'id');
 		const label = payloadString(action, 'label');
-		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		const point = next.tools.restorePoints.find(
+			(candidate) => candidate.id === id
+		);
 		if (!point || !label) throw new Error('Restore point was not found.');
 		next.tools.restorePoints.unshift({
 			...point,
@@ -1093,7 +1120,9 @@ export function applyDemoAction(
 	}
 	if (action.tool === 'restore' && action.command === 'restore') {
 		const id = payloadString(action, 'id');
-		const point = next.tools.restorePoints.find((candidate) => candidate.id === id);
+		const point = next.tools.restorePoints.find(
+			(candidate) => candidate.id === id
+		);
 		if (!point) {
 			throw new Error('Restore point was not found.');
 		}
@@ -1135,7 +1164,9 @@ export function applyDemoAction(
 			throw new Error('Undo the active scenario before running another one.');
 		}
 		const id = payloadString(action, 'id');
-		const scenario = next.tools.scenarios.find((candidate) => candidate.id === id);
+		const scenario = next.tools.scenarios.find(
+			(candidate) => candidate.id === id
+		);
 		if (
 			!scenario ||
 			action.payload.version !== scenario.version ||
@@ -1195,7 +1226,9 @@ export function applyDemoAction(
 	}
 	if (action.tool === 'scenarios' && action.command === 'remove') {
 		const id = payloadString(action, 'id');
-		const scenario = next.tools.scenarios.find((candidate) => candidate.id === id);
+		const scenario = next.tools.scenarios.find(
+			(candidate) => candidate.id === id
+		);
 		if (
 			!scenario ||
 			scenario.bundled ||
@@ -1229,7 +1262,9 @@ export function applyDemoAction(
 	}
 	if (action.tool === 'identity' && action.command === 'start') {
 		if (next.tools.scenarioRuntime.active) {
-			throw new Error('Undo the active scenario before changing its test identity.');
+			throw new Error(
+				'Undo the active scenario before changing its test identity.'
+			);
 		}
 		const personaId = payloadString(action, 'personaId');
 		const persona = next.tools.identitySession.personas.find(
@@ -1239,12 +1274,12 @@ export function applyDemoAction(
 		const previous = next.tools.identitySession.active;
 		if (previous?.target.personaId === persona.id) return next;
 		if (previous) {
-			next.tools.identitySession.history = next.tools.identitySession.history.map(
-				(entry) =>
+			next.tools.identitySession.history =
+				next.tools.identitySession.history.map((entry) =>
 					entry.id === previous.historyId
 						? { ...entry, stoppedAt: now, status: 'stopped' as const }
 						: entry
-			);
+				);
 		}
 		const actor = previous?.actor ?? {
 			kind: 'account' as const,
@@ -1264,7 +1299,13 @@ export function applyDemoAction(
 			status: 'active',
 		};
 		next.tools.identitySession.history = [
-			{ id: historyId, startedAt: now, actor, target, status: 'active' as const },
+			{
+				id: historyId,
+				startedAt: now,
+				actor,
+				target,
+				status: 'active' as const,
+			},
 			...next.tools.identitySession.history,
 		].slice(0, 20);
 		return next;
@@ -1317,7 +1358,9 @@ export function applyDemoAction(
 	}
 	if (action.tool === 'components' && action.command === 'highlight') {
 		const id = payloadString(action, 'id');
-		const target = next.tools.components.find((candidate) => candidate.id === id);
+		const target = next.tools.components.find(
+			(candidate) => candidate.id === id
+		);
 		if (!target?.isFocused) {
 			throw new Error('Component target is not currently visible.');
 		}
@@ -1433,7 +1476,8 @@ export function applyDemoAction(
 			(candidate) => candidate.id === storeId
 		);
 		const snapshot = next.tools.zustandStateSnapshots.find(
-			(candidate) => candidate.id === snapshotId && candidate.storeId === storeId
+			(candidate) =>
+				candidate.id === snapshotId && candidate.storeId === storeId
 		);
 		if (!store?.capabilities.restorable || !snapshot) {
 			throw new Error('State snapshot is unavailable for this store.');
@@ -1446,7 +1490,9 @@ export function applyDemoAction(
 		const changedKeys = [
 			...new Set([...Object.keys(previous), ...Object.keys(restored)]),
 		]
-			.filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(restored[key]))
+			.filter(
+				(key) => JSON.stringify(previous[key]) !== JSON.stringify(restored[key])
+			)
 			.sort();
 		next.tools.zustandMutationReceipts.push({
 			id: `zustand-mutation-${action.actionId}`,
@@ -1473,7 +1519,10 @@ export function applyDemoAction(
 	throw new Error(`Unsupported demo action: ${action.tool}.${action.command}`);
 }
 
-export function tickDemoDevice(device: DeviceSession, now = Date.now()): DeviceSession {
+export function tickDemoDevice(
+	device: DeviceSession,
+	now = Date.now()
+): DeviceSession {
 	const next = structuredClone(device);
 	next.lastSeenAt = now;
 	next.sequence += 1;
@@ -1491,12 +1540,17 @@ export function tickDemoDevice(device: DeviceSession, now = Date.now()): DeviceS
 			eventLoopLagMs: lag,
 			longFrames: lag > 30 ? 2 : 0,
 			maxFrameMs: lag > 30 ? 58 : 18 + (index % 5),
-			route: next.tools.routes.find((route) => route.isCurrent)?.path ?? '/(tabs)',
+			route:
+				next.tools.routes.find((route) => route.isCurrent)?.path ?? '/(tabs)',
 		});
 		const omitted = Math.max(0, review.samples.length - 1_500);
 		review.samples = review.samples.slice(-1_500);
 		review.droppedSampleCount += omitted;
-		review.summary = summarizePerformance(review.samples, review.startedAt, now);
+		review.summary = summarizePerformance(
+			review.samples,
+			review.startedAt,
+			now
+		);
 	}
 	return next;
 }

@@ -12,7 +12,11 @@ export const MAX_RECIPE_TARGET_COUNT = 20;
 export const MAX_RECIPE_CONCURRENCY = 8;
 
 export const RECIPE_STEP_PALETTE = [
-	{ kind: 'simulator', label: 'Simulator', description: 'Device and app action' },
+	{
+		kind: 'simulator',
+		label: 'Simulator',
+		description: 'Device and app action',
+	},
 	{
 		kind: 'semantic',
 		label: 'Semantic action',
@@ -28,9 +32,17 @@ export const RECIPE_STEP_PALETTE = [
 		label: 'Camera fixture',
 		description: 'Set app-scoped camera input',
 	},
-	{ kind: 'capture', label: 'Capture', description: 'Save screenshot evidence' },
+	{
+		kind: 'capture',
+		label: 'Capture',
+		description: 'Save screenshot evidence',
+	},
 	{ kind: 'wait', label: 'Wait', description: 'Pause for a fixed duration' },
-	{ kind: 'wait-for', label: 'Wait for', description: 'Poll a bounded condition' },
+	{
+		kind: 'wait-for',
+		label: 'Wait for',
+		description: 'Poll a bounded condition',
+	},
 	{ kind: 'assert', label: 'Assert', description: 'Require an observed state' },
 	{
 		kind: 'restore-point',
@@ -76,7 +88,10 @@ type SimulatorOperation = Extract<
 	RecipeStep,
 	{ kind: 'simulator' }
 >['action']['operation'];
-type SemanticOperation = Extract<RecipeStep, { kind: 'semantic' }>['action']['action'];
+type SemanticOperation = Extract<
+	RecipeStep,
+	{ kind: 'semantic' }
+>['action']['action'];
 type WaitForCondition = Extract<
 	RecipeStep,
 	{ kind: 'wait-for' }
@@ -161,7 +176,10 @@ export function stripRecipeAcknowledgements(source: RecipeDefinition): {
 	const recipe = structuredClone(source);
 	let removed = false;
 	for (const step of [...recipe.steps, ...recipe.teardown]) {
-		if (step.kind === 'slimming.mutation' && step.acknowledgement !== undefined) {
+		if (
+			step.kind === 'slimming.mutation' &&
+			step.acknowledgement !== undefined
+		) {
 			delete step.acknowledgement;
 			removed = true;
 		}
@@ -350,7 +368,10 @@ export function createAssertion(
 
 export function createCameraFixture(
 	fixtureKind: CameraFixtureKind
-): Extract<Extract<RecipeStep, { kind: 'camera' }>, { operation: 'set' }>['fixture'] {
+): Extract<
+	Extract<RecipeStep, { kind: 'camera' }>,
+	{ operation: 'set' }
+>['fixture'] {
 	switch (fixtureKind) {
 		case 'unavailable':
 			return { fixtureKind, label: 'Unavailable camera' };
@@ -536,9 +557,12 @@ export function analyzeRecipeApprovals(
 	for (const step of recipe.teardown) inspect(step, 'teardown');
 	return {
 		findings,
-		destructiveCount: findings.filter((item) => item.category === 'destructive').length,
+		destructiveCount: findings.filter((item) => item.category === 'destructive')
+			.length,
 		privacyCount: findings.filter((item) => item.category === 'privacy').length,
-		slimmingCount: findings.filter((item) => item.category === 'slimming').length,
-		mutationCount: findings.filter((item) => item.category === 'state-mutation').length,
+		slimmingCount: findings.filter((item) => item.category === 'slimming')
+			.length,
+		mutationCount: findings.filter((item) => item.category === 'state-mutation')
+			.length,
 	};
 }

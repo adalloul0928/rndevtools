@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type {
 	DesktopAction,
 	DesktopActionResult,
@@ -122,7 +125,9 @@ function actionId(): string {
 
 function needsConnectedDevice(step: RecipeStep): boolean {
 	if (
-		['semantic', 'network', 'camera', 'wait-for', 'restore-point'].includes(step.kind)
+		['semantic', 'network', 'camera', 'wait-for', 'restore-point'].includes(
+			step.kind
+		)
 	) {
 		return true;
 	}
@@ -151,17 +156,24 @@ function exactConnectedDevice(
 	return matches[0];
 }
 
-function currentDevice(state: DesktopState, context: TargetContext): DeviceSession {
+function currentDevice(
+	state: DesktopState,
+	context: TargetContext
+): DeviceSession {
 	if (!context.connectedDeviceId) {
-		throw new Error('No connected app instance is available for this Simulator.');
+		throw new Error(
+			'No connected app instance is available for this Simulator.'
+		);
 	}
 	const device = state.devices.find(
 		(candidate) =>
 			candidate.info.id === context.connectedDeviceId &&
-			candidate.info.simulatorUdid?.toUpperCase() === context.udid.toUpperCase() &&
+			candidate.info.simulatorUdid?.toUpperCase() ===
+				context.udid.toUpperCase() &&
 			(candidate.status === 'online' || candidate.status === 'simulated')
 	);
-	if (!device) throw new Error('The exact connected app instance went offline.');
+	if (!device)
+		throw new Error('The exact connected app instance went offline.');
 	return device;
 }
 
@@ -170,7 +182,8 @@ function diagnosticIds(state: DesktopState, deviceId?: string): Set<string> {
 	const device = deviceId
 		? state.devices.find((candidate) => candidate.info.id === deviceId)
 		: undefined;
-	for (const diagnostic of device?.tools.diagnostics ?? []) ids.add(diagnostic.id);
+	for (const diagnostic of device?.tools.diagnostics ?? [])
+		ids.add(diagnostic.id);
 	return ids;
 }
 
@@ -219,7 +232,10 @@ function timeoutSignal(
 	if (parent.aborted) controller.abort(parent.reason);
 	else parent.addEventListener('abort', onAbort, { once: true });
 	const timer = setTimeout(
-		() => controller.abort(new Error(`Recipe step timed out after ${timeoutMs}ms.`)),
+		() =>
+			controller.abort(
+				new Error(`Recipe step timed out after ${timeoutMs}ms.`)
+			),
 		timeoutMs
 	);
 	return {
@@ -276,7 +292,9 @@ export class RecipeService {
 	async stop(): Promise<void> {
 		this.#stopped = true;
 		for (const active of this.#active.values()) active.controller.abort();
-		await Promise.allSettled([...this.#active.values()].map((active) => active.task));
+		await Promise.allSettled(
+			[...this.#active.values()].map((active) => active.task)
+		);
 	}
 
 	getState(): RecipeState {
@@ -297,13 +315,17 @@ export class RecipeService {
 	}
 
 	async saveRecipe(value: RecipeDefinition): Promise<RecipeSummary> {
-		const summary = await this.#store.saveRecipe(recipeDefinitionSchema.parse(value));
+		const summary = await this.#store.saveRecipe(
+			recipeDefinitionSchema.parse(value)
+		);
 		this.#emit();
 		return summary;
 	}
 
 	async deleteRecipe(recipeId: string): Promise<boolean> {
-		if ([...this.#active.values()].some((active) => active.recipe.id === recipeId)) {
+		if (
+			[...this.#active.values()].some((active) => active.recipe.id === recipeId)
+		) {
 			throw new Error('A running recipe cannot be deleted.');
 		}
 		const deleted = await this.#store.deleteRecipe(recipeId);
@@ -345,7 +367,10 @@ export class RecipeService {
 			.getState()
 			.runs.find((run) => run.actionId === request.actionId);
 		if (prior && prior.status !== 'needs-approval') {
-			return this.#reject(request, 'A run already uses this action identifier.');
+			return this.#reject(
+				request,
+				'A run already uses this action identifier.'
+			);
 		}
 
 		let simulatorState: SimulatorState;
@@ -372,7 +397,10 @@ export class RecipeService {
 		}
 		for (const udid of canonicalUdids) {
 			if (this.#claimedTargets.has(udid.toUpperCase())) {
-				return this.#reject(request, `${udid} is already claimed by another run.`);
+				return this.#reject(
+					request,
+					`${udid} is already claimed by another run.`
+				);
 			}
 		}
 
@@ -383,7 +411,9 @@ export class RecipeService {
 			canonicalUdids.length
 		);
 		let record =
-			prior?.status === 'needs-approval' ? this.#store.getRun(prior.id) : undefined;
+			prior?.status === 'needs-approval'
+				? this.#store.getRun(prior.id)
+				: undefined;
 		if (
 			record &&
 			(record.run.recipeId !== recipe.id ||
@@ -397,7 +427,8 @@ export class RecipeService {
 				'Approved request no longer matches its pending run.'
 			);
 		}
-		if (!record) record = this.#newRecord(request, recipe, canonicalUdids, concurrency);
+		if (!record)
+			record = this.#newRecord(request, recipe, canonicalUdids, concurrency);
 
 		if (recipeRequiresRunApproval(recipe) && !runApproved) {
 			record.run = recipeRunSchema.parse({
@@ -452,14 +483,16 @@ export class RecipeService {
 		});
 		await this.#save(record);
 		const controller = new AbortController();
-		const task = this.#executeRun(record, recipe, controller.signal).finally(() => {
-			this.#active.delete(record.run.id);
-			for (const udid of record.run.targetUdids) {
-				if (this.#claimedTargets.get(udid.toUpperCase()) === record.run.id) {
-					this.#claimedTargets.delete(udid.toUpperCase());
+		const task = this.#executeRun(record, recipe, controller.signal).finally(
+			() => {
+				this.#active.delete(record.run.id);
+				for (const udid of record.run.targetUdids) {
+					if (this.#claimedTargets.get(udid.toUpperCase()) === record.run.id) {
+						this.#claimedTargets.delete(udid.toUpperCase());
+					}
 				}
 			}
-		});
+		);
 		this.#active.set(record.run.id, { record, recipe, controller, task });
 		void task.catch(() => undefined);
 		return { actionId: request.actionId, accepted: true, runId: record.run.id };
@@ -526,7 +559,9 @@ export class RecipeService {
 					await this.#executeTarget(record, recipe, index, signal);
 				}
 			};
-			await Promise.all(Array.from({ length: record.run.concurrency }, () => worker()));
+			await Promise.all(
+				Array.from({ length: record.run.concurrency }, () => worker())
+			);
 		} catch (error) {
 			this.#appendTimeline(record, {
 				phase: 'run',
@@ -596,7 +631,13 @@ export class RecipeService {
 				target.udid,
 				runSignal,
 				(mutationLease) =>
-					this.#executeTargetWithLease(record, recipe, index, runSignal, mutationLease)
+					this.#executeTargetWithLease(
+						record,
+						recipe,
+						index,
+						runSignal,
+						mutationLease
+					)
 			);
 		} catch (error) {
 			this.#updateTarget(record, index, {
@@ -636,7 +677,9 @@ export class RecipeService {
 			} catch (cleanupError) {
 				this.#updateCleanup(record, index, {
 					status: 'failed',
-					failures: [safeError(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH)],
+					failures: [
+						safeError(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
+					],
 					message: 'Teardown could not acquire the simulator mutation lease.',
 				});
 			}
@@ -671,7 +714,9 @@ export class RecipeService {
 		try {
 			connected = exactConnectedDevice(this.#broker.getState(), target.udid);
 			if (connectedRequired && !connected) {
-				throw new Error('No connected app instance matched the exact Simulator UDID.');
+				throw new Error(
+					'No connected app instance matched the exact Simulator UDID.'
+				);
 			}
 			if (connected) context.connectedDeviceId = connected.info.id;
 			context.diagnosticBaseline = diagnosticIds(
@@ -692,7 +737,13 @@ export class RecipeService {
 
 			for (const step of recipe.steps) {
 				if (runSignal.aborted) throw new Error('Recipe run cancelled.');
-				await this.#executeRecordedStep(record, context, step, runSignal, 'step');
+				await this.#executeRecordedStep(
+					record,
+					context,
+					step,
+					runSignal,
+					'step'
+				);
 				const current = runTarget(record, index);
 				this.#updateTarget(record, index, {
 					completedSteps: current.completedSteps + 1,
@@ -709,7 +760,9 @@ export class RecipeService {
 			this.#updateTarget(record, index, {
 				status: runSignal.aborted ? 'cancelled' : 'failed',
 				currentStepId: undefined,
-				message: runSignal.aborted ? 'Recipe target cancelled.' : safeError(error),
+				message: runSignal.aborted
+					? 'Recipe target cancelled.'
+					: safeError(error),
 			});
 		} finally {
 			if (!context.connectedDeviceId) {
@@ -787,9 +840,11 @@ export class RecipeService {
 		phase: 'step' | 'teardown'
 	): Promise<void> {
 		const target = runTarget(record, context.index);
-		const preservePrimaryFailure = ['failed', 'cancelled', 'interrupted'].includes(
-			target.status
-		);
+		const preservePrimaryFailure = [
+			'failed',
+			'cancelled',
+			'interrupted',
+		].includes(target.status);
 		this.#updateTarget(record, context.index, {
 			currentStepId: step.id,
 			...(preservePrimaryFailure
@@ -809,7 +864,12 @@ export class RecipeService {
 			step.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
 		);
 		try {
-			const captureId = await this.#executeStep(record, context, step, scoped.signal);
+			const captureId = await this.#executeStep(
+				record,
+				context,
+				step,
+				scoped.signal
+			);
 			const newDiagnostics = this.#collectDiagnostics(record, context);
 			this.#appendTimeline(record, {
 				phase,
@@ -825,7 +885,10 @@ export class RecipeService {
 		} catch (error) {
 			this.#appendTimeline(record, {
 				phase,
-				status: scoped.signal.aborted && parentSignal.aborted ? 'cancelled' : 'failed',
+				status:
+					scoped.signal.aborted && parentSignal.aborted
+						? 'cancelled'
+						: 'failed',
 				message: safeError(scoped.signal.reason ?? error),
 				targetUdid: context.udid,
 				stepId: step.id,
@@ -861,7 +924,11 @@ export class RecipeService {
 				);
 			}
 			if (step.action.operation === 'privacy.update') {
-				const { privacyOperation, operation: _operation, ...payload } = step.action;
+				const {
+					privacyOperation,
+					operation: _operation,
+					...payload
+				} = step.action;
 				return this.#runSimulatorAction(
 					simulatorActionSchema.parse({
 						actionId: actionId(),
@@ -1003,13 +1070,18 @@ export class RecipeService {
 			};
 			record.evidence = {
 				...record.evidence,
-				captureIds: [...new Set([...record.evidence.captureIds, job.captureId])],
+				captureIds: [
+					...new Set([...record.evidence.captureIds, job.captureId]),
+				],
 			};
 		}
 		return job.captureId;
 	}
 
-	#waitForSimulatorJob(jobId: string, signal: AbortSignal): Promise<SimulatorJob> {
+	#waitForSimulatorJob(
+		jobId: string,
+		signal: AbortSignal
+	): Promise<SimulatorJob> {
 		return new Promise((resolve, reject) => {
 			let unsubscribe: () => void = () => undefined;
 			let settled = false;
@@ -1028,7 +1100,9 @@ export class RecipeService {
 					settled = true;
 					cleanup();
 					reject(
-						new Error('Cancelled Simulator action did not reach a terminal state.')
+						new Error(
+							'Cancelled Simulator action did not reach a terminal state.'
+						)
 					);
 				}, SIMULATOR_CANCEL_SETTLE_TIMEOUT_MS);
 			};
@@ -1058,7 +1132,8 @@ export class RecipeService {
 		const deadline = this.#now() + timeoutMs;
 		let lastError: unknown;
 		do {
-			if (signal.aborted) throw signal.reason ?? new Error('Recipe run cancelled.');
+			if (signal.aborted)
+				throw signal.reason ?? new Error('Recipe run cancelled.');
 			const remainingMs = Math.max(1, deadline - this.#now());
 			try {
 				await this.#runDesktopAction({
@@ -1090,7 +1165,8 @@ export class RecipeService {
 		});
 		await previous.catch(() => undefined);
 		try {
-			if (signal.aborted) throw signal.reason ?? new Error('Recipe run cancelled.');
+			if (signal.aborted)
+				throw signal.reason ?? new Error('Recipe run cancelled.');
 			await this.#slimming.refresh();
 			const action = slimmingActionSchema.parse({
 				actionId: actionId(),
@@ -1120,7 +1196,10 @@ export class RecipeService {
 		}
 	}
 
-	#waitForSlimmingJob(jobId: string, signal: AbortSignal): Promise<SlimmingJob> {
+	#waitForSlimmingJob(
+		jobId: string,
+		signal: AbortSignal
+	): Promise<SlimmingJob> {
 		return new Promise((resolve, reject) => {
 			let unsubscribe: () => void = () => undefined;
 			let settled = false;
@@ -1139,7 +1218,9 @@ export class RecipeService {
 					settled = true;
 					cleanup();
 					reject(
-						new Error('Cancelled Slimming mutation did not reach a terminal state.')
+						new Error(
+							'Cancelled Slimming mutation did not reach a terminal state.'
+						)
 					);
 				}, SLIMMING_CANCEL_SETTLE_TIMEOUT_MS);
 			};
@@ -1164,7 +1245,8 @@ export class RecipeService {
 			const device = this.#simulator
 				.getState()
 				.devices.find(
-					(candidate) => candidate.udid.toUpperCase() === context.udid.toUpperCase()
+					(candidate) =>
+						candidate.udid.toUpperCase() === context.udid.toUpperCase()
 				);
 			if (device?.state !== assertion.expected) {
 				throw new Error(
@@ -1174,7 +1256,10 @@ export class RecipeService {
 			return;
 		}
 		if (assertion.condition === 'connected') {
-			const connected = exactConnectedDevice(this.#broker.getState(), context.udid);
+			const connected = exactConnectedDevice(
+				this.#broker.getState(),
+				context.udid
+			);
 			if (Boolean(connected) !== assertion.expected) {
 				throw new Error('Exact connected-instance assertion failed.');
 			}
@@ -1185,7 +1270,8 @@ export class RecipeService {
 			const exists = device.tools.components.some(
 				(component) => component.id === assertion.componentId
 			);
-			if (exists !== assertion.expected) throw new Error('Component assertion failed.');
+			if (exists !== assertion.expected)
+				throw new Error('Component assertion failed.');
 			return;
 		}
 		if (assertion.condition === 'screen.hash') {
@@ -1199,7 +1285,9 @@ export class RecipeService {
 				? device.tools.networkProfile.id
 				: 'none';
 			if (actual !== assertion.expectedProfileId) {
-				throw new Error(`Expected network profile ${assertion.expectedProfileId}.`);
+				throw new Error(
+					`Expected network profile ${assertion.expectedProfileId}.`
+				);
 			}
 			return;
 		}
@@ -1230,7 +1318,8 @@ export class RecipeService {
 		}
 		if (waitFor.condition === 'screen.change') {
 			const device = currentDevice(this.#broker.getState(), context);
-			const screenHash = waitFor.fromHash ?? device.tools.componentSummary.screenHash;
+			const screenHash =
+				waitFor.fromHash ?? device.tools.componentSummary.screenHash;
 			if (!screenHash) throw new Error('No starting screen hash is available.');
 			await this.#runBoundedDesktopWait(
 				{
@@ -1247,10 +1336,15 @@ export class RecipeService {
 		let quietSince: number | undefined;
 		while (!signal.aborted) {
 			const device = currentDevice(this.#broker.getState(), context);
-			const pending = device.tools.network.some((entry) => entry.state === 'pending');
+			const pending = device.tools.network.some(
+				(entry) => entry.state === 'pending'
+			);
 			if (pending) quietSince = undefined;
 			else quietSince ??= this.#now();
-			if (quietSince !== undefined && this.#now() - quietSince >= waitFor.quietMs) {
+			if (
+				quietSince !== undefined &&
+				this.#now() - quietSince >= waitFor.quietMs
+			) {
 				return;
 			}
 			await waitForDelay(Math.min(100, waitFor.quietMs), signal);
@@ -1265,7 +1359,9 @@ export class RecipeService {
 	): Promise<void> {
 		const device = currentDevice(this.#broker.getState(), context);
 		if (step.operation === 'capture') {
-			const before = new Set(device.tools.restorePoints.map((point) => point.id));
+			const before = new Set(
+				device.tools.restorePoints.map((point) => point.id)
+			);
 			await this.#runDesktopAction({
 				actionId: actionId(),
 				deviceId: device.info.id,
@@ -1287,7 +1383,8 @@ export class RecipeService {
 			throw signal.reason ?? new Error('Recipe run cancelled.');
 		}
 		const restorePointId = context.restorePointIds.get(step.reference);
-		if (!restorePointId) throw new Error('Restore-point reference was not captured.');
+		if (!restorePointId)
+			throw new Error('Restore-point reference was not captured.');
 		await this.#runDesktopAction({
 			actionId: actionId(),
 			deviceId: device.info.id,
@@ -1295,12 +1392,21 @@ export class RecipeService {
 			command: step.operation,
 			payload: { id: restorePointId },
 		});
-		if (step.operation === 'remove') context.restorePointIds.delete(step.reference);
+		if (step.operation === 'remove')
+			context.restorePointIds.delete(step.reference);
 	}
 
-	#collectDiagnostics(record: RecipeRunRecord, context: TargetContext): string[] {
-		const current = diagnosticIds(this.#broker.getState(), context.connectedDeviceId);
-		const added = [...current].filter((id) => !context.diagnosticBaseline.has(id));
+	#collectDiagnostics(
+		record: RecipeRunRecord,
+		context: TargetContext
+	): string[] {
+		const current = diagnosticIds(
+			this.#broker.getState(),
+			context.connectedDeviceId
+		);
+		const added = [...current].filter(
+			(id) => !context.diagnosticBaseline.has(id)
+		);
 		context.diagnosticBaseline = current;
 		if (added.length === 0) return [];
 		const target = evidenceTarget(record, context.index);
@@ -1398,13 +1504,17 @@ export class RecipeService {
 	#updateCleanup(
 		record: RecipeRunRecord,
 		index: number,
-		patch: Partial<RecipeRun['targets'][number]['cleanup']> & { message?: string }
+		patch: Partial<RecipeRun['targets'][number]['cleanup']> & {
+			message?: string;
+		}
 	): void {
 		const { message, ...cleanupPatch } = patch;
 		const target = runTarget(record, index);
-		const preservePrimaryFailure = ['failed', 'cancelled', 'interrupted'].includes(
-			target.status
-		);
+		const preservePrimaryFailure = [
+			'failed',
+			'cancelled',
+			'interrupted',
+		].includes(target.status);
 		record.run.targets[index] = {
 			...target,
 			...(message && !preservePrimaryFailure
@@ -1475,6 +1585,8 @@ export function createRecipePort(service: RecipeService) {
 		run: (request: RecipeRunRequest) => service.runRecipe(request),
 		cancel: (runId: string) => Promise.resolve(service.cancelRun(runId)),
 		status: (runId: string) =>
-			Promise.resolve(service.getState().runs.find((run) => run.id === runId) ?? null),
+			Promise.resolve(
+				service.getState().runs.find((run) => run.id === runId) ?? null
+			),
 	};
 }

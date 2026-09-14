@@ -6,7 +6,9 @@ import {
 
 export function unknownSlimmingStatusesForRun(
 	run: Pick<RecipeRun, 'targetUdids'>,
-	statusBySimulator: Readonly<Record<string, SlimmingSimulatorStatus | undefined>>
+	statusBySimulator: Readonly<
+		Record<string, SlimmingSimulatorStatus | undefined>
+	>
 ): SlimmingSimulatorStatus[] {
 	const seen = new Set<string>();
 	return run.targetUdids.flatMap((udid) => {
@@ -38,7 +40,9 @@ export function recipeSlimmingAcknowledgementBinding(
 
 export async function acknowledgeThenApproveRecipe(input: {
 	run: RecipeRun;
-	statusBySimulator: Readonly<Record<string, SlimmingSimulatorStatus | undefined>>;
+	statusBySimulator: Readonly<
+		Record<string, SlimmingSimulatorStatus | undefined>
+	>;
 	typedAcknowledgement?: string;
 	acknowledgeCompatibility: (input: {
 		simulatorUdids: string[];
@@ -67,7 +71,9 @@ export async function acknowledgeThenApproveRecipe(input: {
 			return {
 				actionId: input.run.actionId,
 				accepted: false,
-				error: acknowledgement.error ?? 'Compatibility acknowledgement was rejected.',
+				error:
+					acknowledgement.error ??
+					'Compatibility acknowledgement was rejected.',
 			};
 		}
 	}

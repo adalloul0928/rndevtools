@@ -29,7 +29,8 @@ export function projectBrokerState({
 			.sort((left, right) => {
 				const rank = { online: 0, simulated: 1, offline: 2 } as const;
 				return (
-					rank[left.status] - rank[right.status] || right.lastSeenAt - left.lastSeenAt
+					rank[left.status] - rank[right.status] ||
+					right.lastSeenAt - left.lastSeenAt
 				);
 			}),
 		diagnostics: [...diagnostics],

@@ -74,8 +74,12 @@ describe('slimming persistence', () => {
 		});
 		const filePath = path.join(directory, 'state-v1.json');
 		expect((await stat(filePath)).mode & 0o777).toBe(0o600);
-		expect(await readFile(filePath, 'utf8')).toContain('opaque-restart-safe-token');
-		expect(JSON.stringify(store.snapshot())).not.toContain('opaque-restart-safe-token');
+		expect(await readFile(filePath, 'utf8')).toContain(
+			'opaque-restart-safe-token'
+		);
+		expect(JSON.stringify(store.snapshot())).not.toContain(
+			'opaque-restart-safe-token'
+		);
 
 		const reloaded = new SlimmingPersistence(directory);
 		await reloaded.load();
@@ -85,14 +89,20 @@ describe('slimming persistence', () => {
 
 	it('fails closed on malformed existing state instead of silently replacing it', async () => {
 		const { directory, store } = await fixture();
-		await writeFile(path.join(directory, 'state-v1.json'), '{"version":1,"bad":true}');
+		await writeFile(
+			path.join(directory, 'state-v1.json'),
+			'{"version":1,"bad":true}'
+		);
 		await expect(store.load()).rejects.toThrow();
 	});
 
 	it('persists a bounded acknowledgement batch in one restart-safe update', async () => {
 		const { directory, store } = await fixture();
 		await store.load();
-		const keys = [`compatibility-${'a'.repeat(64)}`, `compatibility-${'b'.repeat(64)}`];
+		const keys = [
+			`compatibility-${'a'.repeat(64)}`,
+			`compatibility-${'b'.repeat(64)}`,
+		];
 		await store.acknowledgeAll(keys, 42);
 
 		const reloaded = new SlimmingPersistence(directory);

@@ -41,7 +41,12 @@ const MAX_TIMELINE_EVENTS = 5_000;
 const RECIPE_FILE_PATTERN = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,255})\.json$/;
 const RUN_FILE_PATTERN =
 	/^(recipe-run-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/i;
-const ACTIVE_RUN_STATUSES = new Set(['queued', 'resolving', 'running', 'cancelling']);
+const ACTIVE_RUN_STATUSES = new Set([
+	'queued',
+	'resolving',
+	'running',
+	'cancelling',
+]);
 
 const persistedRunSchema = z.strictObject({
 	format: z.literal('pumpd-recipe-run'),
@@ -81,7 +86,9 @@ function recipeSummary(recipe: RecipeDefinition): RecipeSummary {
 	return {
 		id: recipe.id,
 		name: recipe.name,
-		...(recipe.description === undefined ? {} : { description: recipe.description }),
+		...(recipe.description === undefined
+			? {}
+			: { description: recipe.description }),
 		revision: recipe.revision,
 		updatedAt: recipe.updatedAt,
 		stepCount: recipe.steps.length,
@@ -114,19 +121,23 @@ export class RecipeStore {
 		this.#now = now;
 		this.#updatedAt = now();
 		this.#historyDays =
-			Number.isSafeInteger(historyDays) && historyDays >= 1 && historyDays <= 365
+			Number.isSafeInteger(historyDays) &&
+			historyDays >= 1 &&
+			historyDays <= 365
 				? historyDays
 				: DEFAULT_HISTORY_DAYS;
 	}
 
 	initialize(): Promise<void> {
 		if (this.#initializePromise) return this.#initializePromise;
-		const initialization = this.#initializeInternal().catch((error: unknown) => {
-			if (this.#initializePromise === initialization) {
-				this.#initializePromise = undefined;
+		const initialization = this.#initializeInternal().catch(
+			(error: unknown) => {
+				if (this.#initializePromise === initialization) {
+					this.#initializePromise = undefined;
+				}
+				throw error;
 			}
-			throw error;
-		});
+		);
 		this.#initializePromise = initialization;
 		return initialization;
 	}
@@ -174,7 +185,9 @@ export class RecipeStore {
 				throw new Error(`Recipe storage is limited to ${MAX_RECIPES} recipes.`);
 			}
 			if (current && recipe.revision <= current.revision) {
-				throw new Error('Recipe revision must increase when replacing a recipe.');
+				throw new Error(
+					'Recipe revision must increase when replacing a recipe.'
+				);
 			}
 			if (current && recipe.createdAt !== current.createdAt) {
 				throw new Error('Recipe creation time cannot change across revisions.');
@@ -229,7 +242,10 @@ export class RecipeStore {
 				record,
 				MAX_RUN_FILE_BYTES
 			);
-			this.#runs.set(record.run.id, { run: record.run, evidence: record.evidence });
+			this.#runs.set(record.run.id, {
+				run: record.run,
+				evidence: record.evidence,
+			});
 			await this.#pruneRuns();
 			this.#touch();
 		});
@@ -253,7 +269,10 @@ export class RecipeStore {
 		});
 	}
 
-	async exportEvidence(evidenceId: string, destinationPath: string): Promise<void> {
+	async exportEvidence(
+		evidenceId: string,
+		destinationPath: string
+	): Promise<void> {
 		await this.initialize();
 		const evidence = this.getEvidence(evidenceId);
 		if (!evidence) throw new Error('Evidence bundle was not found.');
@@ -347,7 +366,8 @@ export class RecipeStore {
 					? target.message
 					: 'Interrupted by an application restart.',
 				cleanup:
-					target.cleanup.status === 'complete' || target.cleanup.status === 'failed'
+					target.cleanup.status === 'complete' ||
+					target.cleanup.status === 'failed'
 						? target.cleanup
 						: { ...target.cleanup, status: 'interrupted' as const },
 			}));
@@ -419,7 +439,10 @@ export class RecipeStore {
 		if (remove.length > 0) await syncDirectory(this.#requiredRunsDirectory());
 	}
 
-	async #readBoundedJson(filePath: string, maximumBytes: number): Promise<unknown> {
+	async #readBoundedJson(
+		filePath: string,
+		maximumBytes: number
+	): Promise<unknown> {
 		const resolved = path.resolve(filePath);
 		const metadata = await lstat(resolved);
 		if (
@@ -488,7 +511,10 @@ export class RecipeStore {
 		}
 	}
 
-	async #writeExternalJson(destinationPath: string, value: unknown): Promise<void> {
+	async #writeExternalJson(
+		destinationPath: string,
+		value: unknown
+	): Promise<void> {
 		const destination = path.resolve(destinationPath);
 		const directory = await realpath(path.dirname(destination));
 		const managedRoot = await realpath(this.#root);
@@ -509,7 +535,10 @@ export class RecipeStore {
 	async #quarantine(filePath: string, label: string): Promise<void> {
 		try {
 			const directory = path.dirname(filePath);
-			await rename(filePath, path.join(directory, `.${label}.corrupt-${randomUUID()}`));
+			await rename(
+				filePath,
+				path.join(directory, `.${label}.corrupt-${randomUUID()}`)
+			);
 			await syncDirectory(directory);
 		} catch (error) {
 			if (!isMissing(error)) throw error;
@@ -537,12 +566,14 @@ export class RecipeStore {
 	}
 
 	#requiredRecipesDirectory(): string {
-		if (!this.#recipesDirectory) throw new Error('Recipe storage is not initialized.');
+		if (!this.#recipesDirectory)
+			throw new Error('Recipe storage is not initialized.');
 		return this.#recipesDirectory;
 	}
 
 	#requiredRunsDirectory(): string {
-		if (!this.#runsDirectory) throw new Error('Recipe storage is not initialized.');
+		if (!this.#runsDirectory)
+			throw new Error('Recipe storage is not initialized.');
 		return this.#runsDirectory;
 	}
 

@@ -28,14 +28,17 @@ describe('desktop action confirmation policy', () => {
 		['discardRecovery', { recoveryError: 'Stored journal is corrupt.' }],
 		['import', { json: scenarioDocument, mode: 'merge' }],
 		['remove', { id: 'scenario-1', version: 1, definitionToken: 'token-1' }],
-	])('requires main-owned confirmation for scenarios.%s', (command, payload) => {
-		const parsed = action(command, payload);
-		expect(desktopActionNeedsConfirmation(parsed)).toBe(true);
-		expect(desktopActionConfirmationCopy(parsed)).toMatchObject({
-			detail: expect.stringContaining('device-1'),
-			confirmLabel: expect.any(String),
-		});
-	});
+	])(
+		'requires main-owned confirmation for scenarios.%s',
+		(command, payload) => {
+			const parsed = action(command, payload);
+			expect(desktopActionNeedsConfirmation(parsed)).toBe(true);
+			expect(desktopActionConfirmationCopy(parsed)).toMatchObject({
+				detail: expect.stringContaining('device-1'),
+				confirmLabel: expect.any(String),
+			});
+		}
+	);
 
 	it('marks replacement imports destructive and states their removal impact', () => {
 		const copy = desktopActionConfirmationCopy(
@@ -73,7 +76,9 @@ describe('desktop action confirmation policy', () => {
 		);
 		expect(copy?.detail).not.toMatch(/[\n\r\u202e]/u);
 		expect(copy?.detail).toContain('SHA-256');
-		expect(copy?.detail).toContain(`${Buffer.byteLength(source, 'utf8')} bytes`);
+		expect(copy?.detail).toContain(
+			`${Buffer.byteLength(source, 'utf8')} bytes`
+		);
 		expect(copy?.detail.length).toBeLessThan(500);
 	});
 

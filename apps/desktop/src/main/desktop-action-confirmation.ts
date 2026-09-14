@@ -23,11 +23,15 @@ function payloadNumber(action: DesktopAction, key: string): number | undefined {
 	return typeof value === 'number' ? value : undefined;
 }
 
-function securityDialogText(value: string | undefined, fallback: string): string {
+function securityDialogText(
+	value: string | undefined,
+	fallback: string
+): string {
 	const normalized = Array.from((value ?? '').normalize('NFKC'))
 		.map((character) => {
 			const codePoint = character.codePointAt(0) ?? 0;
-			const isControl = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
+			const isControl =
+				codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
 			const isBidirectionalControl =
 				(codePoint >= 0x202a && codePoint <= 0x202e) ||
 				(codePoint >= 0x2066 && codePoint <= 0x2069);
@@ -73,9 +77,12 @@ export function desktopActionConfirmationCopy(
 		};
 	}
 	if (action.command === 'import') {
-		const document = parseScenarioDocumentJson(payloadText(action, 'json') ?? '', {
-			maxScenarios: DEFAULT_SCENARIO_USER_LIMIT,
-		});
+		const document = parseScenarioDocumentJson(
+			payloadText(action, 'json') ?? '',
+			{
+				maxScenarios: DEFAULT_SCENARIO_USER_LIMIT,
+			}
+		);
 		const mode = payloadText(action, 'mode');
 		const source = payloadText(action, 'json') ?? '';
 		const digest = createHash('sha256').update(source, 'utf8').digest('hex');

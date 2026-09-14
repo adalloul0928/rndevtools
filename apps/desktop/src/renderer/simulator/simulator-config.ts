@@ -30,7 +30,8 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'fleet',
 		label: 'Simulators',
-		description: 'Boot, inspect, and manage local Simulator and device targets.',
+		description:
+			'Boot, inspect, and manage local Simulator and device targets.',
 		icon: Smartphone,
 		shortcut: 1,
 	},
@@ -61,21 +62,24 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'automation',
 		label: 'Automation',
-		description: 'Run repeatable simulator scenarios and agent-friendly workflows.',
+		description:
+			'Run repeatable simulator scenarios and agent-friendly workflows.',
 		icon: Bot,
 		shortcut: 5,
 	},
 	{
 		id: 'builds',
 		label: 'Build Insights',
-		description: 'Review build timing, warnings, cache health, and artifact trends.',
+		description:
+			'Review build timing, warnings, cache health, and artifact trends.',
 		icon: Gauge,
 		shortcut: 6,
 	},
 	{
 		id: 'settings',
 		label: 'Settings',
-		description: 'Finish capability onboarding and configure local integrations.',
+		description:
+			'Finish capability onboarding and configure local integrations.',
 		icon: Settings2,
 		shortcut: 7,
 	},

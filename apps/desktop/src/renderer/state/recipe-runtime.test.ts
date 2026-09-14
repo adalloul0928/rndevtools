@@ -4,7 +4,10 @@ import type {
 	RecipeRun,
 	RecipeRunRequest,
 } from '../../shared/recipe-protocol';
-import { confirmAndRunRecipe, pendingRecipeApprovalRequest } from './recipe-runtime';
+import {
+	confirmAndRunRecipe,
+	pendingRecipeApprovalRequest,
+} from './recipe-runtime';
 
 const REQUEST: RecipeRunRequest = {
 	actionId: 'recipe-action',
@@ -17,7 +20,9 @@ describe('recipe confirmation runtime', () => {
 	it('reuses the exact pending action, recipe, targets, and concurrency', () => {
 		const run = pendingRun();
 		expect(pendingRecipeApprovalRequest(run)).toEqual(REQUEST);
-		expect(pendingRecipeApprovalRequest({ ...run, status: 'running' })).toBeNull();
+		expect(
+			pendingRecipeApprovalRequest({ ...run, status: 'running' })
+		).toBeNull();
 		expect(
 			pendingRecipeApprovalRequest({
 				...run,
@@ -50,7 +55,10 @@ describe('recipe confirmation runtime', () => {
 			REQUEST
 		);
 		expect(receipt.accepted).toBe(true);
-		expect(runRecipe).toHaveBeenCalledWith({ ...REQUEST, confirmationToken: token });
+		expect(runRecipe).toHaveBeenCalledWith({
+			...REQUEST,
+			confirmationToken: token,
+		});
 	});
 
 	it('runs an approval-free recipe without injecting a token', async () => {

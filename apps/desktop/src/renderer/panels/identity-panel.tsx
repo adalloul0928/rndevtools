@@ -35,7 +35,12 @@ export function IdentityPanel() {
 							description={`Stop ${active.target.label}, clear its owner-bound caches, and restore ${active.actor.label} from the device-only recovery session.`}
 							isDisabled={!canRunAction('identity', 'stop')}
 							onConfirm={() =>
-								void runAction('identity', 'stop', {}, 'Original actor restored.')
+								void runAction(
+									'identity',
+									'stop',
+									{},
+									'Original actor restored.'
+								)
 							}
 							title={`Restore ${active.actor.label}?`}
 							tone="warning"
@@ -68,9 +73,9 @@ export function IdentityPanel() {
 				title="Test Identities"
 			/>
 			<PanelNotice title="Seeded identities only." tone="info">
-				The desktop receives redacted actor/target labels and bounded history. Account
-				emails, passwords, access tokens, refresh tokens, and arbitrary-user lookup are
-				never projected.
+				The desktop receives redacted actor/target labels and bounded history.
+				Account emails, passwords, access tokens, refresh tokens, and
+				arbitrary-user lookup are never projected.
 			</PanelNotice>
 			{active ? (
 				<div
@@ -90,8 +95,8 @@ export function IdentityPanel() {
 							<span>{active.target.label}</span>
 						</div>
 						<p className="mb-0 mt-1 text-xs text-(--muted)">
-							Started {formatRelativeTime(active.startedAt)}. Stop restores the exact
-							original actor session.
+							Started {formatRelativeTime(active.startedAt)}. Stop restores the
+							exact original actor session.
 						</p>
 						{active.error ? (
 							<p className="mb-0 mt-1 text-xs text-red-300">{active.error}</p>
@@ -130,12 +135,16 @@ export function IdentityPanel() {
 													<StatusPill tone="warning">ACTIVE</StatusPill>
 												) : null}
 											</div>
-											<p className="mb-0 mt-1 text-xs text-(--muted)">{persona.note}</p>
+											<p className="mb-0 mt-1 text-xs text-(--muted)">
+												{persona.note}
+											</p>
 										</div>
 										<ConfirmAction
 											confirmLabel="Start identity"
 											description={`Secure the current actor on-device, clear owner-bound caches, and continue as ${persona.label}.`}
-											isDisabled={selected || !canRunAction('identity', 'start')}
+											isDisabled={
+												selected || !canRunAction('identity', 'start')
+											}
 											onConfirm={() =>
 												void runAction(
 													'identity',
@@ -160,7 +169,9 @@ export function IdentityPanel() {
 					<History className="h-3.5 w-3.5" /> Recent sessions
 				</h2>
 				{session.history.length === 0 ? (
-					<p className="text-xs text-(--text-3)">No managed identity sessions yet.</p>
+					<p className="text-xs text-(--text-3)">
+						No managed identity sessions yet.
+					</p>
 				) : (
 					<div className="overflow-hidden rounded-lg border border-white/8">
 						{session.history.map((entry) => (
@@ -183,7 +194,9 @@ export function IdentityPanel() {
 												: 'warning'
 									}
 								>
-									{entry.status === 'stopped' ? 'RESTORED' : entry.status.toUpperCase()}
+									{entry.status === 'stopped'
+										? 'RESTORED'
+										: entry.status.toUpperCase()}
 								</StatusPill>
 							</div>
 						))}

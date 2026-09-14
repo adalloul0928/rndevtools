@@ -22,7 +22,9 @@ const UDID = '11111111-2222-3333-4444-555555555555';
 const roots: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
-	const directory = await mkdtemp(path.join(os.tmpdir(), 'pumpd-recipe-store-'));
+	const directory = await mkdtemp(
+		path.join(os.tmpdir(), 'pumpd-recipe-store-')
+	);
 	roots.push(directory);
 	return directory;
 }
@@ -53,7 +55,11 @@ function runRecord({
 	const runId = `recipe-run-${id}`;
 	const evidenceId = `evidence-${id}`;
 	const targetStatus =
-		status === 'complete' ? 'complete' : status === 'failed' ? 'failed' : 'running';
+		status === 'complete'
+			? 'complete'
+			: status === 'failed'
+				? 'failed'
+				: 'running';
 	const cleanupStatus = status === 'complete' ? 'complete' : 'not-started';
 	return {
 		run: {
@@ -119,9 +125,15 @@ describe('RecipeStore', () => {
 		const root = await temporaryDirectory();
 		const store = new RecipeStore(root);
 		await store.initialize();
-		await expect(store.saveRecipe(recipe())).resolves.toMatchObject({ revision: 1 });
-		await expect(store.saveRecipe(recipe())).rejects.toThrow('revision must increase');
-		await expect(store.saveRecipe(recipe(2))).resolves.toMatchObject({ revision: 2 });
+		await expect(store.saveRecipe(recipe())).resolves.toMatchObject({
+			revision: 1,
+		});
+		await expect(store.saveRecipe(recipe())).rejects.toThrow(
+			'revision must increase'
+		);
+		await expect(store.saveRecipe(recipe(2))).resolves.toMatchObject({
+			revision: 2,
+		});
 
 		const persisted = JSON.parse(
 			await readFile(path.join(root, 'recipes', 'smoke-test.json'), 'utf8')
@@ -132,7 +144,9 @@ describe('RecipeStore', () => {
 			recipe: { revision: 2 },
 		});
 		expect(
-			(await readdir(path.join(root, 'recipes'))).some((name) => name.includes('.tmp'))
+			(await readdir(path.join(root, 'recipes'))).some((name) =>
+				name.includes('.tmp')
+			)
 		).toBe(false);
 	});
 
@@ -226,7 +240,11 @@ describe('RecipeStore', () => {
 		const source = path.join(external, 'recipe.json');
 		await writeFile(
 			source,
-			JSON.stringify({ format: 'pumpd-recipe', formatVersion: 1, recipe: recipe() })
+			JSON.stringify({
+				format: 'pumpd-recipe',
+				formatVersion: 1,
+				recipe: recipe(),
+			})
 		);
 		const store = new RecipeStore(root);
 		await store.initialize();
@@ -261,7 +279,9 @@ describe('RecipeStore', () => {
 			.spyOn(fileHandlePrototype, 'sync')
 			.mockRejectedValueOnce(new Error('injected fsync failure'));
 
-		await expect(store.saveRecipe(recipe())).rejects.toThrow('injected fsync failure');
+		await expect(store.saveRecipe(recipe())).rejects.toThrow(
+			'injected fsync failure'
+		);
 		sync.mockRestore();
 		expect(
 			(await readdir(path.join(root, 'recipes'))).filter((name) =>

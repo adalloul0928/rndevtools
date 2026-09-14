@@ -1,6 +1,9 @@
 import type { IpcMainInvokeEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
-import type { RecipeDefinition, RecipeRunRequest } from '../shared/recipe-protocol';
+import type {
+	RecipeDefinition,
+	RecipeRunRequest,
+} from '../shared/recipe-protocol';
 import { createRecipeIpcHandlers, type RecipeIpcService } from './recipe-ipc';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
@@ -62,7 +65,12 @@ function fixture({
 		runId: 'recipe-run-12345678-1234-4123-8123-123456789abc',
 	}));
 	const service: RecipeIpcService = {
-		getState: vi.fn(() => ({ revision: 0, updatedAt: 1, recipes: [], runs: [] })),
+		getState: vi.fn(() => ({
+			revision: 0,
+			updatedAt: 1,
+			recipes: [],
+			runs: [],
+		})),
 		getRecipe: vi.fn(() => definition),
 		getEvidence: vi.fn(() => null),
 		saveRecipe: vi.fn(async (value) => ({
@@ -104,8 +112,12 @@ function fixture({
 		consumeRunConfirmation: vi.fn(() => approved),
 		confirmDelete: vi.fn(async () => true),
 		selectImportPath: vi.fn(async () => '/main/selected/import.json'),
-		selectRecipeExportDestination: vi.fn(async () => '/main/selected/export.json'),
-		selectEvidenceExportDestination: vi.fn(async () => '/main/selected/evidence.json'),
+		selectRecipeExportDestination: vi.fn(
+			async () => '/main/selected/export.json'
+		),
+		selectEvidenceExportDestination: vi.fn(
+			async () => '/main/selected/evidence.json'
+		),
 	};
 	return {
 		dependencies,
@@ -119,21 +131,29 @@ describe('recipe IPC', () => {
 	it('checks renderer trust before parsing or invoking every endpoint', async () => {
 		const { handlers, service } = fixture({ trusted: false });
 		expect(() => handlers.getState(event)).toThrow('untrusted renderer');
-		expect(() => handlers.getRecipe(event, 'smoke-test')).toThrow('untrusted renderer');
+		expect(() => handlers.getRecipe(event, 'smoke-test')).toThrow(
+			'untrusted renderer'
+		);
 		expect(() =>
-			handlers.getEvidence(event, 'evidence-12345678-1234-4123-8123-123456789abc')
+			handlers.getEvidence(
+				event,
+				'evidence-12345678-1234-4123-8123-123456789abc'
+			)
 		).toThrow('untrusted renderer');
 		await expect(handlers.saveRecipe(event, recipe())).rejects.toThrow(
 			'untrusted renderer'
 		);
-		await expect(handlers.requestRunConfirmation(event, request)).rejects.toThrow(
-			'untrusted renderer'
-		);
+		await expect(
+			handlers.requestRunConfirmation(event, request)
+		).rejects.toThrow('untrusted renderer');
 		await expect(handlers.runRecipe(event, request)).rejects.toThrow(
 			'untrusted renderer'
 		);
 		expect(() =>
-			handlers.cancelRun(event, 'recipe-run-12345678-1234-4123-8123-123456789abc')
+			handlers.cancelRun(
+				event,
+				'recipe-run-12345678-1234-4123-8123-123456789abc'
+			)
 		).toThrow('untrusted renderer');
 		await expect(
 			handlers.runFileOperation(event, {
@@ -214,9 +234,13 @@ describe('recipe IPC', () => {
 
 	it('requests native confirmation only for recipes containing privileged actions', async () => {
 		const safe = fixture();
-		await expect(safe.handlers.requestRunConfirmation(event, request)).resolves.toEqual(
-			{ actionId: 'run-one', required: false, confirmed: true }
-		);
+		await expect(
+			safe.handlers.requestRunConfirmation(event, request)
+		).resolves.toEqual({
+			actionId: 'run-one',
+			required: false,
+			confirmed: true,
+		});
 		expect(safe.dependencies.requestRunConfirmation).not.toHaveBeenCalled();
 
 		const mutation = fixture({ mutation: true });
@@ -242,7 +266,9 @@ describe('recipe IPC', () => {
 			actionId: 'import',
 			kind: 'recipe.import',
 		});
-		expect(service.importRecipe).toHaveBeenCalledWith('/main/selected/import.json');
+		expect(service.importRecipe).toHaveBeenCalledWith(
+			'/main/selected/import.json'
+		);
 		expect(JSON.stringify(imported)).not.toContain('/main/selected');
 
 		const exported = await handlers.runFileOperation(event, {

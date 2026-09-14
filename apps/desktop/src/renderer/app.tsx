@@ -63,19 +63,29 @@ function workspaceShortcut(
 }
 
 const NetworkPanel = lazy(() =>
-	import('@/panels/network-panel').then((module) => ({ default: module.NetworkPanel }))
+	import('@/panels/network-panel').then((module) => ({
+		default: module.NetworkPanel,
+	}))
 );
 const ConsolePanel = lazy(() =>
-	import('@/panels/console-panel').then((module) => ({ default: module.ConsolePanel }))
+	import('@/panels/console-panel').then((module) => ({
+		default: module.ConsolePanel,
+	}))
 );
 const StoragePanel = lazy(() =>
-	import('@/panels/storage-panel').then((module) => ({ default: module.StoragePanel }))
+	import('@/panels/storage-panel').then((module) => ({
+		default: module.StoragePanel,
+	}))
 );
 const QueryPanel = lazy(() =>
-	import('@/panels/query-panel').then((module) => ({ default: module.QueryPanel }))
+	import('@/panels/query-panel').then((module) => ({
+		default: module.QueryPanel,
+	}))
 );
 const RoutesPanel = lazy(() =>
-	import('@/panels/routes-panel').then((module) => ({ default: module.RoutesPanel }))
+	import('@/panels/routes-panel').then((module) => ({
+		default: module.RoutesPanel,
+	}))
 );
 const EnvironmentPanel = lazy(() =>
 	import('@/panels/environment-panel').then((module) => ({
@@ -83,10 +93,14 @@ const EnvironmentPanel = lazy(() =>
 	}))
 );
 const ZustandPanel = lazy(() =>
-	import('@/panels/zustand-panel').then((module) => ({ default: module.ZustandPanel }))
+	import('@/panels/zustand-panel').then((module) => ({
+		default: module.ZustandPanel,
+	}))
 );
 const RestorePanel = lazy(() =>
-	import('@/panels/restore-panel').then((module) => ({ default: module.RestorePanel }))
+	import('@/panels/restore-panel').then((module) => ({
+		default: module.RestorePanel,
+	}))
 );
 const ScenariosPanel = lazy(() =>
 	import('@/panels/scenarios-panel').then((module) => ({
@@ -172,7 +186,10 @@ const TOOL_PANELS: Record<ToolId, LazyExoticComponent<ComponentType>> = {
 	diagnostics: DiagnosticsPanel,
 };
 
-const SIMULATOR_PANELS: Record<SimulatorToolId, LazyExoticComponent<ComponentType>> = {
+const SIMULATOR_PANELS: Record<
+	SimulatorToolId,
+	LazyExoticComponent<ComponentType>
+> = {
 	fleet: FleetPanel,
 	actions: AppActionsPanel,
 	slimming: SlimmingPanel,
@@ -192,12 +209,23 @@ function routeFromHash(): WorkspaceRoute {
 		return { workspace, connectedTool: panel, simulatorTool: 'fleet' };
 	}
 	if (isToolId(hash)) {
-		return { workspace: 'connected', connectedTool: hash, simulatorTool: 'fleet' };
+		return {
+			workspace: 'connected',
+			connectedTool: hash,
+			simulatorTool: 'fleet',
+		};
 	}
-	return { workspace: 'simulator', simulatorTool: 'fleet', connectedTool: 'network' };
+	return {
+		workspace: 'simulator',
+		simulatorTool: 'fleet',
+		connectedTool: 'network',
+	};
 }
 
-function replaceHash(workspace: WorkspaceId, panel: ToolId | SimulatorToolId): void {
+function replaceHash(
+	workspace: WorkspaceId,
+	panel: ToolId | SimulatorToolId
+): void {
 	window.history.replaceState(null, '', `#${workspace}/${panel}`);
 }
 
@@ -220,10 +248,16 @@ export function App() {
 
 	useEffect(() => {
 		const successfulClearers = [
-			desktop.actionStatus.kind === 'success' ? desktop.clearActionStatus : null,
+			desktop.actionStatus.kind === 'success'
+				? desktop.clearActionStatus
+				: null,
 			recipe.actionStatus.kind === 'success' ? recipe.clearActionStatus : null,
-			simulator.actionStatus.kind === 'success' ? simulator.clearActionStatus : null,
-			slimming.actionStatus.kind === 'success' ? slimming.clearActionStatus : null,
+			simulator.actionStatus.kind === 'success'
+				? simulator.clearActionStatus
+				: null,
+			slimming.actionStatus.kind === 'success'
+				? slimming.clearActionStatus
+				: null,
 		].filter((clearer): clearer is () => void => clearer !== null);
 		if (successfulClearers.length === 0) return;
 		const timer = window.setTimeout(() => {
@@ -258,7 +292,9 @@ export function App() {
 				return;
 			}
 			const hasPlatformModifier =
-				desktop.bootstrap?.platform === 'darwin' ? event.metaKey : event.ctrlKey;
+				desktop.bootstrap?.platform === 'darwin'
+					? event.metaKey
+					: event.ctrlKey;
 			if (!hasPlatformModifier) return;
 			if (!event.shiftKey && event.key.toLowerCase() === 'b') {
 				event.preventDefault();
@@ -285,7 +321,9 @@ export function App() {
 			}
 			if (route.workspace !== 'simulator' || event.shiftKey) return;
 			const shortcut = Number(event.key);
-			const tool = simulatorTools.find((candidate) => candidate.shortcut === shortcut);
+			const tool = simulatorTools.find(
+				(candidate) => candidate.shortcut === shortcut
+			);
 			if (!tool) return;
 			event.preventDefault();
 			setRoute((current) => ({ ...current, simulatorTool: tool.id }));
@@ -298,7 +336,9 @@ export function App() {
 	const setWorkspace = (workspace: WorkspaceId) => {
 		setRoute((current) => {
 			const panel =
-				workspace === 'simulator' ? current.simulatorTool : current.connectedTool;
+				workspace === 'simulator'
+					? current.simulatorTool
+					: current.connectedTool;
 			replaceHash(workspace, panel);
 			return { ...current, workspace };
 		});
@@ -406,7 +446,8 @@ function Titlebar({
 	const shortcut = sidebarShortcut(desktop.bootstrap?.platform);
 	const latest = desktop.selectedDevice?.tools.performance.samples.at(-1);
 	const connected =
-		desktop.state?.devices.filter((device) => device.status === 'online').length ?? 0;
+		desktop.state?.devices.filter((device) => device.status === 'online')
+			.length ?? 0;
 	const booted = simulator.state.devices.filter(
 		(device) => device.state === 'booted'
 	).length;
@@ -418,12 +459,18 @@ function Titlebar({
 		'rolling-back',
 	]);
 	const activeJobs =
-		simulator.state.jobs.filter((job) => activeJobStatuses.has(job.status)).length +
-		slimming.state.jobs.filter((job) => activeJobStatuses.has(job.status)).length +
+		simulator.state.jobs.filter((job) => activeJobStatuses.has(job.status))
+			.length +
+		slimming.state.jobs.filter((job) => activeJobStatuses.has(job.status))
+			.length +
 		recipe.state.runs.filter((run) =>
-			['queued', 'needs-approval', 'resolving', 'running', 'cancelling'].includes(
-				run.status
-			)
+			[
+				'queued',
+				'needs-approval',
+				'resolving',
+				'running',
+				'cancelling',
+			].includes(run.status)
 		).length;
 
 	return (
@@ -463,7 +510,9 @@ function Titlebar({
 							metrics={simulator.state.metrics.byDevice}
 						/>
 					) : (
-						<LiveTrace samples={desktop.selectedDevice?.tools.performance.samples} />
+						<LiveTrace
+							samples={desktop.selectedDevice?.tools.performance.samples}
+						/>
 					)}
 					<div className="titlebar-metrics no-drag">
 						{workspace === 'simulator' ? (
@@ -486,14 +535,21 @@ function Titlebar({
 											disabled={simulator.state.devices.length === 0}
 											value={simulator.selectedDevice?.udid ?? ''}
 											onChange={(event) =>
-												simulator.setSelectedDeviceUdid(event.currentTarget.value)
+												simulator.setSelectedDeviceUdid(
+													event.currentTarget.value
+												)
 											}
 										>
 											{simulator.state.devices.length === 0 ? (
-												<NativeSelect.Option value="">No Simulator</NativeSelect.Option>
+												<NativeSelect.Option value="">
+													No Simulator
+												</NativeSelect.Option>
 											) : null}
 											{simulator.state.devices.map((device) => (
-												<NativeSelect.Option key={device.udid} value={device.udid}>
+												<NativeSelect.Option
+													key={device.udid}
+													value={device.udid}
+												>
 													{device.name} · {device.state}
 												</NativeSelect.Option>
 											))}
@@ -512,7 +568,9 @@ function Titlebar({
 								/>
 								<Metric
 									label="Lag"
-									value={latest ? `${latest.eventLoopLagMs.toFixed(1)} ms` : '—'}
+									value={
+										latest ? `${latest.eventLoopLagMs.toFixed(1)} ms` : '—'
+									}
 								/>
 								<Metric
 									label="Memory"
@@ -551,7 +609,9 @@ function Titlebar({
 											}
 										>
 											{!desktop.state?.devices.length ? (
-												<NativeSelect.Option value="">No device</NativeSelect.Option>
+												<NativeSelect.Option value="">
+													No device
+												</NativeSelect.Option>
 											) : null}
 											{desktop.state?.devices.map((device) => (
 												<NativeSelect.Option
@@ -586,7 +646,10 @@ function WorkspaceSwitcher({
 	setWorkspace: (workspace: WorkspaceId) => void;
 }) {
 	return (
-		<fieldset className="workspace-switcher no-drag" aria-label="Desktop workspace">
+		<fieldset
+			className="workspace-switcher no-drag"
+			aria-label="Desktop workspace"
+		>
 			<Button
 				aria-pressed={workspace === 'simulator'}
 				className={workspace === 'simulator' ? 'is-current' : ''}
@@ -609,7 +672,11 @@ function WorkspaceSwitcher({
 	);
 }
 
-function LiveTrace({ samples }: { samples: readonly PerformanceSample[] | undefined }) {
+function LiveTrace({
+	samples,
+}: {
+	samples: readonly PerformanceSample[] | undefined;
+}) {
 	const trace = samples?.slice(-TRACE_BAR_COUNT) ?? [];
 	const offset = TRACE_BAR_COUNT - trace.length;
 
@@ -630,7 +697,8 @@ function LiveTrace({ samples }: { samples: readonly PerformanceSample[] | undefi
 								height: sample
 									? Math.max(
 											TRACE_BAR_MIN_HEIGHT,
-											TRACE_BAR_MAX_HEIGHT - Math.min(12, sample.eventLoopLagMs / 4)
+											TRACE_BAR_MAX_HEIGHT -
+												Math.min(12, sample.eventLoopLagMs / 4)
 										)
 									: TRACE_BAR_MIN_HEIGHT,
 							}}
@@ -650,7 +718,9 @@ function FleetTrace({
 	metrics,
 }: {
 	devices: ReturnType<typeof useSimulatorRuntime>['state']['devices'];
-	metrics: ReturnType<typeof useSimulatorRuntime>['state']['metrics']['byDevice'];
+	metrics: ReturnType<
+		typeof useSimulatorRuntime
+	>['state']['metrics']['byDevice'];
 }) {
 	const visible = devices.slice(-TRACE_BAR_COUNT);
 	const offset = TRACE_BAR_COUNT - visible.length;
@@ -686,7 +756,9 @@ function FleetTrace({
 				})}
 			</div>
 			<span className="live-label">
-				{devices.length > 0 ? `${booted}/${devices.length} fleet live` : 'No targets'}
+				{devices.length > 0
+					? `${booted}/${devices.length} fleet live`
+					: 'No targets'}
 			</span>
 		</div>
 	);
@@ -727,7 +799,9 @@ function SimulatorSidebar({
 					<Smartphone className="h-4 w-4" />
 				</div>
 				<div className="min-w-0 flex-1">
-					<p className="device-name">{selectedDevice?.name ?? 'Simulator workspace'}</p>
+					<p className="device-name">
+						{selectedDevice?.name ?? 'Simulator workspace'}
+					</p>
 					<p className="device-meta">
 						{selectedDevice
 							? `${selectedDevice.state} · ${state.runtimes.length} runtimes`
@@ -745,7 +819,11 @@ function SimulatorSidebar({
 					<div className="space-y-0.5">
 						{coreTools.map((tool) => {
 							const Icon = tool.icon;
-							const count = simulatorCount(tool.id, state, recipe.state.recipes.length);
+							const count = simulatorCount(
+								tool.id,
+								state,
+								recipe.state.recipes.length
+							);
 							return (
 								<Button
 									{...(activeTool === tool.id
@@ -849,13 +927,18 @@ function DesktopSidebar({
 	const { bootstrap, selectedDevice, state } = useDesktopRuntime();
 	const shortcut = bootstrap?.platform === 'darwin' ? '⌘ B' : 'Ctrl B';
 	return (
-		<aside className="desktop-sidebar" aria-label="Connected app developer tools">
+		<aside
+			className="desktop-sidebar"
+			aria-label="Connected app developer tools"
+		>
 			<header className="device-summary">
 				<div className="device-icon">
 					<Cable className="h-4 w-4" />
 				</div>
 				<div className="min-w-0 flex-1">
-					<p className="device-name">{selectedDevice?.info.name ?? 'No device'}</p>
+					<p className="device-name">
+						{selectedDevice?.info.name ?? 'No device'}
+					</p>
 					<p className="device-meta">
 						{selectedDevice
 							? `${selectedDevice.info.appVersion ?? 'dev'} · ${selectedDevice.info.platform}`
@@ -863,11 +946,16 @@ function DesktopSidebar({
 					</p>
 				</div>
 				<output
-					aria-label={selectedDevice ? `Device ${selectedDevice.status}` : 'No device'}
+					aria-label={
+						selectedDevice ? `Device ${selectedDevice.status}` : 'No device'
+					}
 					className={`device-status is-${selectedDevice?.status ?? 'empty'}`}
 				/>
 			</header>
-			<nav className="desktop-sidebar-content" aria-label="Connected app tool panels">
+			<nav
+				className="desktop-sidebar-content"
+				aria-label="Connected app tool panels"
+			>
 				{toolGroups.map((group) => (
 					<section className="tool-group" key={group.label}>
 						<h2 className="tool-group-label">{group.label}</h2>
@@ -907,7 +995,9 @@ function DesktopSidebar({
 					<div className="min-w-0 flex-1 text-left">
 						<p>{state?.broker.status ?? 'Starting broker'}</p>
 						<code>
-							{state ? `${state.broker.host}:${state.broker.port}` : '127.0.0.1'}
+							{state
+								? `${state.broker.host}:${state.broker.port}`
+								: '127.0.0.1'}
 						</code>
 					</div>
 					<span
@@ -916,7 +1006,9 @@ function DesktopSidebar({
 				</button>
 				<div className="shortcut-hint">
 					<span>
-						{bootstrap?.platform === 'darwin' ? <Command className="h-3 w-3" /> : null}{' '}
+						{bootstrap?.platform === 'darwin' ? (
+							<Command className="h-3 w-3" />
+						) : null}{' '}
 						{shortcut}
 					</span>
 					<span>Toggle sidebar</span>
@@ -945,7 +1037,8 @@ function SimulatorContent({
 					<span className="connection-dot" />
 					<strong>Simulator setup needs attention</strong>
 					<span>
-						{state.capability.error ?? 'Review Xcode and native capability status.'}
+						{state.capability.error ??
+							'Review Xcode and native capability status.'}
 					</span>
 					<Settings2 className="h-3.5 w-3.5" />
 				</button>
@@ -973,8 +1066,8 @@ const ConnectedContent = memo(function ConnectedContent({
 				<>
 					{selectedDevice.status === 'offline' ? (
 						<output className="offline-banner">
-							Showing the last snapshot from an offline device. Remote actions are
-							disabled until it reconnects.
+							Showing the last snapshot from an offline device. Remote actions
+							are disabled until it reconnects.
 						</output>
 					) : null}
 					<div className="min-h-0 flex-1">
@@ -1023,7 +1116,9 @@ function DesktopLoading() {
 				<TerminalSquare className="h-5 w-5" />
 			</div>
 			<h1>Starting PUMPD Devtools</h1>
-			<p>Initializing the secure renderer bridge and local diagnostics broker.</p>
+			<p>
+				Initializing the secure renderer bridge and local diagnostics broker.
+			</p>
 		</output>
 	);
 }
@@ -1039,7 +1134,8 @@ function RuntimeBanner({ message }: { message: string }) {
 
 function WaitingForDevice() {
 	const { state } = useDesktopRuntime();
-	const brokerError = state?.broker.status === 'error' ? state.broker.error : undefined;
+	const brokerError =
+		state?.broker.status === 'error' ? state.broker.error : undefined;
 	return (
 		<div className="waiting-state">
 			<div className="waiting-icon">

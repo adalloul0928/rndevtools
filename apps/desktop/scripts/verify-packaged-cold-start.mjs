@@ -1,5 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+	existsSync,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +24,18 @@ const appPath = resolve(
 			`${packageManifest.productName}.app`
 		)
 );
-const executablePath = join(appPath, 'Contents', 'MacOS', packageManifest.productName);
-const diagnosticDirectory = join(homedir(), 'Library', 'Logs', 'DiagnosticReports');
+const executablePath = join(
+	appPath,
+	'Contents',
+	'MacOS',
+	packageManifest.productName
+);
+const diagnosticDirectory = join(
+	homedir(),
+	'Library',
+	'Logs',
+	'DiagnosticReports'
+);
 const productUserDataDirectory = join(
 	homedir(),
 	'Library',
@@ -76,10 +92,13 @@ try {
 	}
 	const liveRenderer = appProcesses().find(
 		(process_) =>
-			process_.pid === renderer.pid && process_.command.includes('--type=renderer')
+			process_.pid === renderer.pid &&
+			process_.command.includes('--type=renderer')
 	);
 	if (!liveRenderer) {
-		throw new Error('Renderer health marker disappeared during the stability window.');
+		throw new Error(
+			'Renderer health marker disappeared during the stability window.'
+		);
 	}
 } catch (error) {
 	failure = error;
@@ -126,7 +145,8 @@ async function waitForRenderer(process_, processExit, timeoutMilliseconds) {
 	while (Date.now() < deadline) {
 		const rendererProcess = appProcesses().find(
 			(candidate) =>
-				candidate.ppid === process_.pid && candidate.command.includes('--type=renderer')
+				candidate.ppid === process_.pid &&
+				candidate.command.includes('--type=renderer')
 		);
 		if (rendererProcess) {
 			return rendererProcess;
@@ -187,7 +207,8 @@ function crashReportSnapshot() {
 		readdirSync(diagnosticDirectory)
 			.filter(
 				(file) =>
-					file.startsWith(`${packageManifest.productName}-`) && file.endsWith('.ips')
+					file.startsWith(`${packageManifest.productName}-`) &&
+					file.endsWith('.ips')
 			)
 			.map((file) => [file, statSync(join(diagnosticDirectory, file)).mtimeMs])
 	);

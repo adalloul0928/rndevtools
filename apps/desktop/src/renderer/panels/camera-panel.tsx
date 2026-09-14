@@ -33,7 +33,9 @@ type FixtureKind = 'still' | 'qr' | 'video';
 
 export function CameraPanel() {
 	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
-	const fixture = selectedDevice?.tools.cameraFixture ?? { active: false as const };
+	const fixture = selectedDevice?.tools.cameraFixture ?? {
+		active: false as const,
+	};
 	const [kind, setKind] = useState<FixtureKind>('still');
 	const [label, setLabel] = useState('Desktop fixture');
 	const [errorMessage, setErrorMessage] = useState(
@@ -57,8 +59,13 @@ export function CameraPanel() {
 			}
 			const media = await inspectFixtureFile(file, kind);
 			const dataBase64 = await readBase64(file);
-			if (new TextEncoder().encode(dataBase64).byteLength > MAX_ENCODED_FIXTURE_BYTES) {
-				throw new Error('The encoded fixture exceeds the 512 KiB action envelope.');
+			if (
+				new TextEncoder().encode(dataBase64).byteLength >
+				MAX_ENCODED_FIXTURE_BYTES
+			) {
+				throw new Error(
+					'The encoded fixture exceeds the 512 KiB action envelope.'
+				);
 			}
 			await runAction(
 				'camera',
@@ -70,7 +77,9 @@ export function CameraPanel() {
 					dataBase64,
 					width: media.width,
 					height: media.height,
-					...(media.durationMs === undefined ? {} : { durationMs: media.durationMs }),
+					...(media.durationMs === undefined
+						? {}
+						: { durationMs: media.durationMs }),
 				},
 				`${kind === 'qr' ? 'QR' : kind === 'video' ? 'Video' : 'Still-image'} camera fixture applied.`
 			);
@@ -88,11 +97,18 @@ export function CameraPanel() {
 			<PanelHeader
 				actions={
 					<Button
-						isDisabled={!fixture.active || !canRunAction('camera', 'clearFixture')}
+						isDisabled={
+							!fixture.active || !canRunAction('camera', 'clearFixture')
+						}
 						size="sm"
 						variant="secondary"
 						onPress={() =>
-							void runAction('camera', 'clearFixture', {}, 'Camera fixture cleared.')
+							void runAction(
+								'camera',
+								'clearFixture',
+								{},
+								'Camera fixture cleared.'
+							)
 						}
 					>
 						<Trash2 className="h-3.5 w-3.5" /> Clear fixture
@@ -108,9 +124,9 @@ export function CameraPanel() {
 				title="Camera Fixtures"
 			/>
 			<PanelNotice title="App-scoped camera simulation." tone="info">
-				This controls only PUMPD's instrumented development camera provider. It does not
-				replace the macOS camera, Simulator system camera, or camera input in
-				third-party libraries.
+				This controls only PUMPD's instrumented development camera provider. It
+				does not replace the macOS camera, Simulator system camera, or camera
+				input in third-party libraries.
 			</PanelNotice>
 			{localError ? (
 				<PanelNotice title="Fixture could not be prepared." tone="danger">
@@ -130,7 +146,9 @@ export function CameraPanel() {
 								setLocalError(null);
 							}}
 						>
-							<NativeSelect.Option value="still">Still image</NativeSelect.Option>
+							<NativeSelect.Option value="still">
+								Still image
+							</NativeSelect.Option>
 							<NativeSelect.Option value="qr">QR image</NativeSelect.Option>
 							<NativeSelect.Option value="video">Video</NativeSelect.Option>
 							<NativeSelect.Indicator>
@@ -157,7 +175,8 @@ export function CameraPanel() {
 								)}
 							</span>
 							<h2>
-								{file?.name ?? `Choose a ${kind === 'video' ? 'video' : 'still image'}`}
+								{file?.name ??
+									`Choose a ${kind === 'video' ? 'video' : 'still image'}`}
 							</h2>
 							<p>
 								{file
@@ -185,7 +204,9 @@ export function CameraPanel() {
 							onChange={(event) => setLabel(event.currentTarget.value)}
 						/>
 						<Button
-							isDisabled={!file || isPreparing || !canRunAction('camera', 'setFixture')}
+							isDisabled={
+								!file || isPreparing || !canRunAction('camera', 'setFixture')
+							}
 							isPending={isPreparing}
 							variant="primary"
 							onPress={() => void setFixture()}
@@ -228,7 +249,9 @@ export function CameraPanel() {
 								<Input
 									aria-label="Simulated camera error"
 									value={errorMessage}
-									onChange={(event) => setErrorMessage(event.currentTarget.value)}
+									onChange={(event) =>
+										setErrorMessage(event.currentTarget.value)
+									}
 								/>
 								<Button
 									isDisabled={
@@ -266,7 +289,10 @@ export function CameraPanel() {
 						</h2>
 					</header>
 					<dl>
-						<KeyValue label="Status" value={fixture.active ? 'Active' : 'Inactive'} />
+						<KeyValue
+							label="Status"
+							value={fixture.active ? 'Active' : 'Inactive'}
+						/>
 						<KeyValue label="Kind" value={fixture.kind ?? '—'} />
 						<KeyValue label="Media type" value={fixture.mimeType ?? '—'} mono />
 						<KeyValue
@@ -279,7 +305,9 @@ export function CameraPanel() {
 						/>
 						<KeyValue
 							label="Payload"
-							value={fixture.bytes === undefined ? '—' : formatBytes(fixture.bytes)}
+							value={
+								fixture.bytes === undefined ? '—' : formatBytes(fixture.bytes)
+							}
 						/>
 						<KeyValue
 							label="Duration"
@@ -291,8 +319,8 @@ export function CameraPanel() {
 						/>
 					</dl>
 					<p>
-						The desktop receives metadata only after activation; raw fixture bytes
-						remain on the connected development client.
+						The desktop receives metadata only after activation; raw fixture
+						bytes remain on the connected development client.
 					</p>
 				</aside>
 			</div>
@@ -303,7 +331,8 @@ export function CameraPanel() {
 async function readBase64(file: File): Promise<string> {
 	return await new Promise((resolve, reject) => {
 		const reader = new FileReader();
-		reader.onerror = () => reject(new Error('The selected fixture could not be read.'));
+		reader.onerror = () =>
+			reject(new Error('The selected fixture could not be read.'));
 		reader.onload = () => {
 			const result = reader.result;
 			if (typeof result !== 'string') {
@@ -326,8 +355,12 @@ async function inspectFixtureFile(
 	kind: FixtureKind
 ): Promise<{ width: number; height: number; durationMs?: number }> {
 	if (kind !== 'video') {
-		if (!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])) {
-			throw new Error('Still and QR fixtures must be JPEG, PNG, or WebP images.');
+		if (
+			!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])
+		) {
+			throw new Error(
+				'Still and QR fixtures must be JPEG, PNG, or WebP images.'
+			);
 		}
 		const bitmap = await createImageBitmap(file);
 		try {
@@ -336,7 +369,9 @@ async function inspectFixtureFile(
 			bitmap.close();
 		}
 	}
-	if (!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])) {
+	if (
+		!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])
+	) {
 		throw new Error('Video fixtures must be MP4 or QuickTime files.');
 	}
 	const objectUrl = URL.createObjectURL(file);
@@ -344,14 +379,21 @@ async function inspectFixtureFile(
 		return await new Promise((resolve, reject) => {
 			const video = document.createElement('video');
 			video.preload = 'metadata';
-			video.onerror = () => reject(new Error('Video metadata could not be decoded.'));
+			video.onerror = () =>
+				reject(new Error('Video metadata could not be decoded.'));
 			video.onloadedmetadata = () => {
 				const durationMs = Math.round(video.duration * 1_000);
 				if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-					reject(new Error('The selected video does not report valid dimensions.'));
+					reject(
+						new Error('The selected video does not report valid dimensions.')
+					);
 					return;
 				}
-				if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 600_000) {
+				if (
+					!Number.isFinite(durationMs) ||
+					durationMs <= 0 ||
+					durationMs > 600_000
+				) {
 					reject(new Error('Choose a video between 1 ms and 10 minutes.'));
 					return;
 				}

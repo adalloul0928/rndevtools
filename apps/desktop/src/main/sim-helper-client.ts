@@ -7,7 +7,10 @@ import {
 	verifySimulatorHelper,
 } from './native-helper-trust';
 import { NativeHostResponseError } from './native-host-client';
-import { runSimulatorCommand, SimulatorCommandError } from './simulator-command-runner';
+import {
+	runSimulatorCommand,
+	SimulatorCommandError,
+} from './simulator-command-runner';
 
 const PROTOCOL_VERSION = 2;
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -27,7 +30,9 @@ const serviceIdsSchema = z.array(serviceIdSchema).max(1_000);
 const processNamesSchema = z
 	.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/))
 	.max(256);
-const udidSchema = z.string().regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
 
 function boundedCheckpointToken(value: string): string {
 	if (
@@ -66,22 +71,50 @@ type OperationBudget = Readonly<{
 	forceKillDelayMs?: number;
 }>;
 
-const operationBudgets: Readonly<Record<SimHelperOperation, OperationBudget>> = {
-	handshake: { timeoutMs: READ_TIMEOUT_MS },
-	list_simulators: { timeoutMs: READ_TIMEOUT_MS },
-	clone_simulator: { timeoutMs: 32 * MINUTE_MS, forceKillDelayMs: 21 * MINUTE_MS },
-	disk_cleanup_plan: { timeoutMs: 11 * MINUTE_MS, forceKillDelayMs: MINUTE_MS },
-	disk_cleanup: { timeoutMs: 11 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	list_profiles: { timeoutMs: READ_TIMEOUT_MS },
-	simulator_status: { timeoutMs: 12 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	preview_profile: { timeoutMs: 12 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	verify_profile: { timeoutMs: 12 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	doctor: { timeoutMs: 12 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	prepare_mutation: { timeoutMs: 31 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
-	apply_profile: { timeoutMs: 31 * MINUTE_MS, forceKillDelayMs: 31 * MINUTE_MS },
-	restore_managed: { timeoutMs: 31 * MINUTE_MS, forceKillDelayMs: 31 * MINUTE_MS },
-	undo_last: { timeoutMs: 31 * MINUTE_MS, forceKillDelayMs: 31 * MINUTE_MS },
-};
+const operationBudgets: Readonly<Record<SimHelperOperation, OperationBudget>> =
+	{
+		handshake: { timeoutMs: READ_TIMEOUT_MS },
+		list_simulators: { timeoutMs: READ_TIMEOUT_MS },
+		clone_simulator: {
+			timeoutMs: 32 * MINUTE_MS,
+			forceKillDelayMs: 21 * MINUTE_MS,
+		},
+		disk_cleanup_plan: {
+			timeoutMs: 11 * MINUTE_MS,
+			forceKillDelayMs: MINUTE_MS,
+		},
+		disk_cleanup: {
+			timeoutMs: 11 * MINUTE_MS,
+			forceKillDelayMs: 11 * MINUTE_MS,
+		},
+		list_profiles: { timeoutMs: READ_TIMEOUT_MS },
+		simulator_status: {
+			timeoutMs: 12 * MINUTE_MS,
+			forceKillDelayMs: 11 * MINUTE_MS,
+		},
+		preview_profile: {
+			timeoutMs: 12 * MINUTE_MS,
+			forceKillDelayMs: 11 * MINUTE_MS,
+		},
+		verify_profile: {
+			timeoutMs: 12 * MINUTE_MS,
+			forceKillDelayMs: 11 * MINUTE_MS,
+		},
+		doctor: { timeoutMs: 12 * MINUTE_MS, forceKillDelayMs: 11 * MINUTE_MS },
+		prepare_mutation: {
+			timeoutMs: 31 * MINUTE_MS,
+			forceKillDelayMs: 11 * MINUTE_MS,
+		},
+		apply_profile: {
+			timeoutMs: 31 * MINUTE_MS,
+			forceKillDelayMs: 31 * MINUTE_MS,
+		},
+		restore_managed: {
+			timeoutMs: 31 * MINUTE_MS,
+			forceKillDelayMs: 31 * MINUTE_MS,
+		},
+		undo_last: { timeoutMs: 31 * MINUTE_MS, forceKillDelayMs: 31 * MINUTE_MS },
+	};
 const mutationOperations = new Set<SimHelperOperation>([
 	'clone_simulator',
 	'disk_cleanup',
@@ -101,7 +134,9 @@ const helperCompatibilitySchema = z.strictObject({
 		runtimeBuild: shortTextSchema,
 		hostArchitecture: z.enum(['arm64', 'x64']),
 		helperVersion: shortTextSchema,
-		helperBuildCommit: z.string().regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
+		helperBuildCommit: z
+			.string()
+			.regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
 		catalogVersion: shortTextSchema,
 	}),
 	verifiedOperations: z
@@ -182,7 +217,9 @@ const helperDiskCleanupResultSchema = z.strictObject({
 	wasBooted: z.boolean(),
 	bootStateRestored: z.boolean(),
 });
-export type SimHelperDiskCleanupResult = z.infer<typeof helperDiskCleanupResultSchema>;
+export type SimHelperDiskCleanupResult = z.infer<
+	typeof helperDiskCleanupResultSchema
+>;
 
 const helperStatusSchema = z.strictObject({
 	device: helperDeviceSchema,
@@ -216,7 +253,11 @@ const helperVerificationSchema = z.strictObject({
 	missingDisabledServiceIds: serviceIdsSchema,
 	unexpectedDisabledServiceIds: serviceIdsSchema,
 	disabledLaunchdJobRegistrationsAbsent: z.boolean(),
-	checkedDisabledLaunchdJobRegistrationCount: z.number().int().nonnegative().max(1_000),
+	checkedDisabledLaunchdJobRegistrationCount: z
+		.number()
+		.int()
+		.nonnegative()
+		.max(1_000),
 	registeredDisabledLaunchdJobIds: serviceIdsSchema,
 	observedPreMutationProcessesAbsent: z.boolean(),
 	checkedObservedProcessNames: processNamesSchema,
@@ -417,7 +458,9 @@ const helperProfilesSchema = z.strictObject({
 		)
 		.max(100),
 	doctorCapabilities: z
-		.array(z.strictObject({ id: identifierSchema, displayName: shortTextSchema }))
+		.array(
+			z.strictObject({ id: identifierSchema, displayName: shortTextSchema })
+		)
 		.max(20),
 });
 export type SimHelperProfiles = z.infer<typeof helperProfilesSchema>;
@@ -514,7 +557,9 @@ export class SimHelperClient {
 		}
 		const manifest = verified.manifest;
 		const operations = new Set(handshake.capabilities.operations);
-		const compatibilityStates = new Set(handshake.capabilities.compatibilityStates);
+		const compatibilityStates = new Set(
+			handshake.capabilities.compatibilityStates
+		);
 		if (
 			handshake.helperVersion !== manifest.appVersion ||
 			handshake.buildCommit !== manifest.buildCommit ||
@@ -568,7 +613,11 @@ export class SimHelperClient {
 	): Promise<SimHelperDiskPlan> {
 		const exactSimulatorId = udidSchema.parse(simulatorId);
 		const plan = helperDiskPlanSchema.parse(
-			await this.#call('disk_cleanup_plan', { simulatorId: exactSimulatorId }, signal)
+			await this.#call(
+				'disk_cleanup_plan',
+				{ simulatorId: exactSimulatorId },
+				signal
+			)
 		);
 		if (plan.simulatorId.toUpperCase() !== exactSimulatorId.toUpperCase()) {
 			throw new SimHelperError(
@@ -605,7 +654,9 @@ export class SimHelperClient {
 		if (
 			result.simulatorId.toUpperCase() !== exactSimulatorId.toUpperCase() ||
 			result.categoryIds.length !== parsedCategoryIds.length ||
-			result.categoryIds.some((categoryId) => !parsedCategoryIds.includes(categoryId))
+			result.categoryIds.some(
+				(categoryId) => !parsedCategoryIds.includes(categoryId)
+			)
 		) {
 			throw new SimHelperError(
 				'response_mismatch',
@@ -616,7 +667,9 @@ export class SimHelperClient {
 	}
 
 	async listProfiles(signal?: AbortSignal): Promise<SimHelperProfiles> {
-		return helperProfilesSchema.parse(await this.#call('list_profiles', {}, signal));
+		return helperProfilesSchema.parse(
+			await this.#call('list_profiles', {}, signal)
+		);
 	}
 
 	async simulatorStatus(
@@ -653,7 +706,9 @@ export class SimHelperClient {
 		simulatorId: string,
 		profileId: string,
 		signal?: AbortSignal
-	): Promise<SimHelperVerification & { simulatorId: string; profileId: string }> {
+	): Promise<
+		SimHelperVerification & { simulatorId: string; profileId: string }
+	> {
 		return helperVerificationSchema
 			.extend({ simulatorId: udidSchema, profileId: identifierSchema })
 			.strict()
@@ -781,7 +836,9 @@ export class SimHelperClient {
 				'undo_last',
 				{
 					simulatorId: udidSchema.parse(simulatorId),
-					preparedCheckpointToken: boundedCheckpointToken(preparedCheckpointToken),
+					preparedCheckpointToken: boundedCheckpointToken(
+						preparedCheckpointToken
+					),
 					checkpointToken: boundedCheckpointToken(checkpointToken),
 					confirmation: 'UNDO_EXPERIMENTAL_MUTATION',
 					acknowledgement: acknowledgement ?? '',
@@ -799,7 +856,10 @@ export class SimHelperClient {
 		const requestId = `helper-${randomUUID()}`;
 		const input = `${JSON.stringify({ protocolVersion: PROTOCOL_VERSION, requestId, operation, payload })}\n`;
 		if (Buffer.byteLength(input, 'utf8') > MAX_REQUEST_BYTES) {
-			throw new SimHelperError('request_too_large', 'Helper request exceeds 64 KiB.');
+			throw new SimHelperError(
+				'request_too_large',
+				'Helper request exceeds 64 KiB.'
+			);
 		}
 		let helper: VerifiedSimulatorHelper;
 		try {

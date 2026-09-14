@@ -26,7 +26,9 @@ describe('Simulator Settings capability guidance', () => {
 			status: 'checking' as const,
 			unavailableGuidance: 'Install the required capability.',
 		};
-		expect(capabilityGuidance(capability, false)).toContain('installed desktop app');
+		expect(capabilityGuidance(capability, false)).toContain(
+			'installed desktop app'
+		);
 		expect(capabilityGuidance(capability, true)).toContain('still running');
 	});
 
@@ -47,7 +49,10 @@ describe('Simulator Settings capability guidance', () => {
 			operation: { kind: 'toolchain.selectXcode' },
 		});
 		expect(capabilityOnboardingAction('screen-recording')).toMatchObject({
-			operation: { kind: 'privacy.openSettings', permission: 'screen_recording' },
+			operation: {
+				kind: 'privacy.openSettings',
+				permission: 'screen_recording',
+			},
 		});
 		expect(capabilityOnboardingAction('audio-capture')).toMatchObject({
 			operation: { kind: 'privacy.openSettings', permission: 'microphone' },
@@ -61,7 +66,9 @@ describe('Simulator Settings capability guidance', () => {
 
 	it('does not call API or hardware probes ready before a persistent provider exists', () => {
 		expect(persistentCaptureProviderStatus(false, true)).toBe('unavailable');
-		expect(persistentCaptureProviderStatus(undefined, true)).toBe('unavailable');
+		expect(persistentCaptureProviderStatus(undefined, true)).toBe(
+			'unavailable'
+		);
 		expect(persistentCaptureProviderStatus(true, false)).toBe('unavailable');
 		expect(persistentCaptureProviderStatus(true, true)).toBe('available');
 	});

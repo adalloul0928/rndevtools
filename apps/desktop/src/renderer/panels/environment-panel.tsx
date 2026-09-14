@@ -31,7 +31,13 @@ export function EnvironmentPanel() {
 		return entries.filter(
 			(entry) =>
 				!needle ||
-				[entry.section, entry.key, entry.valueText, entry.status, entry.description]
+				[
+					entry.section,
+					entry.key,
+					entry.valueText,
+					entry.status,
+					entry.description,
+				]
 					.join(' ')
 					.toLowerCase()
 					.includes(needle)
@@ -40,10 +46,12 @@ export function EnvironmentPanel() {
 	const visibleEntries = filtered.slice(0, MAX_RENDERED_ENVIRONMENT_VALUES);
 	const sections = useMemo(
 		() =>
-			[...new Set(visibleEntries.map((entry) => entry.section))].map((title) => ({
-				title,
-				entries: visibleEntries.filter((entry) => entry.section === title),
-			})),
+			[...new Set(visibleEntries.map((entry) => entry.section))].map(
+				(title) => ({
+					title,
+					entries: visibleEntries.filter((entry) => entry.section === title),
+				})
+			),
 		[visibleEntries]
 	);
 	const checked = entries.filter((entry) => entry.status !== 'unchecked');
@@ -90,8 +98,8 @@ export function EnvironmentPanel() {
 			</Toolbar>
 			{filtered.length > visibleEntries.length ? (
 				<PanelNotice title="Environment rendering is bounded." tone="info">
-					Search covers all {filtered.length} matching values; the grid renders the
-					first {MAX_RENDERED_ENVIRONMENT_VALUES}.
+					Search covers all {filtered.length} matching values; the grid renders
+					the first {MAX_RENDERED_ENVIRONMENT_VALUES}.
 				</PanelNotice>
 			) : null}
 			<div className="panel-scroll p-5">
@@ -122,8 +130,9 @@ export function EnvironmentPanel() {
 									: `${failures} value${failures === 1 ? '' : 's'} need review`}
 						</h2>
 						<p className="mb-0 mt-2 max-w-xl text-xs leading-5 text-(--muted)">
-							Validation is performed against declared requirements. Secrets are not
-							auto-discovered; only explicitly supplied, client-safe values appear here.
+							Validation is performed against declared requirements. Secrets are
+							not auto-discovered; only explicitly supplied, client-safe values
+							appear here.
 						</p>
 					</div>
 				</div>

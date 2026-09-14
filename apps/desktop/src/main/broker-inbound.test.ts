@@ -23,7 +23,10 @@ describe('broker inbound boundary', () => {
 	it('normalizes complete and fragmented ws frames through the wire schema', () => {
 		const encoded = Buffer.from(JSON.stringify(helloMessage()));
 		const splitAt = Math.floor(encoded.byteLength / 2);
-		const fragmented = [encoded.subarray(0, splitAt), encoded.subarray(splitAt)];
+		const fragmented = [
+			encoded.subarray(0, splitAt),
+			encoded.subarray(splitAt),
+		];
 
 		expect(parseBrokerDeviceMessage(encoded)).toMatchObject({
 			type: 'hello',

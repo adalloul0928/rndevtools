@@ -48,7 +48,9 @@ function boundedString(
 	value: unknown,
 	maxLength = MAX_TEXT_LENGTH
 ): string | undefined {
-	return typeof value === 'string' && value.length <= maxLength ? value : undefined;
+	return typeof value === 'string' && value.length <= maxLength
+		? value
+		: undefined;
 }
 
 function validString(value: unknown, pattern: RegExp): string | undefined {
@@ -142,7 +144,10 @@ export function parseSimctlInventory(value: unknown): SimctlInventory {
 			!Array.isArray(rawDevices)
 		)
 			continue;
-		for (const value of rawDevices.slice(0, MAX_DEVICE_ITEMS - devices.length)) {
+		for (const value of rawDevices.slice(
+			0,
+			MAX_DEVICE_ITEMS - devices.length
+		)) {
 			const record = dataRecord(value);
 			if (!record) continue;
 			const udid = validString(record.udid, UDID_PATTERN);
@@ -178,8 +183,12 @@ export function parseSimctlInventory(value: unknown): SimctlInventory {
 	});
 
 	return {
-		runtimes: runtimes.sort((left, right) => left.name.localeCompare(right.name)),
-		deviceTypes: deviceTypes.sort((left, right) => left.name.localeCompare(right.name)),
+		runtimes: runtimes.sort((left, right) =>
+			left.name.localeCompare(right.name)
+		),
+		deviceTypes: deviceTypes.sort((left, right) =>
+			left.name.localeCompare(right.name)
+		),
 		devices: devices.sort(
 			(left, right) =>
 				Number(right.state === 'booted') - Number(left.state === 'booted') ||
@@ -222,7 +231,9 @@ export function parseSimctlApps(value: unknown): SimulatorApp[] {
 	);
 }
 
-function platformName(platform: NodeJS.Platform): SimulatorCapability['platform'] {
+function platformName(
+	platform: NodeJS.Platform
+): SimulatorCapability['platform'] {
 	if (platform === 'darwin' || platform === 'win32' || platform === 'linux') {
 		return platform;
 	}
@@ -238,11 +249,14 @@ function hostArchitecture(
 
 export function developerDirectoryLabel(output: string): string | undefined {
 	const selected = output.trim();
-	if (!selected.startsWith('/') || selected.length > MAX_TEXT_LENGTH) return undefined;
+	if (!selected.startsWith('/') || selected.length > MAX_TEXT_LENGTH)
+		return undefined;
 	const application = selected
 		.split('/')
 		.find((component) => component.toLowerCase().endsWith('.app'));
-	return application ? `${application} (selected)` : 'Command Line Tools (selected)';
+	return application
+		? `${application} (selected)`
+		: 'Command Line Tools (selected)';
 }
 
 export function parseXcodeVersion(output: string): {
@@ -273,7 +287,9 @@ function features(enabled: boolean): SimulatorCapability['features'] {
 	};
 }
 
-export function parseSimctlFeatures(helpText: string): SimulatorCapability['features'] {
+export function parseSimctlFeatures(
+	helpText: string
+): SimulatorCapability['features'] {
 	const commands = new Set(
 		[...helpText.matchAll(/^\s+([a-z_]+)\s+/gm)]
 			.map((match) => match[1])
@@ -330,7 +346,8 @@ export class SimctlProvider {
 
 	async discover(): Promise<SimulatorCapability> {
 		const platform = platformName(this.#platform);
-		let discoveredLicenseStatus: SimulatorCapability['licenseStatus'] = 'unknown';
+		let discoveredLicenseStatus: SimulatorCapability['licenseStatus'] =
+			'unknown';
 		if (this.#platform !== 'darwin') {
 			return {
 				status: 'unavailable',
@@ -350,24 +367,25 @@ export class SimctlProvider {
 			if (!located.stdout.trim().startsWith('/')) {
 				throw new Error('xcrun returned an invalid simctl location.');
 			}
-			const [version, help, selectedDirectory, license] = await Promise.allSettled([
-				this.#run(XCODEBUILD_PATH, ['-version'], {
-					timeoutMs: 10_000,
-					maxOutputBytes: 64 * 1024,
-				}),
-				this.#run(XCRUN_PATH, ['simctl', 'help'], {
-					timeoutMs: 10_000,
-					maxOutputBytes: 256 * 1024,
-				}),
-				this.#run(XCODE_SELECT_PATH, ['-p'], {
-					timeoutMs: 10_000,
-					maxOutputBytes: 64 * 1024,
-				}),
-				this.#run(XCODEBUILD_PATH, ['-checkFirstLaunchStatus'], {
-					timeoutMs: 30_000,
-					maxOutputBytes: 64 * 1024,
-				}),
-			]);
+			const [version, help, selectedDirectory, license] =
+				await Promise.allSettled([
+					this.#run(XCODEBUILD_PATH, ['-version'], {
+						timeoutMs: 10_000,
+						maxOutputBytes: 64 * 1024,
+					}),
+					this.#run(XCRUN_PATH, ['simctl', 'help'], {
+						timeoutMs: 10_000,
+						maxOutputBytes: 256 * 1024,
+					}),
+					this.#run(XCODE_SELECT_PATH, ['-p'], {
+						timeoutMs: 10_000,
+						maxOutputBytes: 64 * 1024,
+					}),
+					this.#run(XCODEBUILD_PATH, ['-checkFirstLaunchStatus'], {
+						timeoutMs: 30_000,
+						maxOutputBytes: 64 * 1024,
+					}),
+				]);
 			discoveredLicenseStatus =
 				license.status === 'fulfilled'
 					? 'accepted'

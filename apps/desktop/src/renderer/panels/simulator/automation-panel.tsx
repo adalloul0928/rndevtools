@@ -42,7 +42,10 @@ import {
 	useState,
 } from 'react';
 import { RecipeStepEditor } from '@/components/recipe-step-editor';
-import { DenseVirtualList, SimulatorPanelHeader } from '@/components/simulator-ui';
+import {
+	DenseVirtualList,
+	SimulatorPanelHeader,
+} from '@/components/simulator-ui';
 import {
 	ConfirmAction,
 	CopyButton,
@@ -129,13 +132,18 @@ export function AutomationPanel() {
 	const [targetUdids, setTargetUdids] = useState<string[]>([]);
 	const [concurrency, setConcurrency] = useState(2);
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-	const [evidenceLoad, setEvidenceLoad] = useState<EvidenceLoadState>({ kind: 'idle' });
+	const [evidenceLoad, setEvidenceLoad] = useState<EvidenceLoadState>({
+		kind: 'idle',
+	});
 	const [localError, setLocalError] = useState<string | null>(null);
 	const definitionRequestRef = useRef(0);
 	const evidenceRequestRef = useRef(0);
 
 	const persistedById = useMemo(
-		() => new Map(recipeRuntime.state.recipes.map((summary) => [summary.id, summary])),
+		() =>
+			new Map(
+				recipeRuntime.state.recipes.map((summary) => [summary.id, summary])
+			),
 		[recipeRuntime.state.recipes]
 	);
 	const recipeSummaries = useMemo(() => {
@@ -167,7 +175,8 @@ export function AutomationPanel() {
 		);
 	}, [query, recipeSummaries]);
 	const selectedSummary = selectedRecipeId
-		? (recipeSummaries.find((summary) => summary.id === selectedRecipeId) ?? null)
+		? (recipeSummaries.find((summary) => summary.id === selectedRecipeId) ??
+			null)
 		: null;
 	const selectedEntry = selectedRecipeId ? drafts[selectedRecipeId] : undefined;
 	const draft = selectedEntry?.recipe ?? null;
@@ -180,8 +189,11 @@ export function AutomationPanel() {
 		[draft]
 	);
 	const activeSteps = draft?.[selectedLane] ?? [];
-	const selectedStepIndex = activeSteps.findIndex((step) => step.id === selectedStepId);
-	const selectedStep = selectedStepIndex >= 0 ? activeSteps[selectedStepIndex] : null;
+	const selectedStepIndex = activeSteps.findIndex(
+		(step) => step.id === selectedStepId
+	);
+	const selectedStep =
+		selectedStepIndex >= 0 ? activeSteps[selectedStepIndex] : null;
 	const totalStepCount = draft ? draft.steps.length + draft.teardown.length : 0;
 	const runsForRecipe = useMemo(
 		() =>
@@ -191,10 +203,17 @@ export function AutomationPanel() {
 		[recipeRuntime.state.runs, selectedRecipeId]
 	);
 	const selectedRun =
-		runsForRecipe.find((run) => run.id === selectedRunId) ?? runsForRecipe[0] ?? null;
-	const activeRun = runsForRecipe.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
+		runsForRecipe.find((run) => run.id === selectedRunId) ??
+		runsForRecipe[0] ??
+		null;
+	const activeRun = runsForRecipe.find((run) =>
+		ACTIVE_RUN_STATUSES.has(run.status)
+	);
 	const activeRunUnknownSlimmingStatuses = activeRun
-		? unknownSlimmingStatusesForRun(activeRun, slimmingRuntime.state.statusBySimulator)
+		? unknownSlimmingStatusesForRun(
+				activeRun,
+				slimmingRuntime.state.statusBySimulator
+			)
 		: [];
 	const canSave = Boolean(
 		draft &&
@@ -221,7 +240,11 @@ export function AutomationPanel() {
 	}, [recipeSummaries, selectedRecipeId]);
 
 	useEffect(() => {
-		if (!selectedRecipeId || selectedEntry || !persistedById.has(selectedRecipeId))
+		if (
+			!selectedRecipeId ||
+			selectedEntry ||
+			!persistedById.has(selectedRecipeId)
+		)
 			return;
 		const requestId = definitionRequestRef.current + 1;
 		definitionRequestRef.current = requestId;
@@ -315,7 +338,10 @@ export function AutomationPanel() {
 	}, [recipeRuntime, selectedRun, selectedRunId]);
 
 	const updateDraft = useCallback((recipe: RecipeDefinition) => {
-		setDrafts((current) => ({ ...current, [recipe.id]: { recipe, dirty: true } }));
+		setDrafts((current) => ({
+			...current,
+			[recipe.id]: { recipe, dirty: true },
+		}));
 	}, []);
 
 	const saveDraft = async () => {
@@ -364,7 +390,10 @@ export function AutomationPanel() {
 		if (!draft) return;
 		const id = `${draft.id.slice(0, 210)}-copy-${crypto.randomUUID().slice(0, 8)}`;
 		const copy = duplicateRecipeDefinition(draft, { id, now: Date.now() });
-		setDrafts((current) => ({ ...current, [id]: { recipe: copy, dirty: true } }));
+		setDrafts((current) => ({
+			...current,
+			[id]: { recipe: copy, dirty: true },
+		}));
 		setSelectedRecipeId(id);
 		setSelectedLane('steps');
 		setSelectedStepId(copy.steps[0]?.id ?? null);
@@ -387,14 +416,17 @@ export function AutomationPanel() {
 			return next;
 		});
 		setSelectedRecipeId(
-			recipeSummaries.find((summary) => summary.id !== selectedRecipeId)?.id ?? null
+			recipeSummaries.find((summary) => summary.id !== selectedRecipeId)?.id ??
+				null
 		);
 		setLocalError(null);
 	};
 
 	const addStep = () => {
 		if (!draft || totalStepCount >= MAX_RECIPE_STEP_COUNT) return;
-		const usedIds = new Set([...draft.steps, ...draft.teardown].map((step) => step.id));
+		const usedIds = new Set(
+			[...draft.steps, ...draft.teardown].map((step) => step.id)
+		);
 		const prefix = `step-${paletteKind.replace('.', '-')}`;
 		let index = totalStepCount + 1;
 		let id = `${prefix}-${index}`;
@@ -417,9 +449,13 @@ export function AutomationPanel() {
 
 	const removeSelectedStep = () => {
 		if (!draft || selectedStepIndex < 0) return;
-		const next = draft[selectedLane].filter((_, index) => index !== selectedStepIndex);
+		const next = draft[selectedLane].filter(
+			(_, index) => index !== selectedStepIndex
+		);
 		updateDraft({ ...draft, [selectedLane]: next });
-		setSelectedStepId(next[Math.min(selectedStepIndex, next.length - 1)]?.id ?? null);
+		setSelectedStepId(
+			next[Math.min(selectedStepIndex, next.length - 1)]?.id ?? null
+		);
 	};
 
 	const moveSelectedStep = (direction: -1 | 1) => {
@@ -438,9 +474,12 @@ export function AutomationPanel() {
 	const toggleTarget = (udid: string) => {
 		setLocalError(null);
 		setTargetUdids((current) => {
-			if (current.includes(udid)) return current.filter((value) => value !== udid);
+			if (current.includes(udid))
+				return current.filter((value) => value !== udid);
 			if (current.length >= MAX_RECIPE_TARGET_COUNT) {
-				setLocalError(`Select at most ${MAX_RECIPE_TARGET_COUNT} exact targets.`);
+				setLocalError(
+					`Select at most ${MAX_RECIPE_TARGET_COUNT} exact targets.`
+				);
 				return current;
 			}
 			return [...current, udid];
@@ -465,7 +504,10 @@ export function AutomationPanel() {
 		}
 	};
 
-	const approvePendingRun = async (run: RecipeRun, typedAcknowledgement?: string) => {
+	const approvePendingRun = async (
+		run: RecipeRun,
+		typedAcknowledgement?: string
+	) => {
 		setLocalError(null);
 		const receipt = await acknowledgeThenApproveRecipe({
 			run,
@@ -485,7 +527,9 @@ export function AutomationPanel() {
 	};
 
 	const importRecipe = async () => {
-		const receipt = await recipeRuntime.runFileOperation({ kind: 'recipe.import' });
+		const receipt = await recipeRuntime.runFileOperation({
+			kind: 'recipe.import',
+		});
 		if (receipt.completed && receipt.recipe) {
 			setSelectedRecipeId(receipt.recipe.id);
 			setView('definition');
@@ -498,7 +542,9 @@ export function AutomationPanel() {
 				actions={
 					<Button
 						aria-label="Refresh recipe catalog"
-						isDisabled={!recipeRuntime.isBridgeAvailable || recipeRuntime.isLoading}
+						isDisabled={
+							!recipeRuntime.isBridgeAvailable || recipeRuntime.isLoading
+						}
 						isIconOnly
 						size="sm"
 						variant="secondary"
@@ -516,8 +562,8 @@ export function AutomationPanel() {
 			/>
 			{!recipeRuntime.isBridgeAvailable ? (
 				<PanelNotice title="Recipe provider unavailable." tone="warning">
-					Update and reopen the installed desktop app. The renderer cannot save, import,
-					export, or run recipes without the narrow Recipe bridge.
+					Update and reopen the installed desktop app. The renderer cannot save,
+					import, export, or run recipes without the narrow Recipe bridge.
 				</PanelNotice>
 			) : null}
 			{recipeRuntime.runtimeError ? (
@@ -537,7 +583,9 @@ export function AutomationPanel() {
 					value={query}
 					onChange={setQuery}
 				/>
-				<span className="sim-toolbar-meta">{visibleRecipes.length} recipes</span>
+				<span className="sim-toolbar-meta">
+					{visibleRecipes.length} recipes
+				</span>
 				<div className="sim-toolbar-spacer" />
 				<Button size="sm" variant="secondary" onPress={createRecipe}>
 					<Plus className="h-3.5 w-3.5" /> New recipe
@@ -600,7 +648,8 @@ export function AutomationPanel() {
 				<section className="sim-scenario-detail recipe-editor-pane panel-scroll">
 					{definitionLoad.kind === 'loading' && !draft ? (
 						<div className="recipe-loading-state" role="status">
-							<LoaderCircle className="h-4 w-4 animate-spin" /> Loading definition…
+							<LoaderCircle className="h-4 w-4 animate-spin" /> Loading
+							definition…
 						</div>
 					) : definitionLoad.kind === 'error' && !draft ? (
 						<EmptyPanel
@@ -629,7 +678,9 @@ export function AutomationPanel() {
 											<Button
 												aria-pressed={selectedLane === 'steps'}
 												size="sm"
-												variant={selectedLane === 'steps' ? 'secondary' : 'ghost'}
+												variant={
+													selectedLane === 'steps' ? 'secondary' : 'ghost'
+												}
 												onPress={() => setSelectedLane('steps')}
 											>
 												<Play className="h-3 w-3" /> Run · {draft.steps.length}
@@ -637,7 +688,9 @@ export function AutomationPanel() {
 											<Button
 												aria-pressed={selectedLane === 'teardown'}
 												size="sm"
-												variant={selectedLane === 'teardown' ? 'secondary' : 'ghost'}
+												variant={
+													selectedLane === 'teardown' ? 'secondary' : 'ghost'
+												}
 												onPress={() => setSelectedLane('teardown')}
 											>
 												<RotateCcw className="h-3 w-3" /> Cleanup ·{' '}
@@ -650,11 +703,16 @@ export function AutomationPanel() {
 													aria-label="Step type"
 													value={paletteKind}
 													onChange={(event) =>
-														setPaletteKind(event.currentTarget.value as RecipeStepKind)
+														setPaletteKind(
+															event.currentTarget.value as RecipeStepKind
+														)
 													}
 												>
 													{RECIPE_STEP_PALETTE.map((item) => (
-														<NativeSelect.Option key={item.kind} value={item.kind}>
+														<NativeSelect.Option
+															key={item.kind}
+															value={item.kind}
+														>
 															{item.label}
 														</NativeSelect.Option>
 													))}
@@ -703,7 +761,9 @@ export function AutomationPanel() {
 												</Button>
 												<Button
 													aria-label="Move step down"
-													isDisabled={selectedStepIndex >= activeSteps.length - 1}
+													isDisabled={
+														selectedStepIndex >= activeSteps.length - 1
+													}
 													isIconOnly
 													size="sm"
 													variant="ghost"
@@ -711,7 +771,11 @@ export function AutomationPanel() {
 												>
 													<ArrowDown className="h-3.5 w-3.5" />
 												</Button>
-												<Button size="sm" variant="danger" onPress={removeSelectedStep}>
+												<Button
+													size="sm"
+													variant="danger"
+													onPress={removeSelectedStep}
+												>
 													<Trash2 className="h-3 w-3" /> Remove step
 												</Button>
 											</div>
@@ -764,7 +828,9 @@ export function AutomationPanel() {
 					<aside className="sim-automation-inspector recipe-run-inspector panel-scroll">
 						<RunInspector
 							activeRun={activeRun}
-							activeRunUnknownSlimmingStatuses={activeRunUnknownSlimmingStatuses}
+							activeRunUnknownSlimmingStatuses={
+								activeRunUnknownSlimmingStatuses
+							}
 							approval={approval}
 							canRun={canRun}
 							concurrency={concurrency}
@@ -832,7 +898,13 @@ export function AutomationPanel() {
 	);
 }
 
-function RecipeRow({ summary, dirty }: { summary: RecipeSummary; dirty: boolean }) {
+function RecipeRow({
+	summary,
+	dirty,
+}: {
+	summary: RecipeSummary;
+	dirty: boolean;
+}) {
 	return (
 		<>
 			<div className="sim-list-leading">
@@ -841,13 +913,19 @@ function RecipeRow({ summary, dirty }: { summary: RecipeSummary; dirty: boolean 
 			<div className="sim-list-copy">
 				<strong>{summary.name}</strong>
 				<span>
-					r{summary.revision} · {summary.stepCount + summary.teardownStepCount} steps
+					r{summary.revision} · {summary.stepCount + summary.teardownStepCount}{' '}
+					steps
 				</span>
 			</div>
 			<div className="recipe-row-state">
-				{dirty ? <span className="recipe-dirty-dot" title="Unsaved changes" /> : null}
+				{dirty ? (
+					<span className="recipe-dirty-dot" title="Unsaved changes" />
+				) : null}
 				{summary.requiresMutationApproval ? (
-					<ShieldAlert aria-label="Native approval required" className="h-3 w-3" />
+					<ShieldAlert
+						aria-label="Native approval required"
+						className="h-3 w-3"
+					/>
 				) : null}
 			</div>
 		</>
@@ -875,7 +953,9 @@ function RecipeEditorHeader({
 				<Input
 					aria-label="Recipe name"
 					value={draft.name}
-					onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })}
+					onChange={(event) =>
+						onChange({ ...draft, name: event.currentTarget.value })
+					}
 				/>
 				<TextArea
 					aria-label="Recipe description"
@@ -896,7 +976,9 @@ function RecipeEditorHeader({
 				<code>{draft.id}</code>
 				<span>revision {draft.revision}</span>
 				{dirty ? <span className="is-dirty">Unsaved</span> : <span>Saved</span>}
-				{issues > 0 ? <span className="is-invalid">{issues} issues</span> : null}
+				{issues > 0 ? (
+					<span className="is-invalid">{issues} issues</span>
+				) : null}
 			</div>
 			<fieldset
 				className="recipe-segmented-control recipe-view-control"
@@ -938,7 +1020,10 @@ function ExecutionRail({
 }) {
 	if (steps.length === 0) return null;
 	return (
-		<ol className={`recipe-execution-rail is-${lane}`} aria-label={`${lane} steps`}>
+		<ol
+			className={`recipe-execution-rail is-${lane}`}
+			aria-label={`${lane} steps`}
+		>
 			{steps.map((step, index) => {
 				const stepIssues = issuesForPath(issues, `${lane}.${index}`);
 				const Icon = iconForStep(step.kind);
@@ -986,7 +1071,8 @@ function RecipeValidationSummary({
 			<header>
 				<AlertTriangle className="h-3.5 w-3.5" />
 				<strong>
-					Resolve {issues.length} schema {issues.length === 1 ? 'issue' : 'issues'}
+					Resolve {issues.length} schema{' '}
+					{issues.length === 1 ? 'issue' : 'issues'}
 				</strong>
 			</header>
 			<ul>
@@ -1049,8 +1135,8 @@ function RunInspector({
 			<header>
 				<h2>Run settings</h2>
 				<InfoPopover label="Running recipes">
-					Review the selected simulators and steps before running. The desktop app
-					confirms sensitive actions and saves the results locally.
+					Review the selected simulators and steps before running. The desktop
+					app confirms sensitive actions and saves the results locally.
 				</InfoPopover>
 			</header>
 			<section className="recipe-run-section">
@@ -1060,7 +1146,10 @@ function RunInspector({
 						{targetUdids.length} / {MAX_RECIPE_TARGET_COUNT}
 					</code>
 				</div>
-				<fieldset className="recipe-target-list" aria-label="Recipe target Simulators">
+				<fieldset
+					className="recipe-target-list"
+					aria-label="Recipe target Simulators"
+				>
 					{devices.length === 0 ? (
 						<p>No Simulator targets discovered.</p>
 					) : (
@@ -1096,9 +1185,13 @@ function RunInspector({
 						min={1}
 						type="number"
 						value={String(concurrency)}
-						onChange={(event) => onConcurrencyChange(Number(event.currentTarget.value))}
+						onChange={(event) =>
+							onConcurrencyChange(Number(event.currentTarget.value))
+						}
 					/>
-					<small>1–{MAX_RECIPE_CONCURRENCY}; cleanup remains target-scoped.</small>
+					<small>
+						1–{MAX_RECIPE_CONCURRENCY}; cleanup remains target-scoped.
+					</small>
 				</div>
 				{concurrencyValid ? null : (
 					<p className="sim-field-error" role="alert">
@@ -1125,7 +1218,9 @@ function RunInspector({
 				>
 					<Download className="h-3.5 w-3.5" /> Export recipe
 				</Button>
-				{!summary ? <p>Save this definition before running or exporting it.</p> : null}
+				{!summary ? (
+					<p>Save this definition before running or exporting it.</p>
+				) : null}
 				{isDirty && summary ? (
 					<p>Save the current revision before running it.</p>
 				) : null}
@@ -1136,7 +1231,11 @@ function RunInspector({
 				onApprove={onApprove}
 				onCancel={onCancel}
 			/>
-			<RunHistory runs={runs} selectedRun={selectedRun} onSelect={onSelectRun} />
+			<RunHistory
+				runs={runs}
+				selectedRun={selectedRun}
+				onSelect={onSelectRun}
+			/>
 		</>
 	);
 }
@@ -1154,18 +1253,23 @@ function ApprovalPreview({
 			<div className="recipe-approval-preview">
 				<strong>No sensitive steps detected</strong>
 				<InfoPopover label="Recipe review">
-					The desktop checks the full recipe again before running. Steps that erase
-					data, change permissions, or apply SimSlim need additional review.
+					The desktop checks the full recipe again before running. Steps that
+					erase data, change permissions, or apply SimSlim need additional
+					review.
 				</InfoPopover>
 			</div>
 		);
 	return (
-		<section className={`recipe-approval-preview ${hasFindings ? 'is-required' : ''}`}>
+		<section
+			className={`recipe-approval-preview ${hasFindings ? 'is-required' : ''}`}
+		>
 			<header>
 				<ShieldAlert className="h-3.5 w-3.5" />
 				<div>
 					<span>Approval preview</span>
-					<strong>{hasFindings ? 'Native review required' : 'Read-only review'}</strong>
+					<strong>
+						{hasFindings ? 'Native review required' : 'Read-only review'}
+					</strong>
 				</div>
 			</header>
 			<div className="recipe-approval-counts">
@@ -1191,11 +1295,14 @@ function ApprovalPreview({
 					))}
 				</ul>
 			) : (
-				<p>No destructive, location/push/camera, or SimSlim mutation step detected.</p>
+				<p>
+					No destructive, location/push/camera, or SimSlim mutation step
+					detected.
+				</p>
 			)}
 			<p>
-				Run always asks main to evaluate the exact normalized request. Privacy fixtures
-				never grant or reset OS permissions.
+				Run always asks main to evaluate the exact normalized request. Privacy
+				fixtures never grant or reset OS permissions.
 			</p>
 		</section>
 	);
@@ -1223,7 +1330,10 @@ function ActiveRunCard({
 				<p>No run is active for this recipe.</p>
 			</section>
 		);
-	const completed = run.targets.reduce((sum, target) => sum + target.completedSteps, 0);
+	const completed = run.targets.reduce(
+		(sum, target) => sum + target.completedSteps,
+		0
+	);
 	const total = run.targets.reduce((sum, target) => sum + target.totalSteps, 0);
 	const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
 	const needsAttention = run.targets.some((target) =>
@@ -1264,8 +1374,8 @@ function ActiveRunCard({
 						<small>{target.message}</small>
 						{target.cleanup.status !== 'not-started' ? (
 							<em>
-								cleanup {target.cleanup.status} · {target.cleanup.completedSteps}/
-								{target.cleanup.totalSteps}
+								cleanup {target.cleanup.status} ·{' '}
+								{target.cleanup.completedSteps}/{target.cleanup.totalSteps}
 							</em>
 						) : null}
 					</div>
@@ -1273,8 +1383,8 @@ function ActiveRunCard({
 			</div>
 			{needsAttention ? (
 				<p className="recipe-needs-attention">
-					<AlertTriangle className="h-3 w-3" /> Cleanup needs attention. Inspect target
-					evidence before retrying.
+					<AlertTriangle className="h-3 w-3" /> Cleanup needs attention. Inspect
+					target evidence before retrying.
 				</p>
 			) : null}
 			{run.status === 'needs-approval' ? (
@@ -1310,8 +1420,9 @@ function RecipePendingApprovalControls({
 	return (
 		<div className="recipe-pending-approval-actions">
 			<p>
-				Approve reuses action <code>{run.actionId}</code>, recipe, target order, and
-				concurrency exactly as submitted. Native confirmation remains mandatory.
+				Approve reuses action <code>{run.actionId}</code>, recipe, target order,
+				and concurrency exactly as submitted. Native confirmation remains
+				mandatory.
 			</p>
 			{unknownSlimmingStatuses.length === 0 ? (
 				<Button
@@ -1352,9 +1463,9 @@ function RecipePendingApprovalControls({
 								<AlertDialog.Body>
 									<div className="sim-ack-dialog-body">
 										<p>
-											The signed helper will freshly verify and persist only these exact
-											current tuple keys. The recipe and pending request never store
-											this acknowledgement.
+											The signed helper will freshly verify and persist only
+											these exact current tuple keys. The recipe and pending
+											request never store this acknowledgement.
 										</p>
 										<div className="sim-tuple-list">
 											{unknownSlimmingStatuses.map((status) => (
@@ -1368,7 +1479,8 @@ function RecipePendingApprovalControls({
 										</div>
 										<div className="sim-ack-input">
 											<span>
-												Type <code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code>{' '}
+												Type{' '}
+												<code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code>{' '}
 												exactly
 											</span>
 											<Input
@@ -1391,7 +1503,8 @@ function RecipePendingApprovalControls({
 									</Button>
 									<Button
 										isDisabled={
-											typedAcknowledgement !== SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT
+											typedAcknowledgement !==
+											SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT
 										}
 										size="sm"
 										slot="close"
@@ -1469,7 +1582,8 @@ function EvidenceView({
 	if (evidenceLoad.kind === 'loading' || evidenceLoad.kind === 'idle')
 		return (
 			<div className="recipe-loading-state" role="status">
-				<LoaderCircle className="h-4 w-4 animate-spin" /> Loading evidence manifest…
+				<LoaderCircle className="h-4 w-4 animate-spin" /> Loading evidence
+				manifest…
 			</div>
 		);
 	if (evidenceLoad.kind === 'error' || evidenceLoad.kind === 'missing')
@@ -1497,7 +1611,11 @@ function EvidenceView({
 						{evidence.targets.length} targets
 					</p>
 				</div>
-				<Button size="sm" variant="secondary" onPress={() => onExport(evidence.id)}>
+				<Button
+					size="sm"
+					variant="secondary"
+					onPress={() => onExport(evidence.id)}
+				>
 					<Download className="h-3.5 w-3.5" /> Export bundle
 				</Button>
 			</header>
@@ -1537,7 +1655,9 @@ function EvidenceView({
 						`${event.sequence}:${event.targetUdid ?? 'host'}:${event.stepId ?? 'run'}`
 					}
 					rowHeight={64}
-					textValue={(event) => `${event.phase} ${event.status} ${event.message}`}
+					textValue={(event) =>
+						`${event.phase} ${event.status} ${event.message}`
+					}
 					onSelect={() => {}}
 					renderItem={(event) => (
 						<>
@@ -1559,7 +1679,11 @@ function EvidenceView({
 				/>
 			</section>
 			<div className="recipe-evidence-artifacts">
-				<EvidenceIdList icon={Camera} ids={evidence.captureIds} label="Capture IDs" />
+				<EvidenceIdList
+					icon={Camera}
+					ids={evidence.captureIds}
+					label="Capture IDs"
+				/>
 				<EvidenceIdList
 					icon={Gauge}
 					ids={evidence.diagnosticCorrelationIds}
@@ -1567,8 +1691,9 @@ function EvidenceView({
 				/>
 			</div>
 			<p className="recipe-evidence-boundary">
-				<FileArchive className="h-3.5 w-3.5" /> This projection contains opaque IDs and
-				bounded metadata only. Local paths never cross into the renderer.
+				<FileArchive className="h-3.5 w-3.5" /> This projection contains opaque
+				IDs and bounded metadata only. Local paths never cross into the
+				renderer.
 			</p>
 		</div>
 	);
@@ -1622,12 +1747,16 @@ function EvidenceIdList({
 					))}
 				</ul>
 			)}
-			{ids.length > 8 ? <p>+ {ids.length - 8} more in exported manifest</p> : null}
+			{ids.length > 8 ? (
+				<p>+ {ids.length - 8} more in exported manifest</p>
+			) : null}
 		</section>
 	);
 }
 
-function iconForStep(kind: RecipeStep['kind']): ComponentType<{ className?: string }> {
+function iconForStep(
+	kind: RecipeStep['kind']
+): ComponentType<{ className?: string }> {
 	switch (kind) {
 		case 'simulator':
 			return Play;
@@ -1662,9 +1791,13 @@ function emptyApprovalAnalysis(): RecipeApprovalAnalysis {
 	};
 }
 
-function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+function arraysEqual(
+	left: readonly string[],
+	right: readonly string[]
+): boolean {
 	return (
-		left.length === right.length && left.every((value, index) => value === right[index])
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
 	);
 }
 

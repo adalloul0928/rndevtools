@@ -62,17 +62,17 @@ describe('capture recording target model', () => {
 	});
 
 	it('does not expose another target recording or a finished selected-target job', () => {
-		expect(runningRecordingJobForDevice([job('first', firstUdid)], secondUdid)).toBe(
-			undefined
-		);
+		expect(
+			runningRecordingJobForDevice([job('first', firstUdid)], secondUdid)
+		).toBe(undefined);
 		expect(
 			runningRecordingJobForDevice(
 				[job('complete', secondUdid, 'complete')],
 				secondUdid
 			)
 		).toBe(undefined);
-		expect(runningRecordingJobForDevice([job('first', firstUdid)], undefined)).toBe(
-			undefined
-		);
+		expect(
+			runningRecordingJobForDevice([job('first', firstUdid)], undefined)
+		).toBe(undefined);
 	});
 });

@@ -42,7 +42,9 @@ function openSocket(url: string, origin?: string): Promise<WebSocket> {
 	});
 }
 
-function nextSocketMessage(socket: WebSocket): Promise<Record<string, unknown>> {
+function nextSocketMessage(
+	socket: WebSocket
+): Promise<Record<string, unknown>> {
 	return new Promise((resolve) => {
 		socket.once('message', (raw) => {
 			resolve(JSON.parse(raw.toString()) as Record<string, unknown>);
@@ -54,7 +56,8 @@ describe('DesktopBroker', () => {
 	it('starts without a simulated device unless demo mode is explicit', () => {
 		expect(new DesktopBroker().getState().devices).toEqual([]);
 		expect(
-			new DesktopBroker({ includeDemoDevice: true }).getState().devices[0]?.status
+			new DesktopBroker({ includeDemoDevice: true }).getState().devices[0]
+				?.status
 		).toBe('simulated');
 	});
 
@@ -175,7 +178,10 @@ describe('DesktopBroker', () => {
 		});
 
 		socket.close(1000, 'test complete');
-		await waitForState(broker, (state) => state.devices[0]?.status === 'offline');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'offline'
+		);
 	});
 
 	it('rejects clients that do not send hello first', async () => {
@@ -274,7 +280,10 @@ describe('DesktopBroker', () => {
 				},
 			})
 		);
-		await waitForState(broker, (state) => state.devices[0]?.status === 'online');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'online'
+		);
 		for (let index = 0; index < 2; index += 1) {
 			socket.send(JSON.stringify({ type: 'heartbeat', sentAt: Date.now() }));
 		}
@@ -283,7 +292,9 @@ describe('DesktopBroker', () => {
 		expect(
 			broker
 				.getState()
-				.diagnostics.some((entry) => entry.message.includes('message rate limit'))
+				.diagnostics.some((entry) =>
+					entry.message.includes('message rate limit')
+				)
 		).toBe(true);
 	});
 
@@ -367,15 +378,15 @@ describe('DesktopBroker', () => {
 		await waitForState(
 			broker,
 			(state) =>
-				state.devices.find((device) => device.info.id === 'budget-first')?.sequence ===
-				1
+				state.devices.find((device) => device.info.id === 'budget-first')
+					?.sequence === 1
 		);
 		first.close(1000, 'make snapshot evictable');
 		await waitForState(
 			broker,
 			(state) =>
-				state.devices.find((device) => device.info.id === 'budget-first')?.status ===
-				'offline'
+				state.devices.find((device) => device.info.id === 'budget-first')
+					?.status === 'offline'
 		);
 
 		const second = await connect('budget-second');
@@ -384,8 +395,8 @@ describe('DesktopBroker', () => {
 			broker,
 			(state) =>
 				!state.devices.some((device) => device.info.id === 'budget-first') &&
-				state.devices.find((device) => device.info.id === 'budget-second')?.sequence ===
-					1
+				state.devices.find((device) => device.info.id === 'budget-second')
+					?.sequence === 1
 		);
 
 		const third = await connect('budget-third');
@@ -400,8 +411,9 @@ describe('DesktopBroker', () => {
 				.diagnostics.some((entry) => entry.message.includes('snapshot budget'))
 		).toBe(true);
 		expect(
-			broker.getState().devices.find((device) => device.info.id === 'budget-second')
-				?.sequence
+			broker
+				.getState()
+				.devices.find((device) => device.info.id === 'budget-second')?.sequence
 		).toBe(1);
 
 		second.close(1000, 'test complete');
@@ -429,7 +441,10 @@ describe('DesktopBroker', () => {
 				},
 			})
 		);
-		await waitForState(broker, (state) => state.devices[0]?.status === 'online');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'online'
+		);
 		let emissionCount = 0;
 		const unsubscribe = broker.subscribe(() => {
 			emissionCount += 1;
@@ -508,13 +523,17 @@ describe('DesktopBroker', () => {
 			})
 		);
 		const state = await waitForState(broker, (next) =>
-			next.devices.some((device) => device.info.id === 'unicode-diagnostic-device')
+			next.devices.some(
+				(device) => device.info.id === 'unicode-diagnostic-device'
+			)
 		);
-		const diagnostic = state.diagnostics.find((entry) => entry.scope === 'connection');
+		const diagnostic = state.diagnostics.find(
+			(entry) => entry.scope === 'connection'
+		);
 
-		expect(Buffer.byteLength(diagnostic?.message ?? '', 'utf8')).toBeLessThanOrEqual(
-			8 * 1024
-		);
+		expect(
+			Buffer.byteLength(diagnostic?.message ?? '', 'utf8')
+		).toBeLessThanOrEqual(8 * 1024);
 		expect(diagnostic?.message).toMatch(/…$/u);
 		expect(diagnostic?.message).not.toContain('\uFFFD');
 		socket.close(1000, 'test complete');
@@ -674,16 +693,18 @@ describe('DesktopBroker', () => {
 			`http://127.0.0.1:${listeningPort}/health?token=a-development-token`
 		);
 		expect(authenticatedHealth.status).toBe(200);
-		await expect(openSocket(`ws://127.0.0.1:${listeningPort}/device`)).rejects.toThrow(
-			'Unexpected server response: 401'
-		);
+		await expect(
+			openSocket(`ws://127.0.0.1:${listeningPort}/device`)
+		).rejects.toThrow('Unexpected server response: 401');
 		const protectedUrl = broker.getState().broker.urls[0];
 		expect(protectedUrl).toContain('token=a-development-token');
 		const socket = await openSocket(protectedUrl ?? '');
 		expect(
 			broker
 				.getState()
-				.diagnostics.some((entry) => entry.message.includes('a-development-token'))
+				.diagnostics.some((entry) =>
+					entry.message.includes('a-development-token')
+				)
 		).toBe(false);
 		socket.close(1000, 'authenticated');
 	});
@@ -720,7 +741,10 @@ describe('DesktopBroker', () => {
 		};
 		const first = await openSocket(url);
 		first.send(JSON.stringify(hello));
-		await waitForState(broker, (state) => state.devices[0]?.status === 'online');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'online'
+		);
 		first.send(
 			JSON.stringify({
 				type: 'snapshot',
@@ -728,20 +752,26 @@ describe('DesktopBroker', () => {
 				sentAt: Date.now(),
 				tools: {
 					...createEmptyDeviceTools(),
-					console: [{ id: 'old', at: Date.now(), level: 'info', message: 'old' }],
+					console: [
+						{ id: 'old', at: Date.now(), level: 'info', message: 'old' },
+					],
 				},
 			})
 		);
 		await waitForState(broker, (state) => state.devices[0]?.sequence === 25);
 		first.close(1000, 'reconnect');
-		await waitForState(broker, (state) => state.devices[0]?.status === 'offline');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'offline'
+		);
 
 		const second = await openSocket(url);
 		second.send(JSON.stringify(hello));
 		await waitForState(
 			broker,
 			(state) =>
-				state.devices[0]?.status === 'online' && state.devices[0]?.sequence === 0
+				state.devices[0]?.status === 'online' &&
+				state.devices[0]?.sequence === 0
 		);
 		expect(broker.getState().devices[0]?.tools.console).toEqual([]);
 		second.send(
@@ -751,11 +781,16 @@ describe('DesktopBroker', () => {
 				sentAt: Date.now(),
 				tools: {
 					...createEmptyDeviceTools(),
-					console: [{ id: 'new', at: Date.now(), level: 'info', message: 'fresh' }],
+					console: [
+						{ id: 'new', at: Date.now(), level: 'info', message: 'fresh' },
+					],
 				},
 			})
 		);
-		const state = await waitForState(broker, (next) => next.devices[0]?.sequence === 1);
+		const state = await waitForState(
+			broker,
+			(next) => next.devices[0]?.sequence === 1
+		);
 		expect(state.devices[0]?.tools.console[0]?.message).toBe('fresh');
 		second.close(1000, 'complete');
 	});
@@ -778,7 +813,10 @@ describe('DesktopBroker', () => {
 		};
 		const first = await openSocket(url);
 		first.send(JSON.stringify(hello));
-		await waitForState(broker, (state) => state.devices[0]?.status === 'online');
+		await waitForState(
+			broker,
+			(state) => state.devices[0]?.status === 'online'
+		);
 
 		const envelope = nextSocketMessage(first);
 		const pending = broker.dispatchAction({

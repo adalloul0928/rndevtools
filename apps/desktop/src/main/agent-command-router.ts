@@ -109,7 +109,8 @@ function connectedDeviceForTarget(
 			? state.devices.filter((device) => device.info.id === target.deviceId)
 			: state.devices.filter(
 					(device) =>
-						device.info.simulatorUdid?.toLowerCase() === target.udid.toLowerCase()
+						device.info.simulatorUdid?.toLowerCase() ===
+						target.udid.toLowerCase()
 				);
 	const online = matches.filter((device) => device.status !== 'offline');
 	if (online.length === 1) return online[0] as DeviceSession;
@@ -144,7 +145,8 @@ function simulatorByUdid(state: SimulatorState, udid: string) {
 	if (!simulator) {
 		throw new AgentCliError({
 			code: 'target_not_found',
-			message: 'The requested Simulator is not present in the fresh local inventory.',
+			message:
+				'The requested Simulator is not present in the fresh local inventory.',
 			retryable: true,
 		});
 	}
@@ -164,8 +166,10 @@ async function dispatchConnectedAction(
 	if (!isSafeAgentConnectedAction(action.tool, action.command)) {
 		throw new AgentCliError({
 			code: 'approval_required',
-			message: 'This connected-app action is not permitted through the unattended CLI.',
-			recovery: 'Run the action from the desktop app so its confirmation can be shown.',
+			message:
+				'This connected-app action is not permitted through the unattended CLI.',
+			recovery:
+				'Run the action from the desktop app so its confirmation can be shown.',
 		});
 	}
 	const parsed = desktopActionSchema.parse({
@@ -298,7 +302,9 @@ async function runSimulatorAction(
 			retryable: true,
 		});
 	}
-	return wait ? await waitForSimulatorJob(service, receipt.jobId, signal) : receipt;
+	return wait
+		? await waitForSimulatorJob(service, receipt.jobId, signal)
+		: receipt;
 }
 
 async function runSlimmingAction(
@@ -310,14 +316,18 @@ async function runSlimmingAction(
 	if (!receipt.accepted || !receipt.jobId) {
 		throw new AgentCliError({
 			code: 'action_rejected',
-			message: receipt.error ?? 'The read-only Simulator Slimming action was rejected.',
+			message:
+				receipt.error ??
+				'The read-only Simulator Slimming action was rejected.',
 			retryable: true,
 		});
 	}
 	return await waitForSlimmingJob(service, receipt.jobId, signal);
 }
 
-function ensureComplete<T extends { status: string; message: string }>(job: T): T {
+function ensureComplete<T extends { status: string; message: string }>(
+	job: T
+): T {
 	if (job.status === 'complete') return job;
 	throw new AgentCliError({
 		code: job.status === 'cancelled' ? 'cancelled' : 'action_failed',
@@ -326,8 +336,13 @@ function ensureComplete<T extends { status: string; message: string }>(job: T): 
 	});
 }
 
-function captureForJob(state: SimulatorState, job: SimulatorJob): SimulatorCapture {
-	const capture = state.captures.find((candidate) => candidate.id === job.captureId);
+function captureForJob(
+	state: SimulatorState,
+	job: SimulatorJob
+): SimulatorCapture {
+	const capture = state.captures.find(
+		(candidate) => candidate.id === job.captureId
+	);
 	if (!capture) {
 		throw new AgentCliError({
 			code: 'capture_missing',
@@ -338,7 +353,10 @@ function captureForJob(state: SimulatorState, job: SimulatorJob): SimulatorCaptu
 	return capture;
 }
 
-function compactSimulatorState(state: SimulatorState, includeUnavailable: boolean) {
+function compactSimulatorState(
+	state: SimulatorState,
+	includeUnavailable: boolean
+) {
 	return {
 		capability: state.capability,
 		updatedAt: state.updatedAt,
@@ -373,7 +391,9 @@ function compactConnectedSession(device: DeviceSession) {
 		lastSeenAt: device.lastSeenAt,
 		...(device.info.appVersion ? { appVersion: device.info.appVersion } : {}),
 		...(device.info.variant ? { variant: device.info.variant } : {}),
-		...(device.info.simulatorUdid ? { simulatorUdid: device.info.simulatorUdid } : {}),
+		...(device.info.simulatorUdid
+			? { simulatorUdid: device.info.simulatorUdid }
+			: {}),
 		...(device.info.bundleIdentifier
 			? { bundleIdentifier: device.info.bundleIdentifier }
 			: {}),
@@ -395,7 +415,8 @@ async function waitForNetworkIdle(
 		if (!current || current.status === 'offline') {
 			throw new AgentCliError({
 				code: 'device_offline',
-				message: 'The PUMPD session disconnected while waiting for network idle.',
+				message:
+					'The PUMPD session disconnected while waiting for network idle.',
 				retryable: true,
 			});
 		}
@@ -482,7 +503,10 @@ export function createAgentCommandRouter({
 				);
 			}
 			case 'elements': {
-				const device = connectedDeviceForTarget(broker.getState(), command.target);
+				const device = connectedDeviceForTarget(
+					broker.getState(),
+					command.target
+				);
 				const query = command.query?.trim().toLowerCase();
 				const elements = device.tools.components
 					.filter(
@@ -510,7 +534,10 @@ export function createAgentCommandRouter({
 				};
 			}
 			case 'act': {
-				const device = connectedDeviceForTarget(broker.getState(), command.target);
+				const device = connectedDeviceForTarget(
+					broker.getState(),
+					command.target
+				);
 				return await dispatchConnectedAction(
 					broker,
 					device,
@@ -527,7 +554,9 @@ export function createAgentCommandRouter({
 					if (simulatorJob) {
 						return await waitForSimulatorJob(simulator, jobId, context.signal);
 					}
-					const slimmingJob = slimming.getState().jobs.find((job) => job.id === jobId);
+					const slimmingJob = slimming
+						.getState()
+						.jobs.find((job) => job.id === jobId);
 					if (slimmingJob) {
 						return await waitForSlimmingJob(slimming, jobId, context.signal);
 					}
@@ -537,8 +566,12 @@ export function createAgentCommandRouter({
 						retryable: true,
 					});
 				}
-				if (!command.target) required('This wait condition requires an exact target.');
-				const device = connectedDeviceForTarget(broker.getState(), command.target);
+				if (!command.target)
+					required('This wait condition requires an exact target.');
+				const device = connectedDeviceForTarget(
+					broker.getState(),
+					command.target
+				);
 				if (command.condition.kind === 'network-idle') {
 					return await waitForNetworkIdle(
 						broker,
@@ -630,10 +663,15 @@ export function createAgentCommandRouter({
 					!TERMINAL_JOB_STATUSES.has(candidate.status)
 						? candidate
 						: undefined;
-				if (!job) required('No active recording matches this target and jobId.');
+				if (!job)
+					required('No active recording matches this target and jobId.');
 				if (!simulator.cancelJob(job.id))
 					required('The recording is no longer active.');
-				const finished = await waitForSimulatorJob(simulator, job.id, context.signal);
+				const finished = await waitForSimulatorJob(
+					simulator,
+					job.id,
+					context.signal
+				);
 				return {
 					job: finished,
 					...(finished.captureId
@@ -642,7 +680,10 @@ export function createAgentCommandRouter({
 				};
 			}
 			case 'network': {
-				const device = connectedDeviceForTarget(broker.getState(), command.target);
+				const device = connectedDeviceForTarget(
+					broker.getState(),
+					command.target
+				);
 				if (command.operation === 'status') {
 					return (
 						device.tools.networkProfile ?? {
@@ -668,8 +709,12 @@ export function createAgentCommandRouter({
 			}
 			case 'jobs': {
 				const jobs = [
-					...simulator.getState().jobs.map((job) => ({ source: 'simulator', ...job })),
-					...slimming.getState().jobs.map((job) => ({ source: 'slimming', ...job })),
+					...simulator
+						.getState()
+						.jobs.map((job) => ({ source: 'simulator', ...job })),
+					...slimming
+						.getState()
+						.jobs.map((job) => ({ source: 'slimming', ...job })),
 				];
 				if (command.operation === 'list') return jobs;
 				if (!command.jobId) required('jobs get and cancel require jobId.');
@@ -678,13 +723,16 @@ export function createAgentCommandRouter({
 				if (command.operation === 'get') return job;
 				return {
 					cancelled:
-						simulator.cancelJob(command.jobId) || slimming.cancelJob(command.jobId),
+						simulator.cancelJob(command.jobId) ||
+						slimming.cancelJob(command.jobId),
 				};
 			}
 			case 'slimming': {
 				if (command.operation === 'status') return await slimming.refresh();
 				if (!command.udids?.length) {
-					required('Slimming preview, doctor, and verify require one or more udids.');
+					required(
+						'Slimming preview, doctor, and verify require one or more udids.'
+					);
 				}
 				const simulatorInventory = await simulator.refresh();
 				const canonicalUdids = command.udids.map(
@@ -742,11 +790,14 @@ export function createAgentCommandRouter({
 						);
 					case 'run': {
 						const recipeUdids =
-							command.udids ?? required('recipe run requires one or more udids.');
+							command.udids ??
+							required('recipe run requires one or more udids.');
 						const recipeInventory = await simulator.refresh();
 						return await recipes.run(
 							command.recipeId ?? required('recipe run requires recipeId.'),
-							recipeUdids.map((udid) => simulatorByUdid(recipeInventory, udid).udid)
+							recipeUdids.map(
+								(udid) => simulatorByUdid(recipeInventory, udid).udid
+							)
 						);
 					}
 					case 'cancel':

@@ -6,7 +6,9 @@ import {
 
 describe('capture composition model', () => {
 	it('builds the bounded App Store design recipe', () => {
-		expect(parseCaptureCompositionFields(DEFAULT_CAPTURE_COMPOSITION_FIELDS)).toEqual(
+		expect(
+			parseCaptureCompositionFields(DEFAULT_CAPTURE_COMPOSITION_FIELDS)
+		).toEqual(
 			expect.objectContaining({
 				name: 'Designed-Capture',
 				recipe: expect.objectContaining({

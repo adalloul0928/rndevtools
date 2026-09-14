@@ -17,14 +17,17 @@ const serviceIdentifierSchema = z
 	.min(3)
 	.max(128)
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._-]+$/);
-const serviceIdentifiersSchema = z.array(serviceIdentifierSchema).max(MAX_SERVICE_IDS);
+const serviceIdentifiersSchema = z
+	.array(serviceIdentifierSchema)
+	.max(MAX_SERVICE_IDS);
 const simulatorUdidsSchema = z
 	.array(simulatorUdidSchema)
 	.min(1)
 	.max(MAX_BATCH_SIZE)
 	.refine(
 		(values) =>
-			new Set(values.map((value) => value.toUpperCase())).size === values.length,
+			new Set(values.map((value) => value.toUpperCase())).size ===
+			values.length,
 		{
 			message: 'Simulator batch targets must be unique.',
 		}
@@ -113,7 +116,9 @@ const slimmingCompatibilitySchema = z.strictObject({
 		runtimeBuild: shortTextSchema,
 		hostArchitecture: z.enum(['arm64', 'x64']),
 		helperVersion: shortTextSchema,
-		helperBuildCommit: z.string().regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
+		helperBuildCommit: z
+			.string()
+			.regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
 		catalogVersion: shortTextSchema,
 	}),
 	verifiedOperations: z.array(slimmingCompatibilityOperationSchema).max(3),
@@ -135,7 +140,9 @@ const slimmingSimulatorStatusSchema = z.strictObject({
 	compatibility: slimmingCompatibilitySchema.optional(),
 	message: shortTextSchema.optional(),
 });
-export type SlimmingSimulatorStatus = z.infer<typeof slimmingSimulatorStatusSchema>;
+export type SlimmingSimulatorStatus = z.infer<
+	typeof slimmingSimulatorStatusSchema
+>;
 
 const slimmingPlanSchema = z.strictObject({
 	simulatorUdid: simulatorUdidSchema,
@@ -196,7 +203,9 @@ const slimmingOperationMetadataSchema = z.strictObject({
 	errorCode: identifierSchema.optional(),
 	message: shortTextSchema,
 });
-export type SlimmingOperationMetadata = z.infer<typeof slimmingOperationMetadataSchema>;
+export type SlimmingOperationMetadata = z.infer<
+	typeof slimmingOperationMetadataSchema
+>;
 
 const slimmingJobTargetSchema = z.strictObject({
 	simulatorUdid: simulatorUdidSchema,
@@ -374,7 +383,9 @@ export const slimmingSettingRequestSchema = z.union([
 		confirmationToken: confirmationTokenSchema.optional(),
 	}),
 ]);
-export type SlimmingSettingRequest = z.infer<typeof slimmingSettingRequestSchema>;
+export type SlimmingSettingRequest = z.infer<
+	typeof slimmingSettingRequestSchema
+>;
 
 export const slimmingSettingReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
@@ -383,7 +394,9 @@ export const slimmingSettingReceiptSchema = z.strictObject({
 	state: slimmingStateSchema,
 	error: shortTextSchema.optional(),
 });
-export type SlimmingSettingReceipt = z.infer<typeof slimmingSettingReceiptSchema>;
+export type SlimmingSettingReceipt = z.infer<
+	typeof slimmingSettingReceiptSchema
+>;
 
 export const slimmingAcknowledgementRequestSchema = z.strictObject({
 	actionId: identifierSchema,
@@ -426,7 +439,9 @@ export type SlimmingConfirmationResult = z.infer<
 
 export type SlimmingBridge = {
 	getSlimmingState: () => Promise<SlimmingState>;
-	subscribeSlimmingState: (listener: (state: SlimmingState) => void) => () => void;
+	subscribeSlimmingState: (
+		listener: (state: SlimmingState) => void
+	) => () => void;
 	refreshSlimming: () => Promise<SlimmingState>;
 	setSlimmingEnabled: (
 		request: SlimmingSettingRequest

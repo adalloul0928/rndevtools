@@ -27,7 +27,10 @@ export function formatClock(timestamp: number): string {
  * The elapsed-time arithmetic is shared; only the desktop's ' ago' suffix is
  * local, because the on-device panels render the bare token in tighter rows.
  */
-export function formatRelativeTime(timestamp: number, now = Date.now()): string {
+export function formatRelativeTime(
+	timestamp: number,
+	now = Date.now()
+): string {
 	const elapsed = formatElapsed(timestamp, now);
 	if (elapsed === undefined) return '—';
 	return elapsed === 'now' ? elapsed : `${elapsed} ago`;
@@ -57,7 +60,8 @@ export function boundedTextExport<T>(
 	format: (value: T) => string,
 	maxChars = 2 * 1024 * 1024
 ): { text: string; truncated: boolean } {
-	const limit = Number.isInteger(maxChars) && maxChars > 0 ? maxChars : 2 * 1024 * 1024;
+	const limit =
+		Number.isInteger(maxChars) && maxChars > 0 ? maxChars : 2 * 1024 * 1024;
 	const marker = '\n\n[Export truncated at desktop safety limit.]';
 	let text = '';
 	for (const value of values) {

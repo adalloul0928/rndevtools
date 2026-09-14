@@ -46,8 +46,12 @@ function boundsStyle(
 	const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 	const left = clampPercent((bounds.x / viewport.width) * 100);
 	const top = clampPercent((bounds.y / viewport.height) * 100);
-	const right = clampPercent(((bounds.x + bounds.width) / viewport.width) * 100);
-	const bottom = clampPercent(((bounds.y + bounds.height) / viewport.height) * 100);
+	const right = clampPercent(
+		((bounds.x + bounds.width) / viewport.width) * 100
+	);
+	const bottom = clampPercent(
+		((bounds.y + bounds.height) / viewport.height) * 100
+	);
 	return {
 		left: `${left}%`,
 		top: `${top}%`,
@@ -62,7 +66,9 @@ export function ComponentsPanel() {
 	const renderEvents = selectedDevice?.tools.componentRenders ?? [];
 	const summary = selectedDevice?.tools.componentSummary;
 	const [query, setQuery] = useState('');
-	const [selectedId, setSelectedId] = useState<string | null>(targets[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		targets[0]?.id ?? null
+	);
 	const [textInput, setTextInput] = useState('');
 	const [scrollDirection, setScrollDirection] = useState<
 		'up' | 'down' | 'left' | 'right'
@@ -109,11 +115,17 @@ export function ComponentsPanel() {
 	);
 	const currentScreenHash = selected?.screenHash ?? summary?.screenHash;
 	const semanticActions = selected?.actions ?? [];
-	const semanticMutationEnabled = canMutateSemanticTarget(selected, currentScreenHash);
+	const semanticMutationEnabled = canMutateSemanticTarget(
+		selected,
+		currentScreenHash
+	);
 	const shortenedInstanceCount = targets.filter(
 		(target) => target.instanceTruncated
 	).length;
-	const reportedViewport = selectedDevice?.info.viewport ?? { width: 393, height: 852 };
+	const reportedViewport = selectedDevice?.info.viewport ?? {
+		width: 393,
+		height: 852,
+	};
 	const viewport = {
 		width: Math.max(1, Math.min(100_000, reportedViewport.width)),
 		height: Math.max(1, Math.min(100_000, reportedViewport.height)),
@@ -169,7 +181,10 @@ export function ComponentsPanel() {
 				/>
 				<div className="ml-auto flex items-center gap-3 font-mono text-xs text-(--text-3)">
 					<span title={currentScreenHash ?? 'Not reported'}>
-						Screen {currentScreenHash ? currentScreenHash.slice(0, 10) : 'v1 / unknown'}
+						Screen{' '}
+						{currentScreenHash
+							? currentScreenHash.slice(0, 10)
+							: 'v1 / unknown'}
 					</span>
 					<span className="text-white/15">/</span>
 					<span>
@@ -190,7 +205,10 @@ export function ComponentsPanel() {
 				</PanelNotice>
 			) : null}
 			{(summary?.registrationDiagnostics?.length ?? 0) > 0 ? (
-				<PanelNotice title="Component registration needs attention." tone="warning">
+				<PanelNotice
+					title="Component registration needs attention."
+					tone="warning"
+				>
 					{(summary?.registrationDiagnostics ?? [])
 						.slice(0, 5)
 						.map((diagnostic) => diagnostic.message)
@@ -200,20 +218,22 @@ export function ComponentsPanel() {
 			{shortenedInstanceCount > 0 ? (
 				<PanelNotice title="Some instance projections were shortened.">
 					{shortenedInstanceCount} safe instance projection
-					{shortenedInstanceCount === 1 ? ' was' : 's were'} sanitized or truncated to
-					stay within the on-device privacy and size limits.
+					{shortenedInstanceCount === 1 ? ' was' : 's were'} sanitized or
+					truncated to stay within the on-device privacy and size limits.
 				</PanelNotice>
 			) : null}
 			{filtered.length > visibleTargets.length ? (
 				<PanelNotice title="Desktop target rendering is bounded." tone="info">
-					Search covers all {filtered.length} matching targets; the list and coordinate
-					map render the first {MAX_RENDERED_TARGETS} to keep inspection responsive.
+					Search covers all {filtered.length} matching targets; the list and
+					coordinate map render the first {MAX_RENDERED_TARGETS} to keep
+					inspection responsive.
 				</PanelNotice>
 			) : null}
 			{selected && semanticActions.length === 0 ? (
 				<PanelNotice title="Semantic actions are not advertised." tone="info">
-					This snapshot remains fully inspectable, but it may come from a v1 client or a
-					target that did not opt into activate, focus, text, or scroll actions.
+					This snapshot remains fully inspectable, but it may come from a v1
+					client or a target that did not opt into activate, focus, text, or
+					scroll actions.
 				</PanelNotice>
 			) : null}
 			<div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(320px,.9fr)_minmax(360px,1.1fr)] max-[1160px]:grid-cols-[280px_minmax(320px,1fr)]">
@@ -265,7 +285,8 @@ export function ComponentsPanel() {
 							Measured coordinate map
 						</p>
 						<p className="mb-0 mt-1 text-xs leading-4 text-(--muted)">
-							A bounds map from explicit measurements—not a live screen recording.
+							A bounds map from explicit measurements—not a live screen
+							recording.
 						</p>
 					</div>
 					<div className="mx-auto w-full max-w-[306px] rounded-[34px] border border-white/15 bg-[#050505] p-2 shadow-[0_20px_80px_rgba(0,0,0,.45)]">
@@ -313,7 +334,10 @@ export function ComponentsPanel() {
 										{selected.name}
 									</h2>
 								</div>
-								<StatusPill tone={selected.isFocused ? 'success' : 'default'} dot>
+								<StatusPill
+									tone={selected.isFocused ? 'success' : 'default'}
+									dot
+								>
 									{selected.isFocused ? 'Focused' : 'Background'}
 								</StatusPill>
 							</div>
@@ -340,9 +364,21 @@ export function ComponentsPanel() {
 											value={`${selected.depth ?? 0} / ${selected.zIndex ?? 0}`}
 											mono
 										/>
-										<KeyValue label="Feature" value={selected.feature ?? '—'} mono />
-										<KeyValue label="Route" value={selected.route ?? '—'} mono />
-										<KeyValue label="Test ID" value={selected.testID ?? '—'} mono />
+										<KeyValue
+											label="Feature"
+											value={selected.feature ?? '—'}
+											mono
+										/>
+										<KeyValue
+											label="Route"
+											value={selected.route ?? '—'}
+											mono
+										/>
+										<KeyValue
+											label="Test ID"
+											value={selected.testID ?? '—'}
+											mono
+										/>
 										<KeyValue
 											label="Target key"
 											value={selected.targetKey ?? '—'}
@@ -391,7 +427,9 @@ export function ComponentsPanel() {
 													</p>
 												</div>
 												<StatusPill
-													tone={event.actualDuration >= 16 ? 'warning' : 'success'}
+													tone={
+														event.actualDuration >= 16 ? 'warning' : 'success'
+													}
 												>
 													{event.actualDuration.toFixed(1)} ms
 												</StatusPill>
@@ -403,7 +441,9 @@ export function ComponentsPanel() {
 							{selected.styleText ? (
 								<CodePreview
 									label={
-										selected.styleTruncated ? 'Safe styles · shortened' : 'Safe styles'
+										selected.styleTruncated
+											? 'Safe styles · shortened'
+											: 'Safe styles'
 									}
 									value={selected.styleText}
 								/>
@@ -412,7 +452,8 @@ export function ComponentsPanel() {
 								className="mb-4"
 								fullWidth
 								isDisabled={
-									!selected.isFocused || !canRunAction('components', 'highlight')
+									!selected.isFocused ||
+									!canRunAction('components', 'highlight')
 								}
 								variant="secondary"
 								onPress={() =>
@@ -435,7 +476,8 @@ export function ComponentsPanel() {
 							>
 								<Card.Header className="border-b border-white/8 px-3 py-2.5">
 									<Card.Title className="flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
-										<BadgeCheck className="h-3.5 w-3.5" /> Accessibility semantics
+										<BadgeCheck className="h-3.5 w-3.5" /> Accessibility
+										semantics
 									</Card.Title>
 								</Card.Header>
 								<Card.Content className="px-3 py-0">
@@ -444,7 +486,10 @@ export function ComponentsPanel() {
 											label="Label"
 											value={selected.accessibilityLabel ?? '—'}
 										/>
-										<KeyValue label="Hint" value={selected.accessibilityHint ?? '—'} />
+										<KeyValue
+											label="Hint"
+											value={selected.accessibilityHint ?? '—'}
+										/>
 										<KeyValue
 											label="Role"
 											value={selected.accessibilityRole ?? '—'}
@@ -563,7 +608,9 @@ export function ComponentsPanel() {
 										aria-label={`Text for ${selected.name}`}
 										placeholder="Text to enter (empty clears)"
 										value={textInput}
-										onChange={(event) => setTextInput(event.currentTarget.value)}
+										onChange={(event) =>
+											setTextInput(event.currentTarget.value)
+										}
 									/>
 									<Button
 										isDisabled={
@@ -600,11 +647,16 @@ export function ComponentsPanel() {
 												)
 											}
 										>
-											{(['up', 'down', 'left', 'right'] as const).map((direction) => (
-												<NativeSelect.Option key={direction} value={direction}>
-													{direction}
-												</NativeSelect.Option>
-											))}
+											{(['up', 'down', 'left', 'right'] as const).map(
+												(direction) => (
+													<NativeSelect.Option
+														key={direction}
+														value={direction}
+													>
+														{direction}
+													</NativeSelect.Option>
+												)
+											)}
 											<NativeSelect.Indicator>
 												<ChevronDown className="h-3 w-3" />
 											</NativeSelect.Indicator>

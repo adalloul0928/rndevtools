@@ -182,7 +182,9 @@ const bridge: DesktopBridge &
 		simulatorCaptureRetentionStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getSimulatorCaptureRetention)
 		) as SimulatorCaptureRetentionState,
-	runSimulatorCaptureOperation: async (operation: SimulatorCaptureOperation) => {
+	runSimulatorCaptureOperation: async (
+		operation: SimulatorCaptureOperation
+	) => {
 		const validatedOperation = simulatorCaptureOperationSchema.parse(operation);
 		return simulatorCaptureOperationReceiptSchema.parse(
 			await ipcRenderer.invoke(
@@ -191,8 +193,11 @@ const bridge: DesktopBridge &
 			)
 		) as SimulatorCaptureOperationReceipt;
 	},
-	runSimulatorOnboardingOperation: async (operation: SimulatorOnboardingOperation) => {
-		const validatedOperation = simulatorOnboardingOperationSchema.parse(operation);
+	runSimulatorOnboardingOperation: async (
+		operation: SimulatorOnboardingOperation
+	) => {
+		const validatedOperation =
+			simulatorOnboardingOperationSchema.parse(operation);
 		return simulatorOnboardingReceiptSchema.parse(
 			await ipcRenderer.invoke(
 				IPC_CHANNELS.runSimulatorOnboardingOperation,
@@ -218,7 +223,8 @@ const bridge: DesktopBridge &
 			}
 		};
 		ipcRenderer.on(IPC_CHANNELS.slimmingStateChanged, wrapped);
-		return () => ipcRenderer.removeListener(IPC_CHANNELS.slimmingStateChanged, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.slimmingStateChanged, wrapped);
 	},
 	refreshSlimming: async () =>
 		slimmingStateSchema.parse(
@@ -230,16 +236,24 @@ const bridge: DesktopBridge &
 			await ipcRenderer.invoke(IPC_CHANNELS.setSlimmingEnabled, validated)
 		) as SlimmingSettingReceipt;
 	},
-	acknowledgeSlimmingCompatibility: async (request: SlimmingAcknowledgementRequest) => {
+	acknowledgeSlimmingCompatibility: async (
+		request: SlimmingAcknowledgementRequest
+	) => {
 		const validated = slimmingAcknowledgementRequestSchema.parse(request);
 		return slimmingAcknowledgementReceiptSchema.parse(
-			await ipcRenderer.invoke(IPC_CHANNELS.acknowledgeSlimmingCompatibility, validated)
+			await ipcRenderer.invoke(
+				IPC_CHANNELS.acknowledgeSlimmingCompatibility,
+				validated
+			)
 		) as SlimmingAcknowledgementReceipt;
 	},
 	requestSlimmingConfirmation: async (target: SlimmingConfirmationTarget) => {
 		const validated = slimmingConfirmationTargetSchema.parse(target);
 		return slimmingConfirmationResultSchema.parse(
-			await ipcRenderer.invoke(IPC_CHANNELS.requestSlimmingConfirmation, validated)
+			await ipcRenderer.invoke(
+				IPC_CHANNELS.requestSlimmingConfirmation,
+				validated
+			)
 		) as SlimmingConfirmationResult;
 	},
 	runSlimmingAction: async (action: SlimmingAction) => {
@@ -250,7 +264,9 @@ const bridge: DesktopBridge &
 	},
 	cancelSlimmingJob: async (jobId: string) => {
 		const validated = slimmingJobIdSchema.parse(jobId);
-		return Boolean(await ipcRenderer.invoke(IPC_CHANNELS.cancelSlimmingJob, validated));
+		return Boolean(
+			await ipcRenderer.invoke(IPC_CHANNELS.cancelSlimmingJob, validated)
+		);
 	},
 	getRecipeState: async () =>
 		recipeStateSchema.parse(
@@ -270,7 +286,8 @@ const bridge: DesktopBridge &
 			}
 		};
 		ipcRenderer.on(IPC_CHANNELS.recipeStateChanged, wrapped);
-		return () => ipcRenderer.removeListener(IPC_CHANNELS.recipeStateChanged, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.recipeStateChanged, wrapped);
 	},
 	getRecipe: async (recipeId: string) => {
 		const result = await ipcRenderer.invoke(
@@ -329,7 +346,9 @@ const bridge: DesktopBridge &
 		buildInsightsStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getBuildInsightsState)
 		) as BuildInsightsState,
-	subscribeBuildInsightsState: (listener: (state: BuildInsightsState) => void) => {
+	subscribeBuildInsightsState: (
+		listener: (state: BuildInsightsState) => void
+	) => {
 		if (typeof listener !== 'function') {
 			throw new TypeError('Build Insights state listener must be a function.');
 		}
@@ -344,12 +363,18 @@ const bridge: DesktopBridge &
 		};
 		ipcRenderer.on(IPC_CHANNELS.buildInsightsStateChanged, wrapped);
 		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.buildInsightsStateChanged, wrapped);
+			ipcRenderer.removeListener(
+				IPC_CHANNELS.buildInsightsStateChanged,
+				wrapped
+			);
 	},
 	runBuildInsightsOperation: async (operation: BuildInsightsOperation) => {
 		const validated = buildInsightsOperationSchema.parse(operation);
 		return buildInsightsOperationReceiptSchema.parse(
-			await ipcRenderer.invoke(IPC_CHANNELS.runBuildInsightsOperation, validated)
+			await ipcRenderer.invoke(
+				IPC_CHANNELS.runBuildInsightsOperation,
+				validated
+			)
 		) as BuildInsightsOperationReceipt;
 	},
 };

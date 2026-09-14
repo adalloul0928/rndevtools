@@ -9,14 +9,21 @@ import {
 	Trash2,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { ConfirmAction, EmptyPanel, PanelHeader, StatusPill } from '@/components/ui';
+import {
+	ConfirmAction,
+	EmptyPanel,
+	PanelHeader,
+	StatusPill,
+} from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { ScenarioDefinitionSummary } from '../../shared/protocol';
 
 type VariableDrafts = Readonly<Record<string, string>>;
 
-function initialVariables(scenario: ScenarioDefinitionSummary | null): VariableDrafts {
+function initialVariables(
+	scenario: ScenarioDefinitionSummary | null
+): VariableDrafts {
 	if (!scenario) return {};
 	return Object.fromEntries(
 		scenario.variables.flatMap((variable) =>
@@ -68,9 +75,13 @@ export function ScenariosPanel() {
 	const scenarios = selectedDevice?.tools.scenarios ?? [];
 	const runtime = selectedDevice?.tools.scenarioRuntime ?? { running: false };
 	const receipts = selectedDevice?.tools.scenarioReceipts ?? [];
-	const [selectedId, setSelectedId] = useState<string | null>(scenarios[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		scenarios[0]?.id ?? null
+	);
 	const selected =
-		scenarios.find((scenario) => scenario.id === selectedId) ?? scenarios[0] ?? null;
+		scenarios.find((scenario) => scenario.id === selectedId) ??
+		scenarios[0] ??
+		null;
 	const [variablesByScenario, setVariablesByScenario] = useState<
 		Readonly<Record<string, VariableDrafts>>
 	>({});
@@ -83,7 +94,8 @@ export function ScenariosPanel() {
 		try {
 			variables = resolvedVariables(selected, drafts);
 		} catch (error) {
-			variableError = error instanceof Error ? error.message : 'Variables are invalid.';
+			variableError =
+				error instanceof Error ? error.message : 'Variables are invalid.';
 		}
 	}
 	const [importText, setImportText] = useState(
@@ -315,7 +327,10 @@ export function ScenariosPanel() {
 									</h3>
 									<div className="mt-3 grid grid-cols-2 gap-3">
 										{selected.variables.map((variable) => (
-											<label className="text-xs text-(--muted)" key={variable.id}>
+											<label
+												className="text-xs text-(--muted)"
+												key={variable.id}
+											>
 												{variable.label}
 												{variable.required ? ' *' : ''}
 												<input
@@ -335,7 +350,9 @@ export function ScenariosPanel() {
 										))}
 									</div>
 									{variableError ? (
-										<p className="mb-0 mt-2 text-xs text-red-300">{variableError}</p>
+										<p className="mb-0 mt-2 text-xs text-red-300">
+											{variableError}
+										</p>
 									) : null}
 								</div>
 							) : null}

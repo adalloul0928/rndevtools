@@ -20,7 +20,9 @@ export type SimulatorMutationCoordinatorPort = {
  * still own their presentation ordering; this coordinator prevents those
  * otherwise-independent queues from executing against one UDID concurrently.
  */
-export class SimulatorMutationCoordinator implements SimulatorMutationCoordinatorPort {
+export class SimulatorMutationCoordinator
+	implements SimulatorMutationCoordinatorPort
+{
 	readonly #tails = new Map<string, Promise<void>>();
 	readonly #activeOwners = new Set<symbol>();
 
@@ -39,7 +41,9 @@ export class SimulatorMutationCoordinator implements SimulatorMutationCoordinato
 				!this.#activeOwners.has(existingLease.owner) ||
 				existingLease.simulatorUdid !== key
 			) {
-				throw new Error('Simulator mutation lease does not match the exact target.');
+				throw new Error(
+					'Simulator mutation lease does not match the exact target.'
+				);
 			}
 			this.#throwIfAborted(signal);
 			return operation(existingLease);
@@ -67,7 +71,8 @@ export class SimulatorMutationCoordinator implements SimulatorMutationCoordinato
 					}
 					const onAbort = () => reject(this.#abortError(signal));
 					signal.addEventListener('abort', onAbort, { once: true });
-					removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+					removeAbortListener = () =>
+						signal.removeEventListener('abort', onAbort);
 				}),
 			]);
 		} catch (error) {

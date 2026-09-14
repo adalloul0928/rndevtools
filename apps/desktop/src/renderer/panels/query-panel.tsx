@@ -32,7 +32,9 @@ const SIMULATION_LABELS = {
 	offline: 'Offline',
 } as const;
 
-function queryTone(entry: QueryEntry): 'success' | 'warning' | 'danger' | 'info' {
+function queryTone(
+	entry: QueryEntry
+): 'success' | 'warning' | 'danger' | 'info' {
 	if (entry.status === 'error') return 'danger';
 	if (entry.fetchStatus === 'fetching') return 'info';
 	if (entry.isStale) return 'warning';
@@ -68,7 +70,9 @@ export function QueryPanel() {
 	const [tab, setTab] = useState<QueryTab>('queries');
 	const [filter, setFilter] = useState<QueryFilter>('all');
 	const [query, setQuery] = useState('');
-	const [selectedId, setSelectedId] = useState<string | null>(queries[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		queries[0]?.id ?? null
+	);
 	const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(
 		simulation?.active?.familyId ?? simulation?.families[0]?.id ?? null
 	);
@@ -82,7 +86,8 @@ export function QueryPanel() {
 			.filter((entry) => {
 				if (filter === 'active' && entry.observers === 0) return false;
 				if (filter === 'stale' && !entry.isStale) return false;
-				if (filter === 'fetching' && entry.fetchStatus !== 'fetching') return false;
+				if (filter === 'fetching' && entry.fetchStatus !== 'fetching')
+					return false;
 				if (filter === 'errors' && entry.status !== 'error') return false;
 				return (
 					!needle ||
@@ -110,7 +115,9 @@ export function QueryPanel() {
 						.toLowerCase()
 						.includes(needle)
 			)
-			.sort((left, right) => (right.submittedAt ?? 0) - (left.submittedAt ?? 0));
+			.sort(
+				(left, right) => (right.submittedAt ?? 0) - (left.submittedAt ?? 0)
+			);
 	}, [mutations, query]);
 	const visibleMutations = filteredMutations.slice(0, MAX_RENDERED_MUTATIONS);
 	const selected =
@@ -157,7 +164,9 @@ export function QueryPanel() {
 				width: 90,
 				align: 'end',
 				cell: (entry) => (
-					<span className="font-mono text-xs text-(--muted)">{entry.observers}</span>
+					<span className="font-mono text-xs text-(--muted)">
+						{entry.observers}
+					</span>
 				),
 			},
 			{
@@ -186,7 +195,11 @@ export function QueryPanel() {
 				eyebrow="State"
 				title="React Query"
 				description="Inspect the live TanStack Query cache and run narrowly scoped refetch or invalidation actions on the selected device."
-				meta={<span>{summary?.sourceQueryCount ?? queries.length} cached queries</span>}
+				meta={
+					<span>
+						{summary?.sourceQueryCount ?? queries.length} cached queries
+					</span>
+				}
 			/>
 			<Toolbar>
 				<div className="flex rounded-md border border-white/8 bg-black/25 p-0.5">
@@ -273,7 +286,9 @@ export function QueryPanel() {
 									className="h-7 px-2 text-xs"
 									key={family.id}
 									size="sm"
-									variant={family.id === selectedFamily.id ? 'secondary' : 'ghost'}
+									variant={
+										family.id === selectedFamily.id ? 'secondary' : 'ghost'
+									}
 									onPress={() => setSelectedFamilyId(family.id)}
 								>
 									{family.label}
@@ -284,7 +299,9 @@ export function QueryPanel() {
 					<div className="mt-3 flex flex-wrap gap-2">
 						{selectedFamily.modes.map((mode) => (
 							<Button
-								isDisabled={!mode.supported || !canRunAction('query', 'simulate')}
+								isDisabled={
+									!mode.supported || !canRunAction('query', 'simulate')
+								}
 								key={mode.mode}
 								size="sm"
 								variant="secondary"
@@ -317,21 +334,22 @@ export function QueryPanel() {
 			{omittedCount > 0 ? (
 				<PanelNotice title="Cache capture incomplete.">
 					{omittedCount} {tab === 'queries' ? 'query' : 'mutation'} entr
-					{omittedCount === 1 ? 'y was' : 'ies were'} omitted by the on-device item or
-					byte budget.
+					{omittedCount === 1 ? 'y was' : 'ies were'} omitted by the on-device
+					item or byte budget.
 				</PanelNotice>
 			) : null}
 			{truncatedCount > 0 ? (
 				<PanelNotice title="Some diagnostic values were shortened.">
 					{truncatedCount} {tab === 'queries' ? 'query' : 'mutation'} snapshot
-					{truncatedCount === 1 ? ' was' : 's were'} sanitized or truncated to stay
-					within the on-device privacy and size limits.
+					{truncatedCount === 1 ? ' was' : 's were'} sanitized or truncated to
+					stay within the on-device privacy and size limits.
 				</PanelNotice>
 			) : null}
-			{tab === 'mutations' && filteredMutations.length > visibleMutations.length ? (
+			{tab === 'mutations' &&
+			filteredMutations.length > visibleMutations.length ? (
 				<PanelNotice title="Desktop mutation rendering is bounded." tone="info">
-					Search covers all {filteredMutations.length} matching mutations; the list
-					renders the newest {MAX_RENDERED_MUTATIONS}.
+					Search covers all {filteredMutations.length} matching mutations; the
+					list renders the newest {MAX_RENDERED_MUTATIONS}.
 				</PanelNotice>
 			) : null}
 			{tab === 'mutations' ? (
@@ -339,7 +357,9 @@ export function QueryPanel() {
 					{visibleMutations.length === 0 ? (
 						<EmptyPanel
 							icon={<DatabaseZap className="h-5 w-5" />}
-							title={query.trim() ? 'No matching mutations' : 'No captured mutations'}
+							title={
+								query.trim() ? 'No matching mutations' : 'No captured mutations'
+							}
 							description={
 								query.trim()
 									? 'Broaden the search to inspect captured mutation activity.'
@@ -375,7 +395,10 @@ export function QueryPanel() {
 									</div>
 									{mutation.variablesText ? (
 										<div className="mt-3">
-											<CodePreview label="Variables" value={mutation.variablesText} />
+											<CodePreview
+												label="Variables"
+												value={mutation.variablesText}
+											/>
 										</div>
 									) : null}
 									{mutation.errorText ? (

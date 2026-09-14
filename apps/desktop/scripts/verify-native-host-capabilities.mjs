@@ -29,7 +29,11 @@ if (process.argv.length > 3) {
 try {
 	const stats = lstatSync(helperPath);
 	assert.equal(stats.isFile(), true, 'native host must be a regular file');
-	assert.equal(stats.isSymbolicLink(), false, 'native host must not be a symlink');
+	assert.equal(
+		stats.isSymbolicLink(),
+		false,
+		'native host must not be a symlink'
+	);
 	assert.notEqual(stats.mode & 0o111, 0, 'native host must be executable');
 
 	const legacyHandshake = invoke(1, 'legacy-handshake', 'handshake');
@@ -55,10 +59,16 @@ try {
 	assert.match(result.operatingSystemVersion, /^\d+\.\d+\.\d+$/);
 	assert.equal(Number.isSafeInteger(result.checkedAtMilliseconds), true);
 	assert.equal(result.checkedAtMilliseconds > 0, true);
-	assert.deepEqual(result.screenCaptureKit.requestableFrameRates, [30, 60, 120]);
+	assert.deepEqual(
+		result.screenCaptureKit.requestableFrameRates,
+		[30, 60, 120]
+	);
 	assert.equal(result.screenCaptureKit.windowEnumerationPerformed, false);
 	assert.equal(result.screenCaptureKit.contentPickerPresented, false);
-	assert.equal(result.screenCaptureKit.persistentSessionOperationsExposed, false);
+	assert.equal(
+		result.screenCaptureKit.persistentSessionOperationsExposed,
+		false
+	);
 	assert.equal(result.avFoundation.permissionRequestsPerformed, false);
 	assert.equal(result.accessibility.permissionPromptPerformed, false);
 	assert.equal(result.buildInsights.requiresExplicitSourceRoots, true);
@@ -114,7 +124,11 @@ function invoke(protocolVersion, requestId, operation) {
 	if (execution.error) {
 		throw execution.error;
 	}
-	assert.equal(execution.signal, null, `${operation} was terminated by a signal`);
+	assert.equal(
+		execution.signal,
+		null,
+		`${operation} was terminated by a signal`
+	);
 	assert.equal(execution.status, 0, `${operation} failed: ${execution.stderr}`);
 	assert.equal(execution.stderr, '', `${operation} wrote unexpected stderr`);
 	assert.ok(Buffer.byteLength(execution.stdout) <= maximumResponseBytes);

@@ -31,7 +31,12 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
-import { formatBytes, formatClock, formatDuration, truncateMiddle } from '@/lib/format';
+import {
+	formatBytes,
+	formatClock,
+	formatDuration,
+	truncateMiddle,
+} from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { NetworkEntry } from '../../shared/protocol';
 
@@ -55,14 +60,18 @@ const NETWORK_PROFILES = [
 type NetworkProfileId = (typeof NETWORK_PROFILES)[number]['id'];
 
 function methodTone(method: string): string {
-	if (method === 'GET') return 'border-blue-400/25 bg-blue-400/10 text-blue-300';
+	if (method === 'GET')
+		return 'border-blue-400/25 bg-blue-400/10 text-blue-300';
 	if (method === 'POST')
 		return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300';
-	if (method === 'DELETE') return 'border-red-400/25 bg-red-400/10 text-red-300';
+	if (method === 'DELETE')
+		return 'border-red-400/25 bg-red-400/10 text-red-300';
 	return 'border-amber-400/25 bg-amber-400/10 text-amber-300';
 }
 
-function statusTone(entry: NetworkEntry): 'success' | 'warning' | 'danger' | 'info' {
+function statusTone(
+	entry: NetworkEntry
+): 'success' | 'warning' | 'danger' | 'info' {
 	if (entry.state === 'pending') return 'info';
 	if (entry.state === 'error' || (entry.status ?? 0) >= 400) return 'danger';
 	if ((entry.status ?? 0) >= 300) return 'warning';
@@ -70,7 +79,8 @@ function statusTone(entry: NetworkEntry): 'success' | 'warning' | 'danger' | 'in
 }
 
 function headersText(headers: Record<string, string> | undefined): string {
-	if (!headers || Object.keys(headers).length === 0) return 'No captured headers.';
+	if (!headers || Object.keys(headers).length === 0)
+		return 'No captured headers.';
 	return Object.entries(headers)
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([key, value]) => `${key}: ${value}`)
@@ -92,7 +102,9 @@ export function NetworkPanel() {
 	const entries = pausedEntries ?? liveEntries;
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<NetworkFilter>('all');
-	const [selectedId, setSelectedId] = useState<string | null>(entries[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		entries[0]?.id ?? null
+	);
 	const [detailTab, setDetailTab] = useState<DetailTab>('overview');
 	const currentProfile = selectedDevice?.tools.networkProfile;
 	const [profileId, setProfileId] = useState<NetworkProfileId>(
@@ -119,7 +131,14 @@ export function NetworkPanel() {
 				if (!matchesNetworkSegment(entry, filter)) return false;
 				return (
 					!needle ||
-					[entry.method, entry.url, entry.host, entry.path, entry.status, entry.source]
+					[
+						entry.method,
+						entry.url,
+						entry.host,
+						entry.path,
+						entry.status,
+						entry.source,
+					]
 						.join(' ')
 						.toLowerCase()
 						.includes(needle)
@@ -166,7 +185,9 @@ export function NetworkPanel() {
 				width: 92,
 				cell: (entry) => (
 					<StatusPill tone={statusTone(entry)}>
-						{entry.state === 'pending' ? 'Pending' : (entry.status ?? entry.state)}
+						{entry.state === 'pending'
+							? 'Pending'
+							: (entry.status ?? entry.state)}
 					</StatusPill>
 				),
 			},
@@ -254,17 +275,20 @@ export function NetworkPanel() {
 							confirmLabel="Clear requests"
 							isDisabled={!canRunAction('network', 'clear')}
 							onConfirm={() => {
-								void runAction('network', 'clear', {}, 'Network buffer cleared.').then(
-									(result) => {
-										if (result.ok && paused) {
-											setPausedSnapshot((current) =>
-												current?.deviceId === deviceId
-													? { deviceId, entries: [] }
-													: current
-											);
-										}
+								void runAction(
+									'network',
+									'clear',
+									{},
+									'Network buffer cleared.'
+								).then((result) => {
+									if (result.ok && paused) {
+										setPausedSnapshot((current) =>
+											current?.deviceId === deviceId
+												? { deviceId, entries: [] }
+												: current
+										);
 									}
-								);
+								});
 							}}
 						/>
 					</>
@@ -435,17 +459,19 @@ function NetworkDetail({
 				</p>
 			</div>
 			<div className="flex h-9 shrink-0 items-end gap-4 border-b border-white/8 px-4">
-				{(['overview', 'headers', 'request', 'response'] as const).map((value) => (
-					<button
-						aria-pressed={tab === value}
-						className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-white text-white' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
-						key={value}
-						type="button"
-						onClick={() => onTabChange(value)}
-					>
-						{value}
-					</button>
-				))}
+				{(['overview', 'headers', 'request', 'response'] as const).map(
+					(value) => (
+						<button
+							aria-pressed={tab === value}
+							className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-white text-white' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
+							key={value}
+							type="button"
+							onClick={() => onTabChange(value)}
+						>
+							{value}
+						</button>
+					)
+				)}
 			</div>
 			<div className="min-h-0 flex-1 overflow-auto p-4">
 				{tab === 'overview' ? (
@@ -468,7 +494,11 @@ function NetworkDetail({
 							value={formatBytes(entry.responseBytes)}
 							mono
 						/>
-						<KeyValue label="Duration" value={formatDuration(entry.durationMs)} mono />
+						<KeyValue
+							label="Duration"
+							value={formatDuration(entry.durationMs)}
+							mono
+						/>
 						{entry.error ? (
 							<div className="mt-4 rounded-md border border-red-400/20 bg-red-400/8 p-3 text-xs leading-5 text-red-300">
 								{entry.error}
@@ -489,7 +519,11 @@ function NetworkDetail({
 					</div>
 				) : null}
 				{tab === 'request' ? (
-					<CodePreview label="Request body" value={entry.requestBody} maxHeight={520} />
+					<CodePreview
+						label="Request body"
+						value={entry.requestBody}
+						maxHeight={520}
+					/>
 				) : null}
 				{tab === 'response' ? (
 					<CodePreview

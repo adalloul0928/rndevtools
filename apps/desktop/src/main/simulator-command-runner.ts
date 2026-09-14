@@ -116,9 +116,8 @@ function simulatorCommandEnvironment(
 		environment.SIMCTL_CHILD_TZ = appEnvironment.timeZone;
 	}
 	if (appEnvironment?.slowAnimations !== undefined) {
-		environment.SIMCTL_CHILD_PUMPD_SLOW_ANIMATIONS = appEnvironment.slowAnimations
-			? '1'
-			: '0';
+		environment.SIMCTL_CHILD_PUMPD_SLOW_ANIMATIONS =
+			appEnvironment.slowAnimations ? '1' : '0';
 	}
 	return environment;
 }
@@ -129,9 +128,12 @@ export async function runSimulatorCommand(
 	options: SimulatorCommandOptions = {}
 ): Promise<SimulatorCommandResult> {
 	if (!executable.startsWith('/')) {
-		throw new SimulatorCommandError('Simulator executable must use an absolute path.', {
-			kind: 'spawn',
-		});
+		throw new SimulatorCommandError(
+			'Simulator executable must use an absolute path.',
+			{
+				kind: 'spawn',
+			}
+		);
 	}
 	if (options.signal?.aborted) {
 		throw new SimulatorCommandError('Simulator command was cancelled.', {
@@ -145,7 +147,10 @@ export async function runSimulatorCommand(
 		DEFAULT_MAX_OUTPUT_BYTES
 	);
 	const label = commandLabel(executable);
-	const forceKillDelayMs = positiveLimit(options.forceKillDelayMs, FORCE_KILL_DELAY_MS);
+	const forceKillDelayMs = positiveLimit(
+		options.forceKillDelayMs,
+		FORCE_KILL_DELAY_MS
+	);
 
 	return new Promise<SimulatorCommandResult>((resolve, reject) => {
 		let settled = false;
@@ -178,7 +183,8 @@ export async function runSimulatorCommand(
 					options.gracefulCancellationPipe === true
 				),
 				stdio:
-					options.gracefulCancellationPipe && reservedAuthorizationFd !== undefined
+					options.gracefulCancellationPipe &&
+					reservedAuthorizationFd !== undefined
 						? ['pipe', 'pipe', 'pipe', reservedAuthorizationFd, 'pipe']
 						: ['pipe', 'pipe', 'pipe'],
 				shell: false,
@@ -202,9 +208,12 @@ export async function runSimulatorCommand(
 		if (options.gracefulCancellationPipe && !controlPipe) {
 			child.kill('SIGKILL');
 			reject(
-				new SimulatorCommandError(`${label} control pipe could not be created.`, {
-					kind: 'spawn',
-				})
+				new SimulatorCommandError(
+					`${label} control pipe could not be created.`,
+					{
+						kind: 'spawn',
+					}
+				)
 			);
 			return;
 		}

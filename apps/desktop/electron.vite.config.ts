@@ -4,7 +4,10 @@ import react from '@vitejs/plugin-react';
 import type { UserConfig } from 'electron-vite';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 
-export const WS_OPTIONAL_NATIVE_PEERS = ['bufferutil', 'utf-8-validate'] as const;
+export const WS_OPTIONAL_NATIVE_PEERS = [
+	'bufferutil',
+	'utf-8-validate',
+] as const;
 
 const sharedAlias = {
 	'@shared': path.resolve(__dirname, 'src/shared'),
@@ -22,7 +25,9 @@ const rendererAliases = {
 
 export const electronViteConfig = {
 	main: {
-		plugins: [externalizeDepsPlugin({ exclude: ['@pumpd/devtools', 'ws', 'zod'] })],
+		plugins: [
+			externalizeDepsPlugin({ exclude: ['@pumpd/devtools', 'ws', 'zod'] }),
+		],
 		resolve: { alias: nodeAliases },
 		build: {
 			outDir: 'dist/main',

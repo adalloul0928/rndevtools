@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import {
 	type AgentCliCommand,
 	type AgentCliErrorBody,
@@ -75,7 +78,12 @@ function safeErrorBody(error: unknown): AgentCliErrorBody {
 		message: message || 'The agent request failed.',
 		retryable: known?.retryable ?? false,
 		...(known?.recovery
-			? { recovery: redactDiagnosticText(known.recovery).slice(0, MAX_ERROR_LENGTH) }
+			? {
+					recovery: redactDiagnosticText(known.recovery).slice(
+						0,
+						MAX_ERROR_LENGTH
+					),
+				}
 			: {}),
 	};
 }
@@ -90,7 +98,10 @@ function handlerTimeoutMs(command: AgentCliCommand): number {
 	return REQUEST_TIMEOUT_MS;
 }
 
-function failureResponse(id: string, error: AgentCliErrorBody): AgentCliResponse {
+function failureResponse(
+	id: string,
+	error: AgentCliErrorBody
+): AgentCliResponse {
 	return {
 		protocol: PUMPD_AGENT_CLI_PROTOCOL,
 		id: id.slice(0, 256),
@@ -190,10 +201,14 @@ export class AgentCliService {
 			await mkdir(this.#socketDirectory, { recursive: true, mode: 0o700 });
 			await chmod(this.#socketDirectory, 0o700);
 			const directoryMetadata = await lstat(this.#socketDirectory);
-			if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()) {
+			if (
+				!directoryMetadata.isDirectory() ||
+				directoryMetadata.isSymbolicLink()
+			) {
 				throw new AgentCliError({
 					code: 'unsafe_socket_directory',
-					message: 'The agent socket directory must be a real private directory.',
+					message:
+						'The agent socket directory must be a real private directory.',
 				});
 			}
 			await this.#removeStaleSocket();
@@ -325,7 +340,10 @@ export class AgentCliService {
 		});
 		socket.on('data', (chunk: Buffer) => {
 			if (handled) return;
-			buffer = Buffer.concat([buffer, chunk], buffer.byteLength + chunk.byteLength);
+			buffer = Buffer.concat(
+				[buffer, chunk],
+				buffer.byteLength + chunk.byteLength
+			);
 			if (buffer.byteLength > MAX_REQUEST_BYTES) {
 				handled = true;
 				socket.end(
@@ -404,7 +422,9 @@ export class AgentCliService {
 			}
 		} catch (error) {
 			if (!socket.destroyed) {
-				socket.end(encodeResponse(failureResponse(request.id, safeErrorBody(error))));
+				socket.end(
+					encodeResponse(failureResponse(request.id, safeErrorBody(error)))
+				);
 			}
 		} finally {
 			clearTimeout(timer);

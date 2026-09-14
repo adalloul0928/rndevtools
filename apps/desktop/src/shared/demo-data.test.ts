@@ -66,17 +66,21 @@ describe('demo device actions', () => {
 		);
 
 		expect(
-			original.tools.storage.find((entry) => entry.id === storageEntry?.id)?.valueText
+			original.tools.storage.find((entry) => entry.id === storageEntry?.id)
+				?.valueText
 		).not.toBe('updated-from-desktop');
 		expect(
-			updated.tools.storage.find((entry) => entry.id === storageEntry?.id)?.valueText
+			updated.tools.storage.find((entry) => entry.id === storageEntry?.id)
+				?.valueText
 		).toBe('updated-from-desktop');
 		expect(updated.tools.storageEvents[0]?.kind).toBe('updated');
 	});
 
 	it('rejects writes to protected storage', () => {
 		const device = createDemoDevice();
-		const protectedEntry = device.tools.storage.find((entry) => entry.sensitive);
+		const protectedEntry = device.tools.storage.find(
+			(entry) => entry.sensitive
+		);
 		expect(() =>
 			applyDemoAction(
 				device,
@@ -90,7 +94,9 @@ describe('demo device actions', () => {
 
 	it('bookmarks and undoes storage history by stable event id', () => {
 		const original = createDemoDevice(1_100_000);
-		const entry = original.tools.storage.find((candidate) => candidate.editable);
+		const entry = original.tools.storage.find(
+			(candidate) => candidate.editable
+		);
 		expect(entry).toBeDefined();
 		const updated = applyDemoAction(
 			original,
@@ -116,7 +122,8 @@ describe('demo device actions', () => {
 			1_103_000
 		);
 		expect(
-			undone.tools.storage.find((candidate) => candidate.id === entry?.id)?.valueText
+			undone.tools.storage.find((candidate) => candidate.id === entry?.id)
+				?.valueText
 		).toBe(event?.previousText);
 		expect(undone.tools.storageEvents[0]).toMatchObject({
 			bookmarked: true,
@@ -184,7 +191,9 @@ describe('demo device actions', () => {
 			2_005_000
 		);
 		expect(
-			removed.tools.restorePoints.some((candidate) => candidate.id === point?.id)
+			removed.tools.restorePoints.some(
+				(candidate) => candidate.id === point?.id
+			)
 		).toBe(false);
 	});
 
@@ -212,8 +221,9 @@ describe('demo device actions', () => {
 		);
 		expect(
 			JSON.parse(
-				patched.tools.zustandStores.find((candidate) => candidate.id === store?.id)
-					?.stateText ?? '{}'
+				patched.tools.zustandStores.find(
+					(candidate) => candidate.id === store?.id
+				)?.stateText ?? '{}'
 			).showDebugBadges
 		).toBe(false);
 		expect(patched.tools.zustandMutationReceipts.at(-1)).toMatchObject({
@@ -230,8 +240,9 @@ describe('demo device actions', () => {
 			2_103_000
 		);
 		expect(
-			restored.tools.zustandStores.find((candidate) => candidate.id === store?.id)
-				?.stateText
+			restored.tools.zustandStores.find(
+				(candidate) => candidate.id === store?.id
+			)?.stateText
 		).toBe(store?.stateText);
 		expect(restored.tools.zustandMutationReceipts.at(-1)?.kind).toBe('jump');
 	});
@@ -286,8 +297,12 @@ describe('demo device actions', () => {
 			}),
 			2_551_000
 		);
-		expect(original.tools.scenarios.every((scenario) => scenario.bundled)).toBe(true);
-		expect(replaced.tools.scenarios.filter((scenario) => !scenario.bundled)).toEqual([
+		expect(original.tools.scenarios.every((scenario) => scenario.bundled)).toBe(
+			true
+		);
+		expect(
+			replaced.tools.scenarios.filter((scenario) => !scenario.bundled)
+		).toEqual([
 			expect.objectContaining({
 				id: 'user.offline',
 				name: 'Offline flow',
@@ -349,7 +364,9 @@ describe('demo device actions', () => {
 	it('rejects invalid scenario imports without mutating the demo list', () => {
 		const original = createDemoDevice(2_560_000);
 		const originalScenarios = structuredClone(original.tools.scenarios);
-		const bundledId = original.tools.scenarios.find((scenario) => scenario.bundled)?.id;
+		const bundledId = original.tools.scenarios.find(
+			(scenario) => scenario.bundled
+		)?.id;
 		if (!bundledId) throw new Error('Bundled demo scenario is missing.');
 		const invalidImports: Array<Record<string, unknown>> = [
 			{ json: '{}', mode: 'merge' },
@@ -402,7 +419,9 @@ describe('demo device actions', () => {
 			applyDemoAction(
 				imported,
 				action('scenarios', 'import', {
-					json: scenarioDocument([scenarioDefinition({ name: 'Would overwrite' })]),
+					json: scenarioDocument([
+						scenarioDefinition({ name: 'Would overwrite' }),
+					]),
 					mode: 'merge',
 				})
 			)
@@ -424,7 +443,11 @@ describe('demo device actions', () => {
 		});
 		expect(device.tools.identitySession.active).toBeUndefined();
 
-		const restored = applyDemoAction(active, action('identity', 'stop'), 2_602_000);
+		const restored = applyDemoAction(
+			active,
+			action('identity', 'stop'),
+			2_602_000
+		);
 		expect(restored.tools.identitySession.active).toBeUndefined();
 		expect(restored.tools.identitySession.history[0]).toMatchObject({
 			status: 'stopped',
@@ -434,11 +457,19 @@ describe('demo device actions', () => {
 
 	it('records performance samples only while a review is active', () => {
 		const device = createDemoDevice(3_000_000);
-		const started = applyDemoAction(device, action('performance', 'start'), 3_001_000);
+		const started = applyDemoAction(
+			device,
+			action('performance', 'start'),
+			3_001_000
+		);
 		const ticked = tickDemoDevice(started, 3_002_000);
 		expect(ticked.tools.performance.samples).toHaveLength(1);
 
-		const stopped = applyDemoAction(ticked, action('performance', 'stop'), 3_003_000);
+		const stopped = applyDemoAction(
+			ticked,
+			action('performance', 'stop'),
+			3_003_000
+		);
 		const afterStop = tickDemoDevice(stopped, 3_004_000);
 		expect(afterStop.tools.performance.samples).toHaveLength(1);
 		expect(afterStop.tools.performance.summary.sampleCount).toBe(1);
@@ -449,10 +480,13 @@ describe('demo device actions', () => {
 		const sample = device.tools.performance.samples[0];
 		expect(sample).toBeDefined();
 		if (!sample) throw new Error('Demo performance sample is missing.');
-		device.tools.performance.samples = Array.from({ length: 1_500 }, (_, index) => ({
-			...sample,
-			id: `sample-${index}`,
-		}));
+		device.tools.performance.samples = Array.from(
+			{ length: 1_500 },
+			(_, index) => ({
+				...sample,
+				id: `sample-${index}`,
+			})
+		);
 		device.tools.performance.droppedSampleCount = 2;
 
 		const ticked = tickDemoDevice(device, 3_101_000);

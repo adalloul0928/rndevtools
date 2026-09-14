@@ -44,10 +44,14 @@ describe('renderer process boundaries', () => {
 					: null;
 				const crossesProcessBoundary =
 					resolvedRelativeImport !== null &&
-					forbiddenSourceRoots.some((root) => resolvedRelativeImport.startsWith(root));
+					forbiddenSourceRoots.some((root) =>
+						resolvedRelativeImport.startsWith(root)
+					);
 
 				if (isForbiddenPackage || crossesProcessBoundary) {
-					violations.push(`${path.relative(rendererRoot, file)} imports ${moduleId}`);
+					violations.push(
+						`${path.relative(rendererRoot, file)} imports ${moduleId}`
+					);
 				}
 			}
 		}

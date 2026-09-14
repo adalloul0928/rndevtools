@@ -13,7 +13,9 @@ afterEach(async () => {
 });
 
 async function createStore(now: number): Promise<BuildInsightsStore> {
-	const root = await mkdtemp(path.join(tmpdir(), 'pumpd-build-insights-store-'));
+	const root = await mkdtemp(
+		path.join(tmpdir(), 'pumpd-build-insights-store-')
+	);
 	temporaryRoots.push(root);
 	const store = new BuildInsightsStore(root, { now: () => now });
 	await store.start();

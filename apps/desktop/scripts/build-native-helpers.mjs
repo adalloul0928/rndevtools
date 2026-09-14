@@ -36,7 +36,9 @@ const sourceCommit = nativeSourceIdentity();
 
 const options = parseOptions(process.argv.slice(2));
 if (process.platform !== 'darwin' && options.ifSupported) {
-	process.stdout.write('Skipping macOS native helpers on this packaging platform.\n');
+	process.stdout.write(
+		'Skipping macOS native helpers on this packaging platform.\n'
+	);
 	process.exit(0);
 }
 const architectures = options.all
@@ -80,7 +82,9 @@ for (const architecture of architectures) {
 	if (!options.buildSwift) {
 		const existing = join(outputDirectory, 'pumpd-native-host');
 		if (!statIfFile(existing)) {
-			fail('Partial native build requires the existing pumpd-native-host binary.');
+			fail(
+				'Partial native build requires the existing pumpd-native-host binary.'
+			);
 		}
 		helpers.nativeHost = helperManifest(existing, 'pumpd-native-host');
 	}
@@ -108,7 +112,10 @@ for (const architecture of architectures) {
 			goEnvironment,
 			'vendor'
 		);
-		helpers.simulator = helperManifest(simulatorDestination, 'pumpd-sim-helper');
+		helpers.simulator = helperManifest(
+			simulatorDestination,
+			'pumpd-sim-helper'
+		);
 
 		const cliDestination = join(outputDirectory, 'pumpd-devtools');
 		buildGoBinary(
@@ -274,7 +281,9 @@ function requireCommand(command, arguments_, env) {
 		env,
 	});
 	if (result.error?.code === 'ENOENT') {
-		fail(`${command} is required to build native helpers but is not installed.`);
+		fail(
+			`${command} is required to build native helpers but is not installed.`
+		);
 	}
 	if (result.status !== 0) {
 		fail(`${command} is present but could not run successfully.`);

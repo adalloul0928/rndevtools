@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { agentCliRequestSchema, PUMPD_AGENT_CLI_PROTOCOL } from './agent-cli-protocol';
+import {
+	agentCliRequestSchema,
+	PUMPD_AGENT_CLI_PROTOCOL,
+} from './agent-cli-protocol';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
 
@@ -26,7 +29,11 @@ describe('agent CLI protocol', () => {
 	it('rejects arbitrary shell-shaped commands and unknown fields', () => {
 		expect(
 			agentCliRequestSchema.safeParse(
-				request({ kind: 'shell', executable: '/bin/zsh', args: ['-c', 'whoami'] })
+				request({
+					kind: 'shell',
+					executable: '/bin/zsh',
+					args: ['-c', 'whoami'],
+				})
 			).success
 		).toBe(false);
 		expect(
@@ -108,7 +115,9 @@ describe('agent CLI protocol', () => {
 				profileId: 'pumpd-development',
 			},
 		]) {
-			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(true);
+			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(
+				true
+			);
 		}
 		for (const command of [
 			{ kind: 'slimming', operation: 'status', udids: [UDID] },
@@ -120,7 +129,9 @@ describe('agent CLI protocol', () => {
 			},
 			{ kind: 'slimming', operation: 'preview', udids: [UDID] },
 		]) {
-			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(false);
+			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(
+				false
+			);
 		}
 		expect(
 			agentCliRequestSchema.safeParse(

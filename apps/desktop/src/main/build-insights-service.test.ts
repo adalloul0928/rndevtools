@@ -14,7 +14,9 @@ afterEach(async () => {
 });
 
 async function fixture() {
-	const root = await mkdtemp(path.join(tmpdir(), 'pumpd-build-insights-service-'));
+	const root = await mkdtemp(
+		path.join(tmpdir(), 'pumpd-build-insights-service-')
+	);
 	temporaryRoots.push(root);
 	const resultPath = path.join(root, 'Build-PUMPD.xcresult');
 	await mkdir(resultPath);
@@ -37,7 +39,9 @@ async function fixture() {
 		store: new BuildInsightsStore(path.join(root, 'store'), { now: () => now }),
 		runXcresult,
 		watchFactory: () =>
-			Object.assign(new EventEmitter(), { close: vi.fn() }) as unknown as FSWatcher,
+			Object.assign(new EventEmitter(), {
+				close: vi.fn(),
+			}) as unknown as FSWatcher,
 		now: () => now,
 	});
 	await service.start();
@@ -115,25 +119,38 @@ describe('BuildInsightsService', () => {
 		['tab', '\t=SUM(1,1)'],
 		['carriage return', '\r=SUM(1,1)'],
 		['line feed', '\n=SUM(1,1)'],
-	])('neutralizes a leading %s before RFC 4180 CSV quoting', async (_, value) => {
-		const { resultPath, root, service } = await fixture();
-		await service.importXcresult(resultPath);
+	])(
+		'neutralizes a leading %s before RFC 4180 CSV quoting',
+		async (_, value) => {
+			const { resultPath, root, service } = await fixture();
+			await service.importXcresult(resultPath);
 
-		const { buildId, exported } = await exportCsvWithBuildName(service, root, value);
+			const { buildId, exported } = await exportCsvWithBuildName(
+				service,
+				root,
+				value
+			);
 
-		expect(exported).toContain(
-			`${quotedCsvCell(buildId)},${quotedCsvCell(`'${value}`)},`
-		);
-		await service.stop();
-	});
+			expect(exported).toContain(
+				`${quotedCsvCell(buildId)},${quotedCsvCell(`'${value}`)},`
+			);
+			await service.stop();
+		}
+	);
 
 	it('exports negative numeric-looking text as neutralized text', async () => {
 		const { resultPath, root, service } = await fixture();
 		await service.importXcresult(resultPath);
 
-		const { buildId, exported } = await exportCsvWithBuildName(service, root, '-42.5');
+		const { buildId, exported } = await exportCsvWithBuildName(
+			service,
+			root,
+			'-42.5'
+		);
 
-		expect(exported).toContain(`${quotedCsvCell(buildId)},${quotedCsvCell("'-42.5")},`);
+		expect(exported).toContain(
+			`${quotedCsvCell(buildId)},${quotedCsvCell("'-42.5")},`
+		);
 		await service.stop();
 	});
 
@@ -148,9 +165,15 @@ describe('BuildInsightsService', () => {
 		const { resultPath, root, service } = await fixture();
 		await service.importXcresult(resultPath);
 
-		const { buildId, exported } = await exportCsvWithBuildName(service, root, value);
+		const { buildId, exported } = await exportCsvWithBuildName(
+			service,
+			root,
+			value
+		);
 
-		expect(exported).toContain(`${quotedCsvCell(buildId)},${quotedCsvCell(value)},`);
+		expect(exported).toContain(
+			`${quotedCsvCell(buildId)},${quotedCsvCell(value)},`
+		);
 		await service.stop();
 	});
 
@@ -161,7 +184,9 @@ describe('BuildInsightsService', () => {
 	});
 
 	it('keeps a watcher setup failure visible after the initial scan', async () => {
-		const root = await mkdtemp(path.join(tmpdir(), 'pumpd-build-watch-failure-'));
+		const root = await mkdtemp(
+			path.join(tmpdir(), 'pumpd-build-watch-failure-')
+		);
 		temporaryRoots.push(root);
 		const derivedData = path.join(root, 'DerivedData');
 		await mkdir(derivedData);
@@ -186,7 +211,8 @@ describe('BuildInsightsService', () => {
 		temporaryRoots.push(root);
 		const derivedData = path.join(root, 'DerivedData');
 		await mkdir(derivedData);
-		const created: Array<EventEmitter & { close: ReturnType<typeof vi.fn> }> = [];
+		const created: Array<EventEmitter & { close: ReturnType<typeof vi.fn> }> =
+			[];
 		const watchFactory = vi.fn(() => {
 			const watcher = Object.assign(new EventEmitter(), { close: vi.fn() });
 			created.push(watcher);
@@ -214,7 +240,9 @@ describe('BuildInsightsService', () => {
 	it('keeps a scan visibly unhealthy when discovered build results cannot be parsed', async () => {
 		const { root, runXcresult, service } = await fixture();
 		const derivedData = path.join(root, 'DerivedData');
-		await mkdir(path.join(derivedData, 'Unreadable.xcresult'), { recursive: true });
+		await mkdir(path.join(derivedData, 'Unreadable.xcresult'), {
+			recursive: true,
+		});
 		runXcresult.mockRejectedValueOnce(new Error('unsupported build result'));
 
 		const state = await service.addWatchRoot(derivedData);

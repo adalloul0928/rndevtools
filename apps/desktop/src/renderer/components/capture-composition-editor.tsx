@@ -2,7 +2,13 @@ import { Button } from '@heroui/react/button';
 import { Input } from '@heroui/react/input';
 import { Switch } from '@heroui/react/switch';
 import { NativeSelect } from '@heroui-pro/react/native-select';
-import { ChevronDown, Frame, Layers3, LoaderCircle, Sparkles } from 'lucide-react';
+import {
+	ChevronDown,
+	Frame,
+	Layers3,
+	LoaderCircle,
+	Sparkles,
+} from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { InfoPopover } from '@/components/ui';
 import type { SimulatorCapture } from '../../shared/simulator-protocol';
@@ -25,7 +31,10 @@ export function CaptureCompositionPreview({
 	const preset = CAPTURE_CANVAS_PRESETS[fields.canvasPreset];
 	const padding = Number(fields.padding);
 	const paddingPercent = Number.isFinite(padding)
-		? Math.min(28, Math.max(0, (padding / Math.max(preset.width, preset.height)) * 100))
+		? Math.min(
+				28,
+				Math.max(0, (padding / Math.max(preset.width, preset.height)) * 100)
+			)
 		: 0;
 	const background =
 		fields.backgroundKind === 'transparent'
@@ -74,7 +83,10 @@ export function CaptureCompositionPreview({
 							...imageStyle,
 							opacity:
 								fields.comparisonMode === 'opacity'
-									? Math.min(1, Math.max(0, Number(fields.comparisonAmount) / 100))
+									? Math.min(
+											1,
+											Math.max(0, Number(fields.comparisonAmount) / 100)
+										)
 									: 1,
 						}}
 					/>
@@ -93,7 +105,9 @@ export function CaptureCompositionPreview({
 				{images}
 			</div>
 			{fields.metadataEnabled && fields.metadataText ? (
-				<div className={`sim-composition-metadata is-${fields.metadataPlacement}`}>
+				<div
+					className={`sim-composition-metadata is-${fields.metadataPlacement}`}
+				>
 					<span>{fields.metadataText}</span>
 				</div>
 			) : null}
@@ -117,7 +131,11 @@ function PreviewFrame({
 			className={`sim-composition-frame ${bezel ? 'has-bezel' : ''}`}
 			style={frameStyle}
 		>
-			<img alt="Primary capture composition preview" src={url} style={imageStyle} />
+			<img
+				alt="Primary capture composition preview"
+				src={url}
+				style={imageStyle}
+			/>
 		</div>
 	);
 }
@@ -164,8 +182,8 @@ export function CaptureCompositionEditor({
 					<h2>Edit screenshot</h2>
 				</div>
 				<InfoPopover label="Screenshot editing">
-					Add a frame, background, or comparison image. Save a new capture to keep your
-					original screenshot.
+					Add a frame, background, or comparison image. Save a new capture to
+					keep your original screenshot.
 				</InfoPopover>
 			</header>
 			<Switch
@@ -201,18 +219,25 @@ export function CaptureCompositionEditor({
 						label="Canvas preset"
 						value={fields.canvasPreset}
 						onChange={(value) =>
-							update('canvasPreset', value as CaptureCompositionFields['canvasPreset'])
+							update(
+								'canvasPreset',
+								value as CaptureCompositionFields['canvasPreset']
+							)
 						}
-						options={Object.entries(CAPTURE_CANVAS_PRESETS).map(([value, preset]) => ({
-							value,
-							label: `${preset.label} · ${preset.width}×${preset.height}`,
-						}))}
+						options={Object.entries(CAPTURE_CANVAS_PRESETS).map(
+							([value, preset]) => ({
+								value,
+								label: `${preset.label} · ${preset.width}×${preset.height}`,
+							})
+						)}
 					/>
 					<div className="sim-composition-grid">
 						<CompositionSelect
 							label="Format"
 							value={fields.outputFormat}
-							onChange={(value) => update('outputFormat', value as 'png' | 'jpeg')}
+							onChange={(value) =>
+								update('outputFormat', value as 'png' | 'jpeg')
+							}
 							options={[
 								{ value: 'png', label: 'PNG' },
 								{ value: 'jpeg', label: 'JPEG' },
@@ -265,7 +290,9 @@ export function CaptureCompositionEditor({
 						<CompositionSelect
 							label="Fit"
 							value={fields.contentMode}
-							onChange={(value) => update('contentMode', value as 'fit' | 'fill')}
+							onChange={(value) =>
+								update('contentMode', value as 'fit' | 'fill')
+							}
 							options={[
 								{ value: 'fit', label: 'Fit' },
 								{ value: 'fill', label: 'Fill' },
@@ -275,7 +302,10 @@ export function CaptureCompositionEditor({
 							label="Rotation"
 							value={fields.rotation}
 							onChange={(value) =>
-								update('rotation', value as CaptureCompositionFields['rotation'])
+								update(
+									'rotation',
+									value as CaptureCompositionFields['rotation']
+								)
 							}
 							options={['0', '90', '180', '270'].map((value) => ({
 								value,
@@ -316,7 +346,8 @@ export function CaptureCompositionEditor({
 						onChange={(value) =>
 							onChange({
 								...fields,
-								comparisonMode: value as CaptureCompositionFields['comparisonMode'],
+								comparisonMode:
+									value as CaptureCompositionFields['comparisonMode'],
 								...(value === 'none' ? { secondaryCaptureId: '' } : {}),
 							})
 						}
@@ -357,8 +388,8 @@ export function CaptureCompositionEditor({
 					</Button>
 					{parsed ? null : (
 						<p className="sim-field-error" role="alert">
-							Check the color, numeric, metadata, and comparison fields. JPEG requires
-							an opaque background.
+							Check the color, numeric, metadata, and comparison fields. JPEG
+							requires an opaque background.
 						</p>
 					)}
 				</div>

@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type {
 	SlimmingAcknowledgementReceipt,
 	SlimmingAcknowledgementRequest,
@@ -51,7 +54,11 @@ const ACTIVE_JOB_STATUSES = new Set([
 	'verifying',
 	'rolling-back',
 ]);
-const MUTATION_KINDS = new Set(['profile.apply', 'profile.restore', 'profile.undo']);
+const MUTATION_KINDS = new Set([
+	'profile.apply',
+	'profile.restore',
+	'profile.undo',
+]);
 const NO_MUTATION_ERROR_CODES = new Set([
 	'checkpoint_required',
 	'invalid_checkpoint',
@@ -116,7 +123,9 @@ function helperStateFromError(error: unknown): SlimmingState['helper'] {
 	};
 }
 
-function mapDeviceState(state: string): SlimmingState['simulators'][number]['state'] {
+function mapDeviceState(
+	state: string
+): SlimmingState['simulators'][number]['state'] {
 	switch (state.toLowerCase()) {
 		case 'booted':
 			return 'booted';
@@ -165,7 +174,9 @@ function sameManagedServiceSet(
 	if (left.length !== right.length) return false;
 	const sortedLeft = [...left].sort();
 	const sortedRight = [...right].sort();
-	return sortedLeft.every((serviceId, index) => serviceId === sortedRight[index]);
+	return sortedLeft.every(
+		(serviceId, index) => serviceId === sortedRight[index]
+	);
 }
 
 function actionKindForMutation(
@@ -193,16 +204,21 @@ function abbreviatedIds(ids: readonly string[]): string {
  */
 function mutationFailureDetail(error: unknown): string {
 	const evidence =
-		error instanceof SimHelperError ? mutationEvidenceFromError(error) : undefined;
+		error instanceof SimHelperError
+			? mutationEvidenceFromError(error)
+			: undefined;
 	if (!evidence) return '';
 	const parts: string[] = [];
-	if (evidence.failureCode) parts.push(`helper failure ${evidence.failureCode}`);
+	if (evidence.failureCode)
+		parts.push(`helper failure ${evidence.failureCode}`);
 	if (evidence.failureDetail) parts.push(evidence.failureDetail);
 	const verification = evidence.verification;
 	if (!verification.verified) {
 		if (!verification.overridesMatch) {
 			const missing = abbreviatedIds(verification.missingDisabledServiceIds);
-			const unexpected = abbreviatedIds(verification.unexpectedDisabledServiceIds);
+			const unexpected = abbreviatedIds(
+				verification.unexpectedDisabledServiceIds
+			);
 			parts.push(
 				`overrides did not match${missing ? `; missing: ${missing}` : ''}${unexpected ? `; unexpected: ${unexpected}` : ''}`
 			);
@@ -237,7 +253,9 @@ function describeMutationFailure(error: unknown): string {
 
 function mutationFailureIsProvenSafe(error: unknown): boolean {
 	const evidence =
-		error instanceof SimHelperError ? mutationEvidenceFromError(error) : undefined;
+		error instanceof SimHelperError
+			? mutationEvidenceFromError(error)
+			: undefined;
 	return (
 		Boolean(evidence?.rollback.succeeded) ||
 		(error instanceof SimHelperError && NO_MUTATION_ERROR_CODES.has(error.code))
@@ -413,7 +431,9 @@ export class SlimmingService {
 		return refresh;
 	}
 
-	async setEnabled(value: SlimmingSettingRequest): Promise<SlimmingSettingReceipt> {
+	async setEnabled(
+		value: SlimmingSettingRequest
+	): Promise<SlimmingSettingReceipt> {
 		let request = slimmingSettingRequestSchema.parse(value);
 		if (!request.enabled && request.disposition === 'restore-and-verify') {
 			request = slimmingSettingRequestSchema.parse({
@@ -437,9 +457,15 @@ export class SlimmingService {
 			await this.#persistence.setSetting(setting);
 			this.#state.setting = setting;
 			this.#touch();
-			return { actionId: request.actionId, accepted: true, state: this.getState() };
+			return {
+				actionId: request.actionId,
+				accepted: true,
+				state: this.getState(),
+			};
 		}
-		const hasManagedOverrides = Object.values(this.#state.statusBySimulator).some(
+		const hasManagedOverrides = Object.values(
+			this.#state.statusBySimulator
+		).some(
 			(status) =>
 				status.managedDisabledCount > 0 ||
 				(status.checkpointAvailable &&
@@ -453,7 +479,11 @@ export class SlimmingService {
 			await this.#persistence.setSetting(setting);
 			this.#state.setting = setting;
 			this.#touch();
-			return { actionId: request.actionId, accepted: true, state: this.getState() };
+			return {
+				actionId: request.actionId,
+				accepted: true,
+				state: this.getState(),
+			};
 		}
 		if (request.disposition === 'leave-overrides-in-place') {
 			const setting: PersistedSlimmingSetting = {
@@ -466,7 +496,11 @@ export class SlimmingService {
 			await this.#persistence.setSetting(setting);
 			this.#state.setting = setting;
 			this.#touch();
-			return { actionId: request.actionId, accepted: true, state: this.getState() };
+			return {
+				actionId: request.actionId,
+				accepted: true,
+				state: this.getState(),
+			};
 		}
 		const requestedTargets = new Set(request.simulatorUdids);
 		const unrestoredTargets = Object.values(this.#state.statusBySimulator)
@@ -552,10 +586,14 @@ export class SlimmingService {
 				actionId: request.actionId,
 				accepted: false,
 				state: this.getState(),
-				error: this.#state.helper.error ?? 'Native helper inspection is unavailable.',
+				error:
+					this.#state.helper.error ??
+					'Native helper inspection is unavailable.',
 			};
 		}
-		const simulatorUdids = this.#canonicalSimulatorUdids(request.simulatorUdids);
+		const simulatorUdids = this.#canonicalSimulatorUdids(
+			request.simulatorUdids
+		);
 		const knownSimulatorUdids = new Set(
 			this.#state.simulators.map((simulator) => simulator.udid)
 		);
@@ -681,7 +719,10 @@ export class SlimmingService {
 				return this.#reject(action, 'Safety persistence is unavailable.');
 			}
 			if (!this.#state.setting.experimentalMutationsEnabled) {
-				return this.#reject(action, 'Experimental Simulator mutations are disabled.');
+				return this.#reject(
+					action,
+					'Experimental Simulator mutations are disabled.'
+				);
 			}
 			const operation = mutationOperation(action);
 			for (const udid of action.simulatorUdids) {
@@ -703,7 +744,10 @@ export class SlimmingService {
 					operation &&
 					!compatibility.verifiedOperations.includes(operation)
 				) {
-					return this.#reject(action, `${operation} is not verified for ${udid}.`);
+					return this.#reject(
+						action,
+						`${operation} is not verified for ${udid}.`
+					);
 				}
 				if (compatibility.status === 'unknown' && !compatibility.acknowledged) {
 					return this.#reject(
@@ -720,7 +764,10 @@ export class SlimmingService {
 			);
 		}
 		if (this.#jobs.length >= MAX_JOBS) {
-			return this.#reject(action, `The ${MAX_JOBS}-job Slimming queue is full.`);
+			return this.#reject(
+				action,
+				`The ${MAX_JOBS}-job Slimming queue is full.`
+			);
 		}
 		if (
 			mutationLease &&
@@ -807,7 +854,11 @@ export class SlimmingService {
 			try {
 				const executeTarget = () =>
 					this.#withMutationQueue(job.controller.signal, () =>
-						this.#executeTarget(job, target.simulatorUdid, job.controller.signal)
+						this.#executeTarget(
+							job,
+							target.simulatorUdid,
+							job.controller.signal
+						)
 					);
 				const result = MUTATION_KINDS.has(job.action.kind)
 					? await this.#mutationCoordinator.runExclusive(
@@ -816,15 +867,21 @@ export class SlimmingService {
 							executeTarget,
 							job.mutationLease
 						)
-					: await this.#executeTarget(job, target.simulatorUdid, job.controller.signal);
+					: await this.#executeTarget(
+							job,
+							target.simulatorUdid,
+							job.controller.signal
+						);
 				this.#updateTarget(job, index, {
 					status: 'complete',
 					message: result.message,
 					...(result.condition ? { condition: result.condition } : {}),
 					...(result.changed !== undefined ? { changed: result.changed } : {}),
 					checkpointAvailable:
-						this.#state.checkpointBySimulator[target.simulatorUdid] !== undefined ||
-						this.#persistence.pendingMutation(target.simulatorUdid) !== undefined,
+						this.#state.checkpointBySimulator[target.simulatorUdid] !==
+							undefined ||
+						this.#persistence.pendingMutation(target.simulatorUdid) !==
+							undefined,
 				});
 			} catch (error) {
 				const cancelled = job.controller.signal.aborted;
@@ -840,9 +897,10 @@ export class SlimmingService {
 					(pendingAtFailure !== undefined &&
 						(!provenSafe || pendingAtFailure.recovery !== undefined)) ||
 					(error instanceof SimHelperError &&
-						['mutation_failed_needs_attention', 'simulator_needs_attention'].includes(
-							error.code
-						));
+						[
+							'mutation_failed_needs_attention',
+							'simulator_needs_attention',
+						].includes(error.code));
 				const terminal = needsAttention
 					? 'needs-attention'
 					: cancelled
@@ -856,7 +914,8 @@ export class SlimmingService {
 					recoveringEmergencyCheckpoint
 				);
 				if (needsAttention) {
-					const previousStatus = this.#state.statusBySimulator[target.simulatorUdid];
+					const previousStatus =
+						this.#state.statusBySimulator[target.simulatorUdid];
 					if (previousStatus) {
 						this.#state.statusBySimulator[target.simulatorUdid] = {
 							...previousStatus,
@@ -882,8 +941,10 @@ export class SlimmingService {
 					condition: needsAttention ? 'needs-attention' : 'unknown',
 					...(error instanceof SimHelperError ? { errorCode: error.code } : {}),
 					checkpointAvailable:
-						this.#state.checkpointBySimulator[target.simulatorUdid] !== undefined ||
-						this.#persistence.pendingMutation(target.simulatorUdid) !== undefined,
+						this.#state.checkpointBySimulator[target.simulatorUdid] !==
+							undefined ||
+						this.#persistence.pendingMutation(target.simulatorUdid) !==
+							undefined,
 				});
 				if (cancelled) {
 					this.#cancelRemaining(job, index + 1);
@@ -944,7 +1005,11 @@ export class SlimmingService {
 		job: InternalJob,
 		simulatorUdid: string,
 		signal: AbortSignal
-	): Promise<{ message: string; condition?: SlimmingCondition; changed?: boolean }> {
+	): Promise<{
+		message: string;
+		condition?: SlimmingCondition;
+		changed?: boolean;
+	}> {
 		const action = job.action;
 		if (action.kind === 'profile.preview') {
 			const plan = await this.#helper.previewProfile(
@@ -1044,13 +1109,17 @@ export class SlimmingService {
 		) {
 			throw new Error(`${operation} is not verified for ${simulatorUdid}.`);
 		}
-		if (publicCompatibility.status === 'unknown' && !publicCompatibility.acknowledged) {
+		if (
+			publicCompatibility.status === 'unknown' &&
+			!publicCompatibility.acknowledged
+		) {
 			throw new Error(
 				`${simulatorUdid} requires a separately persisted exact EXPERIMENTAL acknowledgement for its current compatibility tuple.`
 			);
 		}
 		let acknowledgement: 'EXPERIMENTAL' | undefined =
-			publicCompatibility.status === 'unknown' && publicCompatibility.acknowledged
+			publicCompatibility.status === 'unknown' &&
+			publicCompatibility.acknowledged
 				? 'EXPERIMENTAL'
 				: undefined;
 		const interruptedPending = this.#persistence.pendingMutation(simulatorUdid);
@@ -1079,7 +1148,9 @@ export class SlimmingService {
 			targetCheckpointToken,
 			signal
 		);
-		const preparedCompatibility = this.#publicCompatibility(prepared.compatibility);
+		const preparedCompatibility = this.#publicCompatibility(
+			prepared.compatibility
+		);
 		if (preparedCompatibility.status === 'blocked') {
 			throw new Error(
 				`${simulatorUdid} changed to a blocked compatibility tuple during preflight.`
@@ -1103,7 +1174,8 @@ export class SlimmingService {
 			);
 		}
 		acknowledgement =
-			preparedCompatibility.status === 'unknown' && preparedCompatibility.acknowledged
+			preparedCompatibility.status === 'unknown' &&
+			preparedCompatibility.acknowledged
 				? 'EXPERIMENTAL'
 				: undefined;
 		const operationId = `operation-${randomUUID()}`;
@@ -1207,7 +1279,10 @@ export class SlimmingService {
 				operation: completedOperation,
 			});
 		} else {
-			await this.#persistence.recordOperation(simulatorUdid, completedOperation);
+			await this.#persistence.recordOperation(
+				simulatorUdid,
+				completedOperation
+			);
 		}
 		this.#syncPersistenceState();
 		this.#state.statusBySimulator[simulatorUdid] = this.#statusFromMutation(
@@ -1296,13 +1371,16 @@ export class SlimmingService {
 	): Promise<void> {
 		if (!MUTATION_KINDS.has(action.kind)) return;
 		const evidence =
-			error instanceof SimHelperError ? mutationEvidenceFromError(error) : undefined;
+			error instanceof SimHelperError
+				? mutationEvidenceFromError(error)
+				: undefined;
 		const condition: SlimmingCondition =
 			status === 'needs-attention' ? 'needs-attention' : 'unknown';
 		try {
 			const pending = this.#persistence.pendingMutation(simulatorUdid);
 			const safeResolution = mutationFailureIsProvenSafe(error);
-			const errorCode = error instanceof SimHelperError ? error.code : undefined;
+			const errorCode =
+				error instanceof SimHelperError ? error.code : undefined;
 			const operation = this.#operationMetadata(
 				action,
 				`operation-${randomUUID()}`,
@@ -1414,14 +1492,22 @@ export class SlimmingService {
 			checkedAt: this.#now(),
 			checkpointAvailable:
 				this.#state.checkpointBySimulator[simulatorUdid] !== undefined,
-			...(previous?.compatibility ? { compatibility: previous.compatibility } : {}),
+			...(previous?.compatibility
+				? { compatibility: previous.compatibility }
+				: {}),
 		};
 		return { ...partial, condition: conditionForStatus(partial) };
 	}
 
-	#publicCompatibility(compatibility: SimHelperCompatibility): SlimmingCompatibility {
+	#publicCompatibility(
+		compatibility: SimHelperCompatibility
+	): SlimmingCompatibility {
 		if (!this.#handshake) throw new Error('Helper handshake is unavailable.');
-		const key = compatibilityKey(compatibility, this.#handshake, this.#appVersion);
+		const key = compatibilityKey(
+			compatibility,
+			this.#handshake,
+			this.#appVersion
+		);
 		return compatibilityForPublic(
 			compatibility,
 			key,
@@ -1429,7 +1515,9 @@ export class SlimmingService {
 		);
 	}
 
-	#compatibilityForDevice(simulatorUdid: string): SlimmingCompatibility | undefined {
+	#compatibilityForDevice(
+		simulatorUdid: string
+	): SlimmingCompatibility | undefined {
 		return (
 			this.#state.previewBySimulator[simulatorUdid]?.compatibility ??
 			this.#state.statusBySimulator[simulatorUdid]?.compatibility
@@ -1453,7 +1541,9 @@ export class SlimmingService {
 			signal
 		);
 		if (!plan.compatibility) {
-			throw new Error('The helper did not return an exact compatibility tuple.');
+			throw new Error(
+				'The helper did not return an exact compatibility tuple.'
+			);
 		}
 		const compatibility = this.#publicCompatibility(plan.compatibility);
 		this.#setCompatibilityForDevice(simulatorUdid, compatibility);
@@ -1466,7 +1556,10 @@ export class SlimmingService {
 	): void {
 		const status = this.#state.statusBySimulator[simulatorUdid];
 		if (status) {
-			this.#state.statusBySimulator[simulatorUdid] = { ...status, compatibility };
+			this.#state.statusBySimulator[simulatorUdid] = {
+				...status,
+				compatibility,
+			};
 		}
 		const preview = this.#state.previewBySimulator[simulatorUdid];
 		if (preview) {
@@ -1491,7 +1584,9 @@ export class SlimmingService {
 		const setting: PersistedSlimmingSetting = {
 			experimentalMutationsEnabled: false,
 			updatedAt: this.#now(),
-			disabledDisposition: completed ? 'restored-and-verified' : 'restore-failed',
+			disabledDisposition: completed
+				? 'restored-and-verified'
+				: 'restore-failed',
 			...(completed
 				? {}
 				: {
@@ -1530,7 +1625,8 @@ export class SlimmingService {
 				helperVersion: handshake.helperVersion,
 				buildCommit: handshake.buildCommit,
 				catalogVersion: handshake.catalogVersion,
-				compatibilityMatrixVersion: handshake.capabilities.compatibilityMatrixVersion,
+				compatibilityMatrixVersion:
+					handshake.capabilities.compatibilityMatrixVersion,
 				mutationMode: handshake.capabilities.mutationMode,
 				mutationReason: handshake.capabilities.mutationSafety,
 				...(this.#mutationUnavailableReason
@@ -1539,7 +1635,10 @@ export class SlimmingService {
 				verifiedMutationTuples: handshake.capabilities.verifiedMutationTuples,
 				verifiedAt: this.#now(),
 				...(!this.#persistenceHealthy
-					? { error: 'Safety persistence is unavailable; mutations are blocked.' }
+					? {
+							error:
+								'Safety persistence is unavailable; mutations are blocked.',
+						}
 					: {}),
 			};
 			this.#state.categories = profiles.categories.map((category) => ({
@@ -1577,7 +1676,11 @@ export class SlimmingService {
 			let status = this.#state.statusBySimulator[simulatorUdid];
 			const recoveryOperationId = `recovery-${pending.id}`;
 			const recoveryOperation = (
-				operationStatus: 'complete' | 'failed' | 'needs-attention' | 'cancelled',
+				operationStatus:
+					| 'complete'
+					| 'failed'
+					| 'needs-attention'
+					| 'cancelled',
 				condition: SlimmingCondition,
 				message: string
 			): SlimmingOperationMetadata => ({
@@ -1597,11 +1700,18 @@ export class SlimmingService {
 					? this.#persistence.checkpointToken(simulatorUdid)
 					: undefined;
 			const inspection = await this.#helper
-				.prepareMutation(simulatorUdid, 'undo_last', undefined, pending.checkpointToken)
+				.prepareMutation(
+					simulatorUdid,
+					'undo_last',
+					undefined,
+					pending.checkpointToken
+				)
 				.catch(() => undefined);
 			const currentServiceIds = inspection?.before.managedDisabledServiceIds;
 			if (inspection) {
-				const compatibility = this.#publicCompatibility(inspection.compatibility);
+				const compatibility = this.#publicCompatibility(
+					inspection.compatibility
+				);
 				const reconciledStatus: SlimmingSimulatorStatus = {
 					...(status ?? {
 						simulatorUdid,
@@ -1612,7 +1722,8 @@ export class SlimmingService {
 						matchingProfileIds: [],
 						checkedAt: this.#now(),
 					}),
-					managedDisabledServiceIds: inspection.before.managedDisabledServiceIds,
+					managedDisabledServiceIds:
+						inspection.before.managedDisabledServiceIds,
 					managedDisabledCount: inspection.before.count,
 					checkpointAvailable: true,
 					compatibility,
@@ -1631,14 +1742,18 @@ export class SlimmingService {
 				sameManagedServiceSet(currentServiceIds, pending.beforeServiceIds) &&
 				inspection?.verification.verified
 			) {
-				await this.#persistence.resolvePendingMutation(simulatorUdid, pending.id, {
-					kind: 'complete',
-					operation: recoveryOperation(
-						'cancelled',
-						status?.condition ?? 'unknown',
-						'Restart reconciliation proved the pre-mutation state; the prior restore point was preserved.'
-					),
-				});
+				await this.#persistence.resolvePendingMutation(
+					simulatorUdid,
+					pending.id,
+					{
+						kind: 'complete',
+						operation: recoveryOperation(
+							'cancelled',
+							status?.condition ?? 'unknown',
+							'Restart reconciliation proved the pre-mutation state; the prior restore point was preserved.'
+						),
+					}
+				);
 				const checkpointAvailable =
 					this.#persistence.snapshot().checkpointBySimulator[simulatorUdid] !==
 					undefined;
@@ -1658,7 +1773,10 @@ export class SlimmingService {
 			if (
 				pending.recovery &&
 				currentServiceIds &&
-				sameManagedServiceSet(currentServiceIds, pending.recovery.beforeServiceIds) &&
+				sameManagedServiceSet(
+					currentServiceIds,
+					pending.recovery.beforeServiceIds
+				) &&
 				inspection?.verification.verified
 			) {
 				await this.#persistence.recordPendingRecoveryFailure(
@@ -1709,35 +1827,44 @@ export class SlimmingService {
 			const targetCompatibility = targetVerification
 				? this.#publicCompatibility(targetVerification.compatibility)
 				: undefined;
-			const tupleStillMatches = targetCompatibility?.key === pending.compatibilityKey;
+			const tupleStillMatches =
+				targetCompatibility?.key === pending.compatibilityKey;
 			if (desiredVerified && tupleStillMatches) {
-				await this.#persistence.resolvePendingMutation(simulatorUdid, pending.id, {
-					kind: 'complete',
-					checkpointMetadata: this.#checkpointMetadata(
-						recoveryOperationId,
-						pending.profileId
-					),
-					operation: recoveryOperation(
-						'complete',
-						status?.condition ?? 'unknown',
-						'Restart reconciliation verified the exact intended state and promoted the durable pre-mutation restore point.'
-					),
-				});
+				await this.#persistence.resolvePendingMutation(
+					simulatorUdid,
+					pending.id,
+					{
+						kind: 'complete',
+						checkpointMetadata: this.#checkpointMetadata(
+							recoveryOperationId,
+							pending.profileId
+						),
+						operation: recoveryOperation(
+							'complete',
+							status?.condition ?? 'unknown',
+							'Restart reconciliation verified the exact intended state and promoted the durable pre-mutation restore point.'
+						),
+					}
+				);
 				continue;
 			}
 
-			const existingRecovery = persisted.operationsBySimulator[simulatorUdid]?.some(
-				(operation) => operation.id === recoveryOperationId
-			);
+			const existingRecovery = persisted.operationsBySimulator[
+				simulatorUdid
+			]?.some((operation) => operation.id === recoveryOperationId);
 			if (!existingRecovery) {
-				await this.#persistence.resolvePendingMutation(simulatorUdid, pending.id, {
-					kind: 'needs-attention',
-					operation: recoveryOperation(
-						'needs-attention',
-						'needs-attention',
-						'Restart reconciliation could not prove either the exact before state or the exact verified target state.'
-					),
-				});
+				await this.#persistence.resolvePendingMutation(
+					simulatorUdid,
+					pending.id,
+					{
+						kind: 'needs-attention',
+						operation: recoveryOperation(
+							'needs-attention',
+							'needs-attention',
+							'Restart reconciliation could not prove either the exact before state or the exact verified target state.'
+						),
+					}
+				);
 			}
 			this.#state.statusBySimulator[simulatorUdid] = {
 				...(status ?? {
@@ -1784,7 +1911,11 @@ export class SlimmingService {
 					next[device.id] = {
 						...this.#statusFromHelper(result.value.status),
 						...(result.value.compatibility
-							? { compatibility: this.#publicCompatibility(result.value.compatibility) }
+							? {
+									compatibility: this.#publicCompatibility(
+										result.value.compatibility
+									),
+								}
 							: {}),
 					};
 				} else {
@@ -1828,7 +1959,9 @@ export class SlimmingService {
 			checkpointAvailable:
 				this.#state.checkpointBySimulator[status.device.id] !== undefined ||
 				this.#persistence.pendingMutation(status.device.id) !== undefined,
-			...(previous?.compatibility ? { compatibility: previous.compatibility } : {}),
+			...(previous?.compatibility
+				? { compatibility: previous.compatibility }
+				: {}),
 		};
 		return { ...partial, condition: conditionForStatus(partial) };
 	}

@@ -95,19 +95,18 @@ export function CapturesPanel() {
 	const accessRequestRef = useRef(0);
 	const [access, setAccess] = useState<CaptureAccessState>({ kind: 'idle' });
 	const [retention, setRetention] = useState<RetentionState>({ kind: 'idle' });
-	const [retentionFields, setRetentionFields] = useState<CaptureRetentionFields>({
-		maxAgeDays: '30',
-		maxTotalGiB: '10',
-	});
+	const [retentionFields, setRetentionFields] =
+		useState<CaptureRetentionFields>({
+			maxAgeDays: '30',
+			maxTotalGiB: '10',
+		});
 	const [pendingOperation, setPendingOperation] = useState<
 		SimulatorCaptureOperationInput['kind'] | null
 	>(null);
-	const [operationFeedback, setOperationFeedback] = useState<OperationFeedback | null>(
-		null
-	);
-	const [compositionFields, setCompositionFields] = useState<CaptureCompositionFields>(
-		DEFAULT_CAPTURE_COMPOSITION_FIELDS
-	);
+	const [operationFeedback, setOperationFeedback] =
+		useState<OperationFeedback | null>(null);
+	const [compositionFields, setCompositionFields] =
+		useState<CaptureCompositionFields>(DEFAULT_CAPTURE_COMPOSITION_FIELDS);
 	const [secondaryAccess, setSecondaryAccess] = useState<CaptureAccessState>({
 		kind: 'idle',
 	});
@@ -134,13 +133,18 @@ export function CapturesPanel() {
 		state.captures.find((capture) => capture.id === selectedCaptureId) ??
 		state.captures[0] ??
 		null;
-	const recordingJob = runningRecordingJobForDevice(state.jobs, selectedDevice?.udid);
+	const recordingJob = runningRecordingJobForDevice(
+		state.jobs,
+		selectedDevice?.udid
+	);
 	const compositionJob = compositionJobId
 		? state.jobs.find((job) => job.id === compositionJobId)
 		: undefined;
 	const isRenderingComposition = Boolean(
 		compositionJob &&
-			['queued', 'preflight', 'running', 'verifying'].includes(compositionJob.status)
+			['queued', 'preflight', 'running', 'verifying'].includes(
+				compositionJob.status
+			)
 	);
 	const screenshotCaptures = useMemo(
 		() => state.captures.filter((capture) => capture.kind === 'screenshot'),
@@ -164,11 +168,15 @@ export function CapturesPanel() {
 		parsedRetentionPolicy &&
 			retention.kind === 'ready' &&
 			(parsedRetentionPolicy.maxAgeDays !== retention.value.policy.maxAgeDays ||
-				parsedRetentionPolicy.maxTotalBytes !== retention.value.policy.maxTotalBytes)
+				parsedRetentionPolicy.maxTotalBytes !==
+					retention.value.policy.maxTotalBytes)
 	);
 
 	const loadRetention = useCallback(
-		async (optimisticInventory?: { captureCount: number; totalBytes: number }) => {
+		async (optimisticInventory?: {
+			captureCount: number;
+			totalBytes: number;
+		}) => {
 			if (!isBridgeAvailable) {
 				setRetention({ kind: 'idle' });
 				return;
@@ -210,7 +218,10 @@ export function CapturesPanel() {
 			setAccess({ kind: 'loading', captureId });
 			try {
 				const result = await getCaptureAccess(captureId);
-				if (accessRequestRef.current !== requestId || result.captureId !== captureId) {
+				if (
+					accessRequestRef.current !== requestId ||
+					result.captureId !== captureId
+				) {
 					return;
 				}
 				if (result.available && result.url) {
@@ -220,7 +231,11 @@ export function CapturesPanel() {
 				}
 			} catch (error) {
 				if (accessRequestRef.current === requestId) {
-					setAccess({ kind: 'error', captureId, error: captureErrorText(error) });
+					setAccess({
+						kind: 'error',
+						captureId,
+						error: captureErrorText(error),
+					});
 				}
 			}
 		},
@@ -345,7 +360,8 @@ export function CapturesPanel() {
 						tone: 'danger',
 						title: 'Capture operation failed',
 						message:
-							receipt.error ?? 'The native capture provider rejected the request.',
+							receipt.error ??
+							'The native capture provider rejected the request.',
 					});
 					return;
 				}
@@ -388,7 +404,10 @@ export function CapturesPanel() {
 			/>
 			<BridgeUnavailableNotice />
 			{operationFeedback ? (
-				<PanelNotice title={operationFeedback.title} tone={operationFeedback.tone}>
+				<PanelNotice
+					title={operationFeedback.title}
+					tone={operationFeedback.tone}
+				>
 					{operationFeedback.message}
 				</PanelNotice>
 			) : null}
@@ -475,7 +494,9 @@ export function CapturesPanel() {
 						getId={(capture) => capture.id}
 						rowHeight={62}
 						selectedId={selectedCapture?.id}
-						textValue={(capture) => `${captureDisplayName(capture)} ${capture.status}`}
+						textValue={(capture) =>
+							`${captureDisplayName(capture)} ${capture.status}`
+						}
 						onSelect={(capture) => setSelectedCaptureId(capture.id)}
 						renderItem={(capture) => <CaptureRow capture={capture} />}
 					/>
@@ -492,7 +513,9 @@ export function CapturesPanel() {
 								: `${selectedCapture?.id ?? 'none'}-${access.kind}`
 						}
 						onRetry={() =>
-							selectedCapture ? void loadCaptureAccess(selectedCapture.id) : undefined
+							selectedCapture
+								? void loadCaptureAccess(selectedCapture.id)
+								: undefined
 						}
 						{...(secondaryAccess.kind === 'available'
 							? { secondaryUrl: secondaryAccess.url }
@@ -617,7 +640,8 @@ export function CapturesPanel() {
 }
 
 function captureDisplayName(capture: SimulatorCapture): string {
-	if (!/^(?:screenshot|recording|video)-\d+-/.test(capture.name)) return capture.name;
+	if (!/^(?:screenshot|recording|video)-\d+-/.test(capture.name))
+		return capture.name;
 	return `${capture.kind === 'video' ? 'Recording' : 'Screenshot'} · ${new Date(capture.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
@@ -634,7 +658,8 @@ function CaptureRow({ capture }: { capture: SimulatorCapture }) {
 			<div className="sim-list-copy">
 				<strong>{captureDisplayName(capture)}</strong>
 				<span>
-					{new Date(capture.createdAt).toLocaleString()} · {formatBytes(capture.bytes)}
+					{new Date(capture.createdAt).toLocaleString()} ·{' '}
+					{formatBytes(capture.bytes)}
 				</span>
 			</div>
 			<div className="sim-capture-row-tags">
@@ -684,8 +709,8 @@ function CapturePreview({
 					<AlertTriangle className="h-3.5 w-3.5" />
 					<span>
 						<strong>Recovered partial capture.</strong> Finalization stopped
-						unexpectedly; preview and export may end early, but the recovered original
-						is preserved.
+						unexpectedly; preview and export may end early, but the recovered
+						original is preserved.
 					</span>
 				</div>
 			) : null}
@@ -849,7 +874,10 @@ function CaptureRetentionControls({
 			</header>
 			{retention.kind === 'ready' ? (
 				<dl className="sim-retention-summary">
-					<KeyValue label="Stored captures" value={retention.value.captureCount} />
+					<KeyValue
+						label="Stored captures"
+						value={retention.value.captureCount}
+					/>
 					<KeyValue
 						label="Storage used"
 						value={formatBytes(retention.value.totalBytes)}
@@ -931,8 +959,8 @@ function CaptureRetentionControls({
 				{isSaving ? 'Applying…' : 'Apply retention'}
 			</Button>
 			<p className="sim-inline-note">
-				Lower limits can prune existing captures immediately. The desktop app asks for
-				confirmation before applying the policy.
+				Lower limits can prune existing captures immediately. The desktop app
+				asks for confirmation before applying the policy.
 			</p>
 			{isPolicyValid ? null : (
 				<p className="sim-field-error" role="alert">

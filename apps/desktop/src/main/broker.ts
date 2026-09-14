@@ -85,7 +85,10 @@ export type DesktopBrokerOptions = {
 	limits?: Partial<DesktopBrokerLimits>;
 };
 
-function positiveIntegerLimit(value: number | undefined, fallback: number): number {
+function positiveIntegerLimit(
+	value: number | undefined,
+	fallback: number
+): number {
 	if (value === undefined || !Number.isSafeInteger(value) || value <= 0)
 		return fallback;
 	return value;
@@ -103,7 +106,8 @@ function availableLanAddresses(): string[] {
 	const addresses = new Set<string>();
 	for (const entries of Object.values(networkInterfaces())) {
 		for (const entry of entries ?? []) {
-			if (entry.family === 'IPv4' && !entry.internal) addresses.add(entry.address);
+			if (entry.family === 'IPv4' && !entry.internal)
+				addresses.add(entry.address);
 		}
 	}
 	return [...addresses].sort();
@@ -113,7 +117,10 @@ function canonicalIpHost(host: string): string {
 	const normalized = host.toLowerCase().replace(/^\[|\]$/g, '');
 	if (isIP(normalized) !== 6) return normalized;
 	try {
-		return new URL(`ws://[${normalized}]:1/device`).hostname.replace(/^\[|\]$/g, '');
+		return new URL(`ws://[${normalized}]:1/device`).hostname.replace(
+			/^\[|\]$/g,
+			''
+		);
 	} catch {
 		return normalized;
 	}
@@ -172,7 +179,8 @@ function isAllowedUnauthenticatedOrigin(
 }
 
 function websocketUrl(host: string, port: number, token?: string): string {
-	const displayHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+	const displayHost =
+		host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 	const url = new URL(`ws://${displayHost}:${port}/device`);
 	if (token) url.searchParams.set('token', token);
 	return url.toString();
@@ -184,7 +192,9 @@ function brokerUrls(host: string, port: number, token?: string): string[] {
 	}
 	return [
 		websocketUrl('127.0.0.1', port, token),
-		...availableLanAddresses().map((address) => websocketUrl(address, port, token)),
+		...availableLanAddresses().map((address) =>
+			websocketUrl(address, port, token)
+		),
 	];
 }
 
@@ -238,7 +248,9 @@ export class DesktopBroker {
 	#error: string | undefined;
 
 	constructor(options: DesktopBrokerOptions = {}) {
-		this.#host = normalizeBrokerHost(options.host?.trim() || DEFAULT_BROKER_HOST);
+		this.#host = normalizeBrokerHost(
+			options.host?.trim() || DEFAULT_BROKER_HOST
+		);
 		this.#requestedPort = options.port ?? DEFAULT_BROKER_PORT;
 		this.#port =
 			Number.isInteger(this.#requestedPort) &&
@@ -293,7 +305,10 @@ export class DesktopBroker {
 							: undefined;
 		if (options.includeDemoDevice === true) {
 			const demo = createDemoDevice(this.#now());
-			const snapshotWireBytes = Buffer.byteLength(JSON.stringify(demo.tools), 'utf8');
+			const snapshotWireBytes = Buffer.byteLength(
+				JSON.stringify(demo.tools),
+				'utf8'
+			);
 			this.#retainedSnapshotWireBytes = snapshotWireBytes;
 			this.#sessions.set(demo.info.id, { device: demo, snapshotWireBytes });
 		}
@@ -418,13 +433,18 @@ export class DesktopBroker {
 		const server = createServer((request, response) => {
 			const url = requestUrl(request);
 			if (!url) {
-				response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+				response.writeHead(400, {
+					'content-type': 'text/plain; charset=utf-8',
+				});
 				response.end('Bad request');
 				return;
 			}
 			const { pathname } = url;
 			if (request.method === 'GET' && pathname === '/health') {
-				if (this.#token && !tokensMatch(this.#token, url.searchParams.get('token'))) {
+				if (
+					this.#token &&
+					!tokensMatch(this.#token, url.searchParams.get('token'))
+				) {
 					response.writeHead(401, {
 						'content-type': 'text/plain; charset=utf-8',
 						'cache-control': 'no-store',
@@ -465,11 +485,17 @@ export class DesktopBroker {
 				closeUpgrade(socket, 404, 'Not Found');
 				return;
 			}
-			if (!this.#token && !isAllowedUnauthenticatedOrigin(request.headers.origin)) {
+			if (
+				!this.#token &&
+				!isAllowedUnauthenticatedOrigin(request.headers.origin)
+			) {
 				closeUpgrade(socket, 403, 'Forbidden');
 				return;
 			}
-			if (this.#token && !tokensMatch(this.#token, url.searchParams.get('token'))) {
+			if (
+				this.#token &&
+				!tokensMatch(this.#token, url.searchParams.get('token'))
+			) {
 				closeUpgrade(socket, 401, 'Unauthorized');
 				return;
 			}
@@ -519,7 +545,10 @@ export class DesktopBroker {
 		this.#httpServer = server;
 		this.#webSocketServer = webSocketServer;
 		const handleRuntimeError = (scope: string, error: Error) => {
-			if (this.#httpServer !== server && this.#webSocketServer !== webSocketServer) {
+			if (
+				this.#httpServer !== server &&
+				this.#webSocketServer !== webSocketServer
+			) {
 				return;
 			}
 			this.#status = 'error';
@@ -529,7 +558,9 @@ export class DesktopBroker {
 			void this.#closeServers().finally(() => this.#emit());
 		};
 		server.on('error', (error) => handleRuntimeError('http', error));
-		webSocketServer.on('error', (error) => handleRuntimeError('websocket', error));
+		webSocketServer.on('error', (error) =>
+			handleRuntimeError('websocket', error)
+		);
 	}
 
 	#handleConnection(socket: WebSocket, request: IncomingMessage): void {
@@ -642,7 +673,8 @@ export class DesktopBroker {
 			const oldestOffline = [...this.#sessions.entries()]
 				.filter(([, session]) => session.device.status === 'offline')
 				.sort(
-					([, left], [, right]) => left.device.lastSeenAt - right.device.lastSeenAt
+					([, left], [, right]) =>
+						left.device.lastSeenAt - right.device.lastSeenAt
 				)[0];
 			if (oldestOffline) this.#deleteSession(oldestOffline[0]);
 		}
@@ -727,14 +759,18 @@ export class DesktopBroker {
 		messageWireBytes: number
 	): boolean {
 		let nextTotal =
-			this.#retainedSnapshotWireBytes - session.snapshotWireBytes + messageWireBytes;
+			this.#retainedSnapshotWireBytes -
+			session.snapshotWireBytes +
+			messageWireBytes;
 		if (nextTotal > this.#limits.maxRetainedSnapshotWireBytes) {
 			const offlineSessions = [...this.#sessions.entries()]
 				.filter(
-					([id, candidate]) => id !== deviceId && candidate.device.status === 'offline'
+					([id, candidate]) =>
+						id !== deviceId && candidate.device.status === 'offline'
 				)
 				.sort(
-					([, left], [, right]) => left.device.lastSeenAt - right.device.lastSeenAt
+					([, left], [, right]) =>
+						left.device.lastSeenAt - right.device.lastSeenAt
 				);
 			for (const [offlineDeviceId] of offlineSessions) {
 				this.#deleteSession(offlineDeviceId);
@@ -766,15 +802,21 @@ export class DesktopBroker {
 		return this.#sessions.delete(deviceId);
 	}
 
-	#record(level: DiagnosticEntry['level'], scope: string, message: string): void {
+	#record(
+		level: DiagnosticEntry['level'],
+		scope: string,
+		message: string
+	): void {
 		const now = this.#now();
 		this.#diagnostics.unshift({
 			id: diagnosticId(now, this.#diagnosticSequence),
 			at: now,
 			level,
 			scope: scope.slice(0, MAX_DIAGNOSTIC_SCOPE_LENGTH),
-			message: truncateText(redactDiagnosticText(message), MAX_DIAGNOSTIC_MESSAGE_BYTES)
-				.text,
+			message: truncateText(
+				redactDiagnosticText(message),
+				MAX_DIAGNOSTIC_MESSAGE_BYTES
+			).text,
 		});
 		this.#diagnosticSequence += 1;
 		if (this.#diagnostics.length > this.#limits.maxDiagnostics) {
@@ -835,7 +877,10 @@ export class DesktopBroker {
 		const cutoff = this.#now() - OFFLINE_RETENTION_MS;
 		let changed = false;
 		for (const [id, session] of this.#sessions) {
-			if (session.device.status === 'offline' && session.device.lastSeenAt < cutoff) {
+			if (
+				session.device.status === 'offline' &&
+				session.device.lastSeenAt < cutoff
+			) {
 				this.#deleteSession(id);
 				changed = true;
 			}
@@ -850,7 +895,9 @@ export class DesktopBroker {
 		this.#httpServer = undefined;
 		if (webSocketServer) {
 			for (const client of webSocketServer.clients) client.terminate();
-			await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
+			await new Promise<void>((resolve) =>
+				webSocketServer.close(() => resolve())
+			);
 		}
 		if (httpServer) {
 			await new Promise<void>((resolve) => httpServer.close(() => resolve()));

@@ -55,11 +55,20 @@ describe('Simulator Fleet destructive-action policy', () => {
 
 	it('fails closed when the bridge or target is unavailable', () => {
 		expect(
-			simulatorEraseAvailability({ isAvailable: true, state: 'shutdown' }, false)
+			simulatorEraseAvailability(
+				{ isAvailable: true, state: 'shutdown' },
+				false
+			)
 		).toMatchObject({ allowed: false });
 		expect(
-			simulatorEraseAvailability({ isAvailable: false, state: 'shutdown' }, true)
-		).toMatchObject({ allowed: false, reason: expect.stringContaining('unavailable') });
+			simulatorEraseAvailability(
+				{ isAvailable: false, state: 'shutdown' },
+				true
+			)
+		).toMatchObject({
+			allowed: false,
+			reason: expect.stringContaining('unavailable'),
+		});
 	});
 });
 
@@ -107,7 +116,12 @@ describe('Simulator Fleet connected-session association', () => {
 	it('matches UDIDs case-insensitively and orders online sessions first', () => {
 		const result = connectedSessionsForSimulator(UDID, [
 			session('offline-newer', 'offline', UDID, 30),
-			session('unmatched', 'online', '11111111-2222-4333-8444-555555555555', 40),
+			session(
+				'unmatched',
+				'online',
+				'11111111-2222-4333-8444-555555555555',
+				40
+			),
 			session('online-older', 'online', UDID.toLowerCase(), 10),
 			session('simulated', 'simulated', UDID, 100),
 			session('v1', 'online', undefined, 50),

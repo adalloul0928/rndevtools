@@ -44,7 +44,10 @@ describe('slimming protocol', () => {
 
 	it('requires an explicit disable disposition and exact targets for restore-all', () => {
 		expect(() =>
-			slimmingSettingRequestSchema.parse({ actionId: 'disable', enabled: false })
+			slimmingSettingRequestSchema.parse({
+				actionId: 'disable',
+				enabled: false,
+			})
 		).toThrow();
 		expect(
 			slimmingSettingRequestSchema.parse({

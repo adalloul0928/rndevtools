@@ -3,7 +3,10 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type {
 	CaptureCompositionRecipe,
 	SimulatorAction,
@@ -29,7 +32,10 @@ import {
 } from '../shared/simulator-protocol';
 import type { SimHelperClient } from './sim-helper-client';
 import { type SimctlInventory, SimctlProvider } from './simctl-provider';
-import { SimulatorCaptureStore, simulatorCaptureUrl } from './simulator-capture-store';
+import {
+	SimulatorCaptureStore,
+	simulatorCaptureUrl,
+} from './simulator-capture-store';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
@@ -170,7 +176,9 @@ function platformName(): SimulatorCapability['platform'] {
 
 function errorText(error: unknown): string {
 	const source =
-		error instanceof SimulatorCommandError ? error.message : diagnosticErrorText(error);
+		error instanceof SimulatorCommandError
+			? error.message
+			: diagnosticErrorText(error);
 	return redactDiagnosticText(source)
 		.replaceAll(/([a-z][a-z0-9+.-]*:\/\/[^\s?]+)\?[^\s]*/gi, '$1?<redacted>')
 		.slice(0, MAX_JOB_ERROR_LENGTH);
@@ -186,7 +194,9 @@ function coordinate(latitude: number, longitude: number): string {
 
 function appContainerPaths(output: string, container: string): string[] {
 	if (Buffer.byteLength(output, 'utf8') > MAX_APP_CONTAINER_OUTPUT_BYTES) {
-		throw new Error('Simulator app container output exceeded the safe size limit.');
+		throw new Error(
+			'Simulator app container output exceeded the safe size limit.'
+		);
 	}
 	if (container !== 'groups') {
 		const containerPath = output.trim();
@@ -258,7 +268,9 @@ function mutatesSimulatorTarget(action: SimulatorAction): boolean {
 	return true;
 }
 
-function actionFeature(action: SimulatorAction): keyof SimulatorCapability['features'] {
+function actionFeature(
+	action: SimulatorAction
+): keyof SimulatorCapability['features'] {
 	if (action.kind.startsWith('device.')) return 'deviceManagement';
 	if (action.kind.startsWith('disk.')) return 'deviceManagement';
 	if (action.kind === 'app.openUniversalLink') return 'deepLinks';
@@ -275,7 +287,10 @@ function actionFeature(action: SimulatorAction): keyof SimulatorCapability['feat
 }
 
 function statusBarArguments(
-	overrides: Extract<SimulatorAction, { kind: 'statusBar.override' }>['overrides']
+	overrides: Extract<
+		SimulatorAction,
+		{ kind: 'statusBar.override' }
+	>['overrides']
 ): string[] {
 	const args: string[] = [];
 	const append = (flag: string, value: string | number | undefined) => {
@@ -328,13 +343,18 @@ async function validatedSelectedPath(
 	const resolved = await realpath(selected);
 	const metadata = await lstat(resolved);
 	if (kind === 'app') {
-		if (!metadata.isDirectory() || path.extname(selected).toLowerCase() !== '.app') {
+		if (
+			!metadata.isDirectory() ||
+			path.extname(selected).toLowerCase() !== '.app'
+		) {
 			throw new Error('Selected application must be an .app directory.');
 		}
 		return resolved;
 	}
 	const allowedExtensions =
-		kind === 'gpx' ? new Set(['.gpx']) : new Set(['.cer', '.crt', '.der', '.pem']);
+		kind === 'gpx'
+			? new Set(['.gpx'])
+			: new Set(['.cer', '.crt', '.der', '.pem']);
 	const maximumBytes = kind === 'gpx' ? MAX_GPX_BYTES : MAX_CERTIFICATE_BYTES;
 	if (
 		!metadata.isFile() ||
@@ -355,7 +375,9 @@ function parseGpxWaypoints(source: string): Array<{
 	longitude: number;
 }> {
 	if (/<!DOCTYPE|<!ENTITY/i.test(source)) {
-		throw new Error('GPX document type and entity declarations are not supported.');
+		throw new Error(
+			'GPX document type and entity declarations are not supported.'
+		);
 	}
 	if (
 		!/<(?:[A-Za-z_][\w.-]*:)?gpx\b/i.test(source) ||
@@ -367,7 +389,9 @@ function parseGpxWaypoints(source: string): Array<{
 	const tagPattern = /<(?:[A-Za-z_][\w.-]*:)?(?:trkpt|rtept|wpt)\b([^>]*)>/gi;
 	for (const tag of source.matchAll(tagPattern)) {
 		if (waypoints.length >= MAX_GPX_WAYPOINTS) {
-			throw new Error(`GPX routes cannot exceed ${MAX_GPX_WAYPOINTS} waypoints.`);
+			throw new Error(
+				`GPX routes cannot exceed ${MAX_GPX_WAYPOINTS} waypoints.`
+			);
 		}
 		const attributes = tag[1] ?? '';
 		const latitudeText = /\blat\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1];
@@ -397,7 +421,10 @@ async function readBoundedText(
 	filePath: string,
 	maximumBytes: number
 ): Promise<string> {
-	const handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+	const handle = await open(
+		filePath,
+		constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+	);
 	try {
 		const metadata = await handle.stat();
 		if (!metadata.isFile() || metadata.size > maximumBytes) {
@@ -437,7 +464,9 @@ export class SimulatorService {
 		platform: platformName(),
 		licenseStatus: 'unknown',
 		hostArchitecture:
-			process.arch === 'arm64' || process.arch === 'x64' ? process.arch : 'other',
+			process.arch === 'arm64' || process.arch === 'x64'
+				? process.arch
+				: 'other',
 		runtimeAvailability: { total: 0, available: 0 },
 		features: EMPTY_FEATURES,
 	};
@@ -501,7 +530,9 @@ export class SimulatorService {
 		this.#resolveDeviceDataRoot = resolveDeviceDataRoot;
 		this.#mutationCoordinator = mutationCoordinator;
 		if ((captureDirectory === undefined) === (captureStore === undefined)) {
-			throw new Error('Configure exactly one Simulator capture store or directory.');
+			throw new Error(
+				'Configure exactly one Simulator capture store or directory.'
+			);
 		}
 		this.#captureStore =
 			captureStore ?? new SimulatorCaptureStore(captureDirectory as string);
@@ -515,8 +546,10 @@ export class SimulatorService {
 
 	getState = (): SimulatorState => {
 		const appsByDevice: Record<string, SimulatorApp[]> = Object.create(null);
-		for (const [udid, apps] of this.#appsByDevice) appsByDevice[udid] = [...apps];
-		const diskByDevice: Record<string, SimulatorDiskInventory> = Object.create(null);
+		for (const [udid, apps] of this.#appsByDevice)
+			appsByDevice[udid] = [...apps];
+		const diskByDevice: Record<string, SimulatorDiskInventory> =
+			Object.create(null);
 		for (const [udid, inventory] of this.#diskByDevice) {
 			diskByDevice[udid] = structuredClone(inventory);
 		}
@@ -578,7 +611,9 @@ export class SimulatorService {
 		return this.#captureStore.get(captureId);
 	}
 
-	async getCaptureAccess(captureId: string): Promise<SimulatorCaptureAccessResult> {
+	async getCaptureAccess(
+		captureId: string
+	): Promise<SimulatorCaptureAccessResult> {
 		try {
 			const opened = await this.#captureStore.openForRead(captureId);
 			await opened.handle.close();
@@ -628,9 +663,13 @@ export class SimulatorService {
 		this.#nativeController?.abort();
 		for (const job of this.#jobs) {
 			if (
-				['queued', 'preflight', 'running', 'verifying', 'rolling-back'].includes(
-					job.public.status
-				)
+				[
+					'queued',
+					'preflight',
+					'running',
+					'verifying',
+					'rolling-back',
+				].includes(job.public.status)
 			) {
 				job.controller.abort();
 				if (job.public.status === 'queued') {
@@ -669,7 +708,9 @@ export class SimulatorService {
 			platform: platformName(),
 			licenseStatus: 'unknown',
 			hostArchitecture:
-				process.arch === 'arm64' || process.arch === 'x64' ? process.arch : 'other',
+				process.arch === 'arm64' || process.arch === 'x64'
+					? process.arch
+					: 'other',
 			runtimeAvailability: { total: 0, available: 0 },
 			features: EMPTY_FEATURES,
 		};
@@ -692,7 +733,8 @@ export class SimulatorService {
 				if (this.#metricsRefreshPromise === refresh) {
 					this.#metricsRefreshPromise = undefined;
 				}
-				if (this.#metricsController === controller) this.#metricsController = undefined;
+				if (this.#metricsController === controller)
+					this.#metricsController = undefined;
 			});
 		this.#metricsRefreshPromise = refresh;
 		return refresh;
@@ -739,7 +781,8 @@ export class SimulatorService {
 				if (this.#nativeRefreshPromise === refresh) {
 					this.#nativeRefreshPromise = undefined;
 				}
-				if (this.#nativeController === controller) this.#nativeController = undefined;
+				if (this.#nativeController === controller)
+					this.#nativeController = undefined;
 			});
 		this.#nativeRefreshPromise = refresh;
 		return refresh;
@@ -775,8 +818,9 @@ export class SimulatorService {
 				...this.#capability,
 				runtimeAvailability: {
 					total: this.#inventory.runtimes.length,
-					available: this.#inventory.runtimes.filter((runtime) => runtime.isAvailable)
-						.length,
+					available: this.#inventory.runtimes.filter(
+						(runtime) => runtime.isAvailable
+					).length,
 				},
 			};
 			const validDeviceIds = new Set(
@@ -791,7 +835,8 @@ export class SimulatorService {
 			for (const device of this.#inventory.devices) {
 				if (
 					device.state !== 'booted' ||
-					(this.#appsByDevice.has(device.udid) && previouslyBooted.has(device.udid))
+					(this.#appsByDevice.has(device.udid) &&
+						previouslyBooted.has(device.udid))
 				) {
 					continue;
 				}
@@ -851,7 +896,10 @@ export class SimulatorService {
 				action.kind === 'keychain.addCertificate' ||
 				action.kind === 'location.importGpx') &&
 			!context.selectedPath &&
-			!(action.kind === 'keychain.addCertificate' && context.materializeCertificatePath)
+			!(
+				action.kind === 'keychain.addCertificate' &&
+				context.materializeCertificatePath
+			)
 		) {
 			return {
 				actionId: action.actionId,
@@ -880,7 +928,9 @@ export class SimulatorService {
 				phase: 'queued',
 				createdAt: this.#now(),
 				message: 'Waiting for earlier simulator work…',
-				...(actionDeviceUdid(action) ? { deviceUdid: actionDeviceUdid(action) } : {}),
+				...(actionDeviceUdid(action)
+					? { deviceUdid: actionDeviceUdid(action) }
+					: {}),
 			},
 		};
 		this.#jobs.push(internal);
@@ -984,7 +1034,9 @@ export class SimulatorService {
 					progressSequence: job.public.progressSequence + 1,
 					phase: 'cancelled',
 					finishedAt: this.#now(),
-					message: capture ? 'Recording stopped and saved.' : 'Action cancelled.',
+					message: capture
+						? 'Recording stopped and saved.'
+						: 'Action cancelled.',
 					...(capture ? { captureId: capture.id } : {}),
 				};
 			} else {
@@ -1067,7 +1119,9 @@ export class SimulatorService {
 	}
 
 	#requireDevice(udid: string, booted = false): SimulatorDevice {
-		const device = this.#inventory.devices.find((candidate) => candidate.udid === udid);
+		const device = this.#inventory.devices.find(
+			(candidate) => candidate.udid === udid
+		);
 		if (!device?.isAvailable) {
 			throw new Error('Simulator is not present in the current inventory.');
 		}
@@ -1113,7 +1167,8 @@ export class SimulatorService {
 				action.runtimeIdentifier &&
 				!this.#inventory.runtimes.some(
 					(runtime) =>
-						runtime.identifier === action.runtimeIdentifier && runtime.isAvailable
+						runtime.identifier === action.runtimeIdentifier &&
+						runtime.isAvailable
 				)
 			) {
 				throw new Error('Runtime is not available in the current inventory.');
@@ -1138,7 +1193,9 @@ export class SimulatorService {
 					);
 				const device = this.#requireDevice(created.data);
 				if (device.state !== 'booted')
-					await this.#run(['boot', device.udid], signal, { timeoutMs: 120_000 });
+					await this.#run(['boot', device.udid], signal, {
+						timeoutMs: 120_000,
+					});
 				await this.#run(['bootstatus', device.udid, '-b'], signal, {
 					timeoutMs: 180_000,
 				});
@@ -1158,14 +1215,17 @@ export class SimulatorService {
 				!primary.mimeType.startsWith('image/') ||
 				primary.deviceUdid !== action.udid
 			) {
-				throw new Error('The primary image does not belong to the selected simulator.');
+				throw new Error(
+					'The primary image does not belong to the selected simulator.'
+				);
 			}
 			const secondary = action.secondaryCaptureId
 				? this.#captureStore.get(action.secondaryCaptureId)
 				: undefined;
 			if (
 				action.secondaryCaptureId &&
-				(secondary?.kind !== 'screenshot' || !secondary.mimeType.startsWith('image/'))
+				(secondary?.kind !== 'screenshot' ||
+					!secondary.mimeType.startsWith('image/'))
 			) {
 				throw new Error('The comparison image is not an available screenshot.');
 			}
@@ -1214,7 +1274,9 @@ export class SimulatorService {
 		}
 		if (action.kind === 'device.shutdown') {
 			if (device.state !== 'shutdown') {
-				await this.#run(['shutdown', action.udid], signal, { timeoutMs: 60_000 });
+				await this.#run(['shutdown', action.udid], signal, {
+					timeoutMs: 60_000,
+				});
 			}
 			await this.#refreshInventory(signal);
 			return undefined;
@@ -1242,7 +1304,11 @@ export class SimulatorService {
 					'The trusted pinned SimSlim clone helper is unavailable; direct simctl cloning is disabled.'
 				);
 			}
-			await this.#cloneProvider.cloneSimulator(action.udid, action.name, signal);
+			await this.#cloneProvider.cloneSimulator(
+				action.udid,
+				action.name,
+				signal
+			);
 			await this.#refreshInventory(signal);
 			return undefined;
 		}
@@ -1253,9 +1319,14 @@ export class SimulatorService {
 		}
 		if (action.kind === 'disk.inspect') {
 			if (!this.#diskProvider) {
-				throw new Error('The signed SimSlim disk inventory helper is not available.');
+				throw new Error(
+					'The signed SimSlim disk inventory helper is not available.'
+				);
 			}
-			const plan = await this.#diskProvider.planDiskCleanup(action.udid, signal);
+			const plan = await this.#diskProvider.planDiskCleanup(
+				action.udid,
+				signal
+			);
 			const previous = this.#diskByDevice.get(action.udid);
 			this.#diskByDevice.set(action.udid, {
 				simulatorUdid: plan.simulatorId,
@@ -1270,9 +1341,14 @@ export class SimulatorService {
 		}
 		if (action.kind === 'disk.cleanup') {
 			if (!this.#diskProvider) {
-				throw new Error('The signed SimSlim disk cleanup helper is not available.');
+				throw new Error(
+					'The signed SimSlim disk cleanup helper is not available.'
+				);
 			}
-			const before = await this.#diskProvider.planDiskCleanup(action.udid, signal);
+			const before = await this.#diskProvider.planDiskCleanup(
+				action.udid,
+				signal
+			);
 			const beforeInspectedAt = this.#now();
 			const cleanable = new Set(
 				before.categories
@@ -1299,7 +1375,10 @@ export class SimulatorService {
 				cleanedAt: this.#now(),
 			};
 			try {
-				const after = await this.#diskProvider.planDiskCleanup(action.udid, signal);
+				const after = await this.#diskProvider.planDiskCleanup(
+					action.udid,
+					signal
+				);
 				this.#diskByDevice.set(action.udid, {
 					simulatorUdid: after.simulatorId,
 					totalBytes: after.totalBytes,
@@ -1341,14 +1420,20 @@ export class SimulatorService {
 			return undefined;
 		}
 		if (action.kind === 'app.uninstall') {
-			await this.#run(['uninstall', action.udid, action.bundleIdentifier], signal);
+			await this.#run(
+				['uninstall', action.udid, action.bundleIdentifier],
+				signal
+			);
 			await this.#refreshApps(action.udid, signal);
 			return undefined;
 		}
 		if (action.kind === 'app.launch') {
 			const launchArguments = [...action.arguments];
 			if (action.languages) {
-				launchArguments.push('-AppleLanguages', `(${action.languages.join(',')})`);
+				launchArguments.push(
+					'-AppleLanguages',
+					`(${action.languages.join(',')})`
+				);
 			}
 			if (action.locale) launchArguments.push('-AppleLocale', action.locale);
 			const argumentBytes = launchArguments.reduce(
@@ -1369,7 +1454,8 @@ export class SimulatorService {
 				signal,
 				{
 					timeoutMs: 60_000,
-					...(action.timeZone !== undefined || action.slowAnimations !== undefined
+					...(action.timeZone !== undefined ||
+					action.slowAnimations !== undefined
 						? {
 								simulatorAppEnvironment: {
 									...(action.timeZone ? { timeZone: action.timeZone } : {}),
@@ -1384,7 +1470,10 @@ export class SimulatorService {
 			return undefined;
 		}
 		if (action.kind === 'app.terminate') {
-			await this.#run(['terminate', action.udid, action.bundleIdentifier], signal);
+			await this.#run(
+				['terminate', action.udid, action.bundleIdentifier],
+				signal
+			);
 			return undefined;
 		}
 		if (action.kind === 'app.openUniversalLink') {
@@ -1393,13 +1482,22 @@ export class SimulatorService {
 		}
 		if (action.kind === 'app.revealContainer') {
 			const container =
-				action.container === 'app-group' ? action.appGroupIdentifier : action.container;
+				action.container === 'app-group'
+					? action.appGroupIdentifier
+					: action.container;
 			if (!container) {
-				throw new Error('An App Group identifier is required for this container.');
+				throw new Error(
+					'An App Group identifier is required for this container.'
+				);
 			}
 			const containerPaths = appContainerPaths(
 				await this.#run(
-					['get_app_container', action.udid, action.bundleIdentifier, container],
+					[
+						'get_app_container',
+						action.udid,
+						action.bundleIdentifier,
+						container,
+					],
 					signal
 				),
 				container
@@ -1445,13 +1543,21 @@ export class SimulatorService {
 		}
 		if (action.kind === 'location.set') {
 			await this.#run(
-				['location', action.udid, 'set', coordinate(action.latitude, action.longitude)],
+				[
+					'location',
+					action.udid,
+					'set',
+					coordinate(action.latitude, action.longitude),
+				],
 				signal
 			);
 			return undefined;
 		}
 		if (action.kind === 'location.run') {
-			await this.#run(['location', action.udid, 'run', action.scenario], signal);
+			await this.#run(
+				['location', action.udid, 'run', action.scenario],
+				signal
+			);
 			return undefined;
 		}
 		if (action.kind === 'location.start') {
@@ -1507,9 +1613,13 @@ export class SimulatorService {
 			return undefined;
 		}
 		if (action.kind === 'push.send') {
-			await this.#run(['push', action.udid, action.bundleIdentifier, '-'], signal, {
-				stdin: parsePushPayload(action.payloadJson),
-			});
+			await this.#run(
+				['push', action.udid, action.bundleIdentifier, '-'],
+				signal,
+				{
+					stdin: parsePushPayload(action.payloadJson),
+				}
+			);
 			return undefined;
 		}
 		if (action.kind === 'privacy.update') {
@@ -1526,7 +1636,10 @@ export class SimulatorService {
 			return undefined;
 		}
 		if (action.kind === 'ui.update') {
-			await this.#run(['ui', action.udid, action.setting, action.value], signal);
+			await this.#run(
+				['ui', action.udid, action.setting, action.value],
+				signal
+			);
 			return undefined;
 		}
 		if (action.kind === 'statusBar.clear') {
@@ -1625,7 +1738,8 @@ export class SimulatorService {
 			} catch (error) {
 				if (
 					error instanceof SimulatorCommandError &&
-					((signal.aborted && error.kind === 'aborted') || error.kind === 'timeout')
+					((signal.aborted && error.kind === 'aborted') ||
+						error.kind === 'timeout')
 				) {
 					try {
 						return await this.#captureStore.commit(pending);

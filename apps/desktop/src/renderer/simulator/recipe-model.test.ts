@@ -52,7 +52,10 @@ describe('recipe editor model', () => {
 			'statusBar.override',
 			'keychain.reset',
 		] as const;
-		const recipe = createRecipeDefinition({ id: 'simulator-actions', now: 100 });
+		const recipe = createRecipeDefinition({
+			id: 'simulator-actions',
+			now: 100,
+		});
 		recipe.steps = operations.map((operation, index) => ({
 			id: `simulator-${index + 1}`,
 			kind: 'simulator' as const,
@@ -154,7 +157,11 @@ describe('recipe editor model', () => {
 	it('previews destructive, privacy-sensitive, and slimming mutations', () => {
 		const recipe = createRecipeDefinition({ id: 'approval', now: 100 });
 		recipe.steps = [
-			{ id: 'shutdown', kind: 'simulator', action: { operation: 'device.shutdown' } },
+			{
+				id: 'shutdown',
+				kind: 'simulator',
+				action: { operation: 'device.shutdown' },
+			},
 			{
 				id: 'location',
 				kind: 'simulator',
@@ -215,7 +222,9 @@ describe('recipe editor model', () => {
 	});
 });
 
-function summaryFor(recipe: ReturnType<typeof createRecipeDefinition>): RecipeSummary {
+function summaryFor(
+	recipe: ReturnType<typeof createRecipeDefinition>
+): RecipeSummary {
 	return {
 		id: recipe.id,
 		name: recipe.name,

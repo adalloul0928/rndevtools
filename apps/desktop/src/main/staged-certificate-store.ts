@@ -90,7 +90,9 @@ function canonicalCertificateBytes(source: Buffer): {
 		const match = PEM_CERTIFICATE_PATTERN.exec(source.toString('ascii').trim());
 		const payload = match?.[1]?.replaceAll(/\r?\n/g, '') ?? '';
 		if (!payload || !BASE64_PATTERN.test(payload)) {
-			throw new Error('Selected PEM file must contain exactly one certificate.');
+			throw new Error(
+				'Selected PEM file must contain exactly one certificate.'
+			);
 		}
 		const decoded = Buffer.from(payload, 'base64');
 		try {
@@ -136,10 +138,15 @@ async function loadCertificateSource(selectedPath: string): Promise<{
 }> {
 	const selected = path.resolve(selectedPath);
 	if (!CERTIFICATE_EXTENSIONS.has(path.extname(selected).toLowerCase())) {
-		throw new Error('Selected certificate must use a supported certificate extension.');
+		throw new Error(
+			'Selected certificate must use a supported certificate extension.'
+		);
 	}
 	const resolved = await realpath(selected);
-	const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+	const handle = await open(
+		resolved,
+		constants.O_RDONLY | constants.O_NOFOLLOW
+	);
 	try {
 		const metadata = await handle.stat();
 		if (
@@ -202,7 +209,8 @@ export class StagedCertificateStore {
 	}: { directory: string; now?: () => number; ttlMs?: number }) {
 		this.#directory = path.resolve(directory);
 		this.#now = now;
-		this.#ttlMs = Number.isSafeInteger(ttlMs) && ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
+		this.#ttlMs =
+			Number.isSafeInteger(ttlMs) && ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
 	}
 
 	async start(): Promise<void> {
@@ -217,7 +225,10 @@ export class StagedCertificateStore {
 		this.#revokedSenders.delete(senderId);
 	}
 
-	async stage(selectedPath: string, senderId: number): Promise<StagedCertificate> {
+	async stage(
+		selectedPath: string,
+		senderId: number
+	): Promise<StagedCertificate> {
 		if (!this.#started || this.#revokedSenders.has(senderId)) {
 			throw new Error('Certificate staging is unavailable.');
 		}
@@ -228,7 +239,8 @@ export class StagedCertificateStore {
 		}
 		if (
 			this.#staged.size >= MAX_PENDING_CERTIFICATES ||
-			this.#pendingBytes + source.bytes.byteLength > MAX_PENDING_CERTIFICATE_BYTES
+			this.#pendingBytes + source.bytes.byteLength >
+				MAX_PENDING_CERTIFICATE_BYTES
 		) {
 			source.bytes.fill(0);
 			throw new Error('The pending certificate approval queue is full.');
@@ -243,7 +255,9 @@ export class StagedCertificateStore {
 					throw new Error('The approved certificate is no longer available.');
 				}
 				if (materializationStarted) {
-					throw new Error('The approved certificate has already been materialized.');
+					throw new Error(
+						'The approved certificate has already been materialized.'
+					);
 				}
 				materializationStarted = true;
 				if (
@@ -262,7 +276,10 @@ export class StagedCertificateStore {
 				const cleanup = async (): Promise<void> => {
 					if (materializedCleaned) return;
 					if (cleanupAttempt) return cleanupAttempt;
-					cleanupAttempt = rm(artifactDirectory, { force: true, recursive: true })
+					cleanupAttempt = rm(artifactDirectory, {
+						force: true,
+						recursive: true,
+					})
 						.then(() => {
 							materializedCleaned = true;
 							this.#materializedDirectories.delete(artifactDirectory);
@@ -291,12 +308,17 @@ export class StagedCertificateStore {
 						constants.O_RDONLY | constants.O_NOFOLLOW
 					);
 					try {
-						const bytes = await readBoundedFile(verification, MAX_CERTIFICATE_BYTES);
+						const bytes = await readBoundedFile(
+							verification,
+							MAX_CERTIFICATE_BYTES
+						);
 						if (
 							bytes.byteLength !== artifact.identity.sizeBytes ||
 							sha256(bytes) !== artifact.identity.sha256
 						) {
-							throw new Error('The one-use certificate file failed verification.');
+							throw new Error(
+								'The one-use certificate file failed verification.'
+							);
 						}
 					} finally {
 						await verification.close();
@@ -399,7 +421,9 @@ export class StagedCertificateStore {
 		this.#started = false;
 		for (const record of this.#records.values()) clearTimeout(record.timer);
 		this.#records.clear();
-		await Promise.all([...this.#staged.keys()].map((artifact) => artifact.cleanup()));
+		await Promise.all(
+			[...this.#staged.keys()].map((artifact) => artifact.cleanup())
+		);
 		await Promise.all(
 			[...this.#materializedDirectories].map((directory) =>
 				rm(directory, { force: true, recursive: true })

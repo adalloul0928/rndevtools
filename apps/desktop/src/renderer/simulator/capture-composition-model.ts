@@ -4,7 +4,11 @@ import {
 } from '../../shared/simulator-protocol';
 
 export const CAPTURE_CANVAS_PRESETS = {
-	'app-store-portrait': { label: 'App Store portrait', width: 1_290, height: 2_796 },
+	'app-store-portrait': {
+		label: 'App Store portrait',
+		width: 1_290,
+		height: 2_796,
+	},
 	'story-portrait': { label: 'Story portrait', width: 1_080, height: 1_920 },
 	landscape: { label: 'Landscape 16:9', width: 1_920, height: 1_080 },
 	square: { label: 'Square', width: 2_048, height: 2_048 },
@@ -20,7 +24,10 @@ export type CaptureCompositionFields = {
 	backgroundKind: 'transparent' | 'solid' | 'linear_gradient';
 	backgroundStart: string;
 	backgroundEnd: string;
-	gradientDirection: 'top_to_bottom' | 'left_to_right' | 'top_left_to_bottom_right';
+	gradientDirection:
+		| 'top_to_bottom'
+		| 'left_to_right'
+		| 'top_left_to_bottom_right';
 	padding: string;
 	contentMode: 'fit' | 'fill';
 	rotation: '0' | '90' | '180' | '270';

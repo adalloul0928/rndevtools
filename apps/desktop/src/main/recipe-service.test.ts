@@ -28,14 +28,19 @@ import {
 } from './recipe-service';
 import { RecipeStore } from './recipe-store';
 import { SimulatorMutationCoordinator } from './simulator-mutation-coordinator';
-import { type SimulatorHostProvider, SimulatorService } from './simulator-service';
+import {
+	type SimulatorHostProvider,
+	SimulatorService,
+} from './simulator-service';
 
 const UDID_ONE = '11111111-2222-3333-4444-555555555555';
 const UDID_TWO = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 const roots: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
-	const directory = await mkdtemp(path.join(os.tmpdir(), 'pumpd-recipe-service-'));
+	const directory = await mkdtemp(
+		path.join(os.tmpdir(), 'pumpd-recipe-service-')
+	);
 	roots.push(directory);
 	return directory;
 }
@@ -130,7 +135,11 @@ class FakeBroker implements RecipeBrokerPort {
 			this.waitFailuresRemaining > 0
 		) {
 			this.waitFailuresRemaining -= 1;
-			return { actionId: action.actionId, ok: false, error: 'Wait slice elapsed.' };
+			return {
+				actionId: action.actionId,
+				ok: false,
+				error: 'Wait slice elapsed.',
+			};
 		}
 		this.active += 1;
 		this.maxActive = Math.max(this.maxActive, this.active);
@@ -259,7 +268,8 @@ class FakeSimulator implements RecipeSimulatorPort {
 		this.actions.push(action);
 		const jobId = `simulator-job-${this.jobs.length}`;
 		if (action.kind === 'device.boot') this.stateByUdid[action.udid] = 'booted';
-		if (action.kind === 'device.shutdown') this.stateByUdid[action.udid] = 'shutdown';
+		if (action.kind === 'device.shutdown')
+			this.stateByUdid[action.udid] = 'shutdown';
 		this.jobs.push({
 			id: jobId,
 			actionId: action.actionId,
@@ -384,7 +394,9 @@ async function serviceFixture(recipe: RecipeDefinition) {
 
 async function waitForTerminal(service: RecipeService, runId: string) {
 	for (let index = 0; index < 300; index += 1) {
-		const run = service.getState().runs.find((candidate) => candidate.id === runId);
+		const run = service
+			.getState()
+			.runs.find((candidate) => candidate.id === runId);
 		if (
 			run &&
 			['complete', 'failed', 'cancelled', 'interrupted'].includes(run.status)
@@ -427,7 +439,8 @@ describe('RecipeService', () => {
 		);
 		const timeouts = broker.dispatched
 			.filter(
-				(action) => action.tool === 'components' && action.command === 'waitForElement'
+				(action) =>
+					action.tool === 'components' && action.command === 'waitForElement'
 			)
 			.map((action) => Number(action.payload.timeoutMs));
 		expect(timeouts).toEqual([5_000, 5_000, 5_000]);
@@ -475,7 +488,10 @@ describe('RecipeService', () => {
 			captureDirectory: await temporaryDirectory(),
 			provider,
 			metricsProvider: {
-				sample: vi.fn(async () => ({ status: 'available' as const, byDevice: {} })),
+				sample: vi.fn(async () => ({
+					status: 'available' as const,
+					byDevice: {},
+				})),
 			},
 			mutationCoordinator: coordinator,
 			pollIntervalMs: 60_000,
@@ -534,12 +550,13 @@ describe('RecipeService', () => {
 		});
 		expect(directReceipt.accepted).toBe(true);
 		releaseBroker.resolve();
-		expect((await waitForTerminal(service, recipeReceipt.runId ?? '')).status).toBe(
-			'complete'
-		);
+		expect(
+			(await waitForTerminal(service, recipeReceipt.runId ?? '')).status
+		).toBe('complete');
 		await vi.waitFor(() => {
 			expect(
-				simulator.getState().jobs.find((job) => job.id === directReceipt.jobId)?.status
+				simulator.getState().jobs.find((job) => job.id === directReceipt.jobId)
+					?.status
 			).toBe('complete');
 		});
 		const launches = provider.commands.filter((args) => args[0] === 'launch');
@@ -602,7 +619,8 @@ describe('RecipeService', () => {
 			targets: [
 				{
 					status: 'failed',
-					message: 'No connected app instance matched the exact Simulator UDID.',
+					message:
+						'No connected app instance matched the exact Simulator UDID.',
 				},
 			],
 		});
@@ -677,7 +695,9 @@ describe('RecipeService', () => {
 			},
 			{ runApproved: true }
 		);
-		expect((await waitForTerminal(service, blocked.runId ?? '')).status).toBe('failed');
+		expect((await waitForTerminal(service, blocked.runId ?? '')).status).toBe(
+			'failed'
+		);
 		expect(slimming.actions[0]).not.toHaveProperty('acknowledgement');
 		expect(slimming.mutations).toBe(0);
 
@@ -751,9 +771,9 @@ describe('RecipeService', () => {
 			status: 'cancelled',
 			targets: [{ status: 'cancelled', cleanup: { status: 'complete' } }],
 		});
-		expect(broker.actions.some((action) => action.command === 'clearProfile')).toBe(
-			true
-		);
+		expect(
+			broker.actions.some((action) => action.command === 'clearProfile')
+		).toBe(true);
 	});
 
 	it('bounds generated progress messages for valid maximum-length labels', async () => {

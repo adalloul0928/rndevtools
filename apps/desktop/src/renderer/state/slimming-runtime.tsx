@@ -133,7 +133,9 @@ export async function confirmSlimmingSettingRequest(
 	if (request.enabled || request.disposition === 'leave-overrides-in-place') {
 		return { confirmed: true, request };
 	}
-	let confirmation: Awaited<ReturnType<SlimmingBridge['requestSlimmingConfirmation']>>;
+	let confirmation: Awaited<
+		ReturnType<SlimmingBridge['requestSlimmingConfirmation']>
+	>;
 	try {
 		confirmation = await bridge.requestSlimmingConfirmation(request);
 	} catch (error) {
@@ -142,13 +144,16 @@ export async function confirmSlimmingSettingRequest(
 	if (confirmation.actionId !== request.actionId) {
 		return {
 			confirmed: false,
-			error: 'Native confirmation returned a mismatched Slimming action identifier.',
+			error:
+				'Native confirmation returned a mismatched Slimming action identifier.',
 		};
 	}
 	if (!confirmation.confirmed) {
 		return {
 			confirmed: false,
-			error: confirmation.error ?? 'Restore-and-disable was cancelled by the operator.',
+			error:
+				confirmation.error ??
+				'Restore-and-disable was cancelled by the operator.',
 		};
 	}
 	if (confirmation.required && !confirmation.token) {
@@ -269,14 +274,16 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			if (!bridge) {
 				setActionStatus({
 					kind: 'error',
-					message: 'The experimental mutation setting requires the secure bridge.',
+					message:
+						'The experimental mutation setting requires the secure bridge.',
 				});
 				return;
 			}
 			if (pendingSettingRef.current) {
 				setActionStatus({
 					kind: 'error',
-					message: 'Another Slimming setting change is already being submitted.',
+					message:
+						'Another Slimming setting change is already being submitted.',
 				});
 				return;
 			}
@@ -311,7 +318,8 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				if (!receipt.accepted) {
 					setActionStatus({
 						kind: 'error',
-						message: receipt.error ?? 'The Slimming setting change was rejected.',
+						message:
+							receipt.error ?? 'The Slimming setting change was rejected.',
 					});
 					return;
 				}
@@ -325,14 +333,16 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 						? 'Restoring services before disabling SimSlim…'
 						: receipt.state.setting.experimentalMutationsEnabled
 							? 'SimSlim enabled.'
-							: receipt.state.setting.disabledDisposition === 'left-overrides-in-place'
+							: receipt.state.setting.disabledDisposition ===
+									'left-overrides-in-place'
 								? 'SimSlim disabled. Managed services remain changed.'
 								: 'SimSlim disabled.',
 				});
 			} catch (error) {
 				setActionStatus({ kind: 'error', message: errorText(error) });
 			} finally {
-				if (pendingSettingRef.current === actionId) pendingSettingRef.current = null;
+				if (pendingSettingRef.current === actionId)
+					pendingSettingRef.current = null;
 			}
 		},
 		[bridge]
@@ -352,12 +362,14 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				return { accepted: false, error };
 			}
 			if (!bridge) {
-				const error = 'Compatibility acknowledgement requires the secure bridge.';
+				const error =
+					'Compatibility acknowledgement requires the secure bridge.';
 				setActionStatus({ kind: 'error', message: error });
 				return { accepted: false, error };
 			}
 			if (pendingAcknowledgementRef.current) {
-				const error = 'Another compatibility acknowledgement is being submitted.';
+				const error =
+					'Another compatibility acknowledgement is being submitted.';
 				setActionStatus({ kind: 'error', message: error });
 				return { accepted: false, error };
 			}
@@ -386,7 +398,9 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 							}
 						: {
 								kind: 'error',
-								message: receipt.error ?? 'Compatibility acknowledgement was rejected.',
+								message:
+									receipt.error ??
+									'Compatibility acknowledgement was rejected.',
 							}
 				);
 				return {
@@ -432,7 +446,8 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			try {
 				const confirmation = await bridge.requestSlimmingConfirmation(action);
 				if (!confirmation.confirmed) {
-					const error = confirmation.error ?? 'Action cancelled by the operator.';
+					const error =
+						confirmation.error ?? 'Action cancelled by the operator.';
 					if (pendingActionRef.current === actionId) {
 						setActionStatus({ kind: 'error', message: error });
 					}
@@ -440,7 +455,8 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				}
 				if (confirmation.required) {
 					if (!confirmation.token) {
-						const error = 'Native confirmation did not issue a valid Slimming token.';
+						const error =
+							'Native confirmation did not issue a valid Slimming token.';
 						if (pendingActionRef.current === actionId) {
 							setActionStatus({ kind: 'error', message: error });
 						}
@@ -473,7 +489,8 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				}
 				return { actionId, accepted: false, error: message };
 			} finally {
-				if (pendingActionRef.current === actionId) pendingActionRef.current = null;
+				if (pendingActionRef.current === actionId)
+					pendingActionRef.current = null;
 			}
 		},
 		[bridge]
@@ -487,7 +504,10 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 				setActionStatus(
 					cancelled
 						? { kind: 'success', message: 'Slimming job cancelled.' }
-						: { kind: 'error', message: 'The Slimming job could not be cancelled.' }
+						: {
+								kind: 'error',
+								message: 'The Slimming job could not be cancelled.',
+							}
 				);
 				return cancelled;
 			} catch (error) {
@@ -542,7 +562,9 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 export function useSlimmingRuntime(): SlimmingRuntimeValue {
 	const value = useContext(SlimmingRuntimeContext);
 	if (!value) {
-		throw new Error('useSlimmingRuntime must be used inside SlimmingRuntimeProvider.');
+		throw new Error(
+			'useSlimmingRuntime must be used inside SlimmingRuntimeProvider.'
+		);
 	}
 	return value;
 }

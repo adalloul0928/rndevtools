@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoDevice } from '../shared/demo-data';
 import type { DesktopAction, DesktopState } from '../shared/protocol';
-import type { SimulatorAction, SimulatorState } from '../shared/simulator-protocol';
+import type {
+	SimulatorAction,
+	SimulatorState,
+} from '../shared/simulator-protocol';
 import { simulatorStateSchema } from '../shared/simulator-protocol';
-import type { SlimmingAction, SlimmingState } from '../shared/slimming-protocol';
+import type {
+	SlimmingAction,
+	SlimmingState,
+} from '../shared/slimming-protocol';
 import { slimmingStateSchema } from '../shared/slimming-protocol';
 import type { AgentCliError } from './agent-cli-service';
 import { createAgentCommandRouter } from './agent-command-router';
@@ -120,7 +126,11 @@ function fixture() {
 			refresh: async () => simulator,
 			runAction: (action: SimulatorAction) => {
 				simulatorActions.push(action);
-				return { actionId: action.actionId, accepted: false, error: 'not exercised' };
+				return {
+					actionId: action.actionId,
+					accepted: false,
+					error: 'not exercised',
+				};
 			},
 			cancelJob: (jobId: string) => {
 				cancelledSimulatorJobs.push(jobId);
@@ -133,7 +143,11 @@ function fixture() {
 			refresh: async () => slimming,
 			runAction: (action: SlimmingAction) => {
 				slimmingActions.push(action);
-				return { actionId: action.actionId, accepted: false, error: 'not exercised' };
+				return {
+					actionId: action.actionId,
+					accepted: false,
+					error: 'not exercised',
+				};
 			},
 			cancelJob: () => false,
 			subscribe: () => () => undefined,
@@ -186,13 +200,17 @@ describe('agent command router', () => {
 			{ kind: 'simulators', includeUnavailable: false },
 			context
 		);
-		expect(fleet).toMatchObject({ devices: [{ udid: UDID, name: 'Agent Lane' }] });
+		expect(fleet).toMatchObject({
+			devices: [{ udid: UDID, name: 'Agent Lane' }],
+		});
 	});
 
 	it('makes protocol-v1-style sessions discoverable by exact deviceId', async () => {
 		const { handler, setDesktop } = fixture();
 		const state = desktopState();
-		const session = state.devices[0] as NonNullable<(typeof state.devices)[number]>;
+		const session = state.devices[0] as NonNullable<
+			(typeof state.devices)[number]
+		>;
 		setDesktop({
 			...state,
 			devices: [
@@ -215,13 +233,19 @@ describe('agent command router', () => {
 		expect(JSON.stringify(doctor)).not.toContain('simulatorUdid');
 
 		await expect(
-			handler({ kind: 'screen', target: { deviceId: 'pumpd-demo-ios' } }, context)
+			handler(
+				{ kind: 'screen', target: { deviceId: 'pumpd-demo-ios' } },
+				context
+			)
 		).resolves.toMatchObject({ device: { id: 'pumpd-demo-ios' } });
 	});
 
 	it('resolves the exact Simulator session for semantic inspection', async () => {
 		const { handler } = fixture();
-		const screen = await handler({ kind: 'screen', target: { udid: UDID } }, context);
+		const screen = await handler(
+			{ kind: 'screen', target: { udid: UDID } },
+			context
+		);
 		expect(screen).toMatchObject({
 			device: { simulatorUdid: UDID },
 			status: 'simulated',
@@ -265,7 +289,11 @@ describe('agent command router', () => {
 			}
 			if (failures > 0) {
 				failures -= 1;
-				return { actionId: action.actionId, ok: false, error: 'Wait slice elapsed.' };
+				return {
+					actionId: action.actionId,
+					ok: false,
+					error: 'Wait slice elapsed.',
+				};
 			}
 			return { actionId: action.actionId, ok: true };
 		};
@@ -367,7 +395,13 @@ describe('agent command router', () => {
 		]) {
 			await expect(
 				handler(
-					{ kind: 'record', operation: 'stop', udid: UDID, codec: 'h264', jobId },
+					{
+						kind: 'record',
+						operation: 'stop',
+						udid: UDID,
+						codec: 'h264',
+						jobId,
+					},
 					context
 				)
 			).rejects.toMatchObject({ code: 'invalid_command' });
@@ -393,7 +427,10 @@ describe('agent command router', () => {
 		});
 
 		await expect(
-			handler({ kind: 'capture', udid: UDID.toLowerCase(), format: 'png' }, context)
+			handler(
+				{ kind: 'capture', udid: UDID.toLowerCase(), format: 'png' },
+				context
+			)
 		).rejects.toMatchObject({ code: 'action_rejected' });
 		await expect(
 			handler(
@@ -445,7 +482,8 @@ describe('agent command router', () => {
 				{
 					...(state.devices[0] as NonNullable<(typeof state.devices)[number]>),
 					info: {
-						...(state.devices[0] as NonNullable<(typeof state.devices)[number]>).info,
+						...(state.devices[0] as NonNullable<(typeof state.devices)[number]>)
+							.info,
 						id: 'second-session',
 					},
 				},
@@ -458,8 +496,13 @@ describe('agent command router', () => {
 
 	it('does not expose mutating Slimming operations through the router', async () => {
 		const { handler, slimmingActions } = fixture();
-		const status = await handler({ kind: 'slimming', operation: 'status' }, context);
-		expect(status).toMatchObject({ setting: { experimentalMutationsEnabled: false } });
+		const status = await handler(
+			{ kind: 'slimming', operation: 'status' },
+			context
+		);
+		expect(status).toMatchObject({
+			setting: { experimentalMutationsEnabled: false },
+		});
 		expect(slimmingActions).toHaveLength(0);
 	});
 
@@ -545,7 +588,10 @@ describe('agent command router', () => {
 		const handler = createAgentCommandRouter({
 			broker: {
 				getState: desktopState,
-				dispatchAction: async (action) => ({ actionId: action.actionId, ok: true }),
+				dispatchAction: async (action) => ({
+					actionId: action.actionId,
+					ok: true,
+				}),
 			},
 			simulator: {
 				getState: simulatorState,
@@ -592,7 +638,10 @@ describe('agent command router', () => {
 				needsApproval: true,
 			}),
 			cancel: async (runId: string) => ({ runId, cancelled: true }),
-			status: async (runId?: string) => ({ runId: runId ?? null, status: 'complete' }),
+			status: async (runId?: string) => ({
+				runId: runId ?? null,
+				status: 'complete',
+			}),
 		};
 		const handler = createAgentCommandRouter({ ...dependencies, recipes });
 

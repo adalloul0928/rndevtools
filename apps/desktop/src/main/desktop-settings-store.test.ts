@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,7 +14,9 @@ import { DesktopSettingsStore } from './desktop-settings-store';
 const roots: string[] = [];
 
 afterEach(async () => {
-	await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
+	await Promise.all(
+		roots.splice(0).map((root) => rm(root, { recursive: true }))
+	);
 });
 
 async function fixture() {
@@ -47,7 +56,9 @@ describe('DesktopSettingsStore', () => {
 		await writeFile(root, 'blocks directory recreation');
 
 		await expect(
-			store.setXcodeDeveloperDirectory('/Applications/Failed.app/Contents/Developer')
+			store.setXcodeDeveloperDirectory(
+				'/Applications/Failed.app/Contents/Developer'
+			)
 		).rejects.toThrow();
 
 		await rm(root);

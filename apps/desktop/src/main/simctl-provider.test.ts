@@ -73,7 +73,11 @@ describe('simctl provider', () => {
 				{ identifier: watchRuntime, name: 'watchOS 26.0', isAvailable: true },
 			],
 			devicetypes: [
-				{ identifier: DEVICE_TYPE, name: 'iPhone 17 Pro', productFamily: 'iPhone' },
+				{
+					identifier: DEVICE_TYPE,
+					name: 'iPhone 17 Pro',
+					productFamily: 'iPhone',
+				},
 				{
 					identifier: watchType,
 					name: 'Apple Watch Series 11',
@@ -101,11 +105,13 @@ describe('simctl provider', () => {
 				],
 			},
 		});
-		expect(inventory.runtimes.map((runtime) => runtime.identifier)).toEqual([RUNTIME]);
-		expect(inventory.devices.map((device) => device.udid)).toEqual([UDID]);
-		expect(inventory.deviceTypes.map((deviceType) => deviceType.identifier)).toEqual([
-			DEVICE_TYPE,
+		expect(inventory.runtimes.map((runtime) => runtime.identifier)).toEqual([
+			RUNTIME,
 		]);
+		expect(inventory.devices.map((device) => device.udid)).toEqual([UDID]);
+		expect(
+			inventory.deviceTypes.map((deviceType) => deviceType.identifier)
+		).toEqual([DEVICE_TYPE]);
 	});
 
 	it('projects app metadata while omitting container and bundle paths', () => {
@@ -157,11 +163,13 @@ describe('simctl provider', () => {
 			xcodeBuild: '17F113',
 		});
 		expect(
-			developerDirectoryLabel('/Applications/Xcode-beta.app/Contents/Developer\n')
+			developerDirectoryLabel(
+				'/Applications/Xcode-beta.app/Contents/Developer\n'
+			)
 		).toBe('Xcode-beta.app (selected)');
-		expect(developerDirectoryLabel('/Library/Developer/CommandLineTools\n')).toBe(
-			'Command Line Tools (selected)'
-		);
+		expect(
+			developerDirectoryLabel('/Library/Developer/CommandLineTools\n')
+		).toBe('Command Line Tools (selected)');
 	});
 
 	it('derives feature support from the installed simctl command list', () => {

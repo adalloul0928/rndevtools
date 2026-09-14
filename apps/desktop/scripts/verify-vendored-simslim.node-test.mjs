@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	cpSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -9,7 +15,12 @@ import { fileURLToPath } from 'node:url';
 import { verifyVendoredSimSlim } from './verify-vendored-simslim.mjs';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const sourceHelper = path.resolve(scriptDirectory, '..', 'native', 'pumpd-sim-helper');
+const sourceHelper = path.resolve(
+	scriptDirectory,
+	'..',
+	'native',
+	'pumpd-sim-helper'
+);
 const temporaryDirectories = [];
 
 afterEach(() => {
@@ -25,7 +36,8 @@ test('accepts only the anchored reviewed PUMPD SimSlim patch set', () => {
 		patchSet: 'pumpd.1',
 		upstreamSourceManifestSha256:
 			'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
-		patchSha256: '69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+		patchSha256:
+			'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
 		vendoredSourceManifestSha256:
 			'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 		files: 16,
@@ -34,7 +46,10 @@ test('accepts only the anchored reviewed PUMPD SimSlim patch set', () => {
 
 test('rejects source tampering even when the checksum manifest is unchanged', () => {
 	const helper = copyFixture();
-	const clonePath = path.join(helper, 'vendor/github.com/mobai-app/simslim/clone.go');
+	const clonePath = path.join(
+		helper,
+		'vendor/github.com/mobai-app/simslim/clone.go'
+	);
 	writeFileSync(clonePath, `${readFileSync(clonePath, 'utf8')}\n// tampered\n`);
 	assert.throws(
 		() => verifyVendoredSimSlim(helper),
@@ -45,7 +60,10 @@ test('rejects source tampering even when the checksum manifest is unchanged', ()
 test('the anchored patch reverses the final tree to the anchored upstream base', () => {
 	const root = mkdtempSync(path.join(tmpdir(), 'pumpd-simslim-derivation-'));
 	temporaryDirectories.push(root);
-	const finalSource = path.join(sourceHelper, 'vendor/github.com/mobai-app/simslim');
+	const finalSource = path.join(
+		sourceHelper,
+		'vendor/github.com/mobai-app/simslim'
+	);
 	const reconstructedBase = path.join(root, 'simslim');
 	cpSync(finalSource, reconstructedBase, { recursive: true });
 	const patchPath = path.join(sourceHelper, 'PUMPD_PATCHSET_pumpd.1.patch');
@@ -72,7 +90,10 @@ test('the anchored patch reverses the final tree to the anchored upstream base',
 
 test('rejects coordinated source and editable checksum-manifest tampering', () => {
 	const helper = copyFixture();
-	const clonePath = path.join(helper, 'vendor/github.com/mobai-app/simslim/clone.go');
+	const clonePath = path.join(
+		helper,
+		'vendor/github.com/mobai-app/simslim/clone.go'
+	);
 	const checksumPath = path.join(helper, 'VENDORED_SOURCE_SHA256SUMS');
 	writeFileSync(clonePath, `${readFileSync(clonePath, 'utf8')}\n// tampered\n`);
 	writeFileSync(

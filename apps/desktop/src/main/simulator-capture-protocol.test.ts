@@ -6,13 +6,18 @@ import {
 	captureIdFromProtocolUrl,
 	serveSimulatorCaptureRequest,
 } from './simulator-capture-protocol';
-import { SimulatorCaptureStore, simulatorCaptureUrl } from './simulator-capture-store';
+import {
+	SimulatorCaptureStore,
+	simulatorCaptureUrl,
+} from './simulator-capture-store';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
 const temporaryDirectories: string[] = [];
 
 async function fixture(contents = '0123456789') {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-capture-protocol-'));
+	const directory = await mkdtemp(
+		path.join(tmpdir(), 'pumpd-capture-protocol-')
+	);
 	temporaryDirectories.push(directory);
 	const store = new SimulatorCaptureStore(path.join(directory, 'store'));
 	const pending = await store.reserve({
@@ -97,7 +102,12 @@ describe('Simulator capture protocol', () => {
 
 	it('returns 416 for malformed, multiple, and unsatisfiable ranges', async () => {
 		const { capture, store } = await fixture();
-		for (const range of ['bytes=10-', 'bytes=8-2', 'bytes=0-1,4-5', 'items=0-1']) {
+		for (const range of [
+			'bytes=10-',
+			'bytes=8-2',
+			'bytes=0-1,4-5',
+			'items=0-1',
+		]) {
 			const response = await serveSimulatorCaptureRequest(
 				store,
 				new Request(simulatorCaptureUrl(capture.id), { headers: { range } })

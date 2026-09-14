@@ -1,4 +1,7 @@
-import { diagnosticErrorText, redactDiagnosticText } from '@pumpd/devtools/redact';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@pumpd/devtools/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	SimulatorCapture,
@@ -19,7 +22,9 @@ const MAX_ERROR_LENGTH = 4 * 1024;
 
 export type SimulatorCaptureIpcService = {
 	getCapture: (captureId: string) => SimulatorCapture | undefined;
-	getCaptureAccess: (captureId: string) => Promise<SimulatorCaptureAccessResult>;
+	getCaptureAccess: (
+		captureId: string
+	) => Promise<SimulatorCaptureAccessResult>;
 	getCaptureRetention: () => SimulatorCaptureRetentionState;
 	deleteCapture: (captureId: string) => Promise<boolean>;
 	exportCapture: (captureId: string, destinationPath: string) => Promise<void>;
@@ -49,7 +54,10 @@ type CaptureIpcDependencies = {
 };
 
 function operationError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, MAX_ERROR_LENGTH);
+	return redactDiagnosticText(diagnosticErrorText(error)).slice(
+		0,
+		MAX_ERROR_LENGTH
+	);
 }
 
 function failedReceipt(
@@ -86,9 +94,13 @@ export function createSimulatorCaptureIpcHandlers({
 				await service.getCaptureAccess(captureId)
 			);
 		},
-		getRetention: (event: IpcMainInvokeEvent): SimulatorCaptureRetentionState => {
+		getRetention: (
+			event: IpcMainInvokeEvent
+		): SimulatorCaptureRetentionState => {
 			assertTrustedRenderer(event);
-			return simulatorCaptureRetentionStateSchema.parse(service.getCaptureRetention());
+			return simulatorCaptureRetentionStateSchema.parse(
+				service.getCaptureRetention()
+			);
 		},
 		runOperation: async (
 			event: IpcMainInvokeEvent,
@@ -99,7 +111,9 @@ export function createSimulatorCaptureIpcHandlers({
 			if (operation.kind === 'capture.retention.update') {
 				try {
 					const current = service.getCaptureRetention();
-					if (!(await confirmRetentionUpdate(event, operation.policy, current))) {
+					if (
+						!(await confirmRetentionUpdate(event, operation.policy, current))
+					) {
 						return simulatorCaptureOperationReceiptSchema.parse({
 							actionId: operation.actionId,
 							kind: operation.kind,
@@ -108,7 +122,9 @@ export function createSimulatorCaptureIpcHandlers({
 							retention: current,
 						});
 					}
-					const retention = await service.configureCaptureRetention(operation.policy);
+					const retention = await service.configureCaptureRetention(
+						operation.policy
+					);
 					return simulatorCaptureOperationReceiptSchema.parse({
 						actionId: operation.actionId,
 						kind: operation.kind,
@@ -156,7 +172,9 @@ export function createSimulatorCaptureIpcHandlers({
 					}
 					await service.exportCapture(operation.captureId, destinationPath);
 				} else {
-					const capturePath = await service.verifiedCapturePath(operation.captureId);
+					const capturePath = await service.verifiedCapturePath(
+						operation.captureId
+					);
 					await revealPath(capturePath);
 				}
 				return simulatorCaptureOperationReceiptSchema.parse({

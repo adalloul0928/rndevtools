@@ -22,7 +22,12 @@ import {
 	RefreshSimulatorsButton,
 	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
-import { Disclosure, InfoPopover, PanelNotice, StatusPill } from '@/components/ui';
+import {
+	Disclosure,
+	InfoPopover,
+	PanelNotice,
+	StatusPill,
+} from '@/components/ui';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
@@ -69,7 +74,8 @@ const CAPABILITIES: CapabilityDefinition[] = [
 	{
 		id: 'xcode',
 		label: 'Xcode toolchain',
-		description: 'Find an explicit Xcode installation and installed iOS runtimes.',
+		description:
+			'Find an explicit Xcode installation and installed iOS runtimes.',
 		required: true,
 		icon: FolderCog,
 		mechanism: 'xcode-select and xcrun',
@@ -113,7 +119,8 @@ const CAPABILITIES: CapabilityDefinition[] = [
 	{
 		id: 'camera',
 		label: 'Camera input',
-		description: 'Route an explicit camera source into supported simulator workflows.',
+		description:
+			'Route an explicit camera source into supported simulator workflows.',
 		required: false,
 		icon: Camera,
 		mechanism: 'macOS Camera permission',
@@ -188,7 +195,8 @@ const CAPABILITIES: CapabilityDefinition[] = [
 	{
 		id: 'network-extension',
 		label: 'Whole-Simulator networking',
-		description: 'Shape target traffic only when the signed extension is entitled.',
+		description:
+			'Shape target traffic only when the signed extension is entitled.',
 		required: false,
 		icon: Network,
 		mechanism: 'Network Extension entitlement probe',
@@ -200,7 +208,8 @@ const CAPABILITIES: CapabilityDefinition[] = [
 	{
 		id: 'physical-devices',
 		label: 'Physical devices',
-		description: 'Discover paired development devices through Apple developer tooling.',
+		description:
+			'Discover paired development devices through Apple developer tooling.',
 		required: false,
 		icon: Laptop,
 		mechanism: 'Xcode device services and pairing',
@@ -210,7 +219,8 @@ const CAPABILITIES: CapabilityDefinition[] = [
 ];
 
 export function SettingsPanel() {
-	const { isBridgeAvailable, runOnboardingOperation, state } = useSimulatorRuntime();
+	const { isBridgeAvailable, runOnboardingOperation, state } =
+		useSimulatorRuntime();
 	const capabilities = useMemo(
 		() =>
 			CAPABILITIES.map((definition) => {
@@ -286,10 +296,10 @@ export function SettingsPanel() {
 									<strong>Local agent CLI</strong>
 								</header>
 								<p>
-									Packaged startup verifies the signed CLI before opening its private
-									socket. In development, Reveal CLI performs the same manifest, hash,
-									architecture, and signature checks against the current local build.
-									PUMPD never modifies your shell path.
+									Packaged startup verifies the signed CLI before opening its
+									private socket. In development, Reveal CLI performs the same
+									manifest, hash, architecture, and signature checks against the
+									current local build. PUMPD never modifies your shell path.
 								</p>
 								<Button
 									isDisabled={!isBridgeAvailable}
@@ -308,9 +318,9 @@ export function SettingsPanel() {
 									<strong>Privilege boundary</strong>
 								</header>
 								<p>
-									The renderer cannot invoke a shell, enumerate arbitrary files, or
-									grant its own permissions. It sends allowlisted requests through a
-									typed, sandboxed preload bridge.
+									The renderer cannot invoke a shell, enumerate arbitrary files,
+									or grant its own permissions. It sends allowlisted requests
+									through a typed, sandboxed preload bridge.
 								</p>
 								<div>
 									<span>
@@ -429,12 +439,18 @@ export function capabilityOnboardingAction(id: CapabilityId): {
 	operation: SimulatorOnboardingOperationInput;
 } | null {
 	if (id === 'xcode') {
-		return { label: 'Select Xcode…', operation: { kind: 'toolchain.selectXcode' } };
+		return {
+			label: 'Select Xcode…',
+			operation: { kind: 'toolchain.selectXcode' },
+		};
 	}
 	if (id === 'screen-recording' || id === 'live-capture') {
 		return {
 			label: 'Open System Settings',
-			operation: { kind: 'privacy.openSettings', permission: 'screen_recording' },
+			operation: {
+				kind: 'privacy.openSettings',
+				permission: 'screen_recording',
+			},
 		};
 	}
 	if (id === 'accessibility') {
@@ -527,11 +543,15 @@ function capabilityStatus(
 	const permissionId = nativePermissionId(definition);
 	if (permissionId) {
 		if (native.status === 'checking') return 'checking';
-		const permission = native.permissions.find((item) => item.id === permissionId);
+		const permission = native.permissions.find(
+			(item) => item.id === permissionId
+		);
 		return permission?.value === 'granted' ? 'available' : 'unavailable';
 	}
 	if (definition.feature) {
-		return capability.features[definition.feature] ? 'available' : 'unavailable';
+		return capability.features[definition.feature]
+			? 'available'
+			: 'unavailable';
 	}
 	return 'unavailable';
 }

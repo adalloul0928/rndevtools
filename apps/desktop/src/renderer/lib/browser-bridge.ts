@@ -90,7 +90,9 @@ async function runAction(value: DesktopAction) {
 		state = {
 			...state,
 			devices: state.devices.map((device) =>
-				device.info.id === action.deviceId ? applyDemoAction(device, action) : device
+				device.info.id === action.deviceId
+					? applyDemoAction(device, action)
+					: device
 			),
 		};
 		emit();

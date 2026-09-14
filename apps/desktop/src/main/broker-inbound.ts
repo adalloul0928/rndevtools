@@ -24,5 +24,6 @@ export function brokerRawDataByteLength(raw: RawData): number {
 
 /** Bound and redact errors before they cross the broker observability boundary. */
 export function safeBrokerErrorText(error: unknown): string {
-	return truncateText(diagnosticErrorText(error), MAX_BOUNDARY_ERROR_BYTES).text;
+	return truncateText(diagnosticErrorText(error), MAX_BOUNDARY_ERROR_BYTES)
+		.text;
 }

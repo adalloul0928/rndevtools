@@ -84,7 +84,8 @@ export const toolGroups: ToolGroup[] = [
 				id: 'identity',
 				label: 'Test identities',
 				icon: UserRoundCheck,
-				count: (device) => (device?.tools.identitySession.active ? 1 : undefined),
+				count: (device) =>
+					device?.tools.identitySession.active ? 1 : undefined,
 			},
 		],
 	},

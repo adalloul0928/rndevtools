@@ -150,7 +150,9 @@ export async function confirmAndRunRecipe(
 	}
 }
 
-export function pendingRecipeApprovalRequest(run: RecipeRun): RecipeRunRequest | null {
+export function pendingRecipeApprovalRequest(
+	run: RecipeRun
+): RecipeRunRequest | null {
 	const pending = run.pendingRequest;
 	if (
 		run.status !== 'needs-approval' ||
@@ -227,7 +229,9 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 
 	const refresh = useCallback(async () => {
 		if (!bridge) {
-			setRuntimeError('Recipe state is unavailable because the bridge is missing.');
+			setRuntimeError(
+				'Recipe state is unavailable because the bridge is missing.'
+			);
 			return;
 		}
 		setIsLoading(true);
@@ -244,7 +248,8 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 
 	const getRecipe = useCallback(
 		async (recipeId: string) => {
-			if (!bridge) throw new Error('Recipe loading requires the secure bridge.');
+			if (!bridge)
+				throw new Error('Recipe loading requires the secure bridge.');
 			return bridge.getRecipe(recipeId);
 		},
 		[bridge]
@@ -252,7 +257,8 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 
 	const getEvidence = useCallback(
 		async (evidenceId: string) => {
-			if (!bridge) throw new Error('Evidence loading requires the secure bridge.');
+			if (!bridge)
+				throw new Error('Evidence loading requires the secure bridge.');
 			return bridge.getRecipeEvidence(evidenceId);
 		},
 		[bridge]
@@ -300,7 +306,8 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				return { actionId, accepted: false, error };
 			}
 			if (pendingKeysRef.current.size >= 16) {
-				const error = 'The recipe submission queue is full. Wait for a receipt.';
+				const error =
+					'The recipe submission queue is full. Wait for a receipt.';
 				setActionStatus({ kind: 'error', message: error });
 				return { actionId, accepted: false, error };
 			}
@@ -311,7 +318,10 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				message: 'Reviewing exact recipe targets and mutations…',
 			});
 			try {
-				const receipt = await confirmAndRunRecipe(bridge, { ...input, actionId });
+				const receipt = await confirmAndRunRecipe(bridge, {
+					...input,
+					actionId,
+				});
 				if (latestActionIdRef.current === actionId) {
 					setActionStatus(
 						receipt.accepted
@@ -352,7 +362,8 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				return { actionId, accepted: false, error };
 			}
 			if (pendingKeysRef.current.size >= 16) {
-				const error = 'The recipe submission queue is full. Wait for a receipt.';
+				const error =
+					'The recipe submission queue is full. Wait for a receipt.';
 				setActionStatus({ kind: 'error', message: error });
 				return { actionId, accepted: false, error };
 			}
@@ -396,7 +407,10 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				setActionStatus(
 					cancelled
 						? { kind: 'success', message: 'Recipe cancellation requested.' }
-						: { kind: 'error', message: 'The recipe run could not be cancelled.' }
+						: {
+								kind: 'error',
+								message: 'The recipe run could not be cancelled.',
+							}
 				);
 				return cancelled;
 			} catch (error) {
@@ -408,7 +422,9 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 	);
 
 	const runFileOperation = useCallback(
-		async (input: RecipeFileOperationInput): Promise<RecipeFileOperationReceipt> => {
+		async (
+			input: RecipeFileOperationInput
+		): Promise<RecipeFileOperationReceipt> => {
 			const actionId = nextRecipeActionId('recipe-file');
 			const failed = (error: string): RecipeFileOperationReceipt => ({
 				actionId,
@@ -519,12 +535,16 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 export function useRecipeRuntime(): RecipeRuntimeValue {
 	const value = useContext(RecipeRuntimeContext);
 	if (!value) {
-		throw new Error('useRecipeRuntime must be used inside RecipeRuntimeProvider.');
+		throw new Error(
+			'useRecipeRuntime must be used inside RecipeRuntimeProvider.'
+		);
 	}
 	return value;
 }
 
-function fileOperationSuccess(kind: RecipeFileOperationReceipt['kind']): string {
+function fileOperationSuccess(
+	kind: RecipeFileOperationReceipt['kind']
+): string {
 	switch (kind) {
 		case 'recipe.import':
 			return 'Recipe imported.';

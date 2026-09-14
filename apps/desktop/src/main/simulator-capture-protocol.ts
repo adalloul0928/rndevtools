@@ -39,8 +39,11 @@ function errorResponse(
 	return new Response(omitBody ? null : message, { headers, status });
 }
 
-export function captureIdFromProtocolUrl(requestUrl: string): string | undefined {
-	if (Buffer.byteLength(requestUrl, 'utf8') > MAX_REQUEST_URL_BYTES) return undefined;
+export function captureIdFromProtocolUrl(
+	requestUrl: string
+): string | undefined {
+	if (Buffer.byteLength(requestUrl, 'utf8') > MAX_REQUEST_URL_BYTES)
+		return undefined;
 	try {
 		const url = new URL(requestUrl);
 		if (
@@ -119,7 +122,9 @@ function fileBody(
 				const { bytesRead } = await handle.read(buffer, 0, length, position);
 				if (bytesRead === 0) throw new Error('Capture ended during streaming.');
 				position += bytesRead;
-				controller.enqueue(new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead));
+				controller.enqueue(
+					new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead)
+				);
 			} catch (error) {
 				await close();
 				controller.error(error);

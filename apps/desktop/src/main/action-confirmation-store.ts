@@ -37,7 +37,8 @@ export class ActionConfirmationStore {
 		ttlMs = DEFAULT_TTL_MS,
 	}: { now?: () => number; ttlMs?: number } = {}) {
 		this.#now = now;
-		this.#ttlMs = Number.isSafeInteger(ttlMs) && ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
+		this.#ttlMs =
+			Number.isSafeInteger(ttlMs) && ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
 	}
 
 	issue(

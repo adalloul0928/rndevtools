@@ -65,7 +65,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'install-app',
 		label: 'Install .app bundle',
-		description: 'Choose a local Simulator .app bundle through a native file dialog.',
+		description:
+			'Choose a local Simulator .app bundle through a native file dialog.',
 		category: 'App',
 		icon: Download,
 		config: 'none',
@@ -83,7 +84,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'launch-app',
 		label: 'Launch app',
-		description: 'Launch the selected app with optional locale and debug controls.',
+		description:
+			'Launch the selected app with optional locale and debug controls.',
 		category: 'App',
 		icon: Play,
 		config: 'launch',
@@ -92,7 +94,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'relaunch-app',
 		label: 'Relaunch app',
-		description: 'Terminate and launch the selected app with the same overrides.',
+		description:
+			'Terminate and launch the selected app with the same overrides.',
 		category: 'App',
 		icon: RotateCw,
 		config: 'launch',
@@ -128,7 +131,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'terminate-app',
 		label: 'Terminate app',
-		description: 'End the selected app process without shutting down the target.',
+		description:
+			'End the selected app process without shutting down the target.',
 		category: 'App',
 		icon: Command,
 		config: 'none',
@@ -137,7 +141,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'uninstall-app',
 		label: 'Uninstall app',
-		description: 'Remove the selected app and its local data after confirmation.',
+		description:
+			'Remove the selected app and its local data after confirmation.',
 		category: 'App',
 		icon: Trash2,
 		config: 'none',
@@ -164,7 +169,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'reveal-group-containers',
 		label: 'Reveal group containers',
-		description: 'Reveal the selected app’s verified group-container directory.',
+		description:
+			'Reveal the selected app’s verified group-container directory.',
 		category: 'Data',
 		icon: FolderOpen,
 		config: 'none',
@@ -173,7 +179,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'reveal-app-group',
 		label: 'Reveal App Group',
-		description: 'Reveal one exact App Group container after native path verification.',
+		description:
+			'Reveal one exact App Group container after native path verification.',
 		category: 'Data',
 		icon: FolderOpen,
 		config: 'text',
@@ -200,7 +207,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'import-gpx-route',
 		label: 'Import GPX route',
-		description: 'Choose and stream a bounded GPX route through the native dialog.',
+		description:
+			'Choose and stream a bounded GPX route through the native dialog.',
 		category: 'Environment',
 		icon: Upload,
 		config: 'none',
@@ -281,7 +289,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'pasteboard-to-simulator',
 		label: 'Paste into simulator',
-		description: 'Synchronize the host pasteboard into the exact Simulator target.',
+		description:
+			'Synchronize the host pasteboard into the exact Simulator target.',
 		category: 'Data',
 		icon: Clipboard,
 		config: 'none',
@@ -299,7 +308,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'add-root-certificate',
 		label: 'Add trusted certificate',
-		description: 'Choose a bounded certificate and add it to the Simulator keychain.',
+		description:
+			'Choose a bounded certificate and add it to the Simulator keychain.',
 		category: 'Data',
 		icon: KeyRound,
 		config: 'none',
@@ -308,7 +318,8 @@ const APP_ACTIONS: AppActionDefinition[] = [
 	{
 		id: 'reset-keychain',
 		label: 'Reset keychain',
-		description: 'Remove all Simulator keychain entries after native confirmation.',
+		description:
+			'Remove all Simulator keychain entries after native confirmation.',
 		category: 'Data',
 		icon: KeyRound,
 		config: 'none',
@@ -353,16 +364,20 @@ const ACTION_CATEGORIES: Array<ActionCategory | 'All'> = [
 ];
 
 export function AppActionsPanel() {
-	const { isBridgeAvailable, runAction, selectedDevice, state } = useSimulatorRuntime();
+	const { isBridgeAvailable, runAction, selectedDevice, state } =
+		useSimulatorRuntime();
 	const [query, setQuery] = useState('');
 	const [category, setCategory] = useState<ActionCategory | 'All'>('All');
-	const [selectedActionId, setSelectedActionId] = useState(APP_ACTIONS[0]?.id ?? '');
+	const [selectedActionId, setSelectedActionId] = useState(
+		APP_ACTIONS[0]?.id ?? ''
+	);
 	const [selectedBundleIdentifier, setSelectedBundleIdentifier] = useState('');
 	const normalizedQuery = query.trim().toLowerCase();
 	const actions = useMemo(
 		() =>
 			APP_ACTIONS.filter((action) => {
-				const matchesCategory = category === 'All' || action.category === category;
+				const matchesCategory =
+					category === 'All' || action.category === category;
 				const matchesQuery =
 					normalizedQuery.length === 0 ||
 					`${action.label} ${action.description} ${action.category}`
@@ -373,17 +388,22 @@ export function AppActionsPanel() {
 		[category, normalizedQuery]
 	);
 	const selectedAction =
-		APP_ACTIONS.find((action) => action.id === selectedActionId) ?? APP_ACTIONS[0];
+		APP_ACTIONS.find((action) => action.id === selectedActionId) ??
+		APP_ACTIONS[0];
 	const installedApps = useMemo(
 		() =>
 			selectedDevice
-				? (state.appsByDevice[selectedDevice.udid] ?? []).filter((app) => !app.isSystem)
+				? (state.appsByDevice[selectedDevice.udid] ?? []).filter(
+						(app) => !app.isSystem
+					)
 				: [],
 		[selectedDevice, state.appsByDevice]
 	);
 	useEffect(() => {
 		if (
-			installedApps.some((app) => app.bundleIdentifier === selectedBundleIdentifier)
+			installedApps.some(
+				(app) => app.bundleIdentifier === selectedBundleIdentifier
+			)
 		) {
 			return;
 		}
@@ -430,7 +450,9 @@ export function AppActionsPanel() {
 						aria-label="Select installed application"
 						disabled={installedApps.length === 0}
 						value={selectedBundleIdentifier}
-						onChange={(event) => setSelectedBundleIdentifier(event.currentTarget.value)}
+						onChange={(event) =>
+							setSelectedBundleIdentifier(event.currentTarget.value)
+						}
 					>
 						{installedApps.length === 0 ? (
 							<NativeSelect.Option value="">No app loaded</NativeSelect.Option>
@@ -601,8 +623,8 @@ function ActionWorkbench({
 			{!featureAvailable ? (
 				<div className="sim-inline-note is-warning">
 					<Command className="h-3.5 w-3.5" />
-					This action is visible for planning, but the current native provider does not
-					expose it yet.
+					This action is visible for planning, but the current native provider
+					does not expose it yet.
 				</div>
 			) : null}
 			{action.requiresAccessibility ? (
@@ -614,8 +636,8 @@ function ActionWorkbench({
 			{action.config === 'permission' && !bundleIdentifier ? (
 				<div className="sim-inline-note is-warning">
 					<ShieldCheck className="h-3.5 w-3.5" />
-					Select an installed app. Permission grant, revoke, and reset never apply to
-					all apps.
+					Select an installed app. Permission grant, revoke, and reset never
+					apply to all apps.
 				</div>
 			) : null}
 			<div className="sim-run-footer">
@@ -725,7 +747,11 @@ function ActionConfiguration({
 						onChange={(event) => setTimeZone(event.currentTarget.value)}
 					/>
 				</div>
-				<Switch isSelected={slowAnimations} size="sm" onChange={setSlowAnimations}>
+				<Switch
+					isSelected={slowAnimations}
+					size="sm"
+					onChange={setSlowAnimations}
+				>
 					<Switch.Content>
 						<span className="sim-switch-copy">
 							<strong>Slow PUMPD animations</strong>
@@ -740,7 +766,10 @@ function ActionConfiguration({
 		);
 	}
 	if (action.config === 'location') {
-		const customCoordinate = parseCustomCoordinate(customLatitude, customLongitude);
+		const customCoordinate = parseCustomCoordinate(
+			customLatitude,
+			customLongitude
+		);
 		const hasCustomInput =
 			customLatitude.trim().length > 0 || customLongitude.trim().length > 0;
 		return (
@@ -753,11 +782,15 @@ function ActionConfiguration({
 							value={preset}
 							onChange={(event) => setPreset(event.currentTarget.value)}
 						>
-							<NativeSelect.Option value="apple-park">Apple Park</NativeSelect.Option>
+							<NativeSelect.Option value="apple-park">
+								Apple Park
+							</NativeSelect.Option>
 							<NativeSelect.Option value="san-francisco">
 								San Francisco
 							</NativeSelect.Option>
-							<NativeSelect.Option value="new-york">New York</NativeSelect.Option>
+							<NativeSelect.Option value="new-york">
+								New York
+							</NativeSelect.Option>
 							<NativeSelect.Option value="custom">
 								Custom coordinate
 							</NativeSelect.Option>
@@ -781,7 +814,9 @@ function ActionConfiguration({
 									step="any"
 									type="number"
 									value={customLatitude}
-									onChange={(event) => setCustomLatitude(event.currentTarget.value)}
+									onChange={(event) =>
+										setCustomLatitude(event.currentTarget.value)
+									}
 								/>
 							</div>
 							<div className="sim-field">
@@ -795,13 +830,16 @@ function ActionConfiguration({
 									step="any"
 									type="number"
 									value={customLongitude}
-									onChange={(event) => setCustomLongitude(event.currentTarget.value)}
+									onChange={(event) =>
+										setCustomLongitude(event.currentTarget.value)
+									}
 								/>
 							</div>
 						</div>
 						{hasCustomInput && customCoordinate === null ? (
 							<p className="sim-field-error" role="alert">
-								Enter a finite latitude from −90 to 90 and longitude from −180 to 180.
+								Enter a finite latitude from −90 to 90 and longitude from −180
+								to 180.
 							</p>
 						) : (
 							<p className="sim-field-help">
@@ -823,7 +861,9 @@ function ActionConfiguration({
 						value={preset}
 						onChange={(event) => setPreset(event.currentTarget.value)}
 					>
-						<NativeSelect.Option value="microphone">Microphone</NativeSelect.Option>
+						<NativeSelect.Option value="microphone">
+							Microphone
+						</NativeSelect.Option>
 						<NativeSelect.Option value="photos">Photos</NativeSelect.Option>
 						<NativeSelect.Option value="location">Location</NativeSelect.Option>
 						<NativeSelect.Option value="calendar">Calendar</NativeSelect.Option>
@@ -1015,7 +1055,11 @@ export function buildSimulatorAction({
 					}
 				: null;
 		case 'set-location': {
-			const coordinate = locationCoordinate(preset, customLatitude, customLongitude);
+			const coordinate = locationCoordinate(
+				preset,
+				customLatitude,
+				customLongitude
+			);
 			return coordinate
 				? { kind: 'location.set', udid: targetUdid, ...coordinate }
 				: null;
@@ -1089,7 +1133,11 @@ export function buildSimulatorAction({
 						: 'simulator-to-host',
 			};
 		case 'add-root-certificate':
-			return { kind: 'keychain.addCertificate', udid: targetUdid, trustRoot: true };
+			return {
+				kind: 'keychain.addCertificate',
+				udid: targetUdid,
+				trustRoot: true,
+			};
 		case 'reset-keychain':
 			return { kind: 'keychain.reset', udid: targetUdid };
 		case 'grant-permission':
@@ -1105,7 +1153,11 @@ export function buildSimulatorAction({
 								: actionId === 'revoke-permission'
 									? 'revoke'
 									: 'reset',
-						service: preset as 'microphone' | 'photos' | 'location' | 'calendar',
+						service: preset as
+							| 'microphone'
+							| 'photos'
+							| 'location'
+							| 'calendar',
 						bundleIdentifier,
 					}
 				: null;
@@ -1117,7 +1169,9 @@ export function buildSimulatorAction({
 function isValidTimeZone(value: string): boolean {
 	return (
 		value.length <= 128 &&
-		/^[A-Za-z0-9][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9][A-Za-z0-9._+-]*){0,3}$/.test(value) &&
+		/^[A-Za-z0-9][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9][A-Za-z0-9._+-]*){0,3}$/.test(
+			value
+		) &&
 		value.split('/').every((segment) => segment !== '.' && segment !== '..')
 	);
 }
@@ -1132,7 +1186,9 @@ function isValidLocale(value: string): boolean {
 			/^[A-Za-z]+$/.test(language) &&
 			segments.every(
 				(segment) =>
-					segment.length >= 2 && segment.length <= 8 && /^[A-Za-z0-9]+$/.test(segment)
+					segment.length >= 2 &&
+					segment.length <= 8 &&
+					/^[A-Za-z0-9]+$/.test(segment)
 			)
 	);
 }
@@ -1143,7 +1199,9 @@ function isValidLanguage(value: string): boolean {
 
 function isValidBundleIdentifier(value: string): boolean {
 	return (
-		value.length > 0 && value.length <= 255 && /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(value)
+		value.length > 0 &&
+		value.length <= 255 &&
+		/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(value)
 	);
 }
 
@@ -1201,8 +1259,10 @@ function locationCoordinate(
 	if (preset === 'custom') {
 		return parseCustomCoordinate(customLatitude, customLongitude);
 	}
-	if (preset === 'apple-park') return { latitude: 37.3349, longitude: -122.009 };
-	if (preset === 'san-francisco') return { latitude: 37.7749, longitude: -122.4194 };
+	if (preset === 'apple-park')
+		return { latitude: 37.3349, longitude: -122.009 };
+	if (preset === 'san-francisco')
+		return { latitude: 37.7749, longitude: -122.4194 };
 	if (preset === 'new-york') return { latitude: 40.7128, longitude: -74.006 };
 	return null;
 }
@@ -1233,9 +1293,14 @@ function isValidUrl(value: string): boolean {
 	if (value.length === 0) return false;
 	try {
 		const protocol = new URL(value).protocol.toLowerCase();
-		return !['about:', 'blob:', 'data:', 'file:', 'javascript:', 'vbscript:'].includes(
-			protocol
-		);
+		return ![
+			'about:',
+			'blob:',
+			'data:',
+			'file:',
+			'javascript:',
+			'vbscript:',
+		].includes(protocol);
 	} catch {
 		return false;
 	}
@@ -1251,12 +1316,19 @@ function isValidHttpsUrl(value: string): boolean {
 }
 
 function isJsonObject(value: string): boolean {
-	if (value.length === 0 || new TextEncoder().encode(value).byteLength > 4_096) {
+	if (
+		value.length === 0 ||
+		new TextEncoder().encode(value).byteLength > 4_096
+	) {
 		return false;
 	}
 	try {
 		const parsed: unknown = JSON.parse(value);
-		if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		if (
+			typeof parsed !== 'object' ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
 			return false;
 		}
 		const aps = Object.getOwnPropertyDescriptor(parsed, 'aps');

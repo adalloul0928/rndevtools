@@ -34,7 +34,11 @@ describe('projectBrokerState', () => {
 				access: 'loopback',
 				urls: ['ws://127.0.0.1:47931/device'],
 			},
-			sessions: [{ device: offline }, { device: simulated }, { device: online }],
+			sessions: [
+				{ device: offline },
+				{ device: simulated },
+				{ device: online },
+			],
 			diagnostics,
 		});
 

@@ -28,7 +28,9 @@ function routeCanNavigate(route: RouteEntry): boolean {
 	return route.kind === 'static' || route.kind === 'group';
 }
 
-function transitionTone(event: RouteEvent): 'default' | 'success' | 'danger' | 'info' {
+function transitionTone(
+	event: RouteEvent
+): 'default' | 'success' | 'danger' | 'info' {
 	if (event.phase === 'failed') return 'danger';
 	if (event.phase === 'focused') return 'success';
 	if (event.phase === 'requested') return 'info';
@@ -56,7 +58,9 @@ export function RoutesPanel() {
 	}, [query, routes]);
 	const visibleRoutes = filtered.slice(0, MAX_RENDERED_ROUTES);
 	const selected =
-		visibleRoutes.find((route) => route.id === selectedId) ?? visibleRoutes[0] ?? null;
+		visibleRoutes.find((route) => route.id === selectedId) ??
+		visibleRoutes[0] ??
+		null;
 	const current = routes.find((route) => route.isCurrent);
 	const recentEvents = useMemo(
 		() =>
@@ -74,7 +78,8 @@ export function RoutesPanel() {
 				description="See the current Expo Router stack, browse the generated sitemap, and navigate to explicit static routes."
 				meta={
 					<span className="flex items-center gap-1.5 text-blue-300">
-						<Navigation2 className="h-3 w-3" /> {current?.path ?? 'No active route'}
+						<Navigation2 className="h-3 w-3" />{' '}
+						{current?.path ?? 'No active route'}
 					</span>
 				}
 			/>
@@ -86,10 +91,12 @@ export function RoutesPanel() {
 					onChange={setQuery}
 				/>
 				<span className="ml-auto font-mono text-xs text-(--text-3)">
-					{filtered.length} of {routes.length} routes · {events.length} transitions
+					{filtered.length} of {routes.length} routes · {events.length}{' '}
+					transitions
 				</span>
 			</Toolbar>
-			{filtered.length > visibleRoutes.length || events.length > recentEvents.length ? (
+			{filtered.length > visibleRoutes.length ||
+			events.length > recentEvents.length ? (
 				<PanelNotice title="Desktop list rendering is bounded." tone="info">
 					Search still covers every captured route. The list shows up to{' '}
 					{MAX_RENDERED_ROUTES} matches and the timeline shows the latest{' '}
@@ -159,7 +166,10 @@ export function RoutesPanel() {
 							</div>
 							<dl className="mb-4">
 								<KeyValue label="Kind" value={selected.kind} />
-								<KeyValue label="Visible" value={selected.isVisible ? 'Yes' : 'No'} />
+								<KeyValue
+									label="Visible"
+									value={selected.isVisible ? 'Yes' : 'No'}
+								/>
 								<KeyValue label="Stack depth" value={selected.depth} mono />
 								<KeyValue
 									label="Source"
@@ -194,7 +204,9 @@ export function RoutesPanel() {
 							{selected.filename ? (
 								<div className="mt-3 flex items-start gap-2 rounded-md border border-white/8 bg-white/[0.025] p-3 text-xs leading-5 text-(--text-3)">
 									<FileCode2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-									<span className="break-all font-mono">{selected.filename}</span>
+									<span className="break-all font-mono">
+										{selected.filename}
+									</span>
 								</div>
 							) : null}
 						</>

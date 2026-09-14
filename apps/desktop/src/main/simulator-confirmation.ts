@@ -8,7 +8,9 @@ export type SimulatorCertificateIdentity = {
 	subject?: string;
 };
 
-export function simulatorActionNeedsConfirmation(action: SimulatorAction): boolean {
+export function simulatorActionNeedsConfirmation(
+	action: SimulatorAction
+): boolean {
 	return (
 		action.kind === 'device.erase' ||
 		action.kind === 'device.delete' ||

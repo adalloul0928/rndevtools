@@ -34,7 +34,9 @@ export function sanitizeDiskCleanupCategoryIds(
 					id: SimulatorDiskCleanupCategoryId;
 				} =>
 					category.canClean &&
-					CLEANABLE_CATEGORY_IDS.has(category.id as SimulatorDiskCleanupCategoryId)
+					CLEANABLE_CATEGORY_IDS.has(
+						category.id as SimulatorDiskCleanupCategoryId
+					)
 			)
 			.map((category) => category.id)
 	);

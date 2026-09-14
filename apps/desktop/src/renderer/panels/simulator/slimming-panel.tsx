@@ -49,7 +49,10 @@ import {
 	unknownCompatibilityBinding,
 } from '@/simulator/slimming-ui-model';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
-import { type SlimmingActionInput, useSlimmingRuntime } from '@/state/slimming-runtime';
+import {
+	type SlimmingActionInput,
+	useSlimmingRuntime,
+} from '@/state/slimming-runtime';
 import {
 	SLIMMING_CONFIRMATIONS,
 	SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT,
@@ -89,7 +92,8 @@ export function SlimmingPanel() {
 	const [disableDialogOpen, setDisableDialogOpen] = useState(false);
 
 	useEffect(() => {
-		if (state.profiles.some((profile) => profile.id === selectedProfileId)) return;
+		if (state.profiles.some((profile) => profile.id === selectedProfileId))
+			return;
 		setSelectedProfileId(state.profiles[0]?.id ?? '');
 	}, [selectedProfileId, state.profiles]);
 
@@ -99,8 +103,11 @@ export function SlimmingPanel() {
 	const hasSeededSelection = useRef(false);
 
 	useEffect(() => {
-		const available = new Set(state.simulators.map((simulator) => simulator.udid));
-		const seedDefault = !hasSeededSelection.current && state.simulators.length > 0;
+		const available = new Set(
+			state.simulators.map((simulator) => simulator.udid)
+		);
+		const seedDefault =
+			!hasSeededSelection.current && state.simulators.length > 0;
 		if (state.simulators.length > 0) hasSeededSelection.current = true;
 		setSelectedUdids((current) => {
 			const retained = current.filter((udid) => available.has(udid));
@@ -136,16 +143,24 @@ export function SlimmingPanel() {
 				metrics !== undefined &&
 				!metrics.error &&
 				simulatorRuntime.state.devices.some(
-					(device) => device.udid === metrics.deviceUdid && device.state === 'booted'
+					(device) =>
+						device.udid === metrics.deviceUdid && device.state === 'booted'
 				)
 		);
 	const hasCompleteCurrentMetrics =
-		selectedUdids.length > 0 && currentMetricSamples.length === selectedUdids.length;
+		selectedUdids.length > 0 &&
+		currentMetricSamples.length === selectedUdids.length;
 	const currentMemoryBytes = hasCompleteCurrentMetrics
-		? currentMetricSamples.reduce((sum, metrics) => sum + metrics.memoryBytes, 0)
+		? currentMetricSamples.reduce(
+				(sum, metrics) => sum + metrics.memoryBytes,
+				0
+			)
 		: null;
 	const currentProcessCount = hasCompleteCurrentMetrics
-		? currentMetricSamples.reduce((sum, metrics) => sum + metrics.processCount, 0)
+		? currentMetricSamples.reduce(
+				(sum, metrics) => sum + metrics.processCount,
+				0
+			)
 		: null;
 	const categoryById = useMemo(
 		() => new Map(state.categories.map((category) => [category.id, category])),
@@ -161,7 +176,8 @@ export function SlimmingPanel() {
 			total + plan.toDisableServiceIds.length + plan.toEnableServiceIds.length,
 		0
 	);
-	const selectedUnknownTupleBinding = unknownCompatibilityBinding(selectedStatuses);
+	const selectedUnknownTupleBinding =
+		unknownCompatibilityBinding(selectedStatuses);
 	const plansReady =
 		selectedUdids.length > 0 &&
 		selectedPlans.length === selectedUdids.length &&
@@ -249,7 +265,9 @@ export function SlimmingPanel() {
 							}}
 						>
 							<Switch.Content>
-								<span className="sim-slimming-switch-label">Enable SimSlim</span>
+								<span className="sim-slimming-switch-label">
+									Enable SimSlim
+								</span>
 							</Switch.Content>
 							<Switch.Control>
 								<Switch.Thumb />
@@ -263,7 +281,9 @@ export function SlimmingPanel() {
 							variant="secondary"
 							onPress={() => void refresh()}
 						>
-							<RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+							<RefreshCw
+								className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`}
+							/>
 						</Button>
 					</div>
 				}
@@ -290,7 +310,10 @@ export function SlimmingPanel() {
 			<Toolbar>
 				<div className="sim-toolbar-field">
 					<span>Profile</span>
-					<NativeSelect className="sim-slimming-profile-select" fullWidth={false}>
+					<NativeSelect
+						className="sim-slimming-profile-select"
+						fullWidth={false}
+					>
 						<NativeSelect.Trigger
 							aria-label="Slimming profile"
 							disabled={state.profiles.length === 0}
@@ -315,7 +338,9 @@ export function SlimmingPanel() {
 						</NativeSelect.Trigger>
 					</NativeSelect>
 				</div>
-				<span className="sim-toolbar-meta">{selectedUdids.length} selected</span>
+				<span className="sim-toolbar-meta">
+					{selectedUdids.length} selected
+				</span>
 				<span className="sim-toolbar-spacer" />
 				<Button
 					isDisabled={
@@ -371,7 +396,9 @@ export function SlimmingPanel() {
 					detail="selected running simulators"
 					icon={<Cpu className="h-3.5 w-3.5" />}
 					label="Memory now"
-					value={currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)}
+					value={
+						currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)
+					}
 				/>
 				<SimulatorMetric
 					detail="planned changes"
@@ -476,7 +503,8 @@ export function SlimmingPanel() {
 							selectedUdids={selectedUdids}
 							state={state}
 							onAcknowledgeUnknownTuple={async (acknowledgement) => {
-								if (acknowledgement.binding !== selectedUnknownTupleBinding) return;
+								if (acknowledgement.binding !== selectedUnknownTupleBinding)
+									return;
 								await acknowledgeCompatibility({
 									simulatorUdids: selectedUdids,
 									acknowledgement: acknowledgement.value,
@@ -559,8 +587,8 @@ function ProfileWorkspace({
 							{Boolean(profile.preservedServiceIds?.length) && (
 								<>
 									<p className="mt-2">
-										These services stay enabled because they remained registered after
-										reboot during iOS 26.5 testing:
+										These services stay enabled because they remained registered
+										after reboot during iOS 26.5 testing:
 									</p>
 									<ul className="mt-2 space-y-1 font-mono text-[12px] break-all">
 										{profile.preservedServiceIds?.map((serviceId) => (
@@ -632,7 +660,9 @@ function ProfileWorkspace({
 						confirmLabel="Restore all"
 						description={`Restore every service managed by PUMPD on ${selectedUdids.length} selected targets. Unmanaged host services remain untouched.`}
 						isDisabled={
-							!mutationAvailable || selectedUdids.length === 0 || !unknownTupleReady
+							!mutationAvailable ||
+							selectedUdids.length === 0 ||
+							!unknownTupleReady
 						}
 						title="Restore all managed services?"
 						triggerIcon={<ListRestart className="h-3.5 w-3.5" />}
@@ -650,7 +680,9 @@ function ProfileWorkspace({
 						}
 					/>
 					<Button
-						isDisabled={!state.helper.readOnlyAvailable || selectedUdids.length === 0}
+						isDisabled={
+							!state.helper.readOnlyAvailable || selectedUdids.length === 0
+						}
 						size="sm"
 						variant="ghost"
 						onPress={() =>
@@ -710,16 +742,18 @@ function ProfileWorkspace({
 						<div className="sim-section-heading">
 							<h3>Current resource use</h3>
 							<InfoPopover label="Current resource use">
-								Live process footprint from the selected running simulators. These
-								readings do not measure savings. Compare the same PUMPD workload before
-								and after a successful apply.
+								Live process footprint from the selected running simulators.
+								These readings do not measure savings. Compare the same PUMPD
+								workload before and after a successful apply.
 							</InfoPopover>
 						</div>
 						<div className="sim-evidence-grid">
 							<div>
 								<span>Memory</span>
 								<strong>
-									{currentMemoryBytes === null ? '—' : formatBytes(currentMemoryBytes)}
+									{currentMemoryBytes === null
+										? '—'
+										: formatBytes(currentMemoryBytes)}
 								</strong>
 							</div>
 							<div>
@@ -742,7 +776,8 @@ function ProfileWorkspace({
 					{selectedSimulators.map((simulator) => {
 						const status = state.statusBySimulator[simulator.udid];
 						const preview = state.previewBySimulator[simulator.udid];
-						const plan = preview?.profileId === profile.id ? preview : undefined;
+						const plan =
+							preview?.profileId === profile.id ? preview : undefined;
 						const doctor = state.doctorBySimulator[simulator.udid];
 						const checkpoint = state.checkpointBySimulator[simulator.udid];
 						return (
@@ -806,8 +841,8 @@ function ProfileWorkspace({
 					<div>
 						<h3>Recent activity</h3>
 						<InfoPopover label="SimSlim activity">
-							Each simulator is changed and verified in sequence. An unsuccessful change
-							triggers recovery.
+							Each simulator is changed and verified in sequence. An
+							unsuccessful change triggers recovery.
 						</InfoPopover>
 					</div>
 					<History className="h-3.5 w-3.5" />
@@ -820,7 +855,11 @@ function ProfileWorkspace({
 							.toReversed()
 							.slice(0, 8)
 							.map((job) => (
-								<JobRow job={job} key={job.id} onCancel={() => cancelJob(job.id)} />
+								<JobRow
+									job={job}
+									key={job.id}
+									onCancel={() => cancelJob(job.id)}
+								/>
 							))}
 					</div>
 				)}
@@ -842,14 +881,20 @@ function FeatureChecks({ result }: { result: SlimmingDoctorResult }) {
 			<div className="flex items-center gap-2">
 				<strong>PUMPD service checks</strong>
 				<InfoPopover label="PUMPD service checks">
-					Checks whether simulator service overrides block these features. Use PUMPD to
-					test actual purchases, permissions, notifications, and links after applying a
-					profile.
+					Checks whether simulator service overrides block these features. Use
+					PUMPD to test actual purchases, permissions, notifications, and links
+					after applying a profile.
 				</InfoPopover>
 			</div>
-			<ul className="mt-2 space-y-2 text-sm" aria-label="PUMPD service check results">
+			<ul
+				className="mt-2 space-y-2 text-sm"
+				aria-label="PUMPD service check results"
+			>
 				{result.capabilities.map((capability) => (
-					<li key={capability.id} className="flex items-center justify-between gap-3">
+					<li
+						key={capability.id}
+						className="flex items-center justify-between gap-3"
+					>
 						<span>{labels[capability.id] ?? capability.id}</span>
 						<StatusPill tone={capability.available ? 'success' : 'danger'}>
 							{capability.available ? 'Available' : 'Blocked'}
@@ -868,7 +913,9 @@ function UnknownTupleAcknowledgementDialog({
 }: {
 	binding: string;
 	statuses: SlimmingSimulatorStatus[];
-	onAcknowledge: (acknowledgement: UnknownTupleAcknowledgement) => void | Promise<void>;
+	onAcknowledge: (
+		acknowledgement: UnknownTupleAcknowledgement
+	) => void | Promise<void>;
 }) {
 	const [typedValue, setTypedValue] = useState('');
 	const unknownCompatibilities = statuses.flatMap((status) => {
@@ -881,14 +928,16 @@ function UnknownTupleAcknowledgementDialog({
 	});
 	const exact = typedValue === SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT;
 	return (
-		<AlertDialog onOpenChange={(open) => (open ? undefined : setTypedValue(''))}>
+		<AlertDialog
+			onOpenChange={(open) => (open ? undefined : setTypedValue(''))}
+		>
 			<AlertDialog.Trigger className="sim-unknown-ack">
 				<Square className="h-4 w-4" />
 				<span>
 					<strong>Review system compatibility</strong>
 					<small>
-						Apply, undo, and restore remain blocked until the exact acknowledgement is
-						entered for this tuple set.
+						Apply, undo, and restore remain blocked until the exact
+						acknowledgement is entered for this tuple set.
 					</small>
 				</span>
 			</AlertDialog.Trigger>
@@ -909,33 +958,38 @@ function UnknownTupleAcknowledgementDialog({
 						<AlertDialog.Body>
 							<div className="sim-ack-dialog-body">
 								<p>
-									These exact macOS, Xcode, runtime, architecture, and catalog tuples
-									have not been verified. This acknowledgement is held only for the
-									currently displayed tuple set.
+									These exact macOS, Xcode, runtime, architecture, and catalog
+									tuples have not been verified. This acknowledgement is held
+									only for the currently displayed tuple set.
 								</p>
 								<div className="sim-tuple-list">
-									{unknownCompatibilities.map(({ simulatorUdid, compatibility }) => (
-										<div key={`${simulatorUdid}-${compatibility.key}`}>
-											<code>{simulatorUdid}</code>
-											<span>
-												macOS {compatibility.tuple.macOSBuild} · Xcode{' '}
-												{compatibility.tuple.xcodeBuild} ·{' '}
-												{compatibility.tuple.runtimeIdentifier} ·{' '}
-												{compatibility.tuple.hostArchitecture} · catalog{' '}
-												{compatibility.tuple.catalogVersion}
-											</span>
-										</div>
-									))}
+									{unknownCompatibilities.map(
+										({ simulatorUdid, compatibility }) => (
+											<div key={`${simulatorUdid}-${compatibility.key}`}>
+												<code>{simulatorUdid}</code>
+												<span>
+													macOS {compatibility.tuple.macOSBuild} · Xcode{' '}
+													{compatibility.tuple.xcodeBuild} ·{' '}
+													{compatibility.tuple.runtimeIdentifier} ·{' '}
+													{compatibility.tuple.hostArchitecture} · catalog{' '}
+													{compatibility.tuple.catalogVersion}
+												</span>
+											</div>
+										)
+									)}
 								</div>
 								<div className="sim-ack-input">
 									<span>
-										Type <code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code> exactly
+										Type <code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code>{' '}
+										exactly
 									</span>
 									<Input
 										aria-label="Unknown compatibility acknowledgement"
 										autoComplete="off"
 										value={typedValue}
-										onChange={(event) => setTypedValue(event.currentTarget.value)}
+										onChange={(event) =>
+											setTypedValue(event.currentTarget.value)
+										}
 									/>
 								</div>
 							</div>
@@ -1009,8 +1063,8 @@ function SlimmingDisableDialog({
 							<div className="sim-disable-dialog-body">
 								<p>
 									Choose how to handle {managedUdids.length} Simulator
-									{managedUdids.length === 1 ? '' : 's'} before experimental mutations
-									are disabled.
+									{managedUdids.length === 1 ? '' : 's'} before experimental
+									mutations are disabled.
 								</p>
 								<div className="sim-managed-targets">
 									{managedUdids.map((udid) => (
@@ -1020,29 +1074,31 @@ function SlimmingDisableDialog({
 								<div className="sim-disable-choice is-recommended">
 									<strong>Recommended: restore, verify, then disable</strong>
 									<span>
-										The helper restores every listed target sequentially, verifies the
-										managed services, and disables mutations only after success.
+										The helper restores every listed target sequentially,
+										verifies the managed services, and disables mutations only
+										after success.
 									</span>
 								</div>
 								<div className="sim-disable-choice is-risky">
 									<strong>Leave overrides in place and disable</strong>
 									<span>
-										No services are restored. Fleet remains in read-only mode with a
-										persistent warning and restoration guidance.
+										No services are restored. Fleet remains in read-only mode
+										with a persistent warning and restoration guidance.
 									</span>
 								</div>
 								{managedUdids.length > MAX_BATCH_SIZE ? (
 									<p className="sim-field-error" role="alert">
-										Restore-and-disable supports at most {MAX_BATCH_SIZE} managed
-										targets. Restore smaller batches from this workspace first.
+										Restore-and-disable supports at most {MAX_BATCH_SIZE}{' '}
+										managed targets. Restore smaller batches from this workspace
+										first.
 									</p>
 								) : null}
 								{unknownBinding ? (
 									<div className="sim-ack-input">
 										<span>
 											Unknown compatibility is present. Type{' '}
-											<code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code> exactly to
-											restore and verify.
+											<code>{SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT}</code>{' '}
+											exactly to restore and verify.
 										</span>
 										<Input
 											aria-label="Restore unknown compatibility acknowledgement"
@@ -1103,7 +1159,11 @@ function HelperStatus({
 	);
 }
 
-function ConditionPill({ condition }: { condition: SlimmingCondition | undefined }) {
+function ConditionPill({
+	condition,
+}: {
+	condition: SlimmingCondition | undefined;
+}) {
 	const tone =
 		condition === 'managed-clean' || condition === 'profile-match'
 			? 'success'
@@ -1121,7 +1181,9 @@ function ConditionPill({ condition }: { condition: SlimmingCondition | undefined
 		'needs-attention': 'Check required',
 	};
 	return (
-		<StatusPill tone={tone}>{condition ? labels[condition] : 'Not checked'}</StatusPill>
+		<StatusPill tone={tone}>
+			{condition ? labels[condition] : 'Not checked'}
+		</StatusPill>
 	);
 }
 
@@ -1133,7 +1195,10 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 		'verifying',
 		'rolling-back',
 	].includes(job.status);
-	const percent = Math.min(100, Math.max(0, (job.currentIndex / job.total) * 100));
+	const percent = Math.min(
+		100,
+		Math.max(0, (job.currentIndex / job.total) * 100)
+	);
 	return (
 		<div className="sim-slimming-job">
 			<header>

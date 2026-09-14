@@ -6,7 +6,9 @@ import {
 
 describe('Build Insights bounded adapter presentation', () => {
 	it('names the currently supported foundation and deferred metadata', () => {
-		expect(BUILD_INSIGHTS_FOUNDATION_COPY).toContain('xcresulttool get build-results');
+		expect(BUILD_INSIGHTS_FOUNDATION_COPY).toContain(
+			'xcresulttool get build-results'
+		);
 		expect(BUILD_INSIGHTS_FOUNDATION_COPY).toContain(
 			'clean/incremental classification'
 		);

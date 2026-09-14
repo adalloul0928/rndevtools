@@ -124,7 +124,9 @@ class FakeProvider implements SimulatorHostProvider {
 					await new Promise<void>((_resolve, reject) => {
 						const rejectCancelled = () =>
 							reject(
-								new SimulatorCommandError('recording cancelled', { kind: 'aborted' })
+								new SimulatorCommandError('recording cancelled', {
+									kind: 'aborted',
+								})
 							);
 						if (options.signal?.aborted) rejectCancelled();
 						else
@@ -157,7 +159,10 @@ async function createService(
 		captureDirectory,
 		provider,
 		metricsProvider: {
-			sample: vi.fn(async () => ({ status: 'available' as const, byDevice: {} })),
+			sample: vi.fn(async () => ({
+				status: 'available' as const,
+				byDevice: {},
+			})),
 		},
 		pollIntervalMs: 60_000,
 		...(revealPath ? { revealPath } : {}),
@@ -177,7 +182,9 @@ async function waitForJob(
 ) {
 	const deadline = Date.now() + 2_000;
 	while (Date.now() < deadline) {
-		const job = service.getState().jobs.find((candidate) => candidate.id === jobId);
+		const job = service
+			.getState()
+			.jobs.find((candidate) => candidate.id === jobId);
 		if (job?.status === status) return job;
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
@@ -243,9 +250,9 @@ describe('simulator service', () => {
 			);
 			const job = await waitForJob(service, receipt.jobId ?? '', 'failed');
 			expect(job.message).toContain('did not return a valid device ID');
-			expect(provider.commands.some((command) => command.args[0] === 'boot')).toBe(
-				false
-			);
+			expect(
+				provider.commands.some((command) => command.args[0] === 'boot')
+			).toBe(false);
 			expect(provider.opened).toEqual([]);
 		} finally {
 			await service.stop();
@@ -283,9 +290,9 @@ describe('simulator service', () => {
 			name: 'Fresh PUMPD Target',
 			udid: UDID,
 		});
-		await expect(service.resolveConfirmationTarget(UNKNOWN_UDID)).rejects.toThrow(
-			'fresh inventory'
-		);
+		await expect(
+			service.resolveConfirmationTarget(UNKNOWN_UDID)
+		).rejects.toThrow('fresh inventory');
 		await service.stop();
 	});
 
@@ -309,7 +316,12 @@ describe('simulator service', () => {
 		await waitForJob(service, receipt.jobId ?? '');
 		expect(materializeCertificatePath).toHaveBeenCalledOnce();
 		expect(provider.commands.at(-1)).toEqual({
-			args: ['keychain', UDID, 'add-root-cert', '/private/pumpd/certificate.cer'],
+			args: [
+				'keychain',
+				UDID,
+				'add-root-cert',
+				'/private/pumpd/certificate.cer',
+			],
 			options: expect.any(Object),
 		});
 		expect(cleanupMaterialized).toHaveBeenCalledOnce();
@@ -370,7 +382,10 @@ describe('simulator service', () => {
 				payloadJson: '{"aps":{}}',
 			})
 		);
-		expect(receipt).toMatchObject({ accepted: false, actionId: 'unsupported-push' });
+		expect(receipt).toMatchObject({
+			accepted: false,
+			actionId: 'unsupported-push',
+		});
 		expect(provider.commands).toEqual([]);
 		await service.stop();
 	});
@@ -389,7 +404,11 @@ describe('simulator service', () => {
 		expect(provider.opened).toEqual([UDID]);
 
 		const unknown = service.runAction(
-			parsedAction({ actionId: 'boot-2', kind: 'device.boot', udid: UNKNOWN_UDID })
+			parsedAction({
+				actionId: 'boot-2',
+				kind: 'device.boot',
+				udid: UNKNOWN_UDID,
+			})
 		);
 		await waitForJob(service, unknown.jobId ?? '', 'failed');
 		expect(provider.commands).toHaveLength(2);
@@ -408,7 +427,9 @@ describe('simulator service', () => {
 			parsedAction({ actionId: 'stale-target', kind: 'app.list', udid: UDID })
 		);
 		const failed = await waitForJob(service, receipt.jobId ?? '', 'failed');
-		expect(failed.message).toBe('Simulator is not present in the current inventory.');
+		expect(failed.message).toBe(
+			'Simulator is not present in the current inventory.'
+		);
 		expect(provider.listApps).toHaveBeenCalledTimes(1);
 		await service.stop();
 	});
@@ -475,18 +496,30 @@ describe('simulator service', () => {
 		const provider = new FakeProvider();
 		const { service } = await createService(provider);
 		const rejected = service.runAction(
-			parsedAction({ actionId: 'erase-booted', kind: 'device.erase', udid: UDID })
+			parsedAction({
+				actionId: 'erase-booted',
+				kind: 'device.erase',
+				udid: UDID,
+			})
 		);
 		const failed = await waitForJob(service, rejected.jobId ?? '', 'failed');
-		expect(failed.message).toBe('Simulator must be shut down before it can be erased.');
+		expect(failed.message).toBe(
+			'Simulator must be shut down before it can be erased.'
+		);
 		expect(provider.commands).toEqual([]);
 
 		provider.deviceState = 'shutdown';
 		const accepted = service.runAction(
-			parsedAction({ actionId: 'erase-shutdown', kind: 'device.erase', udid: UDID })
+			parsedAction({
+				actionId: 'erase-shutdown',
+				kind: 'device.erase',
+				udid: UDID,
+			})
 		);
 		await waitForJob(service, accepted.jobId ?? '');
-		expect(provider.commands.map((command) => command.args)).toEqual([['erase', UDID]]);
+		expect(provider.commands.map((command) => command.args)).toEqual([
+			['erase', UDID],
+		]);
 		await service.stop();
 	});
 
@@ -555,7 +588,11 @@ describe('simulator service', () => {
 		);
 
 		const inspect = service.runAction(
-			parsedAction({ actionId: 'disk-inspect', kind: 'disk.inspect', udid: UDID })
+			parsedAction({
+				actionId: 'disk-inspect',
+				kind: 'disk.inspect',
+				udid: UDID,
+			})
 		);
 		await waitForJob(service, inspect.jobId ?? '');
 		expect(service.getState().diskByDevice[UDID]).toMatchObject({
@@ -574,9 +611,16 @@ describe('simulator service', () => {
 			})
 		);
 		await waitForJob(service, cleanup.jobId ?? '');
-		expect(cleanDisk).toHaveBeenCalledWith(UDID, ['caches'], expect.any(AbortSignal));
+		expect(cleanDisk).toHaveBeenCalledWith(
+			UDID,
+			['caches'],
+			expect.any(AbortSignal)
+		);
 		expect(service.getState().diskByDevice[UDID]).toMatchObject({
-			categories: [{ id: 'caches', bytes: 1_000 }, { id: 'required-siri-assets' }],
+			categories: [
+				{ id: 'caches', bytes: 1_000 },
+				{ id: 'required-siri-assets' },
+			],
 			lastCleanup: {
 				categoryIds: ['caches'],
 				reclaimedBytes: 3_000,
@@ -706,10 +750,20 @@ describe('simulator service', () => {
 			['push', UDID, 'com.example.pumpd', '-'],
 			['privacy', UDID, 'grant', 'location', 'com.example.pumpd'],
 			['ui', UDID, 'content_size', 'accessibility-large'],
-			['status_bar', UDID, 'override', '--time', '9:41', '--batteryLevel', '100'],
+			[
+				'status_bar',
+				UDID,
+				'override',
+				'--time',
+				'9:41',
+				'--batteryLevel',
+				'100',
+			],
 			['keychain', UDID, 'reset'],
 		]);
-		expect(provider.commands[3]?.options.stdin).toBe('{"aps":{"alert":"Hello"}}');
+		expect(provider.commands[3]?.options.stdin).toBe(
+			'{"aps":{"alert":"Hello"}}'
+		);
 		await service.stop();
 	});
 
@@ -770,7 +824,10 @@ describe('simulator service', () => {
 
 	it('syncs pasteboards in either direction using exact simulator targets', async () => {
 		const { provider, service } = await createService();
-		for (const direction of ['host-to-simulator', 'simulator-to-host'] as const) {
+		for (const direction of [
+			'host-to-simulator',
+			'simulator-to-host',
+		] as const) {
 			const receipt = service.runAction(
 				parsedAction({
 					actionId: `pasteboard-${direction}`,
@@ -846,7 +903,9 @@ describe('simulator service', () => {
 			})
 		);
 		const escapedJob = await waitForJob(service, escaped.jobId ?? '', 'failed');
-		expect(escapedJob.message).toContain('escaped the selected device data root');
+		expect(escapedJob.message).toContain(
+			'escaped the selected device data root'
+		);
 		expect(revealPath).toHaveBeenCalledTimes(1);
 		await service.stop();
 	});
@@ -856,7 +915,13 @@ describe('simulator service', () => {
 		const root = await mkdtemp(path.join(tmpdir(), 'pumpd-groups-'));
 		temporaryDirectories.push(root);
 		const dataRoot = path.join(root, 'CoreSimulator', 'Devices', UDID, 'data');
-		const firstGroup = path.join(dataRoot, 'Containers', 'Shared', 'AppGroup', 'first');
+		const firstGroup = path.join(
+			dataRoot,
+			'Containers',
+			'Shared',
+			'AppGroup',
+			'first'
+		);
 		const secondGroup = path.join(
 			dataRoot,
 			'Containers',
@@ -962,7 +1027,11 @@ describe('simulator service', () => {
 			}),
 			{ selectedPath: oversizedPath }
 		);
-		const oversizedFailure = await waitForJob(service, oversized.jobId ?? '', 'failed');
+		const oversizedFailure = await waitForJob(
+			service,
+			oversized.jobId ?? '',
+			'failed'
+		);
 		expect(oversizedFailure.message).toContain('cannot exceed 500 waypoints');
 		expect(provider.commands).toHaveLength(1);
 		await service.stop();
@@ -1020,7 +1089,10 @@ describe('simulator service', () => {
 				udid: UDID,
 			})
 		);
-		const screenshotJob = await waitForJob(service, screenshotReceipt.jobId ?? '');
+		const screenshotJob = await waitForJob(
+			service,
+			screenshotReceipt.jobId ?? ''
+		);
 		const sourceCaptureId = screenshotJob.captureId;
 		expect(sourceCaptureId).toBeTruthy();
 
@@ -1071,14 +1143,18 @@ describe('simulator service', () => {
 		const deadline = Date.now() + 2_000;
 		while (
 			Date.now() < deadline &&
-			service.getState().jobs.find((job) => job.id === jobId)?.status !== 'running'
+			service.getState().jobs.find((job) => job.id === jobId)?.status !==
+				'running'
 		) {
 			await new Promise((resolve) => setTimeout(resolve, 5));
 		}
 		expect(service.cancelJob(jobId)).toBe(true);
 		const job = await waitForJob(service, jobId, 'cancelled');
 		expect(job.captureId).toBeTruthy();
-		expect(service.getState().captures[0]).toMatchObject({ kind: 'video', bytes: 5 });
+		expect(service.getState().captures[0]).toMatchObject({
+			kind: 'video',
+			bytes: 5,
+		});
 		await service.stop();
 	});
 
@@ -1097,13 +1173,20 @@ describe('simulator service', () => {
 			expect(receipt.accepted).toBe(true);
 		}
 		const overflow = service.runAction(
-			parsedAction({ actionId: 'queue-overflow', kind: 'capture.video', udid: UDID })
+			parsedAction({
+				actionId: 'queue-overflow',
+				kind: 'capture.video',
+				udid: UDID,
+			})
 		);
-		expect(overflow).toMatchObject({ accepted: false, actionId: 'queue-overflow' });
+		expect(overflow).toMatchObject({
+			accepted: false,
+			actionId: 'queue-overflow',
+		});
 		expect(service.getState().jobs).toHaveLength(200);
 		await service.stop();
-		expect(service.getState().jobs.every((job) => job.status === 'cancelled')).toBe(
-			true
-		);
+		expect(
+			service.getState().jobs.every((job) => job.status === 'cancelled')
+		).toBe(true);
 	});
 });

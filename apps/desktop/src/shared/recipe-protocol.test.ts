@@ -16,7 +16,9 @@ function recipe(overrides: Record<string, unknown> = {}) {
 		revision: 1,
 		createdAt: 1,
 		updatedAt: 1,
-		steps: [{ id: 'boot', kind: 'simulator', action: { operation: 'device.boot' } }],
+		steps: [
+			{ id: 'boot', kind: 'simulator', action: { operation: 'device.boot' } },
+		],
 		teardown: [],
 		...overrides,
 	};
@@ -39,7 +41,10 @@ describe('recipe protocol', () => {
 		}));
 		expect(
 			recipeDefinitionSchema.safeParse(
-				recipe({ steps, teardown: [{ id: 'extra', kind: 'wait', durationMs: 0 }] })
+				recipe({
+					steps,
+					teardown: [{ id: 'extra', kind: 'wait', durationMs: 0 }],
+				})
 			).success
 		).toBe(false);
 		expect(
@@ -58,7 +63,8 @@ describe('recipe protocol', () => {
 				recipeId: 'smoke-test',
 				targetUdids: Array.from(
 					{ length: 21 },
-					(_, index) => `11111111-2222-3333-4444-${index.toString().padStart(12, '0')}`
+					(_, index) =>
+						`11111111-2222-3333-4444-${index.toString().padStart(12, '0')}`
 				),
 			}).success
 		).toBe(false);

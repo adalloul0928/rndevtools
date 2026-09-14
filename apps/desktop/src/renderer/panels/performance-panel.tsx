@@ -10,7 +10,12 @@ import {
 	TimerReset,
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { InfoPopover, PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
+import {
+	InfoPopover,
+	PanelHeader,
+	PanelNotice,
+	StatusPill,
+} from '@/components/ui';
 import { formatDuration, formatPercent } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { PerformanceSample } from '../../shared/protocol';
@@ -34,7 +39,8 @@ function sparklinePoints(
 	const range = Math.max(1, max - min);
 	return values
 		.map((value, index) => {
-			const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+			const x =
+				values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
 			const boundedValue = Math.max(min, Math.min(max, value));
 			const y = height - ((boundedValue - min) / range) * height;
 			return `${x.toFixed(1)},${y.toFixed(1)}`;
@@ -63,9 +69,17 @@ function MetricCard({
 }) {
 	const colors = {
 		blue: { line: '#52a8ff', bg: 'bg-blue-400/10', text: 'text-blue-300' },
-		green: { line: '#45d483', bg: 'bg-emerald-400/10', text: 'text-emerald-300' },
+		green: {
+			line: '#45d483',
+			bg: 'bg-emerald-400/10',
+			text: 'text-emerald-300',
+		},
 		amber: { line: '#f4b942', bg: 'bg-amber-400/10', text: 'text-amber-300' },
-		violet: { line: '#a78bfa', bg: 'bg-violet-400/10', text: 'text-violet-300' },
+		violet: {
+			line: '#a78bfa',
+			bg: 'bg-violet-400/10',
+			text: 'text-violet-300',
+		},
 	};
 	const color = colors[tone];
 	return (
@@ -82,7 +96,9 @@ function MetricCard({
 					<p className="mb-0 mt-2 font-mono text-2xl font-semibold tracking-[-0.045em] text-(--foreground)">
 						{value}
 						{suffix ? (
-							<span className="ml-1 text-xs font-normal text-(--text-3)">{suffix}</span>
+							<span className="ml-1 text-xs font-normal text-(--text-3)">
+								{suffix}
+							</span>
 						) : null}
 					</p>
 				</div>
@@ -98,7 +114,13 @@ function MetricCard({
 				viewBox="0 0 180 40"
 				preserveAspectRatio="none"
 			>
-				<line x1="0" x2="180" y1="39.5" y2="39.5" stroke="rgba(255,255,255,.08)" />
+				<line
+					x1="0"
+					x2="180"
+					y1="39.5"
+					y2="39.5"
+					stroke="rgba(255,255,255,.08)"
+				/>
 				<polyline
 					fill="none"
 					points={sparklinePoints(values, 180, 36, 0, maxValue)}
@@ -113,7 +135,9 @@ function MetricCard({
 	);
 }
 
-function gradeTone(grade: string): 'success' | 'warning' | 'danger' | 'default' {
+function gradeTone(
+	grade: string
+): 'success' | 'warning' | 'danger' | 'default' {
 	if (grade === 'healthy') return 'success';
 	if (grade === 'needsAttention') return 'warning';
 	if (grade === 'critical') return 'danger';
@@ -168,7 +192,12 @@ export function PerformancePanel() {
 							size="sm"
 							variant="danger-soft"
 							onPress={() =>
-								void runAction('performance', 'stop', {}, 'Performance review stopped.')
+								void runAction(
+									'performance',
+									'stop',
+									{},
+									'Performance review stopped.'
+								)
 							}
 						>
 							<Square className="h-3 w-3 fill-current" /> Stop review
@@ -201,9 +230,9 @@ export function PerformancePanel() {
 			{review && review.droppedSampleCount > 0 ? (
 				<PanelNotice title="Earlier performance samples were omitted.">
 					{review.droppedSampleCount} sample
-					{review.droppedSampleCount === 1 ? ' was' : 's were'} dropped by the on-device
-					or desktop capture budget. Charts and route rankings reflect the retained
-					window only.
+					{review.droppedSampleCount === 1 ? ' was' : 's were'} dropped by the
+					on-device or desktop capture budget. Charts and route rankings reflect
+					the retained window only.
 				</PanelNotice>
 			) : null}
 			<div className="panel-scroll p-5">
@@ -244,7 +273,11 @@ export function PerformancePanel() {
 					{samples.some((sample) => sample.memoryMb !== undefined) ? (
 						<MetricCard
 							label="Memory"
-							value={latest?.memoryMb === undefined ? '—' : latest.memoryMb.toFixed(1)}
+							value={
+								latest?.memoryMb === undefined
+									? '—'
+									: latest.memoryMb.toFixed(1)
+							}
 							suffix={latest?.memoryMb === undefined ? undefined : 'MB'}
 							icon={<MemoryStick className="h-4 w-4" />}
 							values={samples
@@ -296,7 +329,10 @@ export function PerformancePanel() {
 						<div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/8 bg-white/8">
 							{[
 								['Duration', formatDuration(summary?.durationMs)],
-								['Average JS FPS', summary ? summary.averageJsFps.toFixed(1) : '—'],
+								[
+									'Average JS FPS',
+									summary ? summary.averageJsFps.toFixed(1) : '—',
+								],
 								[
 									'P95 loop lag',
 									summary ? `${summary.p95EventLoopLagMs.toFixed(1)} ms` : '—',

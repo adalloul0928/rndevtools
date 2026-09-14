@@ -18,7 +18,10 @@ const RETENTION_MONTHS = 12;
 const MAX_PUBLIC_BUILDS = 2_000;
 
 type StoredSource = BuildInsightSource & { sourcePath: string };
-type StoredBuildInput = Omit<BuildInsight, 'id' | 'sourceId' | 'sourceLabel'> & {
+type StoredBuildInput = Omit<
+	BuildInsight,
+	'id' | 'sourceId' | 'sourceLabel'
+> & {
 	artifactPath: string;
 };
 
@@ -36,10 +39,13 @@ export class BuildInsightsStore {
 	async start(): Promise<void> {
 		await mkdir(this.#root, { recursive: true, mode: 0o700 });
 		await chmod(this.#root, 0o700);
-		const database = new DatabaseSync(path.join(this.#root, 'build-insights.sqlite'), {
-			allowExtension: false,
-			readOnly: false,
-		});
+		const database = new DatabaseSync(
+			path.join(this.#root, 'build-insights.sqlite'),
+			{
+				allowExtension: false,
+				readOnly: false,
+			}
+		);
 		database.exec(`
 			PRAGMA journal_mode = WAL;
 			PRAGMA foreign_keys = ON;
@@ -101,7 +107,9 @@ export class BuildInsightsStore {
 			.prepare('SELECT id FROM sources WHERE source_path = ?')
 			.get(sourcePath) as { id?: unknown } | undefined;
 		const id =
-			typeof existing?.id === 'string' ? existing.id : `build-source-${randomUUID()}`;
+			typeof existing?.id === 'string'
+				? existing.id
+				: `build-source-${randomUUID()}`;
 		const source = buildInsightSourceSchema.parse({
 			id,
 			label,
@@ -147,7 +155,12 @@ export class BuildInsightsStore {
 			.prepare(
 				'UPDATE sources SET status = ?, last_scanned_at = ?, error = ? WHERE id = ?'
 			)
-			.run(update.status, update.lastScannedAt ?? null, update.error ?? null, sourceId);
+			.run(
+				update.status,
+				update.lastScannedAt ?? null,
+				update.error ?? null,
+				sourceId
+			);
 		this.#touch();
 	}
 
@@ -284,7 +297,10 @@ function sourceFromRow(row: Record<string, unknown>): StoredSource {
 		...(row.last_scanned_at === null || row.last_scanned_at === undefined
 			? {}
 			: { lastScannedAt: Number(row.last_scanned_at) }),
-		status: row.status === 'scanning' || row.status === 'error' ? row.status : 'ready',
+		status:
+			row.status === 'scanning' || row.status === 'error'
+				? row.status
+				: 'ready',
 		...(typeof row.error === 'string' ? { error: row.error } : {}),
 	};
 }
@@ -330,7 +346,10 @@ function buildFromRow(row: Record<string, unknown>): BuildInsight {
 
 function percentile(values: number[], fraction: number): number | undefined {
 	if (values.length === 0) return undefined;
-	const index = Math.min(values.length - 1, Math.ceil(values.length * fraction) - 1);
+	const index = Math.min(
+		values.length - 1,
+		Math.ceil(values.length * fraction) - 1
+	);
 	return values[index];
 }
 
@@ -350,7 +369,10 @@ function buildStats(
 	const recent = builds.filter(
 		(build) => build.createdAt >= now - 7 * 24 * 60 * 60 * 1_000
 	);
-	const activity = new Map<string, { count: number; totalDurationMs: number }>();
+	const activity = new Map<
+		string,
+		{ count: number; totalDurationMs: number }
+	>();
 	for (const build of builds) {
 		const date = new Date(build.createdAt);
 		const month = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -361,7 +383,8 @@ function buildStats(
 	}
 	return {
 		totalBuilds: builds.length,
-		succeededBuilds: builds.filter((build) => build.status === 'succeeded').length,
+		succeededBuilds: builds.filter((build) => build.status === 'succeeded')
+			.length,
 		...(medianDurationMs === undefined ? {} : { medianDurationMs }),
 		...(p75DurationMs === undefined ? {} : { p75DurationMs }),
 		...(p95DurationMs === undefined ? {} : { p95DurationMs }),

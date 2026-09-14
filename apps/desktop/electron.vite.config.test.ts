@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { electronViteConfig, WS_OPTIONAL_NATIVE_PEERS } from './electron.vite.config';
+import {
+	electronViteConfig,
+	WS_OPTIONAL_NATIVE_PEERS,
+} from './electron.vite.config';
 
 describe('Electron Vite configuration', () => {
 	it('preserves ws optional-native-peer fallbacks in the main bundle', () => {

@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
+import {
+	chmod,
+	lstat,
+	mkdir,
+	open,
+	realpath,
+	rename,
+	unlink,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type {
@@ -15,7 +23,9 @@ const MAX_OPERATIONS = 20;
 const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(4 * 1024);
 const timestampSchema = z.number().finite().nonnegative();
-const udidSchema = z.string().regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z
+	.string()
+	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
 
 const checkpointMetadataSchema = z.strictObject({
 	id: identifierSchema,
@@ -108,7 +118,9 @@ const pendingMutationSchema = z.strictObject({
 		runtimeBuild: shortTextSchema,
 		hostArchitecture: z.enum(['arm64', 'x64']),
 		helperVersion: shortTextSchema,
-		helperBuildCommit: z.string().regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
+		helperBuildCommit: z
+			.string()
+			.regex(/^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$/),
 		catalogVersion: shortTextSchema,
 	}),
 	recovery: z
@@ -135,7 +147,9 @@ const persistenceSchema = z.strictObject({
 	version: z.literal(1),
 	setting: settingSchema,
 	checkpoints: boundedRecord(checkpointSchema),
-	operations: boundedRecord(z.array(operationMetadataSchema).max(MAX_OPERATIONS)),
+	operations: boundedRecord(
+		z.array(operationMetadataSchema).max(MAX_OPERATIONS)
+	),
 	pendingMutations: boundedRecord(pendingMutationSchema).default({}),
 	acknowledgements: z
 		.record(
@@ -204,13 +218,17 @@ export class SlimmingPersistence {
 	}
 
 	snapshot(): SlimmingPersistenceSnapshot {
-		const checkpointBySimulator: Record<string, SlimmingCheckpointMetadata> = {};
+		const checkpointBySimulator: Record<string, SlimmingCheckpointMetadata> =
+			{};
 		for (const [udid, checkpoint] of Object.entries(this.#data.checkpoints)) {
 			checkpointBySimulator[udid] = { ...checkpoint.metadata };
 		}
-		const operationsBySimulator: Record<string, SlimmingOperationMetadata[]> = {};
+		const operationsBySimulator: Record<string, SlimmingOperationMetadata[]> =
+			{};
 		for (const [udid, operations] of Object.entries(this.#data.operations)) {
-			operationsBySimulator[udid] = operations.map((operation) => ({ ...operation }));
+			operationsBySimulator[udid] = operations.map((operation) => ({
+				...operation,
+			}));
 		}
 		return {
 			setting: { ...this.#data.setting },
@@ -229,12 +247,15 @@ export class SlimmingPersistence {
 	}
 
 	checkpointToken(simulatorUdid: string): string | undefined {
-		return this.#data.checkpoints[udidSchema.parse(simulatorUdid).toUpperCase()]?.token;
+		return this.#data.checkpoints[udidSchema.parse(simulatorUdid).toUpperCase()]
+			?.token;
 	}
 
 	pendingMutation(simulatorUdid: string): PendingSlimmingMutation | undefined {
 		const pending =
-			this.#data.pendingMutations[udidSchema.parse(simulatorUdid).toUpperCase()];
+			this.#data.pendingMutations[
+				udidSchema.parse(simulatorUdid).toUpperCase()
+			];
 		return pending ? pendingMutationSchema.parse(pending) : undefined;
 	}
 
@@ -253,7 +274,10 @@ export class SlimmingPersistence {
 		await this.acknowledgeAll([key], acknowledgedAt);
 	}
 
-	async acknowledgeAll(keys: readonly string[], acknowledgedAt: number): Promise<void> {
+	async acknowledgeAll(
+		keys: readonly string[],
+		acknowledgedAt: number
+	): Promise<void> {
 		const validatedKeys = z
 			.array(z.string().regex(/^compatibility-[a-f0-9]{64}$/))
 			.min(1)
@@ -289,7 +313,9 @@ export class SlimmingPersistence {
 				!draft.checkpoints[udid] &&
 				Object.keys(draft.checkpoints).length >= MAX_SIMULATORS
 			) {
-				throw new Error(`Checkpoint store cannot exceed ${MAX_SIMULATORS} simulators.`);
+				throw new Error(
+					`Checkpoint store cannot exceed ${MAX_SIMULATORS} simulators.`
+				);
 			}
 			draft.checkpoints[udid] = checkpoint;
 		});
@@ -324,7 +350,9 @@ export class SlimmingPersistence {
 		await this.#update((draft) => {
 			const pending = draft.pendingMutations[udid];
 			if (!pending || pending.id !== exactPendingId) {
-				throw new Error('Pending mutation no longer matches the recovery attempt.');
+				throw new Error(
+					'Pending mutation no longer matches the recovery attempt.'
+				);
 			}
 			// Atomically replace only the superseded intermediate-state checkpoint.
 			// The original pre-mutation emergency checkpoint remains unchanged, and
@@ -344,13 +372,17 @@ export class SlimmingPersistence {
 		await this.#update((draft) => {
 			const pending = draft.pendingMutations[udid];
 			if (!pending || pending.id !== exactPendingId) {
-				throw new Error('Pending recovery no longer matches the durable record.');
+				throw new Error(
+					'Pending recovery no longer matches the durable record.'
+				);
 			}
 			delete pending.recovery;
 			const existing = draft.operations[udid] ?? [];
 			draft.operations[udid] = [
 				validatedOperation,
-				...existing.filter((candidate) => candidate.id !== validatedOperation.id),
+				...existing.filter(
+					(candidate) => candidate.id !== validatedOperation.id
+				),
 			].slice(0, MAX_OPERATIONS);
 		});
 	}
@@ -380,7 +412,9 @@ export class SlimmingPersistence {
 		await this.#update((draft) => {
 			const pending = draft.pendingMutations[udid];
 			if (!pending || pending.id !== exactPendingId) {
-				throw new Error('Pending mutation no longer matches the durable record.');
+				throw new Error(
+					'Pending mutation no longer matches the durable record.'
+				);
 			}
 			if (resolution.kind === 'complete' && validatedCheckpointMetadata) {
 				if (
@@ -400,7 +434,9 @@ export class SlimmingPersistence {
 				const existing = draft.operations[udid] ?? [];
 				draft.operations[udid] = [
 					validatedOperation,
-					...existing.filter((candidate) => candidate.id !== validatedOperation.id),
+					...existing.filter(
+						(candidate) => candidate.id !== validatedOperation.id
+					),
 				].slice(0, MAX_OPERATIONS);
 			}
 			if (resolution.kind !== 'needs-attention') {

@@ -34,7 +34,9 @@ export function ZustandPanel() {
 	const mutationReceipts = selectedDevice?.tools.zustandMutationReceipts ?? [];
 	const summary = selectedDevice?.tools.zustandSummary;
 	const [query, setQuery] = useState('');
-	const [selectedId, setSelectedId] = useState<string | null>(stores[0]?.id ?? null);
+	const [selectedId, setSelectedId] = useState<string | null>(
+		stores[0]?.id ?? null
+	);
 	const [patchDrafts, setPatchDrafts] = useState<Record<string, string>>({});
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -85,7 +87,12 @@ export function ZustandPanel() {
 						size="sm"
 						variant="secondary"
 						onPress={() =>
-							void runAction('zustand', 'refresh', {}, 'Zustand projections refreshed.')
+							void runAction(
+								'zustand',
+								'refresh',
+								{},
+								'Zustand projections refreshed.'
+							)
 						}
 					>
 						<RefreshCw className="h-3.5 w-3.5" /> Refresh projection
@@ -100,8 +107,8 @@ export function ZustandPanel() {
 					onChange={setQuery}
 				/>
 				<span className="ml-auto font-mono text-xs text-(--text-3)">
-					{stores.length} of {summary?.totalStoreCount ?? stores.length} registered
-					stores · {changes.length} changes
+					{stores.length} of {summary?.totalStoreCount ?? stores.length}{' '}
+					registered stores · {changes.length} changes
 				</span>
 			</Toolbar>
 			{summary && (summary.truncated || summary.error) ? (
@@ -115,8 +122,8 @@ export function ZustandPanel() {
 			) : null}
 			{allSelectedChanges.length > selectedChanges.length ? (
 				<PanelNotice title="Change timeline rendering is bounded." tone="info">
-					Showing the newest {MAX_RENDERED_CHANGES} of {allSelectedChanges.length}{' '}
-					captured changes for this store.
+					Showing the newest {MAX_RENDERED_CHANGES} of{' '}
+					{allSelectedChanges.length} captured changes for this store.
 				</PanelNotice>
 			) : null}
 			<div className="zustand-layout grid min-h-0 flex-1 grid-cols-[300px_minmax(360px,1fr)_340px]">
@@ -150,7 +157,8 @@ export function ZustandPanel() {
 										</StatusPill>
 									</div>
 									<p className="mb-0 mt-1.5 line-clamp-2 text-xs leading-4 text-(--text-3)">
-										{store.description ?? 'Explicit Zustand diagnostic projection'}
+										{store.description ??
+											'Explicit Zustand diagnostic projection'}
 									</p>
 									<div className="mt-3 flex items-center justify-between font-mono text-xs text-(--text-3)">
 										<span>{store.keys.length} keys</span>
@@ -175,19 +183,29 @@ export function ZustandPanel() {
 								</div>
 								<div className="flex items-center gap-1.5 text-xs text-(--text-3)">
 									<Eye className="h-3.5 w-3.5" />{' '}
-									{selected.capabilities.restorable ? 'Reversible edits' : 'Read only'}
+									{selected.capabilities.restorable
+										? 'Reversible edits'
+										: 'Read only'}
 								</div>
 							</div>
 							<dl className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] px-3">
 								<KeyValue label="Registry id" value={selected.id} mono />
-								<KeyValue label="Projected keys" value={selected.keys.length} mono />
+								<KeyValue
+									label="Projected keys"
+									value={selected.keys.length}
+									mono
+								/>
 								<KeyValue
 									label="Last change"
 									value={formatRelativeTime(selected.updatedAt)}
 								/>
 								<KeyValue
 									label="Persistence"
-									value={selected.capabilities.persisted ? 'Persisted' : 'Memory only'}
+									value={
+										selected.capabilities.persisted
+											? 'Persisted'
+											: 'Memory only'
+									}
 								/>
 							</dl>
 							<CodePreview
@@ -269,8 +287,8 @@ export function ZustandPanel() {
 														key={snapshot.id}
 													>
 														<span className="font-mono text-xs text-(--text-3)">
-															{formatClock(snapshot.createdAt)} · {snapshot.stateBytes}{' '}
-															B
+															{formatClock(snapshot.createdAt)} ·{' '}
+															{snapshot.stateBytes} B
 														</span>
 														<Button
 															isDisabled={!canRunAction('zustand', 'jump')}
@@ -280,7 +298,10 @@ export function ZustandPanel() {
 																void runAction(
 																	'zustand',
 																	'jump',
-																	{ storeId: selected.id, snapshotId: snapshot.id },
+																	{
+																		storeId: selected.id,
+																		snapshotId: snapshot.id,
+																	},
 																	'Zustand state restored and verified.'
 																)
 															}
@@ -377,7 +398,9 @@ export function ZustandPanel() {
 												{receipt.kind}
 											</span>
 											<StatusPill
-												tone={receipt.status === 'succeeded' ? 'success' : 'danger'}
+												tone={
+													receipt.status === 'succeeded' ? 'success' : 'danger'
+												}
 											>
 												{receipt.status}
 											</StatusPill>

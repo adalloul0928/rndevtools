@@ -102,8 +102,12 @@ describe('Slimming renderer safety model', () => {
 
 	it('validates exact text but never treats renderer input as mutation authority', () => {
 		const binding = '["tuple-a"]';
-		expect(restoreAndDisableInput([FIRST_UDID], binding, 'experimental')).toBeNull();
-		expect(restoreAndDisableInput([FIRST_UDID], binding, 'EXPERIMENTAL')).toEqual({
+		expect(
+			restoreAndDisableInput([FIRST_UDID], binding, 'experimental')
+		).toBeNull();
+		expect(
+			restoreAndDisableInput([FIRST_UDID], binding, 'EXPERIMENTAL')
+		).toEqual({
 			enabled: false,
 			disposition: 'restore-and-verify',
 			simulatorUdids: [FIRST_UDID],
