@@ -19,24 +19,24 @@ import {
 } from './staged-certificate-store';
 
 const CERTIFICATE = `-----BEGIN CERTIFICATE-----
-MIIDPzCCAiegAwIBAgIUDLKs1IaBQPNoFWPBKPfYKg83t/IwDQYJKoZIhvcNAQEL
-BQAwLzEYMBYGA1UEAwwPUFVNUEQgVGVzdCBSb290MRMwEQYDVQQKDApBVkFEIFRl
-c3RzMB4XDTI2MDkwNDAwMzM0OVoXDTI2MDkwNTAwMzM0OVowLzEYMBYGA1UEAwwP
-UFVNUEQgVGVzdCBSb290MRMwEQYDVQQKDApBVkFEIFRlc3RzMIIBIjANBgkqhkiG
-9w0BAQEFAAOCAQ8AMIIBCgKCAQEA9S8iJ1a84YWwirFFaZJu0y73kubaAcEgUkLE
-f1SUIqoBrT8E/EZo7nhMCeaeh9gKvl24FJl/6IS/YkF+OBcbxTRmHKLwFntN9Rji
-oN44fvE8UhcFdmpkFzV5RzATKS2WaDUB2nZs3i4CQrf6Gf0EyC+zvrZBdvcNl1Da
-AqT8cbaonCncm0F8UxpjUfMFZA7BkFY8Rl6mmWJuORLNrEEKxge7ZhtizsV9VrGi
-UXO8GLswnWptFwx20xg4z0+2pmfPD2bh8mSqi3mYNT+XwCwkK9Qndehk88IUs3S+
-t+P/r+Fj5eDCEFVgQVf6oDLzT588ITZtiOOjH4TGKVVPXftZfwIDAQABo1MwUTAd
-BgNVHQ4EFgQUkxpc8/BiRzVHa/BJ68uBTuHSv8wwHwYDVR0jBBgwFoAUkxpc8/Bi
-RzVHa/BJ68uBTuHSv8wwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
-AQEAItVwULcxBEuSP8A/zBNnULJ6H8zknA3btzhdQEkQ+bdn9TgrLnCcTDoGyFBf
-ftoeghKek4j4h+rK1IEcXqzr+Pqr4j/K/7zxxt9y4ZZuI2U7LVOQHn/K8epUt5zn
-GCr/4DaQFxBIb/IT96Px0orrbUMJrt31bByZRew3uU3sRycAgxEGaHOjUHWnlc9q
-0wOskJ5FClXlGTUcfqHWS3XsD3fgsma9bcgVbCAxRBGuw8PYGB7/4oGSBowBZ9vn
-Ci0w9GP0bHlB35pCBUd9QCa9687IlXwmslUMqp73YCheujjhDoCIoxuRpC6IilNF
-Yy+6NPu3dD8EMJhPk2pk5E4KSg==
+MIIDSTCCAjGgAwIBAgIUSckWrt77tfLlr/c5mKpLJ2lsWUEwDQYJKoZIhvcNAQEL
+BQAwNDEaMBgGA1UEAwwRRXhhbXBsZSBUZXN0IFJvb3QxFjAUBgNVBAoMDUV4YW1w
+bGUgVGVzdHMwHhcNMjYwOTE2MDQ0MTU2WhcNMjcwOTE2MDQ0MTU2WjA0MRowGAYD
+VQQDDBFFeGFtcGxlIFRlc3QgUm9vdDEWMBQGA1UECgwNRXhhbXBsZSBUZXN0czCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKMC85Z/VnfqyJfGraPJkr58
+sfO91+ia3w2+uUME3xRV80ZaDCpi4jRXGanwKlKYYZ7X1rl5rgmDKvRPJmt7WdsS
+OCLqYrxDBPi68J/h6s+Md/5l/nf/jVEC6LfkYEgCo9P3XlIMTBwTzX2sR/S98Uei
+sM5Kx2Kr2Zgngv7n7PB2KQWEF21SEeQbajDb2zBJxZIleBDbUalHcSsVQwLog2kC
+3ePoA5MXhbJYtWspqvSMdx7pocZFFEmIMx0fz3We+GS6PdMGL+E9Im6Y6OmlMGag
+mS0vNhChv5jiwcr5zpIniixANMJ1lQ+66d8kbt1/o7lnJohOnKbMnEVPF5Y7tssC
+AwEAAaNTMFEwHQYDVR0OBBYEFEeVsIsMcKKGMeG2OIZ65Li4y8ScMB8GA1UdIwQY
+MBaAFEeVsIsMcKKGMeG2OIZ65Li4y8ScMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggEBACq673odmdYhr/T+PTs4wkfZ67mZBl5DybB5VZNTqkh6P5dJ
+wC03a14+eiYRZYsB7M9fca2XvJ7BAwN79Ki5o3zCTNVPg8s8lSJfPT3rddwcCFix
+TyAp4ptjic+K6OV8xDoE0U2bnRRUN1ClOOPvi9MTQRMCr3y8DZHaXn2ugUkXFw7j
+pYFVFxoGDwxNnH8ZhPcD8Mqq/FUhdVNP3IoPzgWbMGbbNHn2wp4e03AdboOM+508
+gC01UEk42xWbUWIgSt/6bPIsDPHkTRzIc6YzWY/KZiM0dUQM7blQE3pUVjE7bIF7
+Q7jRi0NIYZQeZUSKywiNpDSAi7kfis/XlS2i/E4=
 -----END CERTIFICATE-----
 `;
 const UDID = '11111111-2222-3333-4444-555555555555';
@@ -54,7 +54,7 @@ const temporaryDirectories: string[] = [];
 
 async function setup(now: () => number = Date.now) {
 	const directory = await mkdtemp(
-		path.join(tmpdir(), 'pumpd-certificate-test-')
+		path.join(tmpdir(), 'rndevtools-certificate-test-')
 	);
 	temporaryDirectories.push(directory);
 	const sourcePath = path.join(directory, 'source.pem');
@@ -83,7 +83,7 @@ describe('staged certificate store', () => {
 		expect(artifact.identity).toMatchObject({
 			sha256: CANONICAL_SHA256,
 			sizeBytes: CANONICAL_CERTIFICATE.byteLength,
-			subject: expect.stringContaining('PUMPD Test Root'),
+			subject: expect.stringContaining('Example Test Root'),
 		});
 		const approvedBytes = Buffer.from(artifact.bytes);
 		expect(approvedBytes).toEqual(CANONICAL_CERTIFICATE);
@@ -182,7 +182,7 @@ describe('staged certificate store', () => {
 
 	it('removes stale materialized artifacts and restores private root permissions', async () => {
 		const directory = await mkdtemp(
-			path.join(tmpdir(), 'pumpd-certificate-stale-')
+			path.join(tmpdir(), 'rndevtools-certificate-stale-')
 		);
 		temporaryDirectories.push(directory);
 		const stagedDirectory = path.join(directory, 'staged');
@@ -295,14 +295,14 @@ describe('staged certificate store', () => {
 			stagedCertificateIdentitySchema.safeParse({
 				sha256: 'a'.repeat(64),
 				sizeBytes: 512,
-				subject: 'CN=PUMPD Test Root',
+				subject: 'CN=Example Test Root',
 			}).success
 		).toBe(true);
 		expect(
 			stagedCertificateIdentitySchema.safeParse({
 				sha256: 'a'.repeat(64),
 				sizeBytes: 512,
-				subject: 'CN=PUMPD Test Root',
+				subject: 'CN=Example Test Root',
 				path: '/tmp/renderer-controlled.pem',
 			}).success
 		).toBe(false);

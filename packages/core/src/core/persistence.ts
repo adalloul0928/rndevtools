@@ -5,7 +5,7 @@ import type {
 } from '../types';
 import { utf8ByteLength } from './serialize';
 
-export const DEFAULT_PERSISTENCE_KEY = '@pumpd/devtools/runtime-state';
+export const DEFAULT_PERSISTENCE_KEY = '@rndevtools/core/runtime-state';
 const MAX_PERSISTED_STATE_BYTES = 64 * 1024;
 const MAX_PERSISTED_POSITION = 1_000_000;
 const MAX_PINNED_QUICK_ACTIONS = 32;

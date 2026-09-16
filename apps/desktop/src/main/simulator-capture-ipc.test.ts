@@ -35,7 +35,7 @@ function fixture({ trusted = true, confirm = true } = {}) {
 		getCaptureAccess: vi.fn(async (captureId) => ({
 			captureId,
 			available: true,
-			url: `pumpd-capture://capture/${captureId}`,
+			url: `rndevtools-capture://capture/${captureId}`,
 		})),
 		getCaptureRetention: vi.fn(() => RETENTION),
 		deleteCapture: calls.delete,
@@ -95,7 +95,7 @@ describe('Simulator capture IPC', () => {
 		await expect(handlers.getAccess(event, CAPTURE_ID)).resolves.toEqual({
 			captureId: CAPTURE_ID,
 			available: true,
-			url: `pumpd-capture://capture/${CAPTURE_ID}`,
+			url: `rndevtools-capture://capture/${CAPTURE_ID}`,
 		});
 	});
 

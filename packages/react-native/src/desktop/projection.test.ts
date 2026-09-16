@@ -1,20 +1,20 @@
-import { utf8ByteLength } from '@pumpd/devtools';
+import { utf8ByteLength } from '@rndevtools/core/serialize';
 import {
+	desktopProjectionId,
 	limitDesktopProjection,
 	projectDesktopHeaders,
 	projectDesktopQueryKey,
-	pumpdDesktopProjectionId,
-} from '@/features/dev-menu/desktop/desktop-projection';
+} from './projection';
 
 describe('desktop diagnostic projections', () => {
 	it('creates stable bounded identifiers without retaining source text', () => {
 		const source = 'query'.repeat(100_000);
-		const first = pumpdDesktopProjectionId('query', source);
-		expect(first).toBe(pumpdDesktopProjectionId('query', source));
+		const first = desktopProjectionId('query', source);
+		expect(first).toBe(desktopProjectionId('query', source));
 		expect(first).not.toContain(source.slice(0, 20));
 		expect(first.length).toBeLessThanOrEqual(256);
-		expect(pumpdDesktopProjectionId('query', '😀')).not.toBe(
-			pumpdDesktopProjectionId('query', '😁')
+		expect(desktopProjectionId('query', '😀')).not.toBe(
+			desktopProjectionId('query', '😁'),
 		);
 	});
 
@@ -25,7 +25,7 @@ describe('desktop diagnostic projections', () => {
 				{ id: 'middle', value: 'ok' },
 				{ id: 'new', value: 'ok' },
 			],
-			{ maxItems: 2, maxBytes: 100, keepNewest: true }
+			{ maxItems: 2, maxBytes: 100, keepNewest: true },
 		);
 
 		expect(limited.items).toEqual([
@@ -44,17 +44,17 @@ describe('desktop diagnostic projections', () => {
 			'x-too-long': 'x'.repeat(600_000),
 			'x-multibyte': '🏋️'.repeat(100_000),
 			...Object.fromEntries(
-				Array.from({ length: 205 }, (_, index) => [`x-${index}`, 'value'])
+				Array.from({ length: 205 }, (_, index) => [`x-${index}`, 'value']),
 			),
 		};
 		const projected = projectDesktopHeaders(headers) ?? {};
 
 		expect(Object.keys(projected).length).toBeLessThanOrEqual(200);
 		expect(utf8ByteLength(projected['x-too-long'] ?? '')).toBeLessThanOrEqual(
-			512 * 1024
+			512 * 1024,
 		);
 		expect(utf8ByteLength(projected['x-multibyte'] ?? '')).toBeLessThanOrEqual(
-			512 * 1024
+			512 * 1024,
 		);
 		expect(projected['x-multibyte']).not.toContain('\uFFFD');
 		expect(projected['n'.repeat(257)]).toBeUndefined();
@@ -75,14 +75,14 @@ describe('desktop diagnostic projections', () => {
 				'5d1a7b6e-55f1-4f97-9a64-59a5b947c9af',
 				'private coaching prompt',
 			],
-			'query'
+			'query',
 		);
 
 		expect(projected).toBe('ai-coach · 3 parameters omitted');
 		expect(projected).not.toContain('5d1a7b6e');
 		expect(projected).not.toContain('private coaching prompt');
 		expect(projectDesktopQueryKey(['unsafe family name'], 'mutation')).toBe(
-			'anonymous mutation'
+			'anonymous mutation',
 		);
 	});
 });

@@ -38,7 +38,7 @@ describe('simctl provider', () => {
 				[RUNTIME]: [
 					{
 						udid: UDID,
-						name: 'PUMPD Test',
+						name: 'Example Test',
 						state: 'Booted',
 						isAvailable: true,
 						deviceTypeIdentifier: DEVICE_TYPE,
@@ -116,20 +116,20 @@ describe('simctl provider', () => {
 
 	it('projects app metadata while omitting container and bundle paths', () => {
 		const apps = parseSimctlApps({
-			'com.example.pumpd': {
-				CFBundleIdentifier: 'com.example.pumpd',
-				CFBundleDisplayName: 'PUMPD',
+			'com.example.app': {
+				CFBundleIdentifier: 'com.example.app',
+				CFBundleDisplayName: 'ExampleApp',
 				CFBundleShortVersionString: '1.2.3',
 				CFBundleVersion: '42',
 				ApplicationType: 'User',
-				Bundle: '/private/PUMPD.app',
+				Bundle: '/private/ExampleApp.app',
 				DataContainer: '/private/data',
 			},
 		});
 		expect(apps).toEqual([
 			{
-				bundleIdentifier: 'com.example.pumpd',
-				displayName: 'PUMPD',
+				bundleIdentifier: 'com.example.app',
+				displayName: 'ExampleApp',
 				version: '1.2.3',
 				buildVersion: '42',
 				applicationType: 'User',

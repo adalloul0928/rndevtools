@@ -2,18 +2,16 @@ import type {
 	ComponentInspectorVisualController,
 	ComponentInspectorVisualState,
 	ComponentTargetSnapshot,
-} from '@pumpd/devtools/plugins';
+} from '@rndevtools/core/plugins';
 
-export type PumpdComponentVisualState = ComponentInspectorVisualState &
+export type ComponentVisualState = ComponentInspectorVisualState &
 	Readonly<{
 		candidates: readonly ComponentTargetSnapshot[];
 		selectedInstanceId?: string;
 	}>;
 
-class PumpdComponentVisualController
-	implements ComponentInspectorVisualController
-{
-	#snapshot: PumpdComponentVisualState = {
+class ComponentVisualController implements ComponentInspectorVisualController {
+	#snapshot: ComponentVisualState = {
 		debugBorders: false,
 		inspectMode: false,
 		updateHighlights: false,
@@ -21,8 +19,8 @@ class PumpdComponentVisualController
 	};
 	readonly #listeners = new Set<() => void>();
 
-	readonly getSnapshot = (): PumpdComponentVisualState => this.#snapshot;
-	readonly getServerSnapshot = (): PumpdComponentVisualState => this.#snapshot;
+	readonly getSnapshot = (): ComponentVisualState => this.#snapshot;
+	readonly getServerSnapshot = (): ComponentVisualState => this.#snapshot;
 	readonly subscribe = (listener: () => void): (() => void) => {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
@@ -83,7 +81,7 @@ class PumpdComponentVisualController
 		});
 	}
 
-	#set(snapshot: PumpdComponentVisualState): void {
+	#set(snapshot: ComponentVisualState): void {
 		this.#snapshot = snapshot;
 		for (const listener of [...this.#listeners]) {
 			try {
@@ -95,4 +93,4 @@ class PumpdComponentVisualController
 	}
 }
 
-export const pumpdComponentVisuals = new PumpdComponentVisualController();
+export const componentVisuals = new ComponentVisualController();

@@ -1,4 +1,4 @@
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -76,8 +76,8 @@ const EMPTY_SLIMMING_STATE: SlimmingState = {
 const SlimmingRuntimeContext = createContext<SlimmingRuntimeValue | null>(null);
 
 function slimmingBridge(): SlimmingBridge | null {
-	const candidate = window.pumpdDesktop as
-		| (NonNullable<typeof window.pumpdDesktop> & Partial<SlimmingBridge>)
+	const candidate = window.rnDevtools as
+		| (NonNullable<typeof window.rnDevtools> & Partial<SlimmingBridge>)
 		| undefined;
 	if (
 		!candidate ||

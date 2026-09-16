@@ -133,7 +133,7 @@ const compositionResultSchema = z.strictObject({
 	inputCount: z.union([z.literal(1), z.literal(2)]),
 	composition: z.enum(['single', 'side_by_side', 'opacity', 'difference']),
 	metadataRendered: z.boolean(),
-	bezelStyle: z.enum(['none', 'pumpd-generic-v1']),
+	bezelStyle: z.enum(['none', 'rndevtools-generic-v1']),
 	atomicCommit: z.literal(true),
 });
 

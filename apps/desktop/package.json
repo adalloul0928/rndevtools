@@ -1,10 +1,10 @@
 {
-	"name": "@pumpd/devtools-desktop",
-	"productName": "PUMPD Devtools",
+	"name": "@rndevtools/desktop",
+	"productName": "RN Devtools",
 	"version": "0.1.0",
 	"private": true,
-	"author": "AVAD Technologies LLC",
-	"description": "Local-first desktop diagnostics for PUMPD apps",
+	"author": "Aren Dalloul",
+	"description": "Local-first desktop diagnostics for React Native apps",
 	"main": "dist/main/index.js",
 	"scripts": {
 		"electron:ensure": "node -e \"require('electron')\"",
@@ -27,15 +27,15 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit --pretty false -p tsconfig.node.json && tsc --noEmit --pretty false -p tsconfig.renderer.json",
-		"check:unused": "knip --directory ../.. --workspace apps/devtools-desktop --treat-config-hints-as-errors",
-		"check:cycles": "knip --directory ../.. --workspace apps/devtools-desktop --cycles --treat-config-hints-as-errors",
+		"check:unused": "knip --directory ../.. --workspace apps/desktop --treat-config-hints-as-errors",
+		"check:cycles": "knip --directory ../.. --workspace apps/desktop --cycles --treat-config-hints-as-errors",
 		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "vitest run",
 		"quality": "pnpm lint && pnpm typecheck && pnpm check:dead-code && pnpm test:run && pnpm build"
 	},
 	"dependencies": {},
 	"devDependencies": {
-		"@pumpd/devtools": "workspace:*",
+		"@rndevtools/core": "workspace:*",
 		"@fontsource-variable/geist": "5.3.0",
 		"@fontsource-variable/geist-mono": "5.3.0",
 		"@heroui-pro/react": "1.0.0-beta.8",
@@ -72,8 +72,8 @@
 		"zod": "catalog:"
 	},
 	"build": {
-		"appId": "com.avadtechnologies.pumpd.devtools",
-		"productName": "PUMPD Devtools",
+		"appId": "io.github.adalloul0928.rndevtools",
+		"productName": "RN Devtools",
 		"icon": "build/icon.svg",
 		"asar": true,
 		"beforeBuild": "scripts/before-build.cjs",
@@ -91,7 +91,7 @@
 			"category": "public.app-category.developer-tools",
 			"hardenedRuntime": true,
 			"signIgnore": [
-				"/Contents/Resources/native/pumpd-(?:sim-helper|native-host|devtools)$"
+				"/Contents/Resources/native/rndevtools(?:-sim-helper|-native-host)?$"
 			],
 			"extraResources": [
 				{
@@ -123,5 +123,13 @@
 				"deb"
 			]
 		}
-	}
+	},
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adalloul0928/rndevtools.git",
+		"directory": "apps/desktop"
+	},
+	"homepage": "https://github.com/adalloul0928/rndevtools/tree/main/apps/desktop#readme",
+	"bugs": "https://github.com/adalloul0928/rndevtools/issues"
 }

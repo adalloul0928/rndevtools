@@ -24,9 +24,22 @@ import {
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopDirectory = resolve(scriptDirectory, '..');
 const outputRoot = join(desktopDirectory, 'build', 'native');
-const goPackage = join(desktopDirectory, 'native', 'pumpd-sim-helper');
-const cliPackage = join(desktopDirectory, 'native', 'pumpd-devtools');
-const swiftPackage = join(desktopDirectory, 'native', 'pumpd-native-host');
+const goPackage = join(desktopDirectory, 'native', 'rndevtools-sim-helper');
+const cliPackage = join(desktopDirectory, 'native', 'rndevtools-cli');
+const swiftPackage = join(desktopDirectory, 'native', 'rndevtools-native-host');
+
+// Apple Developer Team ID compiled into the simulator helper's parent
+// attestation. Without it the helper fails closed and refuses every mutation,
+// which is the correct behaviour for an unsigned local build.
+const signingTeamIdentifier = (process.env.APPLE_TEAM_ID ?? '').trim();
+const simulatorHelperTeamFlag = signingTeamIdentifier
+	? ` -X github.com/adalloul0928/rndevtools-sim-helper/internal/authorization.expectedTeamIdentifier=${signingTeamIdentifier}`
+	: '';
+if (!simulatorHelperTeamFlag) {
+	console.warn(
+		'APPLE_TEAM_ID is not set: building a simulator helper that will refuse every mutation. Set it to your Apple Developer Team ID for a distributable build.'
+	);
+}
 const packageManifest = JSON.parse(
 	readFileSync(join(desktopDirectory, 'package.json'), 'utf8')
 );
@@ -69,8 +82,8 @@ for (const architecture of architectures) {
 	const helpers = {};
 	if (!options.buildGo) {
 		for (const [key, name] of [
-			['simulator', 'pumpd-sim-helper'],
-			['cli', 'pumpd-devtools'],
+			['simulator', 'rndevtools-sim-helper'],
+			['cli', 'rndevtools'],
 		]) {
 			const existing = join(outputDirectory, name);
 			if (!statIfFile(existing)) {
@@ -80,13 +93,13 @@ for (const architecture of architectures) {
 		}
 	}
 	if (!options.buildSwift) {
-		const existing = join(outputDirectory, 'pumpd-native-host');
+		const existing = join(outputDirectory, 'rndevtools-native-host');
 		if (!statIfFile(existing)) {
 			fail(
-				'Partial native build requires the existing pumpd-native-host binary.'
+				'Partial native build requires the existing rndevtools-native-host binary.'
 			);
 		}
-		helpers.nativeHost = helperManifest(existing, 'pumpd-native-host');
+		helpers.nativeHost = helperManifest(existing, 'rndevtools-native-host');
 	}
 
 	if (options.buildGo) {
@@ -104,28 +117,29 @@ for (const architecture of architectures) {
 			GOTOOLCHAIN: 'local',
 			GOWORK: 'off',
 		};
-		const simulatorDestination = join(outputDirectory, 'pumpd-sim-helper');
+		const simulatorDestination = join(outputDirectory, 'rndevtools-sim-helper');
 		buildGoBinary(
 			goPackage,
-			'./cmd/pumpd-sim-helper',
+			'./cmd/rndevtools-sim-helper',
 			simulatorDestination,
 			goEnvironment,
-			'vendor'
+			'vendor',
+			simulatorHelperTeamFlag
 		);
 		helpers.simulator = helperManifest(
 			simulatorDestination,
-			'pumpd-sim-helper'
+			'rndevtools-sim-helper'
 		);
 
-		const cliDestination = join(outputDirectory, 'pumpd-devtools');
+		const cliDestination = join(outputDirectory, 'rndevtools');
 		buildGoBinary(
 			cliPackage,
-			'./cmd/pumpd-devtools',
+			'./cmd/rndevtools',
 			cliDestination,
 			goEnvironment,
 			'readonly'
 		);
-		helpers.cli = helperManifest(cliDestination, 'pumpd-devtools');
+		helpers.cli = helperManifest(cliDestination, 'rndevtools');
 	}
 
 	if (options.buildSwift) {
@@ -153,10 +167,10 @@ for (const architecture of architectures) {
 		if (!binaryDirectory) {
 			fail(`Swift did not report a binary directory for ${architecture}.`);
 		}
-		const destination = join(outputDirectory, 'pumpd-native-host');
-		copyFileSync(join(binaryDirectory, 'pumpd-native-host'), destination);
+		const destination = join(outputDirectory, 'rndevtools-native-host');
+		copyFileSync(join(binaryDirectory, 'rndevtools-native-host'), destination);
 		chmodSync(destination, 0o755);
-		helpers.nativeHost = helperManifest(destination, 'pumpd-native-host');
+		helpers.nativeHost = helperManifest(destination, 'rndevtools-native-host');
 	}
 
 	const manifest = {
@@ -198,7 +212,8 @@ function buildGoBinary(
 	command,
 	destination,
 	environment,
-	moduleMode
+	moduleMode,
+	extraLdflags = ''
 ) {
 	run(
 		'go',
@@ -208,7 +223,7 @@ function buildGoBinary(
 			'-trimpath',
 			'-buildvcs=false',
 			'-ldflags',
-			`-s -w -X main.version=${packageManifest.version} -X main.buildCommit=${sourceCommit}`,
+			`-s -w -X main.version=${packageManifest.version} -X main.buildCommit=${sourceCommit}${extraLdflags}`,
 			'-o',
 			destination,
 			command,
@@ -311,6 +326,7 @@ function commandOutput(command, arguments_, cwd, env) {
 function allowlistedBuildEnvironment() {
 	const environment = {};
 	for (const name of [
+		'APPLE_TEAM_ID',
 		'DEVELOPER_DIR',
 		'HOME',
 		'LANG',

@@ -5,8 +5,8 @@ import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import type { Duplex } from 'node:stream';
 import { URL } from 'node:url';
-import { redactDiagnosticText } from '@pumpd/devtools/redact';
-import { truncateText } from '@pumpd/devtools/serialize';
+import { redactDiagnosticText } from '@rndevtools/core/redact';
+import { truncateText } from '@rndevtools/core/serialize';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createDemoDevice, tickDemoDevice } from '../shared/demo-data';
 import {
@@ -296,12 +296,12 @@ export class DesktopBroker {
 					this.#requestedPort > 65_535
 				? 'The broker port must be an integer between 1 and 65535.'
 				: isWildcardHost(this.#host) && !this.#allowWildcardBind
-					? 'Wildcard broker binding requires PUMPD_DEVTOOLS_ALLOW_WILDCARD=true.'
+					? 'Wildcard broker binding requires RNDEVTOOLS_ALLOW_WILDCARD=true.'
 					: !isLoopbackHost(this.#host) &&
 							(!this.#token || this.#token.length < MIN_BROKER_TOKEN_LENGTH)
-						? `LAN binding requires PUMPD_DEVTOOLS_TOKEN with at least ${MIN_BROKER_TOKEN_LENGTH} characters.`
+						? `LAN binding requires RNDEVTOOLS_TOKEN with at least ${MIN_BROKER_TOKEN_LENGTH} characters.`
 						: this.#token && this.#token.length > MAX_BROKER_TOKEN_LENGTH
-							? `PUMPD_DEVTOOLS_TOKEN cannot exceed ${MAX_BROKER_TOKEN_LENGTH} characters.`
+							? `RNDEVTOOLS_TOKEN cannot exceed ${MAX_BROKER_TOKEN_LENGTH} characters.`
 							: undefined;
 		if (options.includeDemoDevice === true) {
 			const demo = createDemoDevice(this.#now());
@@ -458,7 +458,7 @@ export class DesktopBroker {
 				});
 				response.end(
 					JSON.stringify({
-						name: 'PUMPD Devtools',
+						name: 'RN Devtools',
 						status: 'ok',
 						protocolVersion: DESKTOP_PROTOCOL_VERSION,
 						access: this.#token ? 'token' : 'loopback',
@@ -539,7 +539,7 @@ export class DesktopBroker {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			webSocketServer.close();
 			throw new Error(
-				`The broker bind address resolved to ${bound.address}, which listens on every interface. Set PUMPD_DEVTOOLS_ALLOW_WILDCARD=true to allow it.`
+				`The broker bind address resolved to ${bound.address}, which listens on every interface. Set RNDEVTOOLS_ALLOW_WILDCARD=true to allow it.`
 			);
 		}
 		this.#httpServer = server;

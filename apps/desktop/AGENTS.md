@@ -1,17 +1,17 @@
-# PUMPD Devtools Desktop
+# RN Devtools Desktop
 
 This workspace is the isolated Electron desktop diagnostics app. It uses electron-vite, React, HeroUI and HeroUI Pro, Tailwind CSS, a local WebSocket broker, and electron-builder.
 
 ## Commands
 
 ```bash
-pnpm --filter @pumpd/devtools-desktop dev
-pnpm --filter @pumpd/devtools-desktop lint
-pnpm --filter @pumpd/devtools-desktop typecheck
-pnpm --filter @pumpd/devtools-desktop test:run
-pnpm --filter @pumpd/devtools-desktop build
-pnpm --filter @pumpd/devtools-desktop quality
-pnpm --filter @pumpd/devtools-desktop package
+pnpm --filter @rndevtools/desktop dev
+pnpm --filter @rndevtools/desktop lint
+pnpm --filter @rndevtools/desktop typecheck
+pnpm --filter @rndevtools/desktop test:run
+pnpm --filter @rndevtools/desktop build
+pnpm --filter @rndevtools/desktop quality
+pnpm --filter @rndevtools/desktop package
 ```
 
 ## Desktop Rules

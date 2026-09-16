@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { desktopActionSchema } from './protocol';
 
-export const PUMPD_AGENT_CLI_PROTOCOL = 'pumpd-devtools/1' as const;
+export const RNDEVTOOLS_AGENT_CLI_PROTOCOL = 'rndevtools/1' as const;
 
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_SHORT_TEXT_LENGTH = 4 * 1024;
@@ -197,7 +197,7 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 export type AgentCliCommand = z.infer<typeof agentCliCommandSchema>;
 
 export const agentCliRequestSchema = z.strictObject({
-	protocol: z.literal(PUMPD_AGENT_CLI_PROTOCOL),
+	protocol: z.literal(RNDEVTOOLS_AGENT_CLI_PROTOCOL),
 	id: identifierSchema,
 	command: agentCliCommandSchema,
 });
@@ -217,13 +217,13 @@ export type AgentCliErrorBody = z.infer<typeof agentCliErrorSchema>;
 
 const agentCliResponseSchema = z.union([
 	z.strictObject({
-		protocol: z.literal(PUMPD_AGENT_CLI_PROTOCOL),
+		protocol: z.literal(RNDEVTOOLS_AGENT_CLI_PROTOCOL),
 		id: identifierSchema,
 		ok: z.literal(true),
 		result: z.unknown(),
 	}),
 	z.strictObject({
-		protocol: z.literal(PUMPD_AGENT_CLI_PROTOCOL),
+		protocol: z.literal(RNDEVTOOLS_AGENT_CLI_PROTOCOL),
 		id: z.string().max(MAX_IDENTIFIER_LENGTH),
 		ok: z.literal(false),
 		error: agentCliErrorSchema,

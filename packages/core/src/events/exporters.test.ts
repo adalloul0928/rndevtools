@@ -40,7 +40,7 @@ describe('event text exporters', () => {
 				],
 				{ format, maxBytes: 16 * 1024 },
 			);
-			expect(result.text).toContain('PUMPD Devtools');
+			expect(result.text).toContain('RN Devtools');
 			expect(result.text).toContain('Request \\| Bearer [REDACTED]');
 			expect(result.text).not.toContain('should-not-export');
 			expect(result.eventCount).toBe(2);

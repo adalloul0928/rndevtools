@@ -1,9 +1,9 @@
-export type InternalToolsAuthorization = Readonly<{
+export type DevtoolsAuthorization = Readonly<{
 	enabled: boolean;
 	ownerId: string | null;
 }>;
 
-const DISABLED_AUTHORIZATION: InternalToolsAuthorization = Object.freeze({
+const DISABLED_AUTHORIZATION: DevtoolsAuthorization = Object.freeze({
 	enabled: false,
 	ownerId: null,
 });
@@ -12,10 +12,8 @@ let snapshot = DISABLED_AUTHORIZATION;
 const listeners = new Set<() => void>();
 let ownerBoundaryCleanup: (() => void) | undefined;
 
-export function setInternalToolsAuthorization(
-	next: InternalToolsAuthorization
-): void {
-	const normalized: InternalToolsAuthorization = Object.freeze({
+export function setDevtoolsAuthorization(next: DevtoolsAuthorization): void {
+	const normalized: DevtoolsAuthorization = Object.freeze({
 		enabled: Boolean(next.enabled),
 		ownerId: typeof next.ownerId === 'string' ? next.ownerId : null,
 	});
@@ -35,16 +33,16 @@ export function setInternalToolsAuthorization(
 	}
 }
 
-export function disableInternalToolsAuthorization(): void {
-	setInternalToolsAuthorization(DISABLED_AUTHORIZATION);
+export function disableDevtoolsAuthorization(): void {
+	setDevtoolsAuthorization(DISABLED_AUTHORIZATION);
 }
 
-export function getInternalToolsAuthorization(): InternalToolsAuthorization {
+export function getDevtoolsAuthorization(): DevtoolsAuthorization {
 	return snapshot;
 }
 
-export function subscribeToInternalToolsAuthorization(
-	listener: () => void
+export function subscribeToDevtoolsAuthorization(
+	listener: () => void,
 ): () => void {
 	listeners.add(listener);
 	return () => listeners.delete(listener);
@@ -55,7 +53,7 @@ export function subscribeToInternalToolsAuthorization(
  * change can only revoke synchronously; React may explicitly re-grant the new
  * owner after recomputing all visibility policy.
  */
-export function bindInternalToolsAuthorizationOwnerSource(source: {
+export function bindDevtoolsAuthorizationOwnerSource(source: {
 	getOwnerId: () => string | null;
 	subscribe: (listener: () => void) => () => void;
 }): void {
@@ -69,7 +67,7 @@ export function bindInternalToolsAuthorizationOwnerSource(source: {
 			// A failed owner read is a revocation boundary.
 		}
 		if (snapshot.enabled && snapshot.ownerId !== liveOwnerId) {
-			disableInternalToolsAuthorization();
+			disableDevtoolsAuthorization();
 		}
 	};
 	try {

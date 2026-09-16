@@ -16,7 +16,7 @@ describe('typed environment health', () => {
 		values: {
 			BOOL: 'true',
 			COUNT: '4',
-			URL: 'https://pumpd.app/path',
+			URL: 'https://example.app/path',
 			MODE: 'preview',
 			VERSION: 'v1.2.3',
 		},
@@ -50,7 +50,7 @@ describe('typed environment health', () => {
 		expect(results.map(({ normalizedValue }) => normalizedValue)).toEqual([
 			true,
 			4,
-			'https://pumpd.app/path',
+			'https://example.app/path',
 			'preview',
 			'v1.2.3',
 		]);
@@ -64,7 +64,7 @@ describe('typed environment health', () => {
 					values: {
 						BOOL: 'TRUE',
 						COUNT: '1.5',
-						URL: 'ftp://pumpd.app',
+						URL: 'ftp://example.app',
 						MODE: 'beta',
 						VERSION: 'latest',
 					},

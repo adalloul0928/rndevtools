@@ -4,7 +4,7 @@ import {
 	describeImageSource,
 	type ImageDiagnosticEntry,
 	summarizeImageDiagnostics,
-} from '@pumpd/devtools/plugins/images';
+} from '@rndevtools/core/plugins/images';
 import { DevtoolsEventStore } from '../core/event-store';
 
 function install(

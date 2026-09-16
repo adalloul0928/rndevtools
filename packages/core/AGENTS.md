@@ -1,6 +1,6 @@
-# PUMPD Devtools
+# RN Devtools
 
-Private, reusable React Native diagnostics. The root export owns runtime and shared UI; `@pumpd/devtools/plugins` owns built-in diagnostic and plugin factories.
+Private, reusable React Native diagnostics. The root export owns runtime and shared UI; `@rndevtools/core/plugins` owns built-in diagnostic and plugin factories.
 
 ## Commands
 

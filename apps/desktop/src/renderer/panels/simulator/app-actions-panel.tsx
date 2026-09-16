@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { type ComponentType, useEffect, useMemo, useState } from 'react';
 import { InfoPopover } from '@/components/ui';
+import { targetConfig } from '@/simulator/target-config';
 import type { SimulatorCapability } from '../../../shared/simulator-protocol';
 import {
 	BridgeUnavailableNotice,
@@ -754,7 +755,7 @@ function ActionConfiguration({
 				>
 					<Switch.Content>
 						<span className="sim-switch-copy">
-							<strong>Slow PUMPD animations</strong>
+							<strong>Slow app animations</strong>
 							<small>Development-only app environment control.</small>
 						</span>
 					</Switch.Content>
@@ -913,11 +914,11 @@ function ActionConfiguration({
 			? !isValidHttpsUrl(trimmedValue)
 			: !isValidUrl(trimmedValue));
 	const placeholder = isUrl
-		? 'pumpd://workout/current'
+		? targetConfig.deepLinkExample
 		: action.id === 'send-push-notification'
 			? '{"aps":{"alert":"Hello"}}'
 			: action.id === 'reveal-app-group'
-				? 'group.com.pumpd.shared'
+				? targetConfig.appGroupExample
 				: 'Enter deterministic input';
 	return (
 		<>

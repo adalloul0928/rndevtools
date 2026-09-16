@@ -39,7 +39,7 @@ const roots: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
 	const directory = await mkdtemp(
-		path.join(os.tmpdir(), 'pumpd-recipe-service-')
+		path.join(os.tmpdir(), 'rndevtools-recipe-service-')
 	);
 	roots.push(directory);
 	return directory;
@@ -634,7 +634,7 @@ describe('RecipeService', () => {
 					id: 'slim',
 					kind: 'slimming.mutation',
 					operation: 'apply',
-					profileId: 'pumpd-development',
+					profileId: 'rndevtools-development',
 				},
 			])
 		);
@@ -681,7 +681,7 @@ describe('RecipeService', () => {
 					id: 'legacy-slim',
 					kind: 'slimming.mutation',
 					operation: 'apply',
-					profileId: 'pumpd-development',
+					profileId: 'rndevtools-development',
 					acknowledgement: 'EXPERIMENTAL',
 				},
 			])

@@ -132,7 +132,7 @@ export function ZustandPanel() {
 						<EmptyPanel
 							icon={<Store className="h-5 w-5" />}
 							title="No matching stores"
-							description="Only stores registered by the PUMPD host appear here."
+							description="Only stores registered by the connected app appear here."
 						/>
 					) : (
 						<div className="space-y-2">

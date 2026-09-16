@@ -1,9 +1,8 @@
 import {
 	isSensitiveDiagnosticKey,
 	redactDiagnosticText,
-	truncateText,
-	utf8ByteLength,
-} from '@pumpd/devtools';
+} from '@rndevtools/core/redact';
+import { truncateText, utf8ByteLength } from '@rndevtools/core/serialize';
 
 const MAX_HEADER_COUNT = 200;
 const MAX_HEADER_NAME_BYTES = 256;
@@ -11,10 +10,7 @@ const MAX_LONG_TEXT_BYTES = 512 * 1024;
 const SAFE_QUERY_FAMILY = /^[a-z][a-z0-9._:-]{0,127}$/i;
 
 /** Stable, non-sensitive identifier that always fits the desktop wire schema. */
-export function pumpdDesktopProjectionId(
-	prefix: string,
-	value: string
-): string {
+export function desktopProjectionId(prefix: string, value: string): string {
 	let fnvHash = 2_166_136_261;
 	let mixedHash = 5381;
 	for (let index = 0; index < value.length; index += 1) {
@@ -29,7 +25,7 @@ export function pumpdDesktopProjectionId(
 }
 
 export function projectDesktopHeaders(
-	headers: Readonly<Record<string, string>> | undefined
+	headers: Readonly<Record<string, string>> | undefined,
 ): Record<string, string> | undefined {
 	if (!headers) return undefined;
 	const projected = Object.create(null) as Record<string, string>;
@@ -55,7 +51,7 @@ export function projectDesktopHeaders(
  */
 export function projectDesktopQueryKey(
 	segments: readonly string[],
-	fallback: 'query' | 'mutation'
+	fallback: 'query' | 'mutation',
 ): string {
 	const candidate = segments[0]?.trim();
 	const family =
@@ -70,7 +66,7 @@ export function projectDesktopQueryKey(
 
 export function limitDesktopProjection<T>(
 	values: readonly T[],
-	options: { maxItems: number; maxBytes: number; keepNewest?: boolean }
+	options: { maxItems: number; maxBytes: number; keepNewest?: boolean },
 ): { items: readonly T[]; omitted: number } {
 	const candidates = options.keepNewest ? [...values].reverse() : values;
 	const retained: T[] = [];

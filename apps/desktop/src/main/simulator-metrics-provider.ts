@@ -1,4 +1,4 @@
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import type {
 	SimulatorDevice,
 	SimulatorDeviceMetrics,

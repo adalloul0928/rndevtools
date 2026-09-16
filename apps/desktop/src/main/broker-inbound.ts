@@ -1,5 +1,5 @@
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
-import { truncateText } from '@pumpd/devtools/serialize';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
+import { truncateText } from '@rndevtools/core/serialize';
 import type { RawData } from 'ws';
 import { type DeviceMessage, deviceMessageSchema } from '../shared/protocol';
 

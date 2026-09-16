@@ -1,4 +1,4 @@
-import type { DevToolsStorageAdapter } from '@pumpd/devtools/plugins/storage';
+import type { DevToolsStorageAdapter } from '@rndevtools/core/plugins/storage';
 
 export type AsyncStorageLike = {
 	getAllKeys: () => Promise<readonly string[]>;
@@ -9,10 +9,10 @@ export type AsyncStorageLike = {
 };
 
 export function createAsyncStorageDevtoolsAdapter(
-	storage: AsyncStorageLike
+	storage: AsyncStorageLike,
 ): DevToolsStorageAdapter {
 	return {
-		id: 'pumpd-async-storage',
+		id: 'example-async-storage',
 		title: 'AsyncStorage',
 		description: 'React Native asynchronous key-value storage',
 		capabilities: {
@@ -44,17 +44,17 @@ export type SecureStoreManifestEntry = Readonly<{
 export type SecureStoreLike = {
 	getItemAsync: (
 		key: string,
-		options?: Readonly<Record<string, unknown>>
+		options?: Readonly<Record<string, unknown>>,
 	) => Promise<string | null>;
 };
 
 export function createSecureStoreDevtoolsAdapter(
 	storage: SecureStoreLike,
-	manifest: readonly SecureStoreManifestEntry[]
+	manifest: readonly SecureStoreManifestEntry[],
 ): DevToolsStorageAdapter {
 	const entries = new Map(manifest.map((entry) => [entry.key, entry]));
 	return {
-		id: 'pumpd-secure-store',
+		id: 'example-secure-store',
 		title: 'SecureStore',
 		description:
 			'Explicitly registered keychain metadata; values stay on device',
@@ -73,7 +73,7 @@ export function createSecureStoreDevtoolsAdapter(
 				description,
 				...(requiresAuthentication ? { requiresAuthentication: true } : {}),
 				...(revealable ? { revealable: true } : {}),
-			})
+			}),
 		),
 		revealValue: async (key) => {
 			const entry = entries.get(key);

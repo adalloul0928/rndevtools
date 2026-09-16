@@ -7,22 +7,26 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopDirectory = resolve(scriptDirectory, '..');
 const goPackages = [
 	{
-		directory: resolve(desktopDirectory, 'native', 'pumpd-sim-helper'),
+		directory: resolve(desktopDirectory, 'native', 'rndevtools-sim-helper'),
 		modules: [
-			'github.com/avadtechnologies/pumpd-sim-helper',
+			'github.com/adalloul0928/rndevtools-sim-helper',
 			'github.com/mobai-app/simslim v0.8.0',
 		],
 		name: 'simulator helper',
 		vendored: true,
 	},
 	{
-		directory: resolve(desktopDirectory, 'native', 'pumpd-devtools'),
-		modules: ['github.com/avadtechnologies/pumpd-devtools-cli'],
+		directory: resolve(desktopDirectory, 'native', 'rndevtools-cli'),
+		modules: ['github.com/adalloul0928/rndevtools-cli'],
 		name: 'local agent CLI',
 		vendored: false,
 	},
 ];
-const swiftPackage = resolve(desktopDirectory, 'native', 'pumpd-native-host');
+const swiftPackage = resolve(
+	desktopDirectory,
+	'native',
+	'rndevtools-native-host'
+);
 const selection = parseSelection(process.argv.slice(2));
 
 if (selection.go) {

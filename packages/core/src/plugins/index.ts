@@ -102,7 +102,7 @@ export {
 	validateImageOverlayRemoteUrl,
 	validateImageOverlaySource,
 } from './image-overlay';
-// Image diagnostics live at `@pumpd/devtools/plugins/images`; the mobile host
+// Image diagnostics live at `@rndevtools/core/plugins/images`; the mobile host
 // replaces their adapter with a no-op in production.
 export {
 	buildNavigationRoutePath,
@@ -226,7 +226,7 @@ export {
 	type ScenarioRepositorySnapshot,
 } from './scenario-repository';
 // The storage plugin is deliberately absent from this barrel and lives at
-// `@pumpd/devtools/plugins/storage`. It edits, deletes, and clears host storage,
+// `@rndevtools/core/plugins/storage`. It edits, deletes, and clears host storage,
 // so a host that ships diagnostics to production can take the rest of the
 // barrel without pulling an editor it must not expose. The split keeps that
 // module out of the bundle even when the host does not enable tree shaking.

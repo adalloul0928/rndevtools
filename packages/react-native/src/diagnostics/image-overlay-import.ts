@@ -1,11 +1,11 @@
 import type {
 	ImageOverlayLimits,
 	ImageOverlaySource,
-} from '@pumpd/devtools/plugins';
+} from '@rndevtools/core/plugins';
 import {
 	validateImageOverlayRemoteUrl,
 	validateImageOverlaySource,
-} from '@pumpd/devtools/plugins';
+} from '@rndevtools/core/plugins';
 import { fetch as expoFetch } from 'expo/fetch';
 import { File, Paths } from 'expo-file-system';
 
@@ -27,7 +27,7 @@ type RemoteFetchResponse = Pick<
 
 export type RemoteImageFetcher = (
 	url: string,
-	init: RequestInit
+	init: RequestInit,
 ) => Promise<RemoteFetchResponse>;
 
 export type PreparedRemoteImage = Readonly<{
@@ -35,33 +35,41 @@ export type PreparedRemoteImage = Readonly<{
 	file: File;
 }>;
 
+function byteAt(bytes: Uint8Array, offset: number): number {
+	return bytes[offset] ?? 0;
+}
+
 function readUint16BigEndian(bytes: Uint8Array, offset: number): number {
-	return bytes[offset] * 256 + bytes[offset + 1];
+	return byteAt(bytes, offset) * 256 + byteAt(bytes, offset + 1);
 }
 
 function readUint16LittleEndian(bytes: Uint8Array, offset: number): number {
-	return bytes[offset] + bytes[offset + 1] * 256;
+	return byteAt(bytes, offset) + byteAt(bytes, offset + 1) * 256;
 }
 
 function readUint24LittleEndian(bytes: Uint8Array, offset: number): number {
-	return bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65_536;
+	return (
+		byteAt(bytes, offset) +
+		byteAt(bytes, offset + 1) * 256 +
+		byteAt(bytes, offset + 2) * 65_536
+	);
 }
 
 function readUint32BigEndian(bytes: Uint8Array, offset: number): number {
 	return (
-		bytes[offset] * 16_777_216 +
-		bytes[offset + 1] * 65_536 +
-		bytes[offset + 2] * 256 +
-		bytes[offset + 3]
+		byteAt(bytes, offset) * 16_777_216 +
+		byteAt(bytes, offset + 1) * 65_536 +
+		byteAt(bytes, offset + 2) * 256 +
+		byteAt(bytes, offset + 3)
 	);
 }
 
 function readUint32LittleEndian(bytes: Uint8Array, offset: number): number {
 	return (
-		bytes[offset] +
-		bytes[offset + 1] * 256 +
-		bytes[offset + 2] * 65_536 +
-		bytes[offset + 3] * 16_777_216
+		byteAt(bytes, offset) +
+		byteAt(bytes, offset + 1) * 256 +
+		byteAt(bytes, offset + 2) * 65_536 +
+		byteAt(bytes, offset + 3) * 16_777_216
 	);
 }
 
@@ -93,9 +101,9 @@ function inspectJpeg(bytes: Uint8Array): VerifiedImageMetadata | null {
 	if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
 	let offset = 2;
 	while (offset + 3 < bytes.length) {
-		while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+		while (offset < bytes.length && byteAt(bytes, offset) === 0xff) offset += 1;
 		if (offset >= bytes.length) break;
-		const marker = bytes[offset];
+		const marker = byteAt(bytes, offset);
 		offset += 1;
 		if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) continue;
 		if (marker === 0xd9 || marker === 0xda || offset + 1 >= bytes.length) break;
@@ -135,10 +143,10 @@ function inspectWebp(bytes: Uint8Array): VerifiedImageMetadata | null {
 			};
 		}
 		if (chunk === 'VP8L' && chunkSize >= 5 && bytes[payload] === 0x2f) {
-			const b1 = bytes[payload + 1];
-			const b2 = bytes[payload + 2];
-			const b3 = bytes[payload + 3];
-			const b4 = bytes[payload + 4];
+			const b1 = byteAt(bytes, payload + 1);
+			const b2 = byteAt(bytes, payload + 2);
+			const b3 = byteAt(bytes, payload + 3);
+			const b4 = byteAt(bytes, payload + 4);
 			return {
 				mimeType: 'image/webp',
 				width: 1 + (((b2 & 0x3f) << 8) | b1),
@@ -164,13 +172,13 @@ function inspectWebp(bytes: Uint8Array): VerifiedImageMetadata | null {
 }
 
 export function inspectReferenceImageBytes(
-	bytes: Uint8Array
+	bytes: Uint8Array,
 ): VerifiedImageMetadata {
 	const metadata =
 		inspectPng(bytes) ?? inspectJpeg(bytes) ?? inspectWebp(bytes);
 	if (!metadata || metadata.width <= 0 || metadata.height <= 0) {
 		throw new Error(
-			'Remote reference is not a valid PNG, JPEG, or WebP image.'
+			'Remote reference is not a valid PNG, JPEG, or WebP image.',
 		);
 	}
 	return metadata;
@@ -190,7 +198,7 @@ function parseContentLength(value: string | null, maximum: number): void {
 export async function fetchBoundedRemoteImage(
 	inputUrl: string,
 	limits: ImageOverlayLimits,
-	fetcher: RemoteImageFetcher = expoFetch
+	fetcher: RemoteImageFetcher = expoFetch,
 ): Promise<
 	Readonly<{ bytes: Uint8Array; sourceUrl: string }> & VerifiedImageMetadata
 > {
@@ -226,7 +234,7 @@ export async function fetchBoundedRemoteImage(
 				controller.abort();
 				await reader.cancel().catch(() => undefined);
 				throw new Error(
-					`Remote reference cannot exceed ${limits.maxBytes} bytes.`
+					`Remote reference cannot exceed ${limits.maxBytes} bytes.`,
 				);
 			}
 			chunks.push(result.value);
@@ -248,7 +256,7 @@ let remoteFileSequence = 0;
 
 export async function prepareRemoteImageOverlay(
 	url: string,
-	limits: ImageOverlayLimits
+	limits: ImageOverlayLimits,
 ): Promise<PreparedRemoteImage> {
 	const fetched = await fetchBoundedRemoteImage(url, limits);
 	const extension =
@@ -260,7 +268,7 @@ export async function prepareRemoteImageOverlay(
 	remoteFileSequence += 1;
 	const file = new File(
 		Paths.cache,
-		`pumpd-reference-${Date.now()}-${remoteFileSequence}.${extension}`
+		`rndevtools-reference-${Date.now()}-${remoteFileSequence}.${extension}`,
 	);
 	try {
 		file.create({ overwrite: false });
@@ -278,7 +286,7 @@ export async function prepareRemoteImageOverlay(
 				width: fetched.width,
 				height: fetched.height,
 			},
-			limits
+			limits,
 		);
 		return { source, file };
 	} catch (error) {
@@ -292,7 +300,7 @@ export async function prepareRemoteImageOverlay(
 }
 
 export function deletePreparedRemoteImage(
-	prepared: PreparedRemoteImage | null
+	prepared: PreparedRemoteImage | null,
 ): void {
 	if (!prepared) return;
 	try {

@@ -58,7 +58,7 @@ class FakeProvider implements SimulatorHostProvider {
 	readonly commands: RecordedCommand[] = [];
 	readonly opened: string[] = [];
 	deviceState: 'booted' | 'shutdown' = 'booted';
-	deviceName = 'PUMPD Test';
+	deviceName = 'Example Test';
 	blockVideo = false;
 	failKeychain = false;
 	containerPath = '';
@@ -93,8 +93,8 @@ class FakeProvider implements SimulatorHostProvider {
 	}));
 	listApps = vi.fn(async () => [
 		{
-			bundleIdentifier: 'com.example.pumpd',
-			displayName: 'PUMPD',
+			bundleIdentifier: 'com.example.app',
+			displayName: 'ExampleApp',
 			isSystem: false,
 		},
 	]);
@@ -153,7 +153,9 @@ async function createService(
 	cloneProvider?: SimulatorCloneProvider,
 	diskProvider?: SimulatorDiskProvider
 ) {
-	const captureDirectory = await mkdtemp(path.join(tmpdir(), 'pumpd-service-'));
+	const captureDirectory = await mkdtemp(
+		path.join(tmpdir(), 'rndevtools-service-')
+	);
 	temporaryDirectories.push(captureDirectory);
 	const service = new SimulatorService({
 		captureDirectory,
@@ -217,7 +219,7 @@ describe('simulator service', () => {
 				parsedAction({
 					actionId: 'create-and-open',
 					kind: 'device.create',
-					name: 'PUMPD Review',
+					name: 'Example Review',
 					deviceTypeIdentifier: DEVICE_TYPE,
 					runtimeIdentifier: RUNTIME,
 					bootAfterCreate: true,
@@ -243,7 +245,7 @@ describe('simulator service', () => {
 				parsedAction({
 					actionId: 'invalid-created-id',
 					kind: 'device.create',
-					name: 'PUMPD Review',
+					name: 'Example Review',
 					deviceTypeIdentifier: DEVICE_TYPE,
 					bootAfterCreate: true,
 				})
@@ -285,9 +287,9 @@ describe('simulator service', () => {
 	it('resolves destructive confirmation copy from a fresh exact inventory', async () => {
 		const provider = new FakeProvider();
 		const { service } = await createService(provider);
-		provider.deviceName = 'Fresh PUMPD Target';
+		provider.deviceName = 'Fresh Example Target';
 		expect(await service.resolveConfirmationTarget(UDID)).toEqual({
-			name: 'Fresh PUMPD Target',
+			name: 'Fresh Example Target',
 			udid: UDID,
 		});
 		await expect(
@@ -301,7 +303,7 @@ describe('simulator service', () => {
 		const cleanupMaterialized = vi.fn(async () => undefined);
 		const materializeCertificatePath = vi.fn(async () => ({
 			cleanup: cleanupMaterialized,
-			path: '/private/pumpd/certificate.cer',
+			path: '/private/example/certificate.cer',
 		}));
 		const cleanupSelectedInput = vi.fn(async () => undefined);
 		const receipt = service.runAction(
@@ -320,7 +322,7 @@ describe('simulator service', () => {
 				'keychain',
 				UDID,
 				'add-root-cert',
-				'/private/pumpd/certificate.cer',
+				'/private/example/certificate.cer',
 			],
 			options: expect.any(Object),
 		});
@@ -346,7 +348,7 @@ describe('simulator service', () => {
 				cleanupSelectedInput,
 				materializeCertificatePath: vi.fn(async () => ({
 					cleanup: cleanupMaterialized,
-					path: '/private/pumpd/certificate.cer',
+					path: '/private/example/certificate.cer',
 				})),
 			}
 		);
@@ -361,7 +363,7 @@ describe('simulator service', () => {
 		const { service } = await createService(provider);
 		expect(provider.listApps).toHaveBeenCalledWith(UDID, undefined);
 		expect(service.getState().appsByDevice[UDID]).toEqual([
-			expect.objectContaining({ bundleIdentifier: 'com.example.pumpd' }),
+			expect.objectContaining({ bundleIdentifier: 'com.example.app' }),
 		]);
 		await service.stop();
 	});
@@ -378,7 +380,7 @@ describe('simulator service', () => {
 				actionId: 'unsupported-push',
 				kind: 'push.send',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				payloadJson: '{"aps":{}}',
 			})
 		);
@@ -638,7 +640,7 @@ describe('simulator service', () => {
 				actionId: 'clone-booted',
 				kind: 'device.clone',
 				udid: UDID,
-				name: 'PUMPD Clone',
+				name: 'Example Clone',
 			})
 		);
 		const job = await waitForJob(service, receipt.jobId ?? '', 'failed');
@@ -669,13 +671,13 @@ describe('simulator service', () => {
 				actionId: 'clone-via-helper',
 				kind: 'device.clone',
 				udid: UDID,
-				name: 'PUMPD Clone',
+				name: 'Example Clone',
 			})
 		);
 		await waitForJob(service, receipt.jobId ?? '');
 		expect(cloneProvider.cloneSimulator).toHaveBeenCalledWith(
 			UDID,
-			'PUMPD Clone',
+			'Example Clone',
 			expect.any(AbortSignal)
 		);
 		expect(provider.commands).toEqual([]);
@@ -689,13 +691,13 @@ describe('simulator service', () => {
 				actionId: 'url',
 				kind: 'url.open',
 				udid: UDID,
-				url: 'pumpdmobileappdevelopment://home?token=secret',
+				url: 'exampleappdevelopment://home?token=secret',
 			}),
 			parsedAction({
 				actionId: 'universal-url',
 				kind: 'app.openUniversalLink',
 				udid: UDID,
-				url: 'https://pumpd.com/workouts/1',
+				url: 'https://example.com/items/1',
 			}),
 			parsedAction({
 				actionId: 'location',
@@ -708,7 +710,7 @@ describe('simulator service', () => {
 				actionId: 'push',
 				kind: 'push.send',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				payloadJson: '{"aps":{"alert":"Hello"}}',
 			}),
 			parsedAction({
@@ -717,7 +719,7 @@ describe('simulator service', () => {
 				udid: UDID,
 				operation: 'grant',
 				service: 'location',
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 			}),
 			parsedAction({
 				actionId: 'ui',
@@ -744,11 +746,11 @@ describe('simulator service', () => {
 		}
 
 		expect(provider.commands.map((command) => command.args)).toEqual([
-			['openurl', UDID, 'pumpdmobileappdevelopment://home?token=secret'],
-			['openurl', UDID, 'https://pumpd.com/workouts/1'],
+			['openurl', UDID, 'exampleappdevelopment://home?token=secret'],
+			['openurl', UDID, 'https://example.com/items/1'],
 			['location', UDID, 'set', '37.7749000,-122.4194000'],
-			['push', UDID, 'com.example.pumpd', '-'],
-			['privacy', UDID, 'grant', 'location', 'com.example.pumpd'],
+			['push', UDID, 'com.example.app', '-'],
+			['privacy', UDID, 'grant', 'location', 'com.example.app'],
 			['ui', UDID, 'content_size', 'accessibility-large'],
 			[
 				'status_bar',
@@ -782,14 +784,14 @@ describe('simulator service', () => {
 		await service.stop();
 	});
 
-	it('launches apps with bounded locale and PUMPD environment overrides', async () => {
+	it('launches apps with bounded locale and app environment overrides', async () => {
 		const { provider, service } = await createService();
 		const receipt = service.runAction(
 			parsedAction({
 				actionId: 'localized-launch',
 				kind: 'app.launch',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				terminateRunning: true,
 				arguments: ['--fixture', 'onboarding'],
 				locale: 'fr_CA',
@@ -804,7 +806,7 @@ describe('simulator service', () => {
 				'launch',
 				'--terminate-running-process',
 				UDID,
-				'com.example.pumpd',
+				'com.example.app',
 				'--fixture',
 				'onboarding',
 				'-AppleLanguages',
@@ -847,7 +849,7 @@ describe('simulator service', () => {
 
 	it('reveals only a resolved container inside the exact simulator data root', async () => {
 		const provider = new FakeProvider();
-		const root = await mkdtemp(path.join(tmpdir(), 'pumpd-container-'));
+		const root = await mkdtemp(path.join(tmpdir(), 'rndevtools-container-'));
 		temporaryDirectories.push(root);
 		provider.containerPath = path.join(
 			root,
@@ -875,7 +877,7 @@ describe('simulator service', () => {
 				actionId: 'reveal-data',
 				kind: 'app.revealContainer',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				container: 'data',
 			})
 		);
@@ -883,7 +885,7 @@ describe('simulator service', () => {
 		expect(provider.commands[0]?.args).toEqual([
 			'get_app_container',
 			UDID,
-			'com.example.pumpd',
+			'com.example.app',
 			'data',
 		]);
 		expect(revealPath).toHaveBeenCalledWith(
@@ -898,7 +900,7 @@ describe('simulator service', () => {
 				actionId: 'reveal-escaped-data',
 				kind: 'app.revealContainer',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				container: 'data',
 			})
 		);
@@ -912,7 +914,7 @@ describe('simulator service', () => {
 
 	it('parses and reveals every bounded App Group container entry', async () => {
 		const provider = new FakeProvider();
-		const root = await mkdtemp(path.join(tmpdir(), 'pumpd-groups-'));
+		const root = await mkdtemp(path.join(tmpdir(), 'rndevtools-groups-'));
 		temporaryDirectories.push(root);
 		const dataRoot = path.join(root, 'CoreSimulator', 'Devices', UDID, 'data');
 		const firstGroup = path.join(
@@ -948,7 +950,7 @@ describe('simulator service', () => {
 				actionId: 'reveal-groups',
 				kind: 'app.revealContainer',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				container: 'groups',
 			})
 		);
@@ -1043,7 +1045,7 @@ describe('simulator service', () => {
 				actionId: 'bad-push',
 				kind: 'push.send',
 				udid: UDID,
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 				payloadJson: '{"message":"missing aps"}',
 			})
 		).toThrow('aps object');
@@ -1114,7 +1116,7 @@ describe('simulator service', () => {
 						contentMode: 'fit',
 						rotation: 0,
 						cornerRadius: 48,
-						bezel: 'pumpd-generic-v1',
+						bezel: 'rndevtools-generic-v1',
 					},
 				},
 			})

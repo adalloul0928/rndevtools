@@ -49,7 +49,7 @@ export {
 	SCENARIO_STEP_TYPES,
 };
 
-export const SCENARIO_DOCUMENT_NAMESPACE = 'pumpd-devtools-scenarios' as const;
+export const SCENARIO_DOCUMENT_NAMESPACE = 'rndevtools-scenarios' as const;
 export const SCENARIO_DOCUMENT_MAX_BYTES = 512 * 1024;
 export const SCENARIO_DOCUMENT_MAX_SCENARIOS = 50;
 

@@ -19,7 +19,7 @@ const PATCHED_UPSTREAM_FILES = new Set([
 	'simctl.go',
 ]);
 
-const EXPECTED_MODULE_FILE = `module github.com/avadtechnologies/pumpd-sim-helper
+const EXPECTED_MODULE_FILE = `module github.com/adalloul0928/rndevtools-sim-helper
 
 go 1.27.0
 
@@ -116,7 +116,9 @@ export function verifyVendoredSimSlim(helperDirectory) {
 		}
 		if (PATCHED_UPSTREAM_FILES.has(upstreamName)) {
 			if (digest === upstreamDigest) {
-				throw new Error(`Declared PUMPD patch did not change ${upstreamName}.`);
+				throw new Error(
+					`Declared vendor patch did not change ${upstreamName}.`
+				);
 			}
 		} else if (digest !== upstreamDigest) {
 			throw new Error(
@@ -160,7 +162,7 @@ export function verifyVendoredSimSlim(helperDirectory) {
 		!cloneSource.includes('simLaunchdPID(ctx, paths.cloneUDID)')
 	) {
 		throw new Error(
-			'The reviewed PUMPD clone privacy patch is missing or reintroduced process-environment scanning.'
+			'The reviewed clone privacy patch is missing or reintroduced process-environment scanning.'
 		);
 	}
 	const measureSource = readFileSync(
@@ -175,9 +177,7 @@ export function verifyVendoredSimSlim(helperDirectory) {
 		'utf8'
 	);
 	if (!simctlSource.includes('func ParseDisabledOutput(')) {
-		throw new Error(
-			'The reviewed PUMPD launchd-status parser patch is missing.'
-		);
+		throw new Error('The reviewed launchd-status parser patch is missing.');
 	}
 
 	return {

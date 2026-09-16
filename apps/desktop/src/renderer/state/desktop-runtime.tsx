@@ -1,5 +1,5 @@
-import { desktopActionCapability } from '@pumpd/devtools/desktop-protocol';
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { desktopActionCapability } from '@rndevtools/core/desktop-protocol';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -47,10 +47,10 @@ type DesktopRuntimeValue = {
 
 const DesktopRuntimeContext = createContext<DesktopRuntimeValue | null>(null);
 
-const SELECTED_DEVICE_KEY = 'pumpd.desktop.selected-device';
+const SELECTED_DEVICE_KEY = 'rndevtools.desktop.selected-device';
 
 function runtimeBridge(): DesktopBridge | null {
-	if (window.pumpdDesktop) return window.pumpdDesktop;
+	if (window.rnDevtools) return window.rnDevtools;
 	if (navigator.userAgent.toLowerCase().includes('electron')) return null;
 	return createBrowserBridge();
 }

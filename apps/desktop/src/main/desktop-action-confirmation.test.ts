@@ -17,7 +17,7 @@ function action(command: string, payload: Record<string, unknown>) {
 
 const scenarioDocument = JSON.stringify({
 	schemaVersion: 1,
-	namespace: 'pumpd-devtools-scenarios',
+	namespace: 'rndevtools-scenarios',
 	scenarios: [],
 });
 
@@ -52,7 +52,7 @@ describe('desktop action confirmation policy', () => {
 		const unsafeName = `Line one\n\u202E${'x'.repeat(512)}`;
 		const source = JSON.stringify({
 			schemaVersion: 1,
-			namespace: 'pumpd-devtools-scenarios',
+			namespace: 'rndevtools-scenarios',
 			scenarios: [
 				{
 					schemaVersion: 1,

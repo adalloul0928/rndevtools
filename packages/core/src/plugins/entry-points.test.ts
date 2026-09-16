@@ -12,7 +12,7 @@ jest.mock('./storage', () => {
 
 it('loads production staff plugin factories without development-only plugins', () => {
 	const plugins = jest.requireActual<typeof import('./index')>(
-		'@pumpd/devtools/plugins',
+		'@rndevtools/core/plugins',
 	);
 
 	expect(plugins).toEqual(

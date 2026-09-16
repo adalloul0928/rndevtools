@@ -19,7 +19,7 @@ const sourceHelper = path.resolve(
 	scriptDirectory,
 	'..',
 	'native',
-	'pumpd-sim-helper'
+	'rndevtools-sim-helper'
 );
 const temporaryDirectories = [];
 
@@ -29,7 +29,7 @@ afterEach(() => {
 	}
 });
 
-test('accepts only the anchored reviewed PUMPD SimSlim patch set', () => {
+test('accepts only the anchored reviewed SimSlim patch set', () => {
 	assert.deepEqual(verifyVendoredSimSlim(sourceHelper), {
 		upstreamVersion: 'v0.8.0',
 		upstreamCommit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
@@ -58,7 +58,9 @@ test('rejects source tampering even when the checksum manifest is unchanged', ()
 });
 
 test('the anchored patch reverses the final tree to the anchored upstream base', () => {
-	const root = mkdtempSync(path.join(tmpdir(), 'pumpd-simslim-derivation-'));
+	const root = mkdtempSync(
+		path.join(tmpdir(), 'rndevtools-simslim-derivation-')
+	);
 	temporaryDirectories.push(root);
 	const finalSource = path.join(
 		sourceHelper,
@@ -110,9 +112,9 @@ test('rejects coordinated source and editable checksum-manifest tampering', () =
 });
 
 function copyFixture() {
-	const root = mkdtempSync(path.join(tmpdir(), 'pumpd-vendored-simslim-'));
+	const root = mkdtempSync(path.join(tmpdir(), 'rndevtools-vendored-simslim-'));
 	temporaryDirectories.push(root);
-	const helper = path.join(root, 'pumpd-sim-helper');
+	const helper = path.join(root, 'rndevtools-sim-helper');
 	cpSync(sourceHelper, helper, { recursive: true });
 	return helper;
 }

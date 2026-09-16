@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-	PUMPD_RECIPE_FORMAT_VERSION,
+	RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 	recipeDefinitionSchema,
 	recipeEvidenceManifestSchema,
 	recipeRunRequestSchema,
@@ -10,7 +10,7 @@ const UDID = '11111111-2222-3333-4444-555555555555';
 
 function recipe(overrides: Record<string, unknown> = {}) {
 	return {
-		formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+		formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 		id: 'smoke-test',
 		name: 'Smoke test',
 		revision: 1,
@@ -156,7 +156,7 @@ describe('recipe protocol', () => {
 							operation: 'privacy.update',
 							privacyOperation: 'reset',
 							service: 'all',
-							bundleIdentifier: 'com.example.pumpd',
+							bundleIdentifier: 'com.example.app',
 						},
 					},
 					{
@@ -222,7 +222,7 @@ describe('recipe protocol', () => {
 
 	it('keeps evidence manifests opaque and rejects raw path additions', () => {
 		const evidence = {
-			format: 'pumpd-evidence-bundle',
+			format: 'rndevtools-evidence-bundle',
 			formatVersion: 1,
 			id: 'evidence-12345678-1234-4123-8123-123456789abc',
 			runId: 'recipe-run-12345678-1234-4123-8123-123456789abc',

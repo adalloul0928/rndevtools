@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const PUMPD_RECIPE_FORMAT_VERSION = 1 as const;
+export const RNDEVTOOLS_RECIPE_FORMAT_VERSION = 1 as const;
 export const DEFAULT_RECIPE_RUN_CONCURRENCY = 2;
 
 const MAX_SHORT_TEXT = 4 * 1024;
@@ -514,7 +514,7 @@ export type RecipeStep = z.infer<typeof recipeStepSchema>;
 
 export const recipeDefinitionSchema = z
 	.strictObject({
-		formatVersion: z.literal(PUMPD_RECIPE_FORMAT_VERSION),
+		formatVersion: z.literal(RNDEVTOOLS_RECIPE_FORMAT_VERSION),
 		id: recipeIdSchema,
 		name: z.string().trim().min(1).max(128),
 		description: shortTextSchema.optional(),
@@ -691,8 +691,8 @@ const evidenceTargetSchema = z.strictObject({
 
 export const recipeEvidenceManifestSchema = z
 	.strictObject({
-		format: z.literal('pumpd-evidence-bundle'),
-		formatVersion: z.literal(PUMPD_RECIPE_FORMAT_VERSION),
+		format: z.literal('rndevtools-evidence-bundle'),
+		formatVersion: z.literal(RNDEVTOOLS_RECIPE_FORMAT_VERSION),
 		id: recipeEvidenceIdSchema,
 		runId: recipeRunIdSchema,
 		recipe: z.strictObject({
@@ -804,8 +804,8 @@ export type RecipeFileOperationReceipt = z.infer<
 >;
 
 export const recipeImportFileSchema = z.strictObject({
-	format: z.literal('pumpd-recipe'),
-	formatVersion: z.literal(PUMPD_RECIPE_FORMAT_VERSION),
+	format: z.literal('rndevtools-recipe'),
+	formatVersion: z.literal(RNDEVTOOLS_RECIPE_FORMAT_VERSION),
 	recipe: recipeDefinitionSchema,
 });
 

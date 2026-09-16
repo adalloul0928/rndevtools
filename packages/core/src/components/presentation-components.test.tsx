@@ -196,7 +196,7 @@ describe('presentation components', () => {
 						return true;
 					}),
 				}}
-				label="PUMPD Tools"
+				label="Dev Tools"
 				onQuickActionPinnedChange={onQuickActionPinnedChange}
 				onRestore={jest.fn()}
 				quickActionPlugins={[quickActionPlugin]}

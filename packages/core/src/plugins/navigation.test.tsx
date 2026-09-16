@@ -756,7 +756,7 @@ describe('Screens panel', () => {
 		await renderPanel(navigation.plugin);
 		expect(screen.getByText('/settings')).toBeOnTheScreen();
 		expect(screen.queryByTestId('sf-chevron.right')).not.toBeOnTheScreen();
-		expect(screen.queryByPlaceholderText('pumpd://…')).not.toBeOnTheScreen();
+		expect(screen.queryByPlaceholderText('myapp://…')).not.toBeOnTheScreen();
 		expect(
 			screen.queryByTestId('devtools-navigation-deeplink'),
 		).not.toBeOnTheScreen();
@@ -784,11 +784,11 @@ describe('Screens panel', () => {
 			screen.getByTestId('devtools-navigation-deeplink'),
 		).toBeOnTheScreen();
 		await fireEvent.changeText(
-			screen.getByPlaceholderText('pumpd://…'),
-			'pumpd://train',
+			screen.getByPlaceholderText('myapp://…'),
+			'myapp://train',
 		);
 		await fireEvent.press(screen.getByLabelText('Open'));
-		expect(onOpenDeepLink).toHaveBeenCalledWith('pumpd://train');
+		expect(onOpenDeepLink).toHaveBeenCalledWith('myapp://train');
 		await waitFor(() =>
 			expect(
 				navigation.getTransitions().map((transition) => transition.phase),

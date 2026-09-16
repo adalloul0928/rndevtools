@@ -1,4 +1,4 @@
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -65,7 +65,7 @@ const EMPTY_RECIPE_STATE: RecipeState = {
 const RecipeRuntimeContext = createContext<RecipeRuntimeValue | null>(null);
 
 function getRecipeBridge(): RecipeBridge | null {
-	const candidate = window.pumpdDesktop as Partial<RecipeBridge> | undefined;
+	const candidate = window.rnDevtools as Partial<RecipeBridge> | undefined;
 	if (
 		!candidate ||
 		typeof candidate.getRecipeState !== 'function' ||

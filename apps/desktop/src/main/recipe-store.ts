@@ -13,12 +13,12 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 import {
-	PUMPD_RECIPE_FORMAT_VERSION,
 	type RecipeDefinition,
 	type RecipeEvidenceManifest,
 	type RecipeRun,
 	type RecipeState,
 	type RecipeSummary,
+	RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 	recipeDefinitionSchema,
 	recipeEvidenceIdSchema,
 	recipeEvidenceManifestSchema,
@@ -49,8 +49,8 @@ const ACTIVE_RUN_STATUSES = new Set([
 ]);
 
 const persistedRunSchema = z.strictObject({
-	format: z.literal('pumpd-recipe-run'),
-	formatVersion: z.literal(PUMPD_RECIPE_FORMAT_VERSION),
+	format: z.literal('rndevtools-recipe-run'),
+	formatVersion: z.literal(RNDEVTOOLS_RECIPE_FORMAT_VERSION),
 	run: recipeRunSchema,
 	evidence: recipeEvidenceManifestSchema,
 });
@@ -196,8 +196,8 @@ export class RecipeStore {
 				this.#requiredRecipesDirectory(),
 				this.#recipePath(recipe.id),
 				{
-					format: 'pumpd-recipe',
-					formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+					format: 'rndevtools-recipe',
+					formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 					recipe,
 				},
 				MAX_RECIPE_FILE_BYTES
@@ -225,8 +225,8 @@ export class RecipeStore {
 		await this.initialize();
 		await this.#mutate(async () => {
 			const record = persistedRunSchema.parse({
-				format: 'pumpd-recipe-run',
-				formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+				format: 'rndevtools-recipe-run',
+				formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 				run: value.run,
 				evidence: value.evidence,
 			});
@@ -263,8 +263,8 @@ export class RecipeStore {
 		const recipe = this.getRecipe(recipeId);
 		if (!recipe) throw new Error('Recipe was not found.');
 		await this.#writeExternalJson(destinationPath, {
-			format: 'pumpd-recipe',
-			formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+			format: 'rndevtools-recipe',
+			formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 			recipe,
 		});
 	}
@@ -406,8 +406,8 @@ export class RecipeStore {
 				],
 			});
 			const persisted = persistedRunSchema.parse({
-				format: 'pumpd-recipe-run',
-				formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+				format: 'rndevtools-recipe-run',
+				formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 				run,
 				evidence,
 			});

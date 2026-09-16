@@ -17,14 +17,14 @@ describe('slimming confirmation copy', () => {
 		const target = slimmingConfirmationTargetSchema.parse({
 			actionId: 'apply',
 			kind: 'profile.apply',
-			profileId: 'pumpd-development',
+			profileId: 'rndevtools-development',
 			simulatorUdids: UDIDS,
 			confirmation: SLIMMING_CONFIRMATIONS.apply,
 		});
-		const copy = slimmingConfirmationCopy(target, 'PUMPD Development');
+		const copy = slimmingConfirmationCopy(target, 'App Development');
 		expect(copy?.detail).toContain('Operation: Apply experimental profile');
 		expect(copy?.detail).toContain(
-			'Profile: PUMPD Development (pumpd-development)'
+			'Profile: App Development (rndevtools-development)'
 		);
 		expect(copy?.detail).toContain('Targets (20):');
 		for (const udid of UDIDS) expect(copy?.detail).toContain(udid);
@@ -46,7 +46,7 @@ describe('slimming confirmation copy', () => {
 			confirmation: SLIMMING_CONFIRMATIONS.restore,
 		});
 		expect(slimmingConfirmationCopy(restore)?.detail).toContain(
-			'Operation: Restore all PUMPD-managed services'
+			'Operation: Restore all rndevtools-managed services'
 		);
 		expect(slimmingConfirmationCopy(disable)?.detail).toContain(
 			'then disable experimental slimming'
@@ -61,7 +61,7 @@ describe('slimming confirmation copy', () => {
 		const target = slimmingConfirmationTargetSchema.parse({
 			actionId: 'apply',
 			kind: 'profile.apply',
-			profileId: 'pumpd-development',
+			profileId: 'rndevtools-development',
 			simulatorUdids: [UDIDS[0], UDIDS[1]],
 			confirmation: SLIMMING_CONFIRMATIONS.apply,
 		});
@@ -98,7 +98,7 @@ describe('slimming confirmation copy', () => {
 		const preview = slimmingConfirmationTargetSchema.parse({
 			actionId: 'preview',
 			kind: 'profile.preview',
-			profileId: 'pumpd-development',
+			profileId: 'rndevtools-development',
 			simulatorUdids: [UDIDS[0]],
 		});
 		expect(slimmingConfirmationCopy(preview)).toBeUndefined();

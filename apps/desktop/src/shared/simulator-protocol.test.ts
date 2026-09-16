@@ -205,10 +205,7 @@ describe('simulator protocol', () => {
 	});
 
 	it('allows universal and custom deep links but rejects local or executable schemes', () => {
-		for (const url of [
-			'https://example.com/path',
-			'pumpdmobileapp://workout/1',
-		]) {
+		for (const url of ['https://example.com/path', 'exampleapp://workout/1']) {
 			expect(
 				simulatorActionSchema.safeParse({
 					actionId: `url-${url}`,
@@ -240,12 +237,12 @@ describe('simulator protocol', () => {
 				actionId: 'universal-https',
 				kind: 'app.openUniversalLink',
 				udid: UDID,
-				url: 'https://pumpd.com/workouts/1',
+				url: 'https://example.com/items/1',
 			}).success
 		).toBe(true);
 		for (const url of [
-			'http://pumpd.com/workouts/1',
-			'pumpdmobileapp://workouts/1',
+			'http://example.com/items/1',
+			'exampleapp://workouts/1',
 			'file:///private/etc/passwd',
 		]) {
 			expect(
@@ -371,11 +368,11 @@ describe('simulator protocol', () => {
 				contentMode: 'fit',
 				rotation: 0,
 				cornerRadius: 72,
-				bezel: 'pumpd-generic-v1',
+				bezel: 'rndevtools-generic-v1',
 				shadow: { color: '#00000080', blurRadius: 48, offsetX: 0, offsetY: 24 },
 			},
 			metadata: {
-				text: 'PUMPD Development\niPhone 17 Pro',
+				text: 'App Development\niPhone 17 Pro',
 				placement: 'bottom',
 				textColor: '#FFFFFFFF',
 				backgroundColor: '#00000080',

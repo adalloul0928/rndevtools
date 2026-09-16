@@ -357,8 +357,8 @@ describe('createQueryPlugin', () => {
 		const queryClient = new QueryClient();
 		const plugin = createQueryPlugin({
 			queryClient,
-			id: 'pumpd-query',
-			title: 'PUMPD Query',
+			id: 'example-query',
+			title: 'Example Query',
 			description: 'Custom description',
 			section: 'Diagnostics',
 			systemImage: 'bolt.fill',
@@ -366,8 +366,8 @@ describe('createQueryPlugin', () => {
 
 		expect(plugin).toEqual(
 			expect.objectContaining({
-				id: 'pumpd-query',
-				title: 'PUMPD Query',
+				id: 'example-query',
+				title: 'Example Query',
 				description: 'Custom description',
 				section: 'Diagnostics',
 				systemImage: 'bolt.fill',

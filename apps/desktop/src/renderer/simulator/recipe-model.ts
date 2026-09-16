@@ -1,9 +1,9 @@
 import {
 	DEFAULT_RECIPE_RUN_CONCURRENCY,
-	PUMPD_RECIPE_FORMAT_VERSION,
 	type RecipeDefinition,
 	type RecipeStep,
 	type RecipeSummary,
+	RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 	recipeDefinitionSchema,
 } from '../../shared/recipe-protocol';
 
@@ -111,7 +111,7 @@ export function createRecipeDefinition(input: {
 	now: number;
 }): RecipeDefinition {
 	return {
-		formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+		formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 		id: input.id,
 		name: input.name ?? 'Untitled recipe',
 		description: '',
@@ -520,14 +520,14 @@ export function analyzeRecipeApprovals(
 				add(
 					'state-mutation',
 					`network.${step.operation}`,
-					'Changes only the instrumented PUMPD fetch profile.'
+					'Changes only the instrumented fetch profile.'
 				);
 				break;
 			case 'camera':
 				add(
 					'privacy',
 					`camera.${step.operation}`,
-					'Changes only PUMPD’s instrumented camera fixture; it does not grant or revoke camera access.'
+					'Changes only the app’s instrumented camera fixture; it does not grant or revoke camera access.'
 				);
 				break;
 			case 'restore-point':

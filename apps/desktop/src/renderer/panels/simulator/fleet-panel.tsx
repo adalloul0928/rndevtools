@@ -44,6 +44,7 @@ import {
 	diskInventorySelectionRevision,
 	sanitizeDiskCleanupCategoryIds,
 } from '@/simulator/disk-inventory-model';
+import { targetConfig } from '@/simulator/target-config';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import {
 	type SimulatorActionInput,
@@ -270,7 +271,7 @@ export function FleetPanel() {
 						</Button>
 					</>
 				}
-				description="Create a simulator, open it, and run PUMPD. Select a row to inspect it, or use Select multiple for batch actions."
+				description="Create a simulator, open it, and run your app. Select a row to inspect it, or use Select multiple for batch actions."
 				eyebrow="Targets"
 				meta={`${state.devices.length} discovered`}
 				title="Simulators"
@@ -571,7 +572,9 @@ function CreateFleetControls({
 		() => runtimes.filter((runtime) => runtime.isAvailable),
 		[runtimes]
 	);
-	const [nameTemplate, setNameTemplate] = useState('PUMPD Test');
+	const [nameTemplate, setNameTemplate] = useState(
+		targetConfig.deviceNameTemplate
+	);
 	const [countText, setCountText] = useState('1');
 	const [bootAfterCreate, setBootAfterCreate] = useState(true);
 	const [runtimeId, setRuntimeId] = useState(
@@ -619,7 +622,7 @@ function CreateFleetControls({
 				<span>Name</span>
 				<Input
 					aria-label="Simulator name"
-					placeholder="PUMPD Test {n}"
+					placeholder={`${targetConfig.deviceNameTemplate} {n}`}
 					value={nameTemplate}
 					onChange={(event) => setNameTemplate(event.currentTarget.value)}
 				/>
@@ -855,11 +858,11 @@ function TargetDetail({
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
-						<h3>Connected PUMPD sessions</h3>
-						<InfoPopover label="Connected PUMPD sessions">
-							Open PUMPD with Metro running to connect. Linking it here requires
-							the app to report this simulator’s identifier. All sessions are
-							available in Connected App.
+						<h3>Connected app sessions</h3>
+						<InfoPopover label="Connected app sessions">
+							Open your app with Metro running to connect. Linking it here
+							requires the app to report this simulator’s identifier. All
+							sessions are available in Connected App.
 						</InfoPopover>
 					</div>
 					<span>{connectedSessions.length}</span>
@@ -899,7 +902,7 @@ function TargetDetail({
 					</div>
 				) : (
 					<p className="sim-section-empty">
-						No PUMPD session linked to this simulator.
+						No app session linked to this simulator.
 					</p>
 				)}
 			</section>

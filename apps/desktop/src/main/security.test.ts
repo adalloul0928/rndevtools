@@ -26,41 +26,35 @@ describe('desktop URL boundaries', () => {
 	it('matches renderer entries while permitting only hash navigation', () => {
 		expect(
 			urlsMatchWithoutHash(
-				'file:///Applications/PUMPD/index.html#network',
-				'file:///Applications/PUMPD/index.html'
+				'file:///Applications/ExampleApp/index.html#network',
+				'file:///Applications/ExampleApp/index.html'
 			)
 		).toBe(true);
 		expect(
 			urlsMatchWithoutHash(
-				'file:///Applications/PUMPD/other.html',
-				'file:///Applications/PUMPD/index.html'
+				'file:///Applications/ExampleApp/other.html',
+				'file:///Applications/ExampleApp/index.html'
 			)
 		).toBe(false);
 	});
 
 	it('maps only private renderer assets below the generated root', () => {
 		const root =
-			'/Applications/PUMPD.app/Contents/Resources/app.asar/dist/renderer';
+			'/Applications/ExampleApp.app/Contents/Resources/app.asar/dist/renderer';
 		expect(packagedRendererAssetPath(root, PACKAGED_RENDERER_URL)).toBe(
 			`${root}/index.html`
 		);
 		expect(
-			packagedRendererAssetPath(
-				root,
-				'pumpd-devtools://app/assets/index.js?v=1'
-			)
+			packagedRendererAssetPath(root, 'rndevtools://app/assets/index.js?v=1')
 		).toBe(`${root}/assets/index.js`);
 		expect(
-			packagedRendererAssetPath(root, 'pumpd-devtools://other/index.html')
+			packagedRendererAssetPath(root, 'rndevtools://other/index.html')
 		).toBeUndefined();
 		expect(
-			packagedRendererAssetPath(
-				root,
-				'pumpd-devtools://app/%2e%2e/main/index.js'
-			)
+			packagedRendererAssetPath(root, 'rndevtools://app/%2e%2e/main/index.js')
 		).toBeUndefined();
 		expect(
-			packagedRendererAssetPath(root, 'pumpd-devtools://app/private.json')
+			packagedRendererAssetPath(root, 'rndevtools://app/private.json')
 		).toBeUndefined();
 	});
 
@@ -78,10 +72,10 @@ describe('desktop URL boundaries', () => {
 			"'unsafe-eval'"
 		);
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).toContain(
-			"img-src 'self' data: blob: pumpd-capture:"
+			"img-src 'self' data: blob: rndevtools-capture:"
 		);
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).toContain(
-			'media-src pumpd-capture:'
+			'media-src rndevtools-capture:'
 		);
 	});
 });

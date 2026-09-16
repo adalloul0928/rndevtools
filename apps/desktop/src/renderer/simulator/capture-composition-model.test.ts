@@ -16,7 +16,7 @@ describe('capture composition model', () => {
 					canvas: expect.objectContaining({
 						size: { mode: 'pixels', width: 1_290, height: 2_796 },
 					}),
-					layout: expect.objectContaining({ bezel: 'pumpd-generic-v1' }),
+					layout: expect.objectContaining({ bezel: 'rndevtools-generic-v1' }),
 				}),
 			})
 		);

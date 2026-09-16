@@ -14,7 +14,7 @@ afterEach(async () => {
 
 async function createStore(now: number): Promise<BuildInsightsStore> {
 	const root = await mkdtemp(
-		path.join(tmpdir(), 'pumpd-build-insights-store-')
+		path.join(tmpdir(), 'rndevtools-build-insights-store-')
 	);
 	temporaryRoots.push(root);
 	const store = new BuildInsightsStore(root, { now: () => now });
@@ -27,13 +27,13 @@ describe('BuildInsightsStore', () => {
 		const now = Date.UTC(2026, 7, 30);
 		const store = await createStore(now);
 		const source = store.upsertSource({
-			sourcePath: '/private/DerivedData/PUMPD',
-			label: 'PUMPD',
+			sourcePath: '/private/DerivedData/ExampleApp',
+			label: 'ExampleApp',
 			kind: 'derived-data-root',
 		});
 		const build = {
-			artifactPath: '/private/DerivedData/PUMPD/Logs/Build/one.xcresult',
-			name: 'Build PUMPD',
+			artifactPath: '/private/DerivedData/ExampleApp/Logs/Build/one.xcresult',
+			name: 'Build ExampleApp',
 			destination: 'iPhone 17 Pro · iOS Simulator',
 			createdAt: now,
 			startedAt: now - 12_000,
@@ -97,12 +97,12 @@ describe('BuildInsightsStore', () => {
 		const now = Date.UTC(2026, 7, 30);
 		const store = await createStore(now);
 		const source = store.upsertSource({
-			sourcePath: '/private/DerivedData/PUMPD',
-			label: 'PUMPD',
+			sourcePath: '/private/DerivedData/ExampleApp',
+			label: 'ExampleApp',
 			kind: 'derived-data-root',
 		});
 		const base = {
-			name: 'Build PUMPD',
+			name: 'Build ExampleApp',
 			destination: 'iPhone 17 Pro',
 			createdAt: now,
 			startedAt: now - 1_000,
@@ -117,14 +117,14 @@ describe('BuildInsightsStore', () => {
 		expect(
 			store.insertBuild(source, {
 				...base,
-				artifactPath: '/private/DerivedData/PUMPD/incomplete.xcresult',
+				artifactPath: '/private/DerivedData/ExampleApp/incomplete.xcresult',
 				status: 'unknown',
 			})
 		).toBe(true);
 		expect(
 			store.insertBuild(source, {
 				...base,
-				artifactPath: '/private/DerivedData/PUMPD/incomplete.xcresult',
+				artifactPath: '/private/DerivedData/ExampleApp/incomplete.xcresult',
 				status: 'succeeded',
 			})
 		).toBe(true);
@@ -133,7 +133,7 @@ describe('BuildInsightsStore', () => {
 		for (let index = 0; index < 2_000; index += 1) {
 			store.insertBuild(source, {
 				...base,
-				artifactPath: `/private/DerivedData/PUMPD/${index}.xcresult`,
+				artifactPath: `/private/DerivedData/ExampleApp/${index}.xcresult`,
 				status: 'succeeded',
 			});
 		}

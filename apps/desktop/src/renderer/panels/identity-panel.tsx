@@ -111,7 +111,7 @@ export function IdentityPanel() {
 				{session.personas.length === 0 ? (
 					<EmptyPanel
 						compact
-						description="Connect a development or Preview PUMPD build that advertises identity sessions."
+						description="Connect a development build of your app that advertises identity sessions."
 						icon={<UserRoundCheck className="h-5 w-5" />}
 						title="No test identities advertised"
 					/>

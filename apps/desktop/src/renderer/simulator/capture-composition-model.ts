@@ -59,7 +59,7 @@ export const DEFAULT_CAPTURE_COMPOSITION_FIELDS: CaptureCompositionFields = {
 	bezel: true,
 	shadow: true,
 	metadataEnabled: false,
-	metadataText: 'PUMPD Development',
+	metadataText: 'App Development',
 	metadataPlacement: 'bottom',
 	comparisonMode: 'none',
 	comparisonAmount: '50',
@@ -119,7 +119,7 @@ export function parseCaptureCompositionFields(
 			contentMode: fields.contentMode,
 			rotation: Number(fields.rotation),
 			cornerRadius,
-			bezel: fields.bezel ? 'pumpd-generic-v1' : 'none',
+			bezel: fields.bezel ? 'rndevtools-generic-v1' : 'none',
 			...(fields.shadow
 				? {
 						shadow: {

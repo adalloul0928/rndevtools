@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	type AgentCliResponse,
-	PUMPD_AGENT_CLI_PROTOCOL,
+	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
 import { AgentCliError, AgentCliService } from './agent-cli-service';
 
@@ -27,9 +27,9 @@ async function fixture(
 		command
 	) => ({ command })
 ): Promise<{ service: AgentCliService; socketPath: string }> {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-agent-cli-'));
+	const directory = await mkdtemp(path.join(tmpdir(), 'rndevtools-agent-cli-'));
 	temporaryDirectories.push(directory);
-	const socketPath = path.join(directory, 'agent', 'pumpd-devtools.sock');
+	const socketPath = path.join(directory, 'agent', 'rndevtools.sock');
 	const service = new AgentCliService({
 		socketPath,
 		handler,
@@ -75,12 +75,12 @@ describe('agent CLI service', () => {
 		expect(metadata.mode & 0o777).toBe(0o600);
 
 		const response = await request(socketPath, {
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 			id: 'request-1',
 			command: { kind: 'simulators', includeUnavailable: false },
 		});
 		expect(response).toEqual({
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 			id: 'request-1',
 			ok: true,
 			result: { command: { kind: 'simulators', includeUnavailable: false } },
@@ -94,7 +94,7 @@ describe('agent CLI service', () => {
 			return {};
 		});
 		const response = await request(socketPath, {
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 			id: 'request-2',
 			command: { kind: 'shell', command: 'whoami' },
 		});
@@ -130,7 +130,7 @@ describe('agent CLI service', () => {
 			socket.once('connect', () => {
 				socket.write(
 					`${JSON.stringify({
-						protocol: PUMPD_AGENT_CLI_PROTOCOL,
+						protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 						id: 'first-frame',
 						command: { kind: 'doctor' },
 					})}\n`
@@ -138,7 +138,7 @@ describe('agent CLI service', () => {
 				setTimeout(() => {
 					socket.end(
 						`${JSON.stringify({
-							protocol: PUMPD_AGENT_CLI_PROTOCOL,
+							protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 							id: 'smuggled-frame',
 							command: { kind: 'doctor' },
 						})}\n`
@@ -163,7 +163,7 @@ describe('agent CLI service', () => {
 			});
 		});
 		const response = await request(socketPath, {
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 			id: 'request-3',
 			command: { kind: 'doctor' },
 		});
@@ -175,12 +175,14 @@ describe('agent CLI service', () => {
 	});
 
 	it('replaces only stale sockets and refuses a file or symbolic link', async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-agent-path-'));
+		const directory = await mkdtemp(
+			path.join(tmpdir(), 'rndevtools-agent-path-')
+		);
 		temporaryDirectories.push(directory);
 		const socketDirectory = path.join(directory, 'agent');
 		const { mkdir } = await import('node:fs/promises');
 		await mkdir(socketDirectory);
-		const filePath = path.join(socketDirectory, 'pumpd-devtools.sock');
+		const filePath = path.join(socketDirectory, 'rndevtools.sock');
 		await writeFile(filePath, 'do not replace');
 		const fileService = new AgentCliService({
 			socketPath: filePath,
@@ -207,7 +209,7 @@ describe('agent CLI service', () => {
 			value: 'x'.repeat(600_000),
 		}));
 		const response = await request(socketPath, {
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 			id: 'request-4',
 			command: { kind: 'doctor' },
 		});
@@ -218,9 +220,11 @@ describe('agent CLI service', () => {
 	});
 
 	it('reports an unsupported state without creating a socket off macOS', async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-agent-linux-'));
+		const directory = await mkdtemp(
+			path.join(tmpdir(), 'rndevtools-agent-linux-')
+		);
 		temporaryDirectories.push(directory);
-		const socketPath = path.join(directory, 'pumpd-devtools.sock');
+		const socketPath = path.join(directory, 'rndevtools.sock');
 		const service = new AgentCliService({
 			socketPath,
 			handler: async () => ({}),
@@ -233,10 +237,10 @@ describe('agent CLI service', () => {
 
 	it('does not publish a socket when packaged CLI verification fails', async () => {
 		const directory = await mkdtemp(
-			path.join(tmpdir(), 'pumpd-agent-untrusted-')
+			path.join(tmpdir(), 'rndevtools-agent-untrusted-')
 		);
 		temporaryDirectories.push(directory);
-		const socketPath = path.join(directory, 'agent', 'pumpd-devtools.sock');
+		const socketPath = path.join(directory, 'agent', 'rndevtools.sock');
 		const service = new AgentCliService({
 			socketPath,
 			handler: async () => ({}),

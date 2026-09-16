@@ -45,7 +45,7 @@ function builtInPlugins() {
 		},
 	});
 	const environment = createEnvironmentPlugin({
-		sections: [{ title: 'Application', values: { APP: 'pumpd' } }],
+		sections: [{ title: 'Application', values: { APP: 'example' } }],
 	});
 	return [
 		consolePlugin.plugin,

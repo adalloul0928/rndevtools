@@ -16,7 +16,7 @@ const temporaryDirectories: string[] = [];
 
 async function fixture(contents = '0123456789') {
 	const directory = await mkdtemp(
-		path.join(tmpdir(), 'pumpd-capture-protocol-')
+		path.join(tmpdir(), 'rndevtools-capture-protocol-')
 	);
 	temporaryDirectories.push(directory);
 	const store = new SimulatorCaptureStore(path.join(directory, 'store'));
@@ -42,15 +42,17 @@ afterEach(async () => {
 describe('Simulator capture protocol', () => {
 	it('accepts only one exact opaque identifier and rejects traversal variants', () => {
 		const id = 'capture-12345678-1234-4123-8123-123456789abc';
-		expect(captureIdFromProtocolUrl(`pumpd-capture://capture/${id}`)).toBe(id);
+		expect(captureIdFromProtocolUrl(`rndevtools-capture://capture/${id}`)).toBe(
+			id
+		);
 		for (const url of [
-			`pumpd-capture://other/${id}`,
-			`pumpd-capture://capture/${id}/extra`,
-			`pumpd-capture://capture/%2e%2e/${id}`,
-			`pumpd-capture://capture/%2Fetc%2Fpasswd`,
-			`pumpd-capture://capture/${id}?path=/etc/passwd`,
-			`pumpd-capture://capture/${id}#fragment`,
-			`pumpd-capture://user@capture/${id}`,
+			`rndevtools-capture://other/${id}`,
+			`rndevtools-capture://capture/${id}/extra`,
+			`rndevtools-capture://capture/%2e%2e/${id}`,
+			`rndevtools-capture://capture/%2Fetc%2Fpasswd`,
+			`rndevtools-capture://capture/${id}?path=/etc/passwd`,
+			`rndevtools-capture://capture/${id}#fragment`,
+			`rndevtools-capture://user@capture/${id}`,
 			`file:///tmp/${id}`,
 		]) {
 			expect(captureIdFromProtocolUrl(url), url).toBeUndefined();

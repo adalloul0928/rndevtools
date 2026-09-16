@@ -24,7 +24,7 @@ describe('plugin helpers', () => {
 				title: 'Feedback',
 				description: 'Report an issue',
 				systemImage: 'exclamationmark.bubble',
-				section: 'PUMPD',
+				section: 'Example',
 				kind: 'action',
 				onPress: () => {},
 			},
@@ -39,7 +39,7 @@ describe('plugin helpers', () => {
 
 		expect(groupPlugins(plugins)).toEqual([
 			{ title: 'Diagnostics', plugins: [plugins[0], plugins[2]] },
-			{ title: 'PUMPD', plugins: [plugins[1]] },
+			{ title: 'Example', plugins: [plugins[1]] },
 		]);
 	});
 

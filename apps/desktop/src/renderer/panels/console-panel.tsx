@@ -189,7 +189,7 @@ export function ConsolePanel() {
 			<PanelHeader
 				eyebrow="Inspect"
 				title="Console"
-				description="Events from PUMPD's structured logger after telemetry sanitization—without monkey-patching the global console."
+				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
 				meta={
 					<span className="flex items-center gap-1.5 text-emerald-300">
 						<ShieldCheck className="h-3 w-3" /> Logger-backed · redacted

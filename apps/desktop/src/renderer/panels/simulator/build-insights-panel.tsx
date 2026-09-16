@@ -42,7 +42,7 @@ type WithoutActionId<T> = T extends { actionId: string }
 type BuildInsightsOperationInput = WithoutActionId<BuildInsightsOperation>;
 
 function getBridge(): BuildInsightsBridge | null {
-	const bridge = window.pumpdDesktop;
+	const bridge = window.rnDevtools;
 	if (
 		!bridge ||
 		typeof bridge.getBuildInsightsState !== 'function' ||

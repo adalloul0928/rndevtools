@@ -143,10 +143,10 @@ describe('simulator command runner', () => {
 	});
 
 	it('uses a minimal environment and strips secrets and SIMCTL_CHILD overrides', async () => {
-		const previousSecret = process.env.PUMPD_TEST_SECRET;
+		const previousSecret = process.env.EXAMPLE_TEST_SECRET;
 		const previousChildOverride =
 			process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES;
-		process.env.PUMPD_TEST_SECRET = 'must-not-be-inherited';
+		process.env.EXAMPLE_TEST_SECRET = 'must-not-be-inherited';
 		process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES = '/tmp/untrusted.dylib';
 		try {
 			const result = await runSimulatorCommand(process.execPath, [
@@ -155,11 +155,11 @@ describe('simulator command runner', () => {
 			]);
 			const environment = JSON.parse(result.stdout) as Record<string, string>;
 			expect(environment.PATH).toBe('/usr/bin:/bin:/usr/sbin:/sbin');
-			expect(environment.PUMPD_TEST_SECRET).toBeUndefined();
+			expect(environment.EXAMPLE_TEST_SECRET).toBeUndefined();
 			expect(environment.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES).toBeUndefined();
 		} finally {
-			if (previousSecret === undefined) delete process.env.PUMPD_TEST_SECRET;
-			else process.env.PUMPD_TEST_SECRET = previousSecret;
+			if (previousSecret === undefined) delete process.env.EXAMPLE_TEST_SECRET;
+			else process.env.EXAMPLE_TEST_SECRET = previousSecret;
 			if (previousChildOverride === undefined) {
 				delete process.env.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES;
 			} else {
@@ -181,12 +181,12 @@ describe('simulator command runner', () => {
 		);
 		const environment = JSON.parse(result.stdout) as Record<string, string>;
 		expect(environment.SIMCTL_CHILD_TZ).toBe('America/Los_Angeles');
-		expect(environment.SIMCTL_CHILD_PUMPD_SLOW_ANIMATIONS).toBe('1');
+		expect(environment.SIMCTL_CHILD_RNDEVTOOLS_SLOW_ANIMATIONS).toBe('1');
 		expect(
 			Object.keys(environment)
 				.filter((key) => key.startsWith('SIMCTL_CHILD_'))
 				.sort()
-		).toEqual(['SIMCTL_CHILD_PUMPD_SLOW_ANIMATIONS', 'SIMCTL_CHILD_TZ']);
+		).toEqual(['SIMCTL_CHILD_RNDEVTOOLS_SLOW_ANIMATIONS', 'SIMCTL_CHILD_TZ']);
 		await expect(
 			runSimulatorCommand(process.execPath, ['-e', 'process.exit(0)'], {
 				simulatorAppEnvironment: { timeZone: '../../private/etc' },

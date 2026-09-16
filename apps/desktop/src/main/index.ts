@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	app,
 	BrowserWindow,
@@ -121,13 +121,13 @@ protocol.registerSchemesAsPrivileged([
 	},
 ]);
 
-const brokerToken = process.env.PUMPD_DEVTOOLS_TOKEN;
+const brokerToken = process.env.RNDEVTOOLS_TOKEN;
 const broker = new DesktopBroker({
-	host: process.env.PUMPD_DEVTOOLS_BIND_ADDRESS ?? DEFAULT_BROKER_HOST,
-	port: Number(process.env.PUMPD_DEVTOOLS_PORT ?? DEFAULT_BROKER_PORT),
+	host: process.env.RNDEVTOOLS_BIND_ADDRESS ?? DEFAULT_BROKER_HOST,
+	port: Number(process.env.RNDEVTOOLS_PORT ?? DEFAULT_BROKER_PORT),
 	...(brokerToken === undefined ? {} : { token: brokerToken }),
-	allowWildcardBind: process.env.PUMPD_DEVTOOLS_ALLOW_WILDCARD === 'true',
-	includeDemoDevice: process.env.PUMPD_DEVTOOLS_DEMO === 'true',
+	allowWildcardBind: process.env.RNDEVTOOLS_ALLOW_WILDCARD === 'true',
+	includeDemoDevice: process.env.RNDEVTOOLS_DEMO === 'true',
 });
 const windows = new Set<BrowserWindow>();
 const confirmationStore = new ActionConfirmationStore();
@@ -480,10 +480,10 @@ async function selectRecipeImportPath(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
 	const options: Electron.OpenDialogOptions = {
-		title: 'Import PUMPD recipe',
+		title: 'Import recipe',
 		buttonLabel: 'Import',
 		properties: ['openFile'],
-		filters: [{ name: 'PUMPD recipe JSON', extensions: ['json'] }],
+		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
 	};
 	const owner = ownerWindow(event);
 	const result = owner
@@ -497,10 +497,10 @@ async function selectRecipeExportDestination(
 	recipe: RecipeDefinition
 ): Promise<string | undefined> {
 	const options: Electron.SaveDialogOptions = {
-		title: 'Export PUMPD recipe',
+		title: 'Export recipe',
 		buttonLabel: 'Export',
-		defaultPath: `${recipe.id}.pumpd-recipe.json`,
-		filters: [{ name: 'PUMPD recipe JSON', extensions: ['json'] }],
+		defaultPath: `${recipe.id}.rndevtools-recipe.json`,
+		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
 	};
 	const owner = ownerWindow(event);
 	const result = owner
@@ -514,10 +514,10 @@ async function selectEvidenceExportDestination(
 	evidence: RecipeEvidenceManifest
 ): Promise<string | undefined> {
 	const options: Electron.SaveDialogOptions = {
-		title: 'Export PUMPD evidence manifest',
+		title: 'Export evidence manifest',
 		buttonLabel: 'Export',
-		defaultPath: `${evidence.id}.pumpd-evidence.json`,
-		filters: [{ name: 'PUMPD evidence JSON', extensions: ['json'] }],
+		defaultPath: `${evidence.id}.rndevtools-evidence.json`,
+		filters: [{ name: 'Evidence JSON', extensions: ['json'] }],
 	};
 	const owner = ownerWindow(event);
 	const result = owner
@@ -553,7 +553,7 @@ async function selectBuildInsightsExportDestination(
 	const options: Electron.SaveDialogOptions = {
 		title: 'Export local Build Insights',
 		buttonLabel: 'Export',
-		defaultPath: `pumpd-build-insights.${extension}`,
+		defaultPath: `rndevtools-build-insights.${extension}`,
 		filters: [
 			{
 				name:
@@ -1139,7 +1139,7 @@ function createWindow(): BrowserWindow {
 		minHeight: 700,
 		show: false,
 		backgroundColor: '#000000',
-		title: 'PUMPD Devtools',
+		title: 'RN Devtools',
 		titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
 		// Centers the 12px traffic lights in the 48px titlebar the renderer draws.
 		trafficLightPosition: { x: 16, y: 18 },
@@ -1210,7 +1210,7 @@ function createWindow(): BrowserWindow {
 	const rendererLoad = window.loadURL(rendererEntryUrl());
 	void rendererLoad.catch((error: unknown) => {
 		dialog.showErrorBox(
-			'PUMPD Devtools renderer could not load',
+			'RN Devtools renderer could not load',
 			diagnosticErrorText(error).slice(0, 8 * 1024)
 		);
 		if (!window.isDestroyed()) window.destroy();
@@ -1299,7 +1299,7 @@ if (!app.requestSingleInstanceLock()) {
 				...(!app.isPackaged
 					? {
 							mutationUnavailableReason:
-								'Preview is available. Applying or restoring services requires a signed, packaged PUMPD Devtools app.',
+								'Preview is available. Applying or restoring services requires a signed, packaged RN Devtools app.',
 						}
 					: {}),
 				resourceDirectory: nativeResourceDirectory,
@@ -1327,7 +1327,7 @@ if (!app.requestSingleInstanceLock()) {
 				socketPath: path.join(
 					app.getPath('userData'),
 					'agent',
-					'pumpd-devtools.sock'
+					'rndevtools.sock'
 				),
 				handler: createAgentCommandRouter({
 					broker,
@@ -1399,7 +1399,7 @@ if (!app.requestSingleInstanceLock()) {
 		})
 		.catch((error: unknown) => {
 			dialog.showErrorBox(
-				'PUMPD Devtools could not start',
+				'RN Devtools could not start',
 				diagnosticErrorText(error).slice(0, 8 * 1024)
 			);
 			app.quit();

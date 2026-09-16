@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import type {
 	CaptureCompositionRecipe,
 	SimulatorAction,

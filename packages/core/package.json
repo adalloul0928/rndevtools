@@ -1,10 +1,32 @@
 {
-	"name": "@pumpd/devtools",
+	"name": "@rndevtools/core",
 	"version": "0.1.0",
-	"private": true,
-	"description": "Private, extensible on-device diagnostics for Expo and React Native",
-	"license": "UNLICENSED",
+	"description": "Extensible, privacy-bounded on-device diagnostics for Expo and React Native",
+	"license": "MIT",
+	"author": "Aren Dalloul",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adalloul0928/rndevtools.git",
+		"directory": "packages/core"
+	},
+	"homepage": "https://github.com/adalloul0928/rndevtools/tree/main/packages/core#readme",
+	"bugs": "https://github.com/adalloul0928/rndevtools/issues",
+	"keywords": [
+		"react-native",
+		"expo",
+		"devtools",
+		"debugging",
+		"diagnostics",
+		"network-inspector"
+	],
 	"sideEffects": false,
+	"publishConfig": {
+		"access": "public"
+	},
+	"//": "This package ships TypeScript source on purpose. Three components use Reanimated worklets, which must be compiled by the consuming app's own Babel pipeline; pre-bundled output would silently lose workletization. Metro handles this automatically. Jest consumers add '@rndevtools/core' to transformIgnorePatterns.",
+	"source": "./src/index.ts",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
 		"./desktop-protocol": "./src/desktop-protocol.ts",
@@ -18,11 +40,18 @@
 		"./plugins/network-presentation": "./src/plugins/network-presentation.ts",
 		"./package.json": "./package.json"
 	},
+	"files": [
+		"src",
+		"!src/**/*.test.ts",
+		"!src/**/*.test.tsx",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
 		"lint": "biome check src",
 		"typecheck": "tsc --noEmit",
-		"check:unused": "knip --directory ../.. --workspace packages/devtools --treat-config-hints-as-errors",
-		"check:cycles": "knip --directory ../.. --workspace packages/devtools --cycles --treat-config-hints-as-errors",
+		"check:unused": "knip --directory ../.. --workspace packages/core --treat-config-hints-as-errors",
+		"check:cycles": "knip --directory ../.. --workspace packages/core --cycles --treat-config-hints-as-errors",
 		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "jest --runInBand",
 		"test:coverage": "jest --runInBand --coverage",
@@ -38,16 +67,19 @@
 		"react-native-gesture-handler": ">=2.16 <3",
 		"react-native-reanimated": ">=4 <5",
 		"react-native-safe-area-context": ">=5 <6",
-		"react-native-worklets": ">=0.10 <1",
-		"react-native-svg": ">=15 <16"
+		"react-native-svg": ">=15 <16",
+		"react-native-worklets": ">=0.10 <1"
 	},
 	"peerDependenciesMeta": {
 		"@tanstack/react-query": {
 			"optional": true
 		}
 	},
+	"dependencies": {
+		"@hugeicons/core-free-icons": "catalog:",
+		"@hugeicons/react-native": "catalog:"
+	},
 	"devDependencies": {
-		"test-renderer": "catalog:",
 		"@biomejs/biome": "catalog:",
 		"@expo/material-symbols": "catalog:",
 		"@expo/ui": "catalog:",
@@ -64,12 +96,9 @@
 		"react-native-gesture-handler": "catalog:",
 		"react-native-reanimated": "catalog:",
 		"react-native-safe-area-context": "catalog:",
+		"react-native-svg": "catalog:",
 		"react-native-worklets": "catalog:",
-		"typescript": "catalog:",
-		"react-native-svg": "catalog:"
-	},
-	"dependencies": {
-		"@hugeicons/core-free-icons": "catalog:",
-		"@hugeicons/react-native": "catalog:"
+		"test-renderer": "catalog:",
+		"typescript": "catalog:"
 	}
 }

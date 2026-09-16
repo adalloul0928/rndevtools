@@ -26,7 +26,7 @@ describe('validateEnvironmentValues', () => {
 		const sections = [
 			{
 				title: 'App',
-				values: { NAME: 'PUMPD', COUNT: '2', PLATFORM: 'android' },
+				values: { NAME: 'ExampleApp', COUNT: '2', PLATFORM: 'android' },
 			},
 		];
 		const results = validateEnvironmentValues(sections, [

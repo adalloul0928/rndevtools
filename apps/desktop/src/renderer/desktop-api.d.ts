@@ -6,7 +6,7 @@ import type { SlimmingBridge } from '../shared/slimming-protocol';
 
 declare global {
 	interface Window {
-		pumpdDesktop?: DesktopBridge &
+		rnDevtools?: DesktopBridge &
 			SimulatorBridge &
 			SlimmingBridge &
 			RecipeBridge &

@@ -693,7 +693,7 @@ export function createRestorePointsPlugin(
 		await repository.importJson(value, mode);
 	};
 	const retentionDescription = options.persistence
-		? 'persisted in the dedicated PUMPD devtools namespace'
+		? 'persisted in the dedicated devtools namespace'
 		: 'held in memory for this tools session';
 
 	function RestorePointsPanel({ onBack, actions }: DevToolsPanelProps) {
@@ -722,7 +722,7 @@ export function createRestorePointsPlugin(
 				confirmation: {
 					title: 'Reset explicit sources to baseline?',
 					message:
-						'Only sources that explicitly implement resetToBaseline will change. PUMPD captures rollback data first.',
+						'Only sources that explicitly implement resetToBaseline will change. Rollback data is captured first.',
 					confirmLabel: 'Reset safely',
 				},
 				action: async () => {

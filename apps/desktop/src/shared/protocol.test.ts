@@ -214,7 +214,7 @@ describe('desktop IPC and device schemas', () => {
 			})
 		).toMatchObject({ platform: 'browser' });
 		expect(demo.tools.querySimulation?.active).toMatchObject({
-			familyId: 'all-pumpd-queries',
+			familyId: 'all-example-queries',
 			mode: 'offline',
 		});
 	});
@@ -454,7 +454,7 @@ describe('desktop IPC and device schemas', () => {
 				...empty,
 				scenarios: [
 					{
-						id: 'pumpd.persona',
+						id: 'example.persona',
 						version: 1,
 						definitionToken: 'definition-1',
 						name: 'Persona',
@@ -468,7 +468,7 @@ describe('desktop IPC and device schemas', () => {
 					running: false,
 					active: {
 						receiptId: 'receipt-1',
-						scenarioId: 'pumpd.persona',
+						scenarioId: 'example.persona',
 						scenarioVersion: 1,
 						scenarioName: 'Persona',
 						activatedAt: Date.now(),
@@ -481,7 +481,7 @@ describe('desktop IPC and device schemas', () => {
 			},
 		});
 		expect(parsed.tools.scenarioRuntime.active?.scenarioId).toBe(
-			'pumpd.persona'
+			'example.persona'
 		);
 	});
 

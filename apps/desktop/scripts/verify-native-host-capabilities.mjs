@@ -13,7 +13,7 @@ const helperPath = resolve(
 			'build',
 			'native',
 			`mac-${process.arch}`,
-			'pumpd-native-host'
+			'rndevtools-native-host'
 		)
 );
 const maximumRequestBytes = 64 * 1024;
@@ -23,7 +23,9 @@ if (process.platform !== 'darwin') {
 	fail('Native-host capability verification requires macOS.');
 }
 if (process.argv.length > 3) {
-	fail('Usage: node verify-native-host-capabilities.mjs [pumpd-native-host]');
+	fail(
+		'Usage: node verify-native-host-capabilities.mjs [rndevtools-native-host]'
+	);
 }
 
 try {

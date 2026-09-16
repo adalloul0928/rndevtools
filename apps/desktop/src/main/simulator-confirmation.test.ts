@@ -7,11 +7,11 @@ import {
 } from './simulator-confirmation';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
-const DEVICE = { name: 'PUMPD Test', udid: UDID };
+const DEVICE = { name: 'Example Test', udid: UDID };
 const CERTIFICATE = {
 	sha256: 'a'.repeat(64),
 	sizeBytes: 1_024,
-	subject: 'CN=PUMPD Test Root',
+	subject: 'CN=Example Test Root',
 };
 
 const DESTRUCTIVE_ACTIONS: Array<{
@@ -33,7 +33,7 @@ const DESTRUCTIVE_ACTIONS: Array<{
 			actionId: 'uninstall',
 			kind: 'app.uninstall',
 			udid: UDID,
-			bundleIdentifier: 'com.example.pumpd',
+			bundleIdentifier: 'com.example.app',
 		},
 	},
 	{
@@ -46,7 +46,7 @@ const DESTRUCTIVE_ACTIONS: Array<{
 			udid: UDID,
 			operation: 'reset',
 			service: 'photos',
-			bundleIdentifier: 'com.example.pumpd',
+			bundleIdentifier: 'com.example.app',
 		},
 	},
 	{
@@ -169,12 +169,12 @@ describe('Simulator confirmation policy', () => {
 				udid: UDID,
 				operation: 'reset',
 				service: 'photos',
-				bundleIdentifier: 'com.example.pumpd',
+				bundleIdentifier: 'com.example.app',
 			},
 			DEVICE
 		);
 		expect(copy?.detail).toContain('Privacy service: photos');
-		expect(copy?.detail).toContain('Bundle identifier: com.example.pumpd');
+		expect(copy?.detail).toContain('Bundle identifier: com.example.app');
 		expect(copy?.detail).toContain(
 			`UDID: ${UDID}\nTarget name: ${DEVICE.name}`
 		);

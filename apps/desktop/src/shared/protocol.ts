@@ -3,22 +3,22 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 	desktopActionCapability,
-	PUMPD_DESKTOP_ACTION_CAPABILITIES,
-	PUMPD_DESKTOP_PROTOCOL_VERSION,
-	PUMPD_DESKTOP_SNAPSHOT_LIMITS,
-	PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS,
-	PUMPD_DESKTOP_TOOL_IDS,
 	parseDesktopDeviceAction,
-} from '@pumpd/devtools/desktop-protocol';
+	RNDEVTOOLS_ACTION_CAPABILITIES,
+	RNDEVTOOLS_PROTOCOL_VERSION,
+	RNDEVTOOLS_SNAPSHOT_LIMITS,
+	RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS,
+	RNDEVTOOLS_TOOL_IDS,
+} from '@rndevtools/core/desktop-protocol';
 import {
 	isSensitiveDiagnosticKey,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import { z } from 'zod';
 
-export const DESKTOP_PROTOCOL_VERSION = PUMPD_DESKTOP_PROTOCOL_VERSION;
+export const DESKTOP_PROTOCOL_VERSION = RNDEVTOOLS_PROTOCOL_VERSION;
 export const DESKTOP_SUPPORTED_PROTOCOL_VERSIONS =
-	PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS;
+	RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS;
 export const DEFAULT_BROKER_HOST = '127.0.0.1';
 export const DEFAULT_BROKER_PORT = 47931;
 
@@ -84,7 +84,7 @@ const headerRecordSchema = z
 		return output;
 	});
 
-const toolIdSchema = z.enum(PUMPD_DESKTOP_TOOL_IDS);
+const toolIdSchema = z.enum(RNDEVTOOLS_TOOL_IDS);
 export type ToolId = z.infer<typeof toolIdSchema>;
 
 const devicePlatformSchema = z.enum([
@@ -123,8 +123,8 @@ const deviceInfoObjectSchema = z.strictObject({
 		})
 		.optional(),
 	capabilities: z
-		.array(z.enum(PUMPD_DESKTOP_ACTION_CAPABILITIES))
-		.max(PUMPD_DESKTOP_ACTION_CAPABILITIES.length)
+		.array(z.enum(RNDEVTOOLS_ACTION_CAPABILITIES))
+		.max(RNDEVTOOLS_ACTION_CAPABILITIES.length)
 		.default([]),
 });
 type DeviceInfoObject = z.infer<typeof deviceInfoObjectSchema>;
@@ -461,7 +461,7 @@ const zustandStoreSchema = z.strictObject({
 	title: shortTextSchema,
 	description: optionalTextSchema,
 	stateText: longTextSchema,
-	keys: z.array(shortTextSchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storageKeys),
+	keys: z.array(shortTextSchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.storageKeys),
 	updatedAt: timestampSchema,
 	capabilities: z
 		.strictObject({
@@ -485,7 +485,7 @@ const zustandChangeSchema = z.strictObject({
 	storeTitle: shortTextSchema,
 	changedKeys: z
 		.array(shortTextSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChangedKeys),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandChangedKeys),
 	stateText: longTextSchema,
 	error: longTextSchema.optional(),
 });
@@ -511,7 +511,7 @@ const zustandMutationReceiptSchema = z.strictObject({
 	completedAt: timestampSchema,
 	changedKeys: z
 		.array(shortTextSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChangedKeys),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandChangedKeys),
 	correlationId: identifierSchema.optional(),
 	snapshotId: identifierSchema.optional(),
 	error: longTextSchema.optional(),
@@ -535,7 +535,7 @@ const restorePointSchema = z.strictObject({
 	estimatedBytes: z.number().int().nonnegative(),
 	sources: z
 		.array(restoreSourceSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreSources),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.restoreSources),
 });
 const restoreSourceResultSchema = z.strictObject({
 	sourceId: identifierSchema,
@@ -561,7 +561,7 @@ const restoreReceiptSchema = z.strictObject({
 	error: longTextSchema.optional(),
 	sourceResults: z
 		.array(restoreSourceResultSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreSources),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.restoreSources),
 });
 const performanceSampleSchema = z.strictObject({
 	id: identifierSchema,
@@ -596,7 +596,7 @@ const performanceReviewSchema = z.strictObject({
 	droppedSampleCount: boundedCountSchema.default(0),
 	samples: z
 		.array(performanceSampleSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.performanceSamples),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.performanceSamples),
 	summary: performanceSummarySchema,
 });
 export type PerformanceReview = z.infer<typeof performanceReviewSchema>;
@@ -644,7 +644,7 @@ const scenarioDefinitionSummarySchema = z.strictObject({
 	bundled: z.boolean(),
 	variables: z
 		.array(scenarioVariableSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioVariables),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.scenarioVariables),
 	preconditionCount: boundedCountSchema,
 	steps: z
 		.array(
@@ -654,7 +654,7 @@ const scenarioDefinitionSummarySchema = z.strictObject({
 				label: shortTextSchema.optional(),
 			})
 		)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioSteps),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.scenarioSteps),
 });
 export type ScenarioDefinitionSummary = z.infer<
 	typeof scenarioDefinitionSummarySchema
@@ -705,7 +705,7 @@ const scenarioReceiptSchema = z.strictObject({
 	error: longTextSchema.optional(),
 	stepResults: z
 		.array(scenarioStepReceiptSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioSteps),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.scenarioSteps),
 });
 
 const identitySchema = z
@@ -745,7 +745,7 @@ const identitySessionSchema = z.strictObject({
 				error: longTextSchema.optional(),
 			})
 		)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.identityHistory),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.identityHistory),
 	personas: z
 		.array(
 			z.strictObject({
@@ -754,7 +754,7 @@ const identitySessionSchema = z.strictObject({
 				note: shortTextSchema,
 			})
 		)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.identityPersonas),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.identityPersonas),
 });
 
 const componentTargetSchema = z.strictObject({
@@ -771,7 +771,7 @@ const componentTargetSchema = z.strictObject({
 	targetKey: optionalTextSchema,
 	sourceFiles: z
 		.array(longTextSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.componentSourceFiles),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.componentSourceFiles),
 	instanceText: longTextSchema.optional(),
 	instanceTruncated: z.boolean().default(false),
 	bounds: z
@@ -835,11 +835,11 @@ const componentSummarySchema = z.strictObject({
 				targetId: identifierSchema,
 				instanceIds: z
 					.array(identifierSchema)
-					.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.components),
+					.max(RNDEVTOOLS_SNAPSHOT_LIMITS.components),
 				message: longTextSchema,
 			})
 		)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.componentDiagnostics)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.componentDiagnostics)
 		.optional(),
 	error: longTextSchema.optional(),
 });
@@ -927,9 +927,7 @@ const diagnosticEntrySchema = z.strictObject({
 export type DiagnosticEntry = z.infer<typeof diagnosticEntrySchema>;
 
 const deviceToolsObjectSchema = z.strictObject({
-	network: z
-		.array(networkEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.network),
+	network: z.array(networkEntrySchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.network),
 	networkProfile: z
 		.strictObject({
 			id: z.enum(networkSimulationProfileIds),
@@ -938,59 +936,55 @@ const deviceToolsObjectSchema = z.strictObject({
 			scope: z.literal('instrumented-fetch'),
 		})
 		.optional(),
-	console: z
-		.array(consoleEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.console),
-	storage: z
-		.array(storageEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storage),
+	console: z.array(consoleEntrySchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.console),
+	storage: z.array(storageEntrySchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.storage),
 	storageEvents: z
 		.array(storageEventSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.storageEvents),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.storageEvents),
 	storageSummary: storageSummarySchema,
-	queries: z.array(queryEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.queries),
+	queries: z.array(queryEntrySchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.queries),
 	mutations: z
 		.array(mutationEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.mutations),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.mutations),
 	querySummary: querySummarySchema,
 	querySimulation: querySimulationSchema.optional(),
-	routes: z.array(routeEntrySchema).max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routes),
+	routes: z.array(routeEntrySchema).max(RNDEVTOOLS_SNAPSHOT_LIMITS.routes),
 	routeEvents: z
 		.array(routeEventSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.routeEvents),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.routeEvents),
 	environment: z
 		.array(environmentEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.environment),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.environment),
 	zustandStores: z
 		.array(zustandStoreSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandStores),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandStores),
 	zustandChanges: z
 		.array(zustandChangeSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandChanges),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandChanges),
 	zustandStateSnapshots: z
 		.array(zustandStateSnapshotSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandStateSnapshots)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandStateSnapshots)
 		.default([]),
 	zustandMutationReceipts: z
 		.array(zustandMutationReceiptSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.zustandMutationReceipts)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.zustandMutationReceipts)
 		.default([]),
 	zustandSummary: zustandSummarySchema,
 	restorePoints: z
 		.array(restorePointSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restorePoints),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.restorePoints),
 	restoreReceipts: z
 		.array(restoreReceiptSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreReceipts)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.restoreReceipts)
 		.default([]),
 	scenarios: z
 		.array(scenarioDefinitionSummarySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarios)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.scenarios)
 		.default([]),
 	scenarioRuntime: scenarioRuntimeSchema.default({ running: false }),
 	scenarioReceipts: z
 		.array(scenarioReceiptSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.scenarioReceipts)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.scenarioReceipts)
 		.default([]),
 	identitySession: identitySessionSchema.default({
 		running: false,
@@ -1000,16 +994,16 @@ const deviceToolsObjectSchema = z.strictObject({
 	performance: performanceReviewSchema,
 	components: z
 		.array(componentTargetSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.components),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.components),
 	componentRenders: z
 		.array(componentRenderSchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.componentRenders)
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.componentRenders)
 		.default([]),
 	componentSummary: componentSummarySchema,
 	cameraFixture: cameraFixtureSchema.default({ active: false }),
 	diagnostics: z
 		.array(diagnosticEntrySchema)
-		.max(PUMPD_DESKTOP_SNAPSHOT_LIMITS.diagnostics),
+		.max(RNDEVTOOLS_SNAPSHOT_LIMITS.diagnostics),
 });
 
 type DeviceToolsObject = z.infer<typeof deviceToolsObjectSchema>;

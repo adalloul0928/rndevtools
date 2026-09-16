@@ -1,6 +1,6 @@
 import { Button } from '@heroui/react/button';
 import { Input } from '@heroui/react/input';
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	AlertTriangle,
 	Camera,

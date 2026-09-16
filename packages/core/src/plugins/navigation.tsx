@@ -120,6 +120,11 @@ export type NavigationPluginOptions = {
 	onNavigate?: (path: string) => unknown | Promise<unknown>;
 	/** Opens a raw deep link URL. When absent the deep link section is hidden. */
 	onOpenDeepLink?: (url: string) => unknown | Promise<unknown>;
+	/**
+	 * Host URL scheme used to build the deep link field placeholder so the hint
+	 * reads in the host's own scheme. Defaults to a neutral example.
+	 */
+	deepLinkScheme?: string;
 	/** Optional shared, metadata-only timeline owned by the host. */
 	eventStore?: DevtoolsEventStore;
 	/** Injectable monotonic wall clock for deterministic hosts and tests. */
@@ -437,6 +442,7 @@ export function createNavigationPlugin(
 		const deepLinkField = useRef<TextFieldRef>(null);
 
 		const { onNavigate, onOpenDeepLink } = options;
+		const deepLinkPlaceholder = `${options.deepLinkScheme ?? 'myapp'}://…`;
 		const needle = search.trim().toLowerCase();
 		const current = events.at(-1);
 		const mountedCount = stack.length;
@@ -918,7 +924,7 @@ export function createNavigationPlugin(
 												onSubmit(openDeepLink),
 											]}
 											onTextChange={setDeepLink}
-											placeholder="pumpd://…"
+											placeholder={deepLinkPlaceholder}
 											ref={deepLinkField}
 										/>
 										<Button
@@ -1066,7 +1072,7 @@ export function createNavigationPlugin(
 							<AndroidPanelSection title="Deep link">
 								<AndroidPanelSearch
 									onChangeText={setDeepLink}
-									placeholder="pumpd://…"
+									placeholder={deepLinkPlaceholder}
 									value={deepLink}
 								/>
 								<AndroidPanelRow

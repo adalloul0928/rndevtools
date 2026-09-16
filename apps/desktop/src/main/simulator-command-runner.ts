@@ -98,7 +98,7 @@ function simulatorCommandEnvironment(
 		if (value !== undefined) environment[name] = value;
 	}
 	if (gracefulCancellationPipe) {
-		environment.PUMPD_HELPER_CONTROL_FD = '4';
+		environment.RNDEVTOOLS_HELPER_CONTROL_FD = '4';
 	}
 	if (appEnvironment?.timeZone !== undefined) {
 		const timeZoneSegments = appEnvironment.timeZone.split('/');
@@ -116,7 +116,7 @@ function simulatorCommandEnvironment(
 		environment.SIMCTL_CHILD_TZ = appEnvironment.timeZone;
 	}
 	if (appEnvironment?.slowAnimations !== undefined) {
-		environment.SIMCTL_CHILD_PUMPD_SLOW_ANIMATIONS =
+		environment.SIMCTL_CHILD_RNDEVTOOLS_SLOW_ANIMATIONS =
 			appEnvironment.slowAnimations ? '1' : '0';
 	}
 	return environment;

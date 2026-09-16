@@ -28,7 +28,7 @@ describe('simulator metrics parsing', () => {
 			}).sample([
 				{
 					udid: UDID,
-					name: 'PUMPD Test',
+					name: 'Example Test',
 					state: 'booted',
 					isAvailable: true,
 					runtimeIdentifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
@@ -65,7 +65,7 @@ user/501 = {
   }
   services = {
     123 - com.apple.runningboardd
-    456 (pe) UIKitApplication:com.example.pumpd[abcd][rb-legacy]
+    456 (pe) UIKitApplication:com.example.app[abcd][rb-legacy]
     0 - com.apple.not-running
     789 - bad label with spaces
   }
@@ -75,8 +75,8 @@ user/501 = {
 			{ processId: 123, label: 'com.apple.runningboardd' },
 			{
 				processId: 456,
-				label: 'UIKitApplication:com.example.pumpd[abcd][rb-legacy]',
-				bundleIdentifier: 'com.example.pumpd',
+				label: 'UIKitApplication:com.example.app[abcd][rb-legacy]',
+				bundleIdentifier: 'com.example.app',
 			},
 		]);
 		expect(JSON.stringify(processes)).not.toContain('API_TOKEN');

@@ -8,7 +8,9 @@ const UDID = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 const directories: string[] = [];
 
 async function fixture() {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-store-'));
+	const directory = await mkdtemp(
+		path.join(tmpdir(), 'rndevtools-slimming-store-')
+	);
 	directories.push(directory);
 	return { directory, store: new SlimmingPersistence(directory) };
 }
@@ -29,7 +31,7 @@ describe('slimming persistence', () => {
 			id: 'pending-1',
 			actionId: 'action-1',
 			operation: 'apply_profile',
-			profileId: 'pumpd-development',
+			profileId: 'rndevtools-development',
 			startedAt: 1,
 			checkpointToken: 'opaque-restart-safe-token',
 			originalBootState: 'Booted',

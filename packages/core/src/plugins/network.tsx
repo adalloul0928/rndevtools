@@ -135,6 +135,13 @@ const MAX_RAW_CAPTURE_TEXT_CODE_UNITS = 64 * 1024;
 const MAX_SIMULATION_SEED_URL_CODE_UNITS = 1024;
 const MAX_STREAMING_ABORT_BRIDGE_FALLBACK_MS = 10 * 60_000;
 const SIMULATION_CAPABILITY_POLL_INTERVAL_MS = 250;
+// Standard, vendor-neutral correlation headers. A host that emits its own
+// vendor header passes it through the plugin options instead.
+const DEFAULT_CORRELATION_ID_HEADERS = Object.freeze([
+	'x-request-id',
+	'traceparent',
+]);
+const DEFAULT_PARENT_EVENT_ID_HEADERS = Object.freeze(['x-parent-event-id']);
 const CAPTURE_AUTHORITY_POLL_INTERVAL_MS = 250;
 const SIMULATION_AUTHORITY_RECHECK_INTERVAL_MS = 50;
 const REPLAY_MODELED_REQUEST_INIT_KEYS = new Set([
@@ -1074,6 +1081,14 @@ export type NetworkPluginOptions = {
 		input: RequestInfo | URL,
 		init: RequestInit | undefined,
 	) => Readonly<{ correlationId?: string; parentEventId?: string }> | undefined;
+	/**
+	 * Response headers consulted for a correlation id, in preference order. A
+	 * host with its own vendor header lists it first; the standard headers are
+	 * the default so no vendor prefix is assumed.
+	 */
+	correlationIdHeaders?: readonly string[];
+	/** Response headers consulted for a parent event id, in preference order. */
+	parentEventIdHeaders?: readonly string[];
 	maxBodyBytes?: number;
 	maxEvents?: number;
 	maxStoreBytes?: number;
@@ -1955,18 +1970,26 @@ export function createNetworkPlugin(
 		} catch {
 			// Accessor-backed host metadata is ignored.
 		}
+		const firstHeader = (names: readonly string[]): string | undefined => {
+			for (const name of names) {
+				const value = lowerHeaders[name.toLowerCase()];
+				if (value !== undefined) return value;
+			}
+			return undefined;
+		};
 		const correlationId =
 			boundedContextText(suppliedCorrelation) ??
 			boundedContextText(
-				lowerHeaders['x-pumpd-request-id'] ??
-					lowerHeaders['x-request-id'] ??
-					lowerHeaders.traceparent,
+				firstHeader(
+					options.correlationIdHeaders ?? DEFAULT_CORRELATION_ID_HEADERS,
+				),
 			);
 		const parentEventId =
 			boundedContextText(suppliedParent) ??
 			boundedContextText(
-				lowerHeaders['x-pumpd-parent-event-id'] ??
-					lowerHeaders['x-parent-event-id'],
+				firstHeader(
+					options.parentEventIdHeaders ?? DEFAULT_PARENT_EVENT_ID_HEADERS,
+				),
 			);
 		return Object.freeze({
 			...(correlationId ? { correlationId } : {}),
@@ -3090,7 +3113,7 @@ export function createNetworkPlugin(
 					? {
 							required: true,
 							title: `Apply ${profileActionName}?`,
-							message: `${nextProfile.description} This changes only instrumented PUMPD fetch requests until the tools session ends.`,
+							message: `${nextProfile.description} This changes only instrumented fetch requests until the tools session ends.`,
 							confirmLabel: 'Apply profile',
 						}
 					: { required: false },

@@ -11,20 +11,20 @@ const RENDERER_ASSET_EXTENSIONS = new Set([
 	'.woff2',
 ]);
 
-export const PACKAGED_RENDERER_SCHEME = 'pumpd-devtools';
+export const PACKAGED_RENDERER_SCHEME = 'rndevtools';
 export const PACKAGED_RENDERER_URL = `${PACKAGED_RENDERER_SCHEME}://app/index.html`;
 export const PACKAGED_RENDERER_CONTENT_SECURITY_POLICY = [
 	"default-src 'self'",
 	"script-src 'self'",
 	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' data: blob: pumpd-capture:",
+	"img-src 'self' data: blob: rndevtools-capture:",
 	"font-src 'self' data:",
 	"connect-src 'self'",
 	"object-src 'none'",
 	"frame-src 'none'",
 	"frame-ancestors 'none'",
 	"worker-src 'none'",
-	'media-src pumpd-capture:',
+	'media-src rndevtools-capture:',
 	"base-uri 'self'",
 	"form-action 'self'",
 ].join('; ');

@@ -6,7 +6,7 @@ import {
 } from './app-actions-panel';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
-const BUNDLE_ID = 'com.example.pumpd';
+const BUNDLE_ID = 'com.example.app';
 
 function build(
 	actionId: string,
@@ -57,16 +57,14 @@ describe('Simulator App Actions model', () => {
 			build('open-deep-link', { value: 'file:///private/etc/passwd' })
 		).toBeNull();
 		expect(
-			build('open-universal-link', { value: 'https://pumpd.com/workouts/1' })
+			build('open-universal-link', { value: 'https://example.com/items/1' })
 		).toMatchObject({ kind: 'app.openUniversalLink' });
+		expect(build('open-deep-link', { value: 'myapp://home' })).toMatchObject({
+			kind: 'url.open',
+		});
+		expect(build('open-universal-link', { value: 'myapp://home' })).toBeNull();
 		expect(
-			build('open-deep-link', { value: 'pumpd://workout/current' })
-		).toMatchObject({ kind: 'url.open' });
-		expect(
-			build('open-universal-link', { value: 'pumpd://workout/current' })
-		).toBeNull();
-		expect(
-			build('open-universal-link', { value: 'http://pumpd.com/workouts/1' })
+			build('open-universal-link', { value: 'http://example.com/items/1' })
 		).toBeNull();
 		expect(
 			build('send-push-notification', { value: '{"message":"missing aps"}' })
@@ -80,11 +78,11 @@ describe('Simulator App Actions model', () => {
 
 	it('maps exact containers, pasteboards, routes, and confirmed reset operations', () => {
 		expect(
-			build('reveal-app-group', { value: 'group.com.example.pumpd' })
+			build('reveal-app-group', { value: 'group.com.example.app' })
 		).toMatchObject({
 			kind: 'app.revealContainer',
 			container: 'app-group',
-			appGroupIdentifier: 'group.com.example.pumpd',
+			appGroupIdentifier: 'group.com.example.app',
 		});
 		expect(build('pasteboard-from-simulator')).toMatchObject({
 			kind: 'pasteboard.sync',

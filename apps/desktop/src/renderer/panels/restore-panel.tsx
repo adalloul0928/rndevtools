@@ -118,7 +118,7 @@ export function RestorePanel() {
 							<ConfirmAction
 								triggerLabel="Reset explicit baselines"
 								title="Reset explicit sources to baseline?"
-								description="Only sources that explicitly implement a baseline reset will change. PUMPD captures rollback data before the first mutation."
+								description="Only sources that explicitly implement a baseline reset will change. Rollback data is captured before the first mutation."
 								confirmLabel="Reset state"
 								isDisabled={!canRunAction('restore', 'resetBaseline')}
 								tone="warning"
@@ -249,7 +249,7 @@ export function RestorePanel() {
 										triggerLabel="Delete"
 										triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
 										title="Delete this restore point?"
-										description="The persisted snapshot will be removed from PUMPD's dedicated devtools namespace. This cannot be undone."
+										description="The persisted snapshot will be removed from the dedicated devtools namespace. This cannot be undone."
 										confirmLabel="Delete point"
 										isDisabled={!canRunAction('restore', 'remove')}
 										onConfirm={() => {
@@ -268,7 +268,7 @@ export function RestorePanel() {
 										triggerVariant="secondary"
 										tone="warning"
 										title="Restore explicit developer state?"
-										description={`PUMPD will preflight ${selectedSourceIds.length} selected source${selectedSourceIds.length === 1 ? '' : 's'}, include required dependencies, capture rollback data, then apply in dependency order. User data, authentication, and secure storage remain excluded.`}
+										description={`The app will preflight ${selectedSourceIds.length} selected source${selectedSourceIds.length === 1 ? '' : 's'}, include required dependencies, capture rollback data, then apply in dependency order. User data, authentication, and secure storage remain excluded.`}
 										confirmLabel="Restore selected"
 										isDisabled={
 											selectedSourceIds.length === 0 ||
@@ -397,7 +397,7 @@ export function RestorePanel() {
 								</div>
 								<p className="mb-0 mt-2 text-xs leading-5 text-emerald-100/60">
 									Snapshots are JSON-bounded and validated before writes. If a
-									later source fails, PUMPD attempts to reapply the captured
+									later source fails, the app attempts to reapply the captured
 									rollback data. Secure storage and app user data are not
 									included.
 								</p>

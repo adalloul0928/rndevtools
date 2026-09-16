@@ -418,7 +418,7 @@ export function SlimmingPanel() {
 				<div className="sim-slimming-empty panel-scroll min-h-0 flex-1">
 					<EmptyPanel
 						compact
-						description="Install an iOS runtime, create a Simulator, then refresh the signed helper. Slimming never requires a connected PUMPD mobile session."
+						description="Install an iOS runtime, create a Simulator, then refresh the signed helper. Slimming never requires a connected mobile session."
 						icon={<Activity className="h-5 w-5" />}
 						title="No Simulator slimming targets"
 					/>
@@ -658,7 +658,7 @@ function ProfileWorkspace({
 					/>
 					<ConfirmAction
 						confirmLabel="Restore all"
-						description={`Restore every service managed by PUMPD on ${selectedUdids.length} selected targets. Unmanaged host services remain untouched.`}
+						description={`Restore every managed service on ${selectedUdids.length} selected targets. Unmanaged host services remain untouched.`}
 						isDisabled={
 							!mutationAvailable ||
 							selectedUdids.length === 0 ||
@@ -696,7 +696,7 @@ function ProfileWorkspace({
 							)
 						}
 					>
-						<HeartPulse className="h-3.5 w-3.5" /> Check PUMPD features
+						<HeartPulse className="h-3.5 w-3.5" /> Check app features
 					</Button>
 				</div>
 				{!mutationAvailable ? (
@@ -743,7 +743,7 @@ function ProfileWorkspace({
 							<h3>Current resource use</h3>
 							<InfoPopover label="Current resource use">
 								Live process footprint from the selected running simulators.
-								These readings do not measure savings. Compare the same PUMPD
+								These readings do not measure savings. Compare the same app
 								workload before and after a successful apply.
 							</InfoPopover>
 						</div>
@@ -819,7 +819,7 @@ function ProfileWorkspace({
 										}
 									/>
 									<KeyValue
-										label="PUMPD feature services"
+										label="App feature services"
 										value={
 											doctor
 												? doctor.healthy
@@ -879,16 +879,16 @@ function FeatureChecks({ result }: { result: SlimmingDoctorResult }) {
 	return (
 		<div className="p-3">
 			<div className="flex items-center gap-2">
-				<strong>PUMPD service checks</strong>
-				<InfoPopover label="PUMPD service checks">
+				<strong>App service checks</strong>
+				<InfoPopover label="App service checks">
 					Checks whether simulator service overrides block these features. Use
-					PUMPD to test actual purchases, permissions, notifications, and links
-					after applying a profile.
+					your app to test actual purchases, permissions, notifications, and
+					links after applying a profile.
 				</InfoPopover>
 			</div>
 			<ul
 				className="mt-2 space-y-2 text-sm"
-				aria-label="PUMPD service check results"
+				aria-label="App service check results"
 			>
 				{result.capabilities.map((capability) => (
 					<li
@@ -1211,7 +1211,7 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 								'profile.apply': 'Apply profile',
 								'profile.restore': 'Restore services',
 								'profile.undo': 'Undo last change',
-								'doctor.run': 'Check PUMPD features',
+								'doctor.run': 'Check app features',
 							}[job.kind]
 						}
 					</strong>

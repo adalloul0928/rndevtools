@@ -1,7 +1,7 @@
 import {
 	createImageOverlayController,
 	type ImageOverlaySourceInput,
-} from '@pumpd/devtools/plugins';
+} from '@rndevtools/core/plugins';
 import {
 	deletePreparedRemoteImage,
 	type PreparedRemoteImage,
@@ -23,25 +23,25 @@ const configuredRemoteHosts = [
 	configuredRemoteHost(process.env.EXPO_PUBLIC_SUPABASE_URL),
 ].filter((host): host is string => Boolean(host));
 
-export const PUMPD_IMAGE_OVERLAY_LIMITS = Object.freeze({
+export const RNDEVTOOLS_IMAGE_OVERLAY_LIMITS = Object.freeze({
 	maxBytes: 20 * 1024 * 1024,
 	maxDimension: 8_192,
 	maxPixels: 40_000_000,
 	allowedRemoteHosts: Object.freeze([...new Set(configuredRemoteHosts)]),
 });
 
-export const pumpdImageOverlay = createImageOverlayController(
-	PUMPD_IMAGE_OVERLAY_LIMITS
+export const imageOverlay = createImageOverlayController(
+	RNDEVTOOLS_IMAGE_OVERLAY_LIMITS,
 );
 
 let remoteImportGeneration = 0;
 let activeRemoteImage: PreparedRemoteImage | null = null;
 
 export function setLocalImageOverlaySource(
-	source: ImageOverlaySourceInput
+	source: ImageOverlaySourceInput,
 ): void {
 	remoteImportGeneration += 1;
-	pumpdImageOverlay.setSource(source);
+	imageOverlay.setSource(source);
 	const previous = activeRemoteImage;
 	activeRemoteImage = null;
 	deletePreparedRemoteImage(previous);
@@ -52,14 +52,14 @@ export async function setRemoteImageOverlaySource(url: string): Promise<void> {
 	const generation = remoteImportGeneration;
 	const prepared = await prepareRemoteImageOverlay(
 		url,
-		PUMPD_IMAGE_OVERLAY_LIMITS
+		RNDEVTOOLS_IMAGE_OVERLAY_LIMITS,
 	);
 	if (generation !== remoteImportGeneration) {
 		deletePreparedRemoteImage(prepared);
 		return;
 	}
 	try {
-		pumpdImageOverlay.setSource(prepared.source);
+		imageOverlay.setSource(prepared.source);
 	} catch (error) {
 		deletePreparedRemoteImage(prepared);
 		throw error;
@@ -71,7 +71,7 @@ export async function setRemoteImageOverlaySource(url: string): Promise<void> {
 
 export function clearImageOverlay(): void {
 	remoteImportGeneration += 1;
-	pumpdImageOverlay.clear();
+	imageOverlay.clear();
 	const previous = activeRemoteImage;
 	activeRemoteImage = null;
 	deletePreparedRemoteImage(previous);

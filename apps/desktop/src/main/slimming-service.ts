@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import type {
 	SlimmingAcknowledgementReceipt,
 	SlimmingAcknowledgementRequest,
@@ -74,7 +74,7 @@ const NO_MUTATION_ERROR_CODES = new Set([
 	'limited_operation_blocked',
 	'mutation_policy_blocked',
 	// The helper denies these before it constructs the simulator service
-	// (cmd/pumpd-sim-helper/main.go), and Electron raises the broker one before
+	// (cmd/rndevtools-sim-helper/main.go), and Electron raises the broker one before
 	// spawning anything, so neither can have touched a Simulator. Leaving them
 	// out reported a refused attestation as a mutation needing restart
 	// reconciliation.

@@ -1,12 +1,12 @@
 import type {
 	DesktopCameraFixtureKind,
 	DesktopCameraFixtureSnapshot,
-} from '@pumpd/devtools/desktop-protocol';
+} from '@rndevtools/core/desktop-protocol';
 import type { ImagePickerOptions, ImagePickerResult } from 'expo-image-picker';
 
-export type PumpdCameraPicker = {
+export type DevtoolsCameraPicker = {
 	launchCameraAsync: (
-		options?: ImagePickerOptions
+		options?: ImagePickerOptions,
 	) => Promise<ImagePickerResult>;
 };
 
@@ -25,17 +25,17 @@ type MediaFixture = {
 	durationMs?: number;
 };
 
-export type PumpdDebugCameraFixture =
+export type DebugCameraFixture =
 	| MediaFixture
 	| { kind: 'unavailable'; label?: string }
 	| { kind: 'error'; label?: string; errorMessage: string };
 
-export type PumpdCameraProvider = {
+export type DevtoolsCameraProvider = {
 	launchCameraAsync: (
-		picker: PumpdCameraPicker,
-		options?: ImagePickerOptions
+		picker: DevtoolsCameraPicker,
+		options?: ImagePickerOptions,
 	) => Promise<ImagePickerResult>;
-	setDebugFixture: (fixture: PumpdDebugCameraFixture) => Promise<void>;
+	setDebugFixture: (fixture: DebugCameraFixture) => Promise<void>;
 	clearDebugFixture: () => Promise<void>;
 	getDebugFixtureSnapshot: () => DesktopCameraFixtureSnapshot;
 };

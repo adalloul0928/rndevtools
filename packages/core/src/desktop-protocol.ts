@@ -4,13 +4,13 @@ import {
 	type NetworkSimulationProfileId,
 } from './network-profile';
 
-export const PUMPD_DESKTOP_PROTOCOL_VERSION = 2 as const;
-export const PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS = [1, 2] as const;
+export const RNDEVTOOLS_PROTOCOL_VERSION = 2 as const;
+export const RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS = [1, 2] as const;
 
-export type PumpdDesktopProtocolVersion =
-	(typeof PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS)[number];
+export type DesktopProtocolVersion =
+	(typeof RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS)[number];
 
-export const PUMPD_DESKTOP_TOOL_IDS = [
+export const RNDEVTOOLS_TOOL_IDS = [
 	'network',
 	'console',
 	'storage',
@@ -27,7 +27,7 @@ export const PUMPD_DESKTOP_TOOL_IDS = [
 	'diagnostics',
 ] as const;
 
-export type DesktopToolId = (typeof PUMPD_DESKTOP_TOOL_IDS)[number];
+export type DesktopToolId = (typeof RNDEVTOOLS_TOOL_IDS)[number];
 
 /**
  * The maximum number of rows the desktop boundary accepts per collection.
@@ -41,7 +41,7 @@ export type DesktopToolId = (typeof PUMPD_DESKTOP_TOOL_IDS)[number];
  *
  * Both sides now read this table, so they cannot drift apart.
  */
-export const PUMPD_DESKTOP_SNAPSHOT_LIMITS = {
+export const RNDEVTOOLS_SNAPSHOT_LIMITS = {
 	network: 2_000,
 	console: 5_000,
 	storage: 5_000,
@@ -74,13 +74,13 @@ export const PUMPD_DESKTOP_SNAPSHOT_LIMITS = {
 	diagnostics: 2_000,
 } as const;
 
-export type DesktopSnapshotLimit = keyof typeof PUMPD_DESKTOP_SNAPSHOT_LIMITS;
+export type DesktopSnapshotLimit = keyof typeof RNDEVTOOLS_SNAPSHOT_LIMITS;
 
 /**
  * Every remotely invokable operation has one capability with the same
  * `tool.command` spelling. Read-only tools intentionally have no capability.
  */
-export const PUMPD_DESKTOP_ACTION_CAPABILITIES = [
+export const RNDEVTOOLS_ACTION_CAPABILITIES = [
 	'network.clear',
 	'network.setProfile',
 	'network.clearProfile',
@@ -124,7 +124,7 @@ export const PUMPD_DESKTOP_ACTION_CAPABILITIES = [
 ] as const;
 
 export type DesktopActionCapability =
-	(typeof PUMPD_DESKTOP_ACTION_CAPABILITIES)[number];
+	(typeof RNDEVTOOLS_ACTION_CAPABILITIES)[number];
 
 export type DesktopDeviceAction = {
 	actionId: string;
@@ -677,8 +677,8 @@ export type DesktopDeviceToolsSnapshot = {
 	diagnostics: readonly DesktopDiagnosticSnapshot[];
 };
 
-const toolIds = new Set<string>(PUMPD_DESKTOP_TOOL_IDS);
-const actionCapabilities = new Set<string>(PUMPD_DESKTOP_ACTION_CAPABILITIES);
+const toolIds = new Set<string>(RNDEVTOOLS_TOOL_IDS);
+const actionCapabilities = new Set<string>(RNDEVTOOLS_ACTION_CAPABILITIES);
 
 const MAX_IDENTIFIER_BYTES = 256;
 const MAX_COMMAND_BYTES = 128;
@@ -1079,7 +1079,7 @@ function actionPayload(
 		if (payload.sourceIds === undefined) return { id };
 		const sourceIds = identifierList(
 			payload.sourceIds,
-			PUMPD_DESKTOP_SNAPSHOT_LIMITS.restoreSources,
+			RNDEVTOOLS_SNAPSHOT_LIMITS.restoreSources,
 		);
 		return sourceIds ? { id, sourceIds } : null;
 	}

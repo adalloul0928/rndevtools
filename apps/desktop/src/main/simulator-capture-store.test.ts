@@ -25,7 +25,7 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const temporaryDirectories: string[] = [];
 
 async function fixture({ now = Date.now }: { now?: () => number } = {}) {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-captures-'));
+	const directory = await mkdtemp(path.join(tmpdir(), 'rndevtools-captures-'));
 	temporaryDirectories.push(directory);
 	const root = path.join(directory, 'store');
 	return { directory, root, store: new SimulatorCaptureStore(root, { now }) };

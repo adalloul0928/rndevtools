@@ -209,7 +209,7 @@ describe('createRestorePointsPlugin', () => {
 		};
 		expect(exported).toMatchObject({
 			schemaVersion: 1,
-			namespace: 'pumpd-devtools-restore-points',
+			namespace: 'rndevtools-restore-points',
 		});
 		expect(exported.points).toHaveLength(2);
 	});
@@ -228,7 +228,7 @@ describe('createRestorePointsPlugin', () => {
 			persistence: { storage },
 		});
 		await seed.capture('Valid');
-		const key = '@pumpd/devtools/restore-points/v1';
+		const key = '@rndevtools/core/restore-points/v1';
 		const document = JSON.parse(storage.values.get(key) ?? '{}') as {
 			points: unknown[];
 		};

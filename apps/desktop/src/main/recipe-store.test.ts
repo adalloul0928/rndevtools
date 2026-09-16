@@ -23,7 +23,7 @@ const roots: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
 	const directory = await mkdtemp(
-		path.join(os.tmpdir(), 'pumpd-recipe-store-')
+		path.join(os.tmpdir(), 'rndevtools-recipe-store-')
 	);
 	roots.push(directory);
 	return directory;
@@ -91,7 +91,7 @@ function runRecord({
 			],
 		},
 		evidence: {
-			format: 'pumpd-evidence-bundle',
+			format: 'rndevtools-evidence-bundle',
 			formatVersion: 1,
 			id: evidenceId,
 			runId,
@@ -139,7 +139,7 @@ describe('RecipeStore', () => {
 			await readFile(path.join(root, 'recipes', 'smoke-test.json'), 'utf8')
 		) as Record<string, unknown>;
 		expect(persisted).toMatchObject({
-			format: 'pumpd-recipe',
+			format: 'rndevtools-recipe',
 			formatVersion: 1,
 			recipe: { revision: 2 },
 		});
@@ -241,7 +241,7 @@ describe('RecipeStore', () => {
 		await writeFile(
 			source,
 			JSON.stringify({
-				format: 'pumpd-recipe',
+				format: 'rndevtools-recipe',
 				formatVersion: 1,
 				recipe: recipe(),
 			})

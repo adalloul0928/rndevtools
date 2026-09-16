@@ -26,7 +26,7 @@ const rendererAliases = {
 export const electronViteConfig = {
 	main: {
 		plugins: [
-			externalizeDepsPlugin({ exclude: ['@pumpd/devtools', 'ws', 'zod'] }),
+			externalizeDepsPlugin({ exclude: ['@rndevtools/core', 'ws', 'zod'] }),
 		],
 		resolve: { alias: nodeAliases },
 		build: {
@@ -39,7 +39,7 @@ export const electronViteConfig = {
 		},
 	},
 	preload: {
-		plugins: [externalizeDepsPlugin({ exclude: ['@pumpd/devtools', 'zod'] })],
+		plugins: [externalizeDepsPlugin({ exclude: ['@rndevtools/core', 'zod'] })],
 		resolve: { alias: nodeAliases },
 		build: { outDir: 'dist/preload', sourcemap: true },
 	},

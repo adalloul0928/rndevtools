@@ -1390,7 +1390,7 @@ export function createZustandPlugin(
 				{
 					title: `Reset ${store.title}?`,
 					message:
-						'The store will be reset through its explicit adapter. PUMPD will restore the prior state if verification fails.',
+						'The store will be reset through its explicit adapter. The prior state is restored if verification fails.',
 					confirmLabel: 'Reset',
 					destructive: true,
 				},

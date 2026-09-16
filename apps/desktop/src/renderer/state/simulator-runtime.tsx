@@ -1,4 +1,4 @@
-import { diagnosticErrorText } from '@pumpd/devtools/redact';
+import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -83,7 +83,7 @@ type SimulatorRuntimeValue = {
 const SimulatorRuntimeContext = createContext<SimulatorRuntimeValue | null>(
 	null
 );
-const SELECTED_DEVICE_KEY = 'pumpd.desktop.simulator.selected-device';
+const SELECTED_DEVICE_KEY = 'rndevtools.desktop.simulator.selected-device';
 
 const EMPTY_SIMULATOR_STATE: SimulatorState = {
 	revision: 0,
@@ -125,7 +125,7 @@ const EMPTY_SIMULATOR_STATE: SimulatorState = {
 };
 
 function getSimulatorBridge(): SimulatorBridge | null {
-	const candidate = window.pumpdDesktop;
+	const candidate = window.rnDevtools;
 	if (
 		!candidate ||
 		typeof candidate.getSimulatorState !== 'function' ||

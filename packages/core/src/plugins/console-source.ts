@@ -29,7 +29,7 @@ export type ConsoleMethodSourceOptions = Readonly<{
 }>;
 
 /**
- * Explicit third-party compatibility bridge. PUMPD's logger-backed source is
+ * Explicit third-party compatibility bridge. A host's logger-backed source is
  * preferred. This adapter patches only while subscribed and restores a method
  * only when its own wrapper still owns that property.
  */

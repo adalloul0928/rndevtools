@@ -392,7 +392,7 @@ export class SimulatorCaptureStore {
 			}
 			temporaryPath = path.join(
 				destinationDirectory,
-				`.${destinationName}.pumpd-${randomUUID()}.tmp`
+				`.${destinationName}.rndevtools-${randomUUID()}.tmp`
 			);
 			destinationHandle = await open(
 				temporaryPath,

@@ -99,10 +99,10 @@ function textEnvelope(
 	for (const event of events) counts[event.level] += 1;
 	const title =
 		format === 'bug-report'
-			? '# PUMPD Devtools Bug Report'
+			? '# RN Devtools Bug Report'
 			: format === 'errors-only'
-				? '# PUMPD Devtools Errors'
-				: '# PUMPD Devtools Events';
+				? '# RN Devtools Errors'
+				: '# RN Devtools Events';
 	const summary =
 		format === 'bug-report'
 			? `\n\nEvents: ${events.length} | Errors: ${counts.error} | Warnings: ${counts.warn}`

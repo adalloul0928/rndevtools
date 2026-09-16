@@ -1,25 +1,47 @@
 import {
+	type DesktopDeviceAction,
+	type DesktopDeviceInfoSnapshot,
+	type DesktopDeviceToolsSnapshot,
+	parseDesktopActionEnvelope,
+	RNDEVTOOLS_PROTOCOL_VERSION,
+} from '@rndevtools/core/desktop-protocol';
+import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-	truncateText,
-	utf8ByteLength,
-} from '@pumpd/devtools';
-import {
-	type DesktopDeviceAction,
-	PUMPD_DESKTOP_PROTOCOL_VERSION,
-	parseDesktopActionEnvelope,
-} from '@pumpd/devtools/desktop-protocol';
+} from '@rndevtools/core/redact';
+import { truncateText, utf8ByteLength } from '@rndevtools/core/serialize';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import {
-	capturePumpdDesktopTools,
-	createPumpdDesktopDeviceInfo,
-	type DesktopDiagnostic,
-	runPumpdDesktopAction,
-} from '@/features/dev-menu/desktop/desktop-snapshot';
-import { isDevelopmentVariant } from '@/lib/app-variant';
-import { getInternalToolsAuthorization } from '@/services/devtools/internal-tools-authorization';
+import type { DevtoolsAuthorization } from '../authorization';
+
+/** A bounded diagnostic line published alongside each snapshot. */
+export type DesktopDiagnostic = {
+	id: string;
+	at: number;
+	level: 'debug' | 'info' | 'warn' | 'error';
+	scope: string;
+	message: string;
+};
+
+/**
+ * Everything the client needs from the host app. The client owns discovery,
+ * framing, replay protection, and admission control; the host owns what its own
+ * state looks like and what an action is allowed to do. Keeping that boundary
+ * explicit is what makes this client reusable across apps.
+ */
+export type DesktopClientHost = {
+	/** Projects the host's registered diagnostics into a snapshot payload. */
+	captureTools: (
+		diagnostics: readonly DesktopDiagnostic[],
+	) => DesktopDeviceToolsSnapshot;
+	/** Identifies this device and build to the desktop. */
+	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
+	/** Applies one desktop-issued action. Rejecting throws. */
+	runAction: (action: DesktopDeviceAction) => Promise<void>;
+	/** Current authorization. The client refuses actions while disabled. */
+	getAuthorization: () => DevtoolsAuthorization;
+};
 
 const DEFAULT_PORT = 47_931;
 const DEFAULT_PORT_ATTEMPTS = 10;
@@ -192,7 +214,7 @@ function isLoopbackBrokerHost(hostname: string): boolean {
 
 function normalizeExplicitUrl(
 	value: string,
-	{ allowAndroidEmulatorAlias = false } = {}
+	{ allowAndroidEmulatorAlias = false } = {},
 ): string | undefined {
 	if (!value || value.length > MAX_BROKER_URL_LENGTH) return undefined;
 	try {
@@ -242,7 +264,7 @@ function socketDiagnosticLabel(value: string): string {
 	}
 }
 
-export function pumpdDesktopBrokerCandidates({
+export function desktopBrokerCandidates({
 	explicitUrl = process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL,
 	hostUri = Constants.expoConfig?.hostUri,
 	platform = Platform.OS,
@@ -271,7 +293,7 @@ export function pumpdDesktopBrokerCandidates({
 		'127.0.0.1',
 		'localhost',
 	].filter(
-		(host): host is string => Boolean(host) && isLocalBrokerHost(host ?? '')
+		(host): host is string => Boolean(host) && isLocalBrokerHost(host ?? ''),
 	);
 	if (!Number.isInteger(port) || port < 1 || port > 65_535) return [];
 	const attempts = Number.isFinite(portAttempts)
@@ -279,11 +301,11 @@ export function pumpdDesktopBrokerCandidates({
 		: DEFAULT_PORT_ATTEMPTS;
 	const ports = Array.from(
 		{ length: attempts },
-		(_, index) => port + index
+		(_, index) => port + index,
 	).filter((candidate) => candidate <= 65_535);
 	const uniqueHosts = [...new Set(hosts)];
 	return ports.flatMap((candidate) =>
-		uniqueHosts.map((host) => socketUrl(host, candidate))
+		uniqueHosts.map((host) => socketUrl(host, candidate)),
 	);
 }
 
@@ -294,26 +316,36 @@ export function pumpdDesktopBrokerCandidates({
  * the client on development builds also confines the unauthenticated loopback
  * socket to machines the developer controls.
  */
-export function shouldStartPumpdDesktopClient(): boolean {
+export function shouldStartDesktopClient(
+	options: Readonly<{ isDevelopmentBuild: boolean }>,
+): boolean {
 	return (
-		isDevelopmentVariant() &&
+		options.isDevelopmentBuild &&
 		process.env.NODE_ENV !== 'test' &&
 		process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED !== 'true'
 	);
 }
 
-export type PumpdDesktopClientHandle = {
+export type DesktopClientHandle = {
 	stop: () => void;
 };
 
-export function startPumpdDesktopClient(
-	candidates?: readonly string[]
-): PumpdDesktopClientHandle {
+export type DesktopClientOptions = {
+	/** Host adapter supplying snapshots, identity, and action execution. */
+	host: DesktopClientHost;
+	/** Explicit broker URLs. Defaults to the discovered loopback candidates. */
+	candidates?: readonly string[];
+};
+
+export function startDesktopClient(
+	options: DesktopClientOptions,
+): DesktopClientHandle {
+	const { host, candidates } = options;
 	const allowAndroidEmulatorAlias =
 		candidates === undefined &&
 		!process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL &&
 		Platform.OS === 'android';
-	const requestedCandidates = candidates ?? pumpdDesktopBrokerCandidates();
+	const requestedCandidates = candidates ?? desktopBrokerCandidates();
 	const brokerCandidates = [
 		...new Set(
 			requestedCandidates
@@ -323,7 +355,7 @@ export function startPumpdDesktopClient(
 						allowAndroidEmulatorAlias,
 					});
 					return normalized ? [normalized] : [];
-				})
+				}),
 		),
 	];
 	let active = true;
@@ -340,12 +372,12 @@ export function startPumpdDesktopClient(
 	const diagnostics: DesktopDiagnostic[] = [];
 	const processedActions = new DesktopActionReplayCache();
 	const actionAdmission = new DesktopActionAdmissionController();
-	const device = createPumpdDesktopDeviceInfo();
+	const device = host.createDeviceInfo();
 
 	const record = (
 		level: DesktopDiagnostic['level'],
 		scope: string,
-		message: string
+		message: string,
 	) => {
 		const at = Date.now();
 		const safeMessage = redactDiagnosticText(message);
@@ -382,7 +414,7 @@ export function startPumpdDesktopClient(
 			record(
 				'warn',
 				'transport',
-				`Failed to send desktop message: ${diagnosticErrorText(error)}`
+				`Failed to send desktop message: ${diagnosticErrorText(error)}`,
 			);
 			return false;
 		}
@@ -395,7 +427,7 @@ export function startPumpdDesktopClient(
 			record(
 				'warn',
 				'transport',
-				`Failed to serialize desktop message: ${diagnosticErrorText(error)}`
+				`Failed to serialize desktop message: ${diagnosticErrorText(error)}`,
 			);
 			return false;
 		}
@@ -409,7 +441,7 @@ export function startPumpdDesktopClient(
 				record(
 					'warn',
 					'transport',
-					'Desktop snapshot skipped while the socket send buffer drains.'
+					'Desktop snapshot skipped while the socket send buffer drains.',
 				);
 			}
 			return;
@@ -421,13 +453,13 @@ export function startPumpdDesktopClient(
 				type: 'snapshot',
 				sequence: nextSequence,
 				sentAt: Date.now(),
-				tools: capturePumpdDesktopTools(diagnostics),
+				tools: host.captureTools(diagnostics),
 			});
 			if (utf8ByteLength(serialized) > MAX_OUTGOING_SNAPSHOT_BYTES) {
 				record(
 					'error',
 					'snapshot',
-					'Desktop snapshot exceeded the 8 MiB wire budget and was not sent.'
+					'Desktop snapshot exceeded the 8 MiB wire budget and was not sent.',
 				);
 				return;
 			}
@@ -438,7 +470,7 @@ export function startPumpdDesktopClient(
 			record(
 				'error',
 				'snapshot',
-				`Snapshot capture failed: ${diagnosticErrorText(error)}`
+				`Snapshot capture failed: ${diagnosticErrorText(error)}`,
 			);
 		}
 	};
@@ -446,10 +478,10 @@ export function startPumpdDesktopClient(
 	const handleAction = async (
 		action: DesktopDeviceAction,
 		target: WebSocket,
-		expectedOwnerId: string | null
+		expectedOwnerId: string | null,
 	) => {
 		if (!active || socket !== target || target.readyState !== 1) return;
-		const authorization = getInternalToolsAuthorization();
+		const authorization = host.getAuthorization();
 		if (!authorization.enabled || authorization.ownerId !== expectedOwnerId) {
 			const result: ActionResultMessage = {
 				type: 'action-result',
@@ -471,17 +503,17 @@ export function startPumpdDesktopClient(
 							ok: false,
 							error: 'Action identifier was reused with different contents.',
 						},
-				target
+				target,
 			);
 			return;
 		}
 		let result: ActionResultMessage;
 		try {
-			await runPumpdDesktopAction(action);
+			await host.runAction(action);
 			record(
 				'info',
 				action.tool,
-				`Desktop action completed: ${action.command}.`
+				`Desktop action completed: ${action.command}.`,
 			);
 			result = {
 				type: 'action-result',
@@ -524,7 +556,7 @@ export function startPumpdDesktopClient(
 			record(
 				'warn',
 				'transport',
-				`Could not open ${urlLabel}: ${diagnosticErrorText(error)}`
+				`Could not open ${urlLabel}: ${diagnosticErrorText(error)}`,
 			);
 			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
 			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
@@ -543,14 +575,14 @@ export function startPumpdDesktopClient(
 					record(
 						'warn',
 						'transport',
-						`Timed-out socket could not close: ${diagnosticErrorText(error)}`
+						`Timed-out socket could not close: ${diagnosticErrorText(error)}`,
 					);
 				}
 				if (candidateIndex === 0) {
 					record(
 						'warn',
 						'transport',
-						'Could not reach a desktop broker candidate; retrying discovery.'
+						'Could not reach a desktop broker candidate; retrying discovery.',
 					);
 				}
 				scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
@@ -574,10 +606,10 @@ export function startPumpdDesktopClient(
 			const sentHello = send(
 				{
 					type: 'hello',
-					protocolVersion: PUMPD_DESKTOP_PROTOCOL_VERSION,
+					protocolVersion: RNDEVTOOLS_PROTOCOL_VERSION,
 					device,
 				},
-				nextSocket
+				nextSocket,
 			);
 			if (!sentHello) {
 				nextSocket.close(1011, 'hello could not be sent');
@@ -586,7 +618,7 @@ export function startPumpdDesktopClient(
 			sendSnapshot(nextSocket);
 			snapshotTimer = setInterval(
 				() => sendSnapshot(nextSocket),
-				SNAPSHOT_INTERVAL_MS
+				SNAPSHOT_INTERVAL_MS,
 			);
 			heartbeatTimer = setInterval(() => {
 				send({ type: 'heartbeat', sentAt: Date.now() }, nextSocket);
@@ -616,7 +648,7 @@ export function startPumpdDesktopClient(
 				record('warn', 'protocol', 'Ignored an invalid desktop action.');
 				return;
 			}
-			const authorization = getInternalToolsAuthorization();
+			const authorization = host.getAuthorization();
 			if (!authorization.enabled) {
 				send(
 					{
@@ -625,7 +657,7 @@ export function startPumpdDesktopClient(
 						ok: false,
 						error: 'Internal tools are not authorized.',
 					},
-					nextSocket
+					nextSocket,
 				);
 				try {
 					nextSocket.close(1008, 'internal tools authorization required');
@@ -642,7 +674,7 @@ export function startPumpdDesktopClient(
 					'protocol',
 					queueFull
 						? 'Rejected a desktop action because the pending queue is full.'
-						: 'Rejected a desktop action because the rate limit was exceeded.'
+						: 'Rejected a desktop action because the rate limit was exceeded.',
 				);
 				send(
 					{
@@ -653,7 +685,7 @@ export function startPumpdDesktopClient(
 							? 'Desktop action queue is full; retry later.'
 							: 'Desktop action rate limit exceeded; retry later.',
 					},
-					nextSocket
+					nextSocket,
 				);
 				try {
 					nextSocket.close(1008, 'desktop action admission limit exceeded');
@@ -669,7 +701,7 @@ export function startPumpdDesktopClient(
 					record(
 						'error',
 						'action',
-						`Desktop action processing failed: ${diagnosticErrorText(error)}`
+						`Desktop action processing failed: ${diagnosticErrorText(error)}`,
 					);
 				})
 				.finally(admission.release);
@@ -695,7 +727,7 @@ export function startPumpdDesktopClient(
 				record(
 					'warn',
 					'transport',
-					'Could not reach a desktop broker candidate; retrying discovery.'
+					'Could not reach a desktop broker candidate; retrying discovery.',
 				);
 			}
 			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
@@ -706,7 +738,7 @@ export function startPumpdDesktopClient(
 		record(
 			'error',
 			'configuration',
-			'No valid desktop broker URL is configured.'
+			'No valid desktop broker URL is configured.',
 		);
 	} else {
 		record('debug', 'transport', 'Desktop diagnostics client started.');
@@ -723,7 +755,7 @@ export function startPumpdDesktopClient(
 			socket = undefined;
 			if (activeSocket && activeSocket.readyState < 2) {
 				try {
-					activeSocket.close(1000, 'PUMPD internal tools unmounted');
+					activeSocket.close(1000, 'Devtools unmounted');
 				} catch {
 					// Stopping diagnostics must never interrupt app teardown.
 				}

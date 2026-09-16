@@ -12,7 +12,7 @@ import {
 } from './scenario';
 
 export const DEFAULT_SCENARIO_REPOSITORY_KEY =
-	'@pumpd/devtools/scenario-definitions/v1';
+	'@rndevtools/core/scenario-definitions/v1';
 
 export type ScenarioRepositorySnapshot = Readonly<{
 	bundled: readonly ScenarioDefinition[];
@@ -39,7 +39,7 @@ export type ScenarioDefinitionTarget = Readonly<{
 
 type PersistedScenarioDocument = Readonly<{
 	schemaVersion: 1;
-	namespace: 'pumpd-devtools-scenarios';
+	namespace: 'rndevtools-scenarios';
 	scenarios: readonly ScenarioDefinition[];
 }>;
 
@@ -70,7 +70,7 @@ function documentFor(
 ): PersistedScenarioDocument {
 	return {
 		schemaVersion: SCENARIO_SCHEMA_VERSION,
-		namespace: 'pumpd-devtools-scenarios',
+		namespace: 'rndevtools-scenarios',
 		scenarios,
 	};
 }
@@ -94,8 +94,7 @@ function parseDocument(
 		typeof parsed !== 'object' ||
 		Array.isArray(parsed) ||
 		(parsed as Record<string, unknown>).schemaVersion !== 1 ||
-		(parsed as Record<string, unknown>).namespace !==
-			'pumpd-devtools-scenarios' ||
+		(parsed as Record<string, unknown>).namespace !== 'rndevtools-scenarios' ||
 		!Array.isArray((parsed as Record<string, unknown>).scenarios)
 	) {
 		throw new Error('Scenario document has an unsupported schema.');

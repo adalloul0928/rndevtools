@@ -196,7 +196,7 @@ describe('recipe editor model', () => {
 					operation: 'privacy.update',
 					privacyOperation: 'reset',
 					service: 'all',
-					bundleIdentifier: 'com.example.pumpd',
+					bundleIdentifier: 'com.example.app',
 				},
 			},
 			{

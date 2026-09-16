@@ -1,26 +1,26 @@
-import type { DesktopCameraFixtureSnapshot } from '@pumpd/devtools/desktop-protocol';
+import type { DesktopCameraFixtureSnapshot } from '@rndevtools/core/desktop-protocol';
 import { File, Paths } from 'expo-file-system';
 import type {
 	ImagePickerAsset,
 	ImagePickerOptions,
 	ImagePickerResult,
 } from 'expo-image-picker';
-import type {
-	PumpdCameraPicker,
-	PumpdCameraProvider,
-	PumpdDebugCameraFixture,
-} from '@/services/devtools/camera-provider-contract';
 import {
-	getInternalToolsAuthorization,
-	subscribeToInternalToolsAuthorization,
-} from '@/services/devtools/internal-tools-authorization';
+	getDevtoolsAuthorization,
+	subscribeToDevtoolsAuthorization,
+} from '../authorization';
+import type {
+	DebugCameraFixture,
+	DevtoolsCameraPicker,
+	DevtoolsCameraProvider,
+} from './contract';
 
 const MAX_FIXTURE_BASE64_LENGTH = 512 * 1024;
 const MAX_DIMENSION = 16_384;
 const MAX_VIDEO_DURATION_MS = 10 * 60 * 1_000;
 
 type ActiveMediaFixture = Extract<
-	PumpdDebugCameraFixture,
+	DebugCameraFixture,
 	{ kind: 'still' | 'qr' | 'video' }
 > & {
 	file: File;
@@ -30,23 +30,23 @@ type ActiveMediaFixture = Extract<
 
 type ActiveFixture =
 	| ActiveMediaFixture
-	| (Extract<PumpdDebugCameraFixture, { kind: 'unavailable' | 'error' }> & {
+	| (Extract<DebugCameraFixture, { kind: 'unavailable' | 'error' }> & {
 			revision: number;
 	  });
 
 let activeFixture: ActiveFixture | null = null;
 let fixtureRevision = 0;
-let authorizationOwnerId = getInternalToolsAuthorization().ownerId;
+let authorizationOwnerId = getDevtoolsAuthorization().ownerId;
 
 function assertAuthorized(): void {
-	if (!__DEV__ || !getInternalToolsAuthorization().enabled) {
+	if (!__DEV__ || !getDevtoolsAuthorization().enabled) {
 		throw new Error(
-			'Debug camera fixtures require an authorized development session.'
+			'Debug camera fixtures require an authorized development session.',
 		);
 	}
 }
 
-function assertBoundedFixture(fixture: PumpdDebugCameraFixture): void {
+function assertBoundedFixture(fixture: DebugCameraFixture): void {
 	if (fixture.kind === 'unavailable') return;
 	if (fixture.kind === 'error') {
 		if (
@@ -90,9 +90,7 @@ function fixtureBytes(base64: string): number {
 	return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
-function extensionForFixture(
-	fixture: ActiveMediaFixture | PumpdDebugCameraFixture
-) {
+function extensionForFixture(fixture: ActiveMediaFixture | DebugCameraFixture) {
 	if (!('mimeType' in fixture)) return 'bin';
 	if (fixture.mimeType === 'image/jpeg') return 'jpg';
 	if (fixture.mimeType === 'image/png') return 'png';
@@ -125,8 +123,8 @@ function clearFixtureWithoutAuthorization(): void {
 	deleteFixtureFile(previous);
 }
 
-subscribeToInternalToolsAuthorization(() => {
-	const authorization = getInternalToolsAuthorization();
+subscribeToDevtoolsAuthorization(() => {
+	const authorization = getDevtoolsAuthorization();
 	if (
 		!authorization.enabled ||
 		authorization.ownerId !== authorizationOwnerId
@@ -136,9 +134,7 @@ subscribeToInternalToolsAuthorization(() => {
 	authorizationOwnerId = authorization.ownerId;
 });
 
-async function setDebugFixture(
-	fixture: PumpdDebugCameraFixture
-): Promise<void> {
+async function setDebugFixture(fixture: DebugCameraFixture): Promise<void> {
 	assertAuthorized();
 	assertBoundedFixture(fixture);
 	const revision = fixtureRevision + 1;
@@ -150,7 +146,7 @@ async function setDebugFixture(
 		return;
 	}
 
-	const filename = `pumpd-debug-camera-${revision}.${extensionForFixture(fixture)}`;
+	const filename = `rndevtools-debug-camera-${revision}.${extensionForFixture(fixture)}`;
 	const file = new File(Paths.cache, filename);
 	try {
 		file.create({ overwrite: true });
@@ -180,7 +176,7 @@ async function clearDebugFixture(): Promise<void> {
 }
 
 function getDebugFixtureSnapshot(): DesktopCameraFixtureSnapshot {
-	if (!__DEV__ || !getInternalToolsAuthorization().enabled || !activeFixture) {
+	if (!__DEV__ || !getDevtoolsAuthorization().enabled || !activeFixture) {
 		return { active: false };
 	}
 	const fixture = activeFixture;
@@ -209,7 +205,7 @@ function acceptsVideo(options: ImagePickerOptions | undefined): boolean {
 
 async function fixtureAsset(
 	fixture: ActiveMediaFixture,
-	options: ImagePickerOptions | undefined
+	options: ImagePickerOptions | undefined,
 ): Promise<ImagePickerAsset> {
 	if (!fixture.file.exists) {
 		throw new Error('The debug camera fixture is no longer available.');
@@ -217,7 +213,7 @@ async function fixtureAsset(
 	const video = fixture.kind === 'video';
 	if (video && !acceptsVideo(options)) {
 		throw new Error(
-			'The active debug camera fixture is a video, but this camera flow accepts images only.'
+			'The active debug camera fixture is a video, but this camera flow accepts images only.',
 		);
 	}
 	if (
@@ -226,11 +222,11 @@ async function fixtureAsset(
 		options.mediaTypes[0] === 'videos'
 	) {
 		throw new Error(
-			'The active debug camera fixture is an image, but this camera flow accepts videos only.'
+			'The active debug camera fixture is an image, but this camera flow accepts videos only.',
 		);
 	}
 	return {
-		assetId: `pumpd-debug-camera-${fixture.revision}`,
+		assetId: `rndevtools-debug-camera-${fixture.revision}`,
 		uri: fixture.file.uri,
 		width: fixture.width,
 		height: fixture.height,
@@ -244,28 +240,28 @@ async function fixtureAsset(
 }
 
 async function launchCameraAsync(
-	picker: PumpdCameraPicker,
-	options?: ImagePickerOptions
+	picker: DevtoolsCameraPicker,
+	options?: ImagePickerOptions,
 ): Promise<ImagePickerResult> {
-	const authorization = getInternalToolsAuthorization();
+	const authorization = getDevtoolsAuthorization();
 	const fixture = __DEV__ && authorization.enabled ? activeFixture : null;
 	if (!fixture) return picker.launchCameraAsync(options);
 	if (fixture.kind === 'unavailable') {
 		const error = new Error(
-			'The debug camera provider is configured as unavailable.'
+			'The debug camera provider is configured as unavailable.',
 		);
-		error.name = 'PumpdDebugCameraUnavailableError';
+		error.name = 'DebugCameraUnavailableError';
 		throw error;
 	}
 	if (fixture.kind === 'error') {
 		const error = new Error(fixture.errorMessage);
-		error.name = 'PumpdDebugCameraFixtureError';
+		error.name = 'DebugCameraFixtureError';
 		throw error;
 	}
 	return { canceled: false, assets: [await fixtureAsset(fixture, options)] };
 }
 
-export const pumpdCameraProvider: PumpdCameraProvider = Object.freeze({
+export const devtoolsCameraProvider: DevtoolsCameraProvider = Object.freeze({
 	launchCameraAsync,
 	setDebugFixture,
 	clearDebugFixture,

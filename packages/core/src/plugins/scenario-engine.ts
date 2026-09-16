@@ -199,7 +199,7 @@ const MAX_RECOVERY_VALUE_ENTRIES = 10_000;
 const DEFAULT_OPERATION_TIMEOUT_MS = 30_000;
 const DEFAULT_RESET_QUIESCENCE_TIMEOUT_MS = 5_000;
 const MAX_OPERATION_TIMEOUT_MS = 5 * 60_000;
-const RECOVERY_NAMESPACE = 'pumpd-devtools-scenario-recovery';
+const RECOVERY_NAMESPACE = 'rndevtools-scenario-recovery';
 let receiptSequence = 0;
 
 function nextReceiptId(

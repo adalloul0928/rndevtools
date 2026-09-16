@@ -27,7 +27,7 @@ afterEach(async () => {
 
 describe('Simulator onboarding IPC', () => {
 	it('validates a selected Xcode bundle without exposing its path to the renderer', async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), 'pumpd-xcode-'));
+		const root = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-xcode-'));
 		roots.push(root);
 		const application = path.join(root, 'Xcode Test.app');
 		const developerDirectory = path.join(application, 'Contents', 'Developer');

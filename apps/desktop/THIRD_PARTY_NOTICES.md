@@ -10,7 +10,7 @@ state during cancelled disk cleanup, and exports SimSlim's existing launchd
 status parser for the bounded adapter. SimSlim's CLI, GUI, and their unrelated
 dependencies are not included. The upstream base, exact patch, and final
 vendored tree each have an anchored SHA-256 manifest under
-`native/pumpd-sim-helper`.
+`native/rndevtools-sim-helper`.
 
 Source: <https://github.com/MobAI-App/simslim>
 
@@ -38,8 +38,8 @@ SOFTWARE.
 
 ## Go runtime and standard library
 
-`pumpd-sim-helper` and `pumpd-devtools` target the Go 1.27 toolchain line and contain
-portions of the Go runtime and standard library. `pumpd-devtools` is original
+`rndevtools-sim-helper` and `rndevtools` target the Go 1.27 toolchain line and contain
+portions of the Go runtime and standard library. `rndevtools` is original
 first-party code and incorporates no additional third-party module.
 
 Copyright 2009 The Go Authors.

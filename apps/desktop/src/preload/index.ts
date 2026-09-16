@@ -379,4 +379,4 @@ const bridge: DesktopBridge &
 	},
 };
 
-contextBridge.exposeInMainWorld('pumpdDesktop', Object.freeze(bridge));
+contextBridge.exposeInMainWorld('rnDevtools', Object.freeze(bridge));

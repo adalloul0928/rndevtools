@@ -117,24 +117,24 @@ function connectedDeviceForTarget(
 	if (online.length > 1) {
 		throw new AgentCliError({
 			code: 'ambiguous_target',
-			message: 'More than one connected PUMPD session matches this Simulator.',
+			message: 'More than one connected app session matches this Simulator.',
 			recovery: 'Retry with the exact connected deviceId.',
 		});
 	}
 	if (matches.length > 0) {
 		throw new AgentCliError({
 			code: 'device_offline',
-			message: 'The matching PUMPD session is offline.',
+			message: 'The matching app session is offline.',
 			retryable: true,
 			recovery: 'Launch the development app in the Simulator and retry.',
 		});
 	}
 	throw new AgentCliError({
 		code: 'target_not_found',
-		message: 'No connected PUMPD session matches the requested target.',
+		message: 'No connected app session matches the requested target.',
 		retryable: true,
 		recovery:
-			'Run pumpd-devtools doctor and retry with a connectedSessions deviceId or reported Simulator UDID.',
+			'Run rndevtools doctor and retry with a connectedSessions deviceId or reported Simulator UDID.',
 	});
 }
 
@@ -415,8 +415,7 @@ async function waitForNetworkIdle(
 		if (!current || current.status === 'offline') {
 			throw new AgentCliError({
 				code: 'device_offline',
-				message:
-					'The PUMPD session disconnected while waiting for network idle.',
+				message: 'The app session disconnected while waiting for network idle.',
 				retryable: true,
 			});
 		}

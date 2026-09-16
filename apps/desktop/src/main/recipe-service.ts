@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import type {
 	DesktopAction,
 	DesktopActionResult,
@@ -12,7 +12,6 @@ import type {
 import { desktopActionSchema } from '../shared/protocol';
 import {
 	DEFAULT_RECIPE_RUN_CONCURRENCY,
-	PUMPD_RECIPE_FORMAT_VERSION,
 	type RecipeDefinition,
 	type RecipeEvidenceManifest,
 	type RecipeRun,
@@ -21,6 +20,7 @@ import {
 	type RecipeState,
 	type RecipeStep,
 	type RecipeSummary,
+	RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 	recipeDefinitionSchema,
 	recipeEvidenceManifestSchema,
 	recipeRunReceiptSchema,
@@ -1462,8 +1462,8 @@ export class RecipeService {
 			})),
 		});
 		const evidence = recipeEvidenceManifestSchema.parse({
-			format: 'pumpd-evidence-bundle',
-			formatVersion: PUMPD_RECIPE_FORMAT_VERSION,
+			format: 'rndevtools-evidence-bundle',
+			formatVersion: RNDEVTOOLS_RECIPE_FORMAT_VERSION,
 			id: evidenceId,
 			runId,
 			recipe: { id: recipe.id, name: recipe.name, revision: recipe.revision },

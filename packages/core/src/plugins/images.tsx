@@ -624,9 +624,7 @@ export function createImageDiagnosticsPlugin(
 							</Section>
 							<Section title={`Recent · ${recent.length}`}>
 								{recent.length === 0 ? (
-									<UIText>
-										Tracked PUMPD images will appear as they load.
-									</UIText>
+									<UIText>Tracked images will appear as they load.</UIText>
 								) : (
 									recent.map((entry) => {
 										const analysis = analyzeImageDiagnostic(entry, entries);

@@ -15,11 +15,13 @@ import { verifyAgentCli, verifySimulatorHelper } from './native-helper-trust';
 const directories: string[] = [];
 
 async function fixture() {
-	const directory = await mkdtemp(path.join(tmpdir(), 'pumpd-helper-trust-'));
+	const directory = await mkdtemp(
+		path.join(tmpdir(), 'rndevtools-helper-trust-')
+	);
 	directories.push(directory);
-	const executable = path.join(directory, 'pumpd-sim-helper');
-	const nativeHost = path.join(directory, 'pumpd-native-host');
-	const cli = path.join(directory, 'pumpd-devtools');
+	const executable = path.join(directory, 'rndevtools-sim-helper');
+	const nativeHost = path.join(directory, 'rndevtools-native-host');
+	const cli = path.join(directory, 'rndevtools');
 	await writeFile(executable, 'simulator helper');
 	await writeFile(nativeHost, 'native helper');
 	await writeFile(cli, 'agent cli');
@@ -53,9 +55,9 @@ async function fixture() {
 				'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
 		},
 		helpers: {
-			simulator: entry('pumpd-sim-helper', 'simulator helper'),
-			nativeHost: entry('pumpd-native-host', 'native helper'),
-			cli: entry('pumpd-devtools', 'agent cli'),
+			simulator: entry('rndevtools-sim-helper', 'simulator helper'),
+			nativeHost: entry('rndevtools-native-host', 'native helper'),
+			cli: entry('rndevtools', 'agent cli'),
 		},
 	};
 	await writeFile(
@@ -90,7 +92,7 @@ describe('native helper trust', () => {
 
 	it('independently verifies the bundled local agent CLI', async () => {
 		const { directory } = await fixture();
-		const canonicalCli = await realpath(path.join(directory, 'pumpd-devtools'));
+		const canonicalCli = await realpath(path.join(directory, 'rndevtools'));
 		const signatureVerifier = vi.fn(async () => undefined);
 		await expect(
 			verifyAgentCli({

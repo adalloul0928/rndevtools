@@ -879,7 +879,7 @@ function NetworkFields({
 				/>
 			) : null}
 			<p className="recipe-scope-note">
-				This shapes only PUMPD’s instrumented fetch client, not Simulator or
+				This shapes only the app’s instrumented fetch client, not Simulator or
 				host traffic.
 			</p>
 		</>
@@ -1018,7 +1018,7 @@ function CameraFields({
 						</p>
 					) : null}
 					<p className="recipe-scope-note">
-						Fixtures target only PUMPD’s instrumented development camera and
+						Fixtures target only the app’s instrumented development camera and
 						never change macOS camera permission.
 					</p>
 				</>

@@ -41,7 +41,7 @@ Success and failure use the same protocol version and request ID:
 `0` for success, `1` for a recognized operation failure, and `2` for malformed
 protocol input or unexpected arguments. Standard error is not protocol data.
 
-## `pumpd-sim-helper`
+## `rndevtools-sim-helper`
 
 The helper resolves canonical simulator UDIDs from a fresh projection of the
 default device set. It accepts no device-set path, launchd label, executable,
@@ -61,7 +61,7 @@ Supported read-only operations:
 
 Simulator clone preparation is a separate bounded operation:
 
-- `clone_simulator { "simulatorId": "<canonical-UDID>", "name": "PUMPD Clone" }`
+- `clone_simulator { "simulatorId": "<canonical-UDID>", "name": "Test Clone" }`
 
 The helper delegates this operation to the pinned SimSlim library. It preserves
 the source's original boot state, captures only SimSlim-managed overrides,
@@ -99,8 +99,8 @@ Disk cleanup is a separately confirmed, bounded mutation:
   short-lived confirmation token to the exact UDID/category action, and then
   supplies the helper's fixed `CLEAN_SIMULATOR_DISK` confirmation literal.
 
-Canonical built-in profile IDs are `pumpd-development`,
-`pumpd-ui-automation`, and `maximum-density`. The legacy IDs `ui-automation`
+Canonical built-in profile IDs are `rndevtools-development`,
+`rndevtools-ui-automation`, and `maximum-density`. The legacy IDs `ui-automation`
 and `maximum-slimming` are accepted as input aliases but results use canonical
 IDs. Custom and duplicated profiles remain Electron-owned data and never
 cross the native boundary as arbitrary service lists.
@@ -165,7 +165,7 @@ one subprocess per service or assumes user agents live in the system domain.
 
 Mutation JSON is deliberately not authorization. The fixed confirmation
 strings, `EXPERIMENTAL` acknowledgement, and checkpoint integrity binding are
-additional safety layers, but a caller that invokes `pumpd-sim-helper`
+additional safety layers, but a caller that invokes `rndevtools-sim-helper`
 directly cannot use them to mutate a simulator.
 
 Electron sends the exact helper request to the signed Swift native host over
@@ -200,7 +200,7 @@ mandatory on top of this process boundary.
 
 Both direct read-only execution and Swift-brokered mutation execution also
 provide a private inherited control pipe on FD 4, explicitly marked by
-`PUMPD_HELPER_CONTROL_FD=4`. Closing the pipe cancels the Go context and allows
+`RNDEVTOOLS_HELPER_CONTROL_FD=4`. Closing the pipe cancels the Go context and allows
 independently bounded boot-state restoration or mutation rollback to finish;
 the parent escalates only to SIGKILL after the operation-specific grace period.
 Unmarked descriptors are never opened. The helper intentionally does not use
@@ -213,7 +213,7 @@ read-only and accepts one of these exact payloads:
 {
   "simulatorId": "<canonical-UDID>",
   "operation": "apply_profile",
-  "profileId": "pumpd-development",
+  "profileId": "rndevtools-development",
   "checkpointToken": ""
 }
 ```
@@ -291,7 +291,7 @@ shape (`error.details` on failure):
 ```json
 {
   "operation": "apply_profile | restore_managed | undo_last",
-  "profileId": "pumpd-development",
+  "profileId": "rndevtools-development",
   "failureCode": "verification_failed",
   "changed": true,
   "checkpointToken": "opaque-token",
@@ -363,7 +363,7 @@ responding. Electron's operation-specific timeout and forced-kill grace always
 reserve that cleanup budget; ungraceful termination is not routine
 cancellation.
 
-## `pumpd-native-host`
+## `rndevtools-native-host`
 
 Protocol v1 remains byte-shape compatible with the initial Electron client and
 supports:

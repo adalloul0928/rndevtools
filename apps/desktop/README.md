@@ -1,4 +1,4 @@
-# PUMPD Devtools Desktop
+# RN Devtools Desktop
 
 An isolated Electron app for inspecting a running PUMPD development build. The renderer uses React, HeroUI, HeroUI Pro, Tailwind CSS, and a restrained Vercel-inspired visual system. Electron owns the local device broker and exposes only a narrow, typed preload API to the renderer.
 
@@ -40,20 +40,20 @@ Local iOS Simulator tooling on macOS:
   does not report scheme, configuration, Xcode version, or reliable clean/incremental
   evidence, so those values remain explicitly unreported instead of being inferred.
   The Swift FSEvents adapter and versioned richer-metadata adapters remain deferred.
-- A signed `pumpd-devtools` local-agent CLI over a current-user `0600` Unix socket
+- A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket
 
 PUMPD protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
 app-scoped network conditions, request/recipe correlation, and development camera
 fixtures. Protocol v1 diagnostics remain accepted.
 
-The app starts in a connection-ready state and shows real development devices as they connect. Set `PUMPD_DEVTOOLS_DEMO=true` when you deliberately want a simulated device for UI exploration. Multiple connected and recently disconnected devices are retained in the device picker.
+The app starts in a connection-ready state and shows real development devices as they connect. Set `RNDEVTOOLS_DEMO=true` when you deliberately want a simulated device for UI exploration. Multiple connected and recently disconnected devices are retained in the device picker.
 
 ## Run locally
 
 From the monorepo root:
 
 ```bash
-pnpm --filter @pumpd/devtools-desktop dev
+pnpm --filter @rndevtools/desktop dev
 ```
 
 `dev` keeps the cross-platform connected-app diagnostics loop fast and does not
@@ -61,7 +61,7 @@ generate ignored native binaries. On macOS, a clean checkout should use the
 Simulator-capable command at least once (and again after native changes):
 
 ```bash
-pnpm --filter @pumpd/devtools-desktop dev:simulator
+pnpm --filter @rndevtools/desktop dev:simulator
 ```
 
 That command verifies the pinned vendored SimSlim source, builds the Go and
@@ -82,11 +82,11 @@ The broker listens on `ws://127.0.0.1:47931/device` by default. Expo simulators 
 Useful commands:
 
 ```bash
-pnpm --filter @pumpd/devtools-desktop quality
-pnpm --filter @pumpd/devtools-desktop check:dead-code
-pnpm --filter @pumpd/devtools-desktop build
-pnpm --filter @pumpd/devtools-desktop package
-pnpm --filter @pumpd/devtools-desktop make
+pnpm --filter @rndevtools/desktop quality
+pnpm --filter @rndevtools/desktop check:dead-code
+pnpm --filter @rndevtools/desktop build
+pnpm --filter @rndevtools/desktop package
+pnpm --filter @rndevtools/desktop make
 ```
 
 `package` creates an unpacked, locally runnable app in `apps/devtools-desktop/release`. `make` creates the configured platform artifacts: DMG and ZIP on macOS, NSIS on Windows, or AppImage and DEB on Linux. Distribution releases still require the normal platform signing and notarization credentials.
@@ -101,10 +101,10 @@ selections safely, and forces capability rediscovery after a selection changes.
 Native source gates and both-architecture builds:
 
 ```bash
-pnpm --filter @pumpd/devtools-desktop native:check
-pnpm --filter @pumpd/devtools-desktop native:build:all
-pnpm --filter @pumpd/devtools-desktop native:verify
-pnpm --filter @pumpd/devtools-desktop native:verify:capabilities
+pnpm --filter @rndevtools/desktop native:check
+pnpm --filter @rndevtools/desktop native:build:all
+pnpm --filter @rndevtools/desktop native:verify
+pnpm --filter @rndevtools/desktop native:verify:capabilities
 ```
 
 `native:check` requires Go 1.27, `govulncheck`, and the Xcode Swift toolchain. Generated
@@ -116,13 +116,13 @@ macOS package job.
 Loopback is the safe default. The broker itself speaks plaintext WebSocket, while the mobile client requires TLS for every non-loopback address. To connect a physical device, bind the broker to the computer's specific development-network address, put an authenticated TLS terminator or secure tunnel in front of it, and give the mobile development build the resulting `wss://` URL with a token of at least 16 characters:
 
 ```bash
-PUMPD_DEVTOOLS_BIND_ADDRESS=<computer-lan-ip> PUMPD_DEVTOOLS_TOKEN=<long-random-token> pnpm --filter @pumpd/devtools-desktop dev
+RNDEVTOOLS_BIND_ADDRESS=<computer-lan-ip> RNDEVTOOLS_TOKEN=<long-random-token> pnpm --filter @rndevtools/desktop dev
 EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL='wss://<tls-endpoint>/device?token=<long-random-token>' pnpm --dir apps/mobile start
 ```
 
-The desktop Diagnostics panel lists the broker endpoints. Treat a tokenized URL as a development credential and do not paste it into tickets or logs. `PUMPD_DEVTOOLS_PORT` changes the initial port; if it is occupied, the broker tries the next nine ports. An explicit mobile URL should include the selected port when the TLS endpoint does not use its protocol default. Set `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true` to disable the development client.
+The desktop Diagnostics panel lists the broker endpoints. Treat a tokenized URL as a development credential and do not paste it into tickets or logs. `RNDEVTOOLS_PORT` changes the initial port; if it is occupied, the broker tries the next nine ports. An explicit mobile URL should include the selected port when the TLS endpoint does not use its protocol default. Set `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true` to disable the development client.
 
-Wildcard binding is intentionally a second opt-in. If a local setup truly requires `0.0.0.0` or `::`, also set `PUMPD_DEVTOOLS_ALLOW_WILDCARD=true`; prefer an exact interface address because wildcard binding can include VPN and other unintended adapters. Never expose the plaintext broker directly to an untrusted network.
+Wildcard binding is intentionally a second opt-in. If a local setup truly requires `0.0.0.0` or `::`, also set `RNDEVTOOLS_ALLOW_WILDCARD=true`; prefer an exact interface address because wildcard binding can include VPN and other unintended adapters. Never expose the plaintext broker directly to an untrusted network.
 
 Diagnostic payloads are metadata-only by default. For a local Metro development session that deliberately needs sanitized query values and HTTP bodies, set `EXPO_PUBLIC_DEVTOOLS_CAPTURE_PAYLOADS=true`. The flag is ignored outside `__DEV__`; assume any opted-in payload can contain application data and keep the connection local and temporary.
 
@@ -141,7 +141,7 @@ Diagnostic payloads are metadata-only by default. For a local Metro development 
   argument arrays, minimal child environments, bounded output/timeouts, and per-target
   mutation serialization. They never traverse the mobile WebSocket.
 - Simulator media is stored under the app data directory and served only through opaque
-  `pumpd-capture://` IDs. Renderer APIs never accept or return filesystem paths.
+  `rndevtools-capture://` IDs. Renderer APIs never accept or return filesystem paths.
 - SimSlim mutations are off by default. Destructive actions and experimental mutations
   use short-lived confirmations bound to the exact sender, target, and normalized payload.
   The signed Swift host additionally authenticates the packaged Electron parent and gives

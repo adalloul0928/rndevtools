@@ -2,7 +2,7 @@ import {
 	SCENARIO_DOCUMENT_NAMESPACE,
 	SCENARIO_SCHEMA_VERSION,
 	type ScenarioDefinition,
-} from '@pumpd/devtools/scenario-model';
+} from '@rndevtools/core/scenario-model';
 import { describe, expect, it } from 'vitest';
 import { applyDemoAction, createDemoDevice, tickDemoDevice } from './demo-data';
 import type { DesktopAction, ToolId } from './protocol';
@@ -14,7 +14,7 @@ function action(
 ): DesktopAction {
 	return {
 		actionId: `test-${tool}-${command}`,
-		deviceId: 'pumpd-demo-ios',
+		deviceId: 'rndevtools-demo-ios',
 		tool,
 		command,
 		payload,

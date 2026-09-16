@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
 	agentCliRequestSchema,
-	PUMPD_AGENT_CLI_PROTOCOL,
+	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from './agent-cli-protocol';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
 
 function request(command: unknown) {
 	return {
-		protocol: PUMPD_AGENT_CLI_PROTOCOL,
+		protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 		id: 'cli-0123456789abcdef0123456789abcdef',
 		command,
 	};
@@ -48,7 +48,7 @@ describe('agent CLI protocol', () => {
 			agentCliRequestSchema.safeParse(
 				request({
 					kind: 'act',
-					target: { deviceId: 'pumpd-1' },
+					target: { deviceId: 'device-1' },
 					action: {
 						tool: 'components',
 						command: 'activate',
@@ -61,7 +61,7 @@ describe('agent CLI protocol', () => {
 			agentCliRequestSchema.safeParse(
 				request({
 					kind: 'act',
-					target: { deviceId: 'pumpd-1' },
+					target: { deviceId: 'device-1' },
 					action: {
 						tool: 'restore',
 						command: 'restore',
@@ -81,7 +81,7 @@ describe('agent CLI protocol', () => {
 				agentCliRequestSchema.safeParse(
 					request({
 						kind: 'act',
-						target: { deviceId: 'pumpd-1' },
+						target: { deviceId: 'device-1' },
 						action: { tool: 'network', command, payload },
 					})
 				).success
@@ -91,7 +91,7 @@ describe('agent CLI protocol', () => {
 			agentCliRequestSchema.safeParse(
 				request({
 					kind: 'act',
-					target: { deviceId: 'pumpd-1' },
+					target: { deviceId: 'device-1' },
 					action: { tool: 'network', command: 'clear', payload: {} },
 				})
 			).success
@@ -106,13 +106,13 @@ describe('agent CLI protocol', () => {
 				kind: 'slimming',
 				operation: 'preview',
 				udids: [UDID],
-				profileId: 'pumpd-development',
+				profileId: 'rndevtools-development',
 			},
 			{
 				kind: 'slimming',
 				operation: 'verify',
 				udids: [UDID],
-				profileId: 'pumpd-development',
+				profileId: 'rndevtools-development',
 			},
 		]) {
 			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(

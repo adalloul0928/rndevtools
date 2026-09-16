@@ -4,7 +4,7 @@ The desktop app packages three small, first-party macOS executables. None
 downloads code, opens a network listener, or exposes a shell. Every protocol
 operation and CLI flag is explicitly allowlisted and bounded.
 
-- `pumpd-sim-helper` is a first-party Go protocol adapter linked to an exact,
+- `rndevtools-sim-helper` is a first-party Go protocol adapter linked to an exact,
   checked-in snapshot of SimSlim v0.8.0. It discovers the default iOS Simulator
   device set, reads managed launchd overrides, projects the pinned service
   catalog, previews and verifies profiles, runs capability diagnostics, and
@@ -14,7 +14,7 @@ operation and CLI flag is explicitly allowlisted and bounded.
   independent launchd-registration verification, commit-time exact-UDID
   process-root absence evidence, exact rollback orchestration, and job
   serialization. The helper never invokes the upstream CLI or downloads code.
-- `pumpd-native-host` is a Swift executable that reports its protocol version,
+- `rndevtools-native-host` is a Swift executable that reports its protocol version,
   non-prompting macOS permission status, and a bounded native-capability
   projection. Protocol v2 inspects ScreenCaptureKit, AVFoundation,
   VideoToolbox, Accessibility, FSEvents, and Network Extension prerequisites
@@ -30,9 +30,9 @@ operation and CLI flag is explicitly allowlisted and bounded.
   CodeDirectory identity before delivering an operation/UDID/exact-request-bound one-shot
   authorization on inherited FD 3. A separately marked private control pipe on FD 4
   requests graceful cancellation and gives helper rollback its full bounded grace period.
-- `pumpd-devtools` is a standard-library-only Go command-line client for local
+- `rndevtools` is a standard-library-only Go command-line client for local
   agents and scripts. It connects only to the current user's private PUMPD
-  Devtools Unix socket, sends one bounded `pumpd-devtools/1` command, receives
+  Devtools Unix socket, sends one bounded `rndevtools/1` command, receives
   one bounded response, and exits. It has no shell or network-discovery path.
 
 The simulator helper consumes protocol v2. The native host keeps its exact
@@ -95,7 +95,7 @@ Generated binaries live under `build/native/mac-{arm64,x64}` and are ignored by
 Git. `electron-builder` copies only the package target's architecture into
 `Contents/Resources/native`; it never downloads a helper at runtime.
 
-The macOS CI package gate refuses to run while any existing PUMPD Devtools app
+The macOS CI package gate refuses to run while any existing RN Devtools app
 instance could absorb the launch. It starts the packaged Mach-O directly, waits
 for a live renderer process, holds a stability window, rejects new macOS crash
 reports, and then terminates only the process it launched.

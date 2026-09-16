@@ -1,5 +1,5 @@
-import { redactDiagnosticText } from '@pumpd/devtools/redact';
-import { truncateText } from '@pumpd/devtools/serialize';
+import { redactDiagnosticText } from '@rndevtools/core/redact';
+import { truncateText } from '@rndevtools/core/serialize';
 import { WebSocket } from 'ws';
 import { applyDemoAction } from '../shared/demo-data';
 import {

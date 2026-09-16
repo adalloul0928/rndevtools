@@ -11,7 +11,7 @@ const UDID = '11111111-2222-3333-4444-555555555555';
 
 function verified(): VerifiedSimulatorHelper {
 	return {
-		executablePath: '/signed/pumpd-sim-helper',
+		executablePath: '/signed/rndevtools-sim-helper',
 		verifiedAt: 1,
 		manifest: {
 			schemaVersion: 1,
@@ -35,20 +35,20 @@ function verified(): VerifiedSimulatorHelper {
 			},
 			helpers: {
 				simulator: {
-					name: 'pumpd-sim-helper',
-					file: 'pumpd-sim-helper',
+					name: 'rndevtools-sim-helper',
+					file: 'rndevtools-sim-helper',
 					sha256: 'b'.repeat(64),
 					size: 1,
 				},
 				nativeHost: {
-					name: 'pumpd-native-host',
-					file: 'pumpd-native-host',
+					name: 'rndevtools-native-host',
+					file: 'rndevtools-native-host',
 					sha256: 'c'.repeat(64),
 					size: 1,
 				},
 				cli: {
-					name: 'pumpd-devtools',
-					file: 'pumpd-devtools',
+					name: 'rndevtools',
+					file: 'rndevtools',
 					sha256: 'c'.repeat(64),
 					size: 1,
 				},
@@ -299,7 +299,7 @@ describe('sim helper client', () => {
 			runSimulatorMutation: vi.fn(async () => {
 				throw new NativeHostResponseError(
 					'mutation_authorization_required',
-					'The desktop parent is not a production-signed PUMPD application.',
+					'The desktop parent is not a production-signed desktop application.',
 					false
 				);
 			}),
@@ -314,7 +314,7 @@ describe('sim helper client', () => {
 		await expect(client.cleanDisk(UDID, ['caches'])).rejects.toMatchObject({
 			code: 'helper_process_failed',
 			message: expect.stringMatching(
-				/native host mutation_authorization_required.*not a production-signed PUMPD application/
+				/native host mutation_authorization_required.*not a production-signed desktop application/
 			),
 		});
 		expect(runner).not.toHaveBeenCalled();
@@ -325,7 +325,7 @@ describe('sim helper client', () => {
 			throw new Error('the direct read-only runner must not carry a mutation');
 		});
 		const reason =
-			"The helper's parent is not an authenticated PUMPD mutation broker: verify live broker signature: static codesign requirement bound to live cdhash failed";
+			"The helper's parent is not an authenticated mutation broker: verify live broker signature: static codesign requirement bound to live cdhash failed";
 		const mutationBroker = {
 			runSimulatorMutation: vi.fn(async (input: string) => {
 				const request = JSON.parse(input) as { requestId: string };
@@ -408,7 +408,7 @@ describe('sim helper client', () => {
 				};
 				expect(request).toMatchObject({
 					operation: 'clone_simulator',
-					payload: { simulatorId: UDID, name: 'PUMPD Clone' },
+					payload: { simulatorId: UDID, name: 'Example Clone' },
 				});
 				return JSON.stringify({
 					protocolVersion: 2,
@@ -417,7 +417,7 @@ describe('sim helper client', () => {
 					result: {
 						sourceSimulatorId: UDID,
 						simulatorId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
-						name: 'PUMPD Clone',
+						name: 'Example Clone',
 					},
 				});
 			}),
@@ -429,13 +429,13 @@ describe('sim helper client', () => {
 			trustVerifier: vi.fn(async () => verified()),
 			mutationBroker,
 		});
-		await expect(client.cloneSimulator(UDID, ' PUMPD Clone ')).resolves.toEqual(
-			{
-				sourceSimulatorId: UDID,
-				simulatorId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
-				name: 'PUMPD Clone',
-			}
-		);
+		await expect(
+			client.cloneSimulator(UDID, ' Example Clone ')
+		).resolves.toEqual({
+			sourceSimulatorId: UDID,
+			simulatorId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+			name: 'Example Clone',
+		});
 		await expect(
 			client.cloneSimulator('booted; rm -rf /', 'Unsafe')
 		).rejects.toBeDefined();
@@ -460,7 +460,7 @@ describe('sim helper client', () => {
 	it('verifies once and binds a strict one-request handshake to its response ID', async () => {
 		const verifier = vi.fn(async () => verified());
 		const runner = vi.fn(async (executable, args, options) => {
-			expect(executable).toBe('/signed/pumpd-sim-helper');
+			expect(executable).toBe('/signed/rndevtools-sim-helper');
 			expect(args).toEqual([]);
 			const request = JSON.parse(options.stdin ?? '') as {
 				protocolVersion: number;

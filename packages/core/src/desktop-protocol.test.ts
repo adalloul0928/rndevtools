@@ -1,15 +1,15 @@
 import {
 	desktopActionCapability,
-	PUMPD_DESKTOP_PROTOCOL_VERSION,
-	PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS,
 	parseDesktopActionEnvelope,
 	parseDesktopDeviceAction,
+	RNDEVTOOLS_PROTOCOL_VERSION,
+	RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS,
 } from './desktop-protocol';
 
 describe('desktop action protocol', () => {
 	it('advertises protocol v2 while retaining v1 compatibility', () => {
-		expect(PUMPD_DESKTOP_PROTOCOL_VERSION).toBe(2);
-		expect(PUMPD_DESKTOP_SUPPORTED_PROTOCOL_VERSIONS).toEqual([1, 2]);
+		expect(RNDEVTOOLS_PROTOCOL_VERSION).toBe(2);
+		expect(RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS).toEqual([1, 2]);
 	});
 
 	it.each([
@@ -22,7 +22,7 @@ describe('desktop action protocol', () => {
 		['storage', 'bookmark', { id: 'event' }],
 		['query', 'refetch', { id: 'query' }],
 		['query', 'invalidate', { id: 'query' }],
-		['query', 'simulate', { familyId: 'all-pumpd-queries', mode: 'offline' }],
+		['query', 'simulate', { familyId: 'all-example-queries', mode: 'offline' }],
 		['query', 'clearSimulation', { receiptId: 'query-simulation-1' }],
 		['routes', 'navigate', { path: '/settings' }],
 		['zustand', 'refresh', {}],
@@ -47,13 +47,13 @@ describe('desktop action protocol', () => {
 		[
 			'scenarios',
 			'execute',
-			{ id: 'pumpd.powerUser', version: 1, definitionToken: 'definition-1' },
+			{ id: 'example.powerUser', version: 1, definitionToken: 'definition-1' },
 		],
 		[
 			'scenarios',
 			'execute',
 			{
-				id: 'pumpd.custom',
+				id: 'example.custom',
 				version: 2,
 				definitionToken: 'definition-2',
 				variables: { account: 'demo', count: 3 },
@@ -69,7 +69,7 @@ describe('desktop action protocol', () => {
 		[
 			'scenarios',
 			'remove',
-			{ id: 'pumpd.custom', version: 2, definitionToken: 'definition-2' },
+			{ id: 'example.custom', version: 2, definitionToken: 'definition-2' },
 		],
 		['identity', 'start', { personaId: 'power' }],
 		['identity', 'stop', {}],

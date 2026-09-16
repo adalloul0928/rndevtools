@@ -188,7 +188,7 @@ const simulatorAppSchema = z.strictObject({
 });
 export type SimulatorApp = z.infer<typeof simulatorAppSchema>;
 
-export const SIMULATOR_CAPTURE_PROTOCOL_SCHEME = 'pumpd-capture';
+export const SIMULATOR_CAPTURE_PROTOCOL_SCHEME = 'rndevtools-capture';
 
 export const simulatorCaptureIdSchema = z
 	.string()
@@ -237,7 +237,7 @@ export const simulatorCaptureAccessResultSchema = z.strictObject({
 	url: z
 		.string()
 		.regex(
-			/^pumpd-capture:\/\/capture\/capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+			/^rndevtools-capture:\/\/capture\/capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 		)
 		.optional(),
 });
@@ -770,7 +770,7 @@ export const captureCompositionRecipeSchema = z
 				z.literal(270),
 			]),
 			cornerRadius: z.number().int().min(0).max(1_024),
-			bezel: z.enum(['none', 'pumpd-generic-v1']),
+			bezel: z.enum(['none', 'rndevtools-generic-v1']),
 			shadow: z
 				.strictObject({
 					color: captureColorSchema,
@@ -886,7 +886,7 @@ export const captureCompositionRecipeSchema = z
 				});
 			}
 			if (
-				recipe.layout.bezel === 'pumpd-generic-v1' &&
+				recipe.layout.bezel === 'rndevtools-generic-v1' &&
 				Math.min(frameWidth, contentHeight) < 64
 			) {
 				context.addIssue({

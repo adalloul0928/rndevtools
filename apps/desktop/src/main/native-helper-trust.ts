@@ -19,8 +19,8 @@ const EXPECTED_VENDORED_SOURCE_MANIFEST_SHA256 =
 	'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7';
 
 const helperManifestEntrySchema = z.strictObject({
-	name: z.string().regex(/^pumpd-[a-z-]+$/),
-	file: z.string().regex(/^pumpd-[a-z-]+$/),
+	name: z.string().regex(/^rndevtools(?:-[a-z-]+)?$/),
+	file: z.string().regex(/^rndevtools(?:-[a-z-]+)?$/),
 	sha256: z.string().regex(/^[a-f0-9]{64}$/),
 	size: z.number().int().positive().max(MAX_HELPER_BYTES),
 });
@@ -122,7 +122,10 @@ async function verifyNativeHelper({
 	resourceDirectory: string;
 	appVersion: string;
 	helperKind: 'simulator' | 'nativeHost' | 'cli';
-	expectedName: 'pumpd-sim-helper' | 'pumpd-native-host' | 'pumpd-devtools';
+	expectedName:
+		| 'rndevtools-sim-helper'
+		| 'rndevtools-native-host'
+		| 'rndevtools';
 	architecture?: NodeJS.Architecture;
 	platform?: NodeJS.Platform;
 	signatureVerifier?: SignatureVerifier;
@@ -247,7 +250,7 @@ export function verifySimulatorHelper(options: {
 	return verifyNativeHelper({
 		...options,
 		helperKind: 'simulator',
-		expectedName: 'pumpd-sim-helper',
+		expectedName: 'rndevtools-sim-helper',
 	});
 }
 
@@ -261,7 +264,7 @@ export function verifyNativeHost(options: {
 	return verifyNativeHelper({
 		...options,
 		helperKind: 'nativeHost',
-		expectedName: 'pumpd-native-host',
+		expectedName: 'rndevtools-native-host',
 	});
 }
 
@@ -275,6 +278,6 @@ export function verifyAgentCli(options: {
 	return verifyNativeHelper({
 		...options,
 		helperKind: 'cli',
-		expectedName: 'pumpd-devtools',
+		expectedName: 'rndevtools',
 	});
 }

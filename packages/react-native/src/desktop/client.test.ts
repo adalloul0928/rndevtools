@@ -1,29 +1,29 @@
-import type { DesktopDeviceAction } from '@pumpd/devtools/desktop-protocol';
+import type { DesktopDeviceAction } from '@rndevtools/core/desktop-protocol';
+import {
+	disableDevtoolsAuthorization,
+	getDevtoolsAuthorization,
+	setDevtoolsAuthorization,
+} from '../authorization';
+import type { DesktopClientHost } from './client';
 import {
 	DesktopActionAdmissionController,
 	DesktopActionReplayCache,
-	pumpdDesktopBrokerCandidates,
-	shouldStartPumpdDesktopClient,
-	startPumpdDesktopClient,
-} from '@/features/dev-menu/desktop/desktop-client';
-import {
-	capturePumpdDesktopTools,
-	runPumpdDesktopAction,
-} from '@/features/dev-menu/desktop/desktop-snapshot';
-import { isDevelopmentVariant } from '@/lib/app-variant';
-import {
-	disableInternalToolsAuthorization,
-	setInternalToolsAuthorization,
-} from '@/services/devtools/internal-tools-authorization';
+	desktopBrokerCandidates,
+	shouldStartDesktopClient,
+	startDesktopClient,
+} from './client';
 
-jest.mock('@/features/dev-menu/desktop/desktop-snapshot', () => ({
-	capturePumpdDesktopTools: jest.fn(() => ({})),
-	createPumpdDesktopDeviceInfo: jest.fn(() => ({ id: 'device-1' })),
-	runPumpdDesktopAction: jest.fn(),
-}));
+const mockRunDesktopAction = jest.fn<Promise<void>, [DesktopDeviceAction]>();
+const mockCaptureDesktopTools = jest.fn(() => ({}) as never);
 
-const mockRunPumpdDesktopAction = jest.mocked(runPumpdDesktopAction);
-const mockCapturePumpdDesktopTools = jest.mocked(capturePumpdDesktopTools);
+// The client is host-agnostic, so the suite injects a host rather than mocking
+// a module. Anything a real app would supply is a plain function here.
+const testHost: DesktopClientHost = {
+	captureTools: mockCaptureDesktopTools,
+	createDeviceInfo: () => ({ id: 'device-1' }) as never,
+	runAction: mockRunDesktopAction,
+	getAuthorization: getDevtoolsAuthorization,
+};
 
 class FakeWebSocket {
 	static instances: FakeWebSocket[] = [];
@@ -61,83 +61,83 @@ async function flushPromises(): Promise<void> {
 describe('desktop devtools broker discovery', () => {
 	it('requires encryption and authentication for explicit remote endpoints', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://192.168.1.20:49000',
 				hostUri: '10.0.0.3:8081',
 				platform: 'android',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://192.168.1.20:49000?token=pairing-secret-123',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'wss://192.168.1.20:49000',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://10.0.2.2:49000',
-			})
+			}),
 		).toEqual([]);
 	});
 
 	it('rejects an explicit URL that is not a WebSocket transport', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'https://192.168.1.20:49000/device',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://user:password@192.168.1.20:49000/device',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://192.168.1.20:49000/device#fragment',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://192.168.1.20:49000/other',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'ws://192.168.1.20:49000/device?password=private',
-			})
+			}),
 		).toEqual([]);
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: `ws://localhost:49000/device?token=${'x'.repeat(513)}`,
-			})
+			}),
 		).toEqual([]);
 	});
 
 	it('omits the Android host alias on a physical device', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				hostUri: '192.168.1.20:8081',
 				platform: 'android',
 				isEmulator: false,
 				port: 47932,
 				portAttempts: 1,
-			})
+			}),
 		).toEqual(['ws://127.0.0.1:47932/device', 'ws://localhost:47932/device']);
 	});
 
 	it('keeps automatic discovery on local and emulator-safe addresses', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				hostUri: '192.168.1.20:8081',
 				platform: 'android',
 				isEmulator: true,
 				port: 47932,
 				portAttempts: 1,
-			})
+			}),
 		).toEqual([
 			'ws://10.0.2.2:47932/device',
 			'ws://127.0.0.1:47932/device',
@@ -145,22 +145,22 @@ describe('desktop devtools broker discovery', () => {
 		]);
 
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				hostUri: 'localhost:8081',
 				platform: 'ios',
 				portAttempts: 1,
-			})
+			}),
 		).toEqual(['ws://localhost:47931/device', 'ws://127.0.0.1:47931/device']);
 	});
 
 	it('matches the desktop broker port fallback range', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				hostUri: undefined,
 				platform: 'ios',
 				port: 47931,
 				portAttempts: 2,
-			})
+			}),
 		).toEqual([
 			'ws://127.0.0.1:47931/device',
 			'ws://localhost:47931/device',
@@ -171,9 +171,9 @@ describe('desktop devtools broker discovery', () => {
 
 	it('preserves a token in an explicit broker URL', () => {
 		expect(
-			pumpdDesktopBrokerCandidates({
+			desktopBrokerCandidates({
 				explicitUrl: 'wss://192.168.1.20:49000?token=pairing-secret-123',
-			})
+			}),
 		).toEqual(['wss://192.168.1.20:49000/device?token=pairing-secret-123']);
 	});
 });
@@ -263,26 +263,29 @@ describe('desktop action authorization', () => {
 	beforeEach(() => {
 		FakeWebSocket.instances = [];
 		runtime.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-		mockRunPumpdDesktopAction.mockReset();
-		mockCapturePumpdDesktopTools.mockReset();
-		mockCapturePumpdDesktopTools.mockReturnValue({} as never);
+		mockRunDesktopAction.mockReset();
+		mockCaptureDesktopTools.mockReset();
+		mockCaptureDesktopTools.mockReturnValue({} as never);
 	});
 
 	afterEach(() => {
-		disableInternalToolsAuthorization();
+		disableDevtoolsAuthorization();
 		runtime.WebSocket = originalWebSocket;
 	});
 
 	it('rechecks the authorized owner before queued actions execute', async () => {
 		let finishFirstAction: (() => void) | undefined;
-		mockRunPumpdDesktopAction.mockImplementationOnce(
+		mockRunDesktopAction.mockImplementationOnce(
 			() =>
 				new Promise<void>((resolve) => {
 					finishFirstAction = resolve;
-				})
+				}),
 		);
-		setInternalToolsAuthorization({ enabled: true, ownerId: 'owner-a' });
-		const client = startPumpdDesktopClient(['ws://localhost:47931/device']);
+		setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: ['ws://localhost:47931/device'],
+		});
 
 		try {
 			const socket = FakeWebSocket.instances[0];
@@ -299,7 +302,7 @@ describe('desktop action authorization', () => {
 				},
 			});
 			await flushPromises();
-			expect(mockRunPumpdDesktopAction).toHaveBeenCalledTimes(1);
+			expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
 
 			socket?.receive({
 				type: 'action',
@@ -311,14 +314,14 @@ describe('desktop action authorization', () => {
 					payload: {},
 				},
 			});
-			setInternalToolsAuthorization({ enabled: true, ownerId: 'owner-b' });
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-b' });
 			finishFirstAction?.();
 			await flushPromises();
 
-			expect(mockRunPumpdDesktopAction).toHaveBeenCalledTimes(1);
+			expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
 			const results = (socket?.send.mock.calls ?? [])
 				.map(
-					([message]) => JSON.parse(String(message)) as Record<string, unknown>
+					([message]) => JSON.parse(String(message)) as Record<string, unknown>,
 				)
 				.filter((message) => message.type === 'action-result');
 			expect(results).toContainEqual(
@@ -326,7 +329,7 @@ describe('desktop action authorization', () => {
 					actionId: 'second',
 					ok: false,
 					error: expect.stringContaining('authorization changed'),
-				})
+				}),
 			);
 		} finally {
 			client.stop();
@@ -334,17 +337,20 @@ describe('desktop action authorization', () => {
 	});
 
 	it('refuses to send a snapshot above the aggregate wire budget', () => {
-		mockCapturePumpdDesktopTools.mockReturnValueOnce({
+		mockCaptureDesktopTools.mockReturnValueOnce({
 			diagnostics: [{ message: 'x'.repeat(8 * 1024 * 1024) }],
 		} as never);
-		const client = startPumpdDesktopClient(['ws://localhost:47931/device']);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: ['ws://localhost:47931/device'],
+		});
 
 		try {
 			const socket = FakeWebSocket.instances[0];
 			expect(socket).toBeDefined();
 			socket?.open();
 			const sentTypes = (socket?.send.mock.calls ?? []).map(
-				([message]) => (JSON.parse(String(message)) as { type?: string }).type
+				([message]) => (JSON.parse(String(message)) as { type?: string }).type,
 			);
 			expect(sentTypes).toEqual(['hello']);
 		} finally {
@@ -353,13 +359,6 @@ describe('desktop action authorization', () => {
 	});
 });
 
-jest.mock('@/lib/app-variant', () => ({
-	...jest.requireActual('@/lib/app-variant'),
-	isDevelopmentVariant: jest.fn(() => true),
-}));
-
-const mockIsDevelopmentVariant = jest.mocked(isDevelopmentVariant);
-
 describe('desktop client activation', () => {
 	const originalNodeEnv = process.env.NODE_ENV;
 	const originalDisabled = process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED;
@@ -367,29 +366,27 @@ describe('desktop client activation', () => {
 	afterEach(() => {
 		process.env.NODE_ENV = originalNodeEnv;
 		process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED = originalDisabled;
-		mockIsDevelopmentVariant.mockReturnValue(true);
 	});
 
 	it('never dials a broker from a preview build', () => {
 		// Internal tools are enabled for preview too, but a tester's device has no
 		// broker and no hostUri, so discovery would sweep loopback forever.
 		process.env.NODE_ENV = 'development';
-		mockIsDevelopmentVariant.mockReturnValue(false);
 
-		expect(shouldStartPumpdDesktopClient()).toBe(false);
+		expect(shouldStartDesktopClient({ isDevelopmentBuild: false })).toBe(false);
 	});
 
 	it('starts for a development build and honours the kill switch', () => {
 		process.env.NODE_ENV = 'development';
 		process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED = undefined;
-		expect(shouldStartPumpdDesktopClient()).toBe(true);
+		expect(shouldStartDesktopClient({ isDevelopmentBuild: true })).toBe(true);
 
 		process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED = 'true';
-		expect(shouldStartPumpdDesktopClient()).toBe(false);
+		expect(shouldStartDesktopClient({ isDevelopmentBuild: true })).toBe(false);
 	});
 
 	it('stays inert under jest so suites never open sockets', () => {
 		expect(process.env.NODE_ENV).toBe('test');
-		expect(shouldStartPumpdDesktopClient()).toBe(false);
+		expect(shouldStartDesktopClient({ isDevelopmentBuild: true })).toBe(false);
 	});
 });

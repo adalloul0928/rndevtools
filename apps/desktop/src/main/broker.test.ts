@@ -93,7 +93,7 @@ describe('DesktopBroker', () => {
 		const health = await fetch(`http://127.0.0.1:${listeningPort}/health`);
 		expect(health.status).toBe(200);
 		expect(await health.json()).toMatchObject({
-			name: 'PUMPD Devtools',
+			name: 'RN Devtools',
 			protocolVersion: DESKTOP_PROTOCOL_VERSION,
 			access: 'loopback',
 		});
@@ -658,7 +658,7 @@ describe('DesktopBroker', () => {
 		await deniedWildcard.start();
 		expect(deniedWildcard.getState().broker).toMatchObject({
 			status: 'error',
-			error: expect.stringContaining('PUMPD_DEVTOOLS_ALLOW_WILDCARD'),
+			error: expect.stringContaining('RNDEVTOOLS_ALLOW_WILDCARD'),
 		});
 
 		const missingToken = new DesktopBroker({
@@ -671,7 +671,7 @@ describe('DesktopBroker', () => {
 		await missingToken.start();
 		expect(missingToken.getState().broker).toMatchObject({
 			status: 'error',
-			error: expect.stringContaining('PUMPD_DEVTOOLS_TOKEN'),
+			error: expect.stringContaining('RNDEVTOOLS_TOKEN'),
 		});
 
 		const port = 40_000 + Math.floor(Math.random() * 20_000);

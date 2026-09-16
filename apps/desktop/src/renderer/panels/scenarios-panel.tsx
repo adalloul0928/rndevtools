@@ -99,7 +99,7 @@ export function ScenariosPanel() {
 		}
 	}
 	const [importText, setImportText] = useState(
-		'{\n  "schemaVersion": 1,\n  "namespace": "pumpd-devtools-scenarios",\n  "scenarios": []\n}'
+		'{\n  "schemaVersion": 1,\n  "namespace": "rndevtools-scenarios",\n  "scenarios": []\n}'
 	);
 	const latestReceipt = useMemo(
 		() =>
@@ -295,7 +295,7 @@ export function ScenariosPanel() {
 										triggerIcon={<Play className="h-3.5 w-3.5" />}
 										triggerVariant="primary"
 										title={`Run ${selected.name}?`}
-										description={`PUMPD will preflight all ${selected.steps.length} steps, capture rollback state, then apply sequentially. Privileged and non-reversible steps remain blocked by the mobile engine.`}
+										description={`The app will preflight all ${selected.steps.length} steps, capture rollback state, then apply sequentially. Privileged and non-reversible steps remain blocked by the mobile engine.`}
 										confirmLabel="Run transaction"
 										isDisabled={
 											Boolean(runtime.active) ||

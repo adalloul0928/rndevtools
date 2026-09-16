@@ -109,12 +109,12 @@ const CAPABILITIES: CapabilityDefinition[] = [
 		id: 'accessibility',
 		label: 'Native accessibility groundwork',
 		description:
-			'Prepare host permission for the later arbitrary-app accessibility provider. PUMPD semantic actions do not require it.',
+			'Prepare host permission for the later arbitrary-app accessibility provider. Semantic actions do not require it.',
 		required: false,
 		icon: Accessibility,
 		mechanism: 'macOS Accessibility permission',
 		unavailableGuidance:
-			'Connected Components works through the PUMPD protocol today. Grant this only when evaluating the later native provider.',
+			'Connected Components works through the devtools protocol today. Grant this only when evaluating the later native provider.',
 	},
 	{
 		id: 'camera',
@@ -201,7 +201,7 @@ const CAPABILITIES: CapabilityDefinition[] = [
 		icon: Network,
 		mechanism: 'Network Extension entitlement probe',
 		unavailableGuidance:
-			'This build has no approved Network Extension entitlement. App-scoped PUMPD network profiles remain the fallback.',
+			'This build has no approved Network Extension entitlement. App-scoped network profiles remain the fallback.',
 		featureLink: { label: 'Open Network', hash: 'connected/network' },
 		nativeCapability: 'network-extension',
 	},
@@ -254,7 +254,7 @@ export function SettingsPanel() {
 		<section className="panel-root">
 			<SimulatorPanelHeader
 				actions={<RefreshSimulatorsButton />}
-				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected PUMPD app."
+				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected app."
 				eyebrow="Capability onboarding"
 				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
 				title="Settings"
@@ -299,7 +299,8 @@ export function SettingsPanel() {
 									Packaged startup verifies the signed CLI before opening its
 									private socket. In development, Reveal CLI performs the same
 									manifest, hash, architecture, and signature checks against the
-									current local build. PUMPD never modifies your shell path.
+									current local build. RN Devtools never modifies your shell
+									path.
 								</p>
 								<Button
 									isDisabled={!isBridgeAvailable}

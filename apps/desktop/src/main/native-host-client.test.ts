@@ -9,7 +9,7 @@ import {
 } from './native-host-client';
 
 const verified: VerifiedNativeHelper = {
-	executablePath: '/signed/pumpd-native-host',
+	executablePath: '/signed/rndevtools-native-host',
 	verifiedAt: 1,
 	manifest: {
 		schemaVersion: 1,
@@ -33,20 +33,20 @@ const verified: VerifiedNativeHelper = {
 		},
 		helpers: {
 			simulator: {
-				name: 'pumpd-sim-helper',
-				file: 'pumpd-sim-helper',
+				name: 'rndevtools-sim-helper',
+				file: 'rndevtools-sim-helper',
 				sha256: 'b'.repeat(64),
 				size: 1,
 			},
 			nativeHost: {
-				name: 'pumpd-native-host',
-				file: 'pumpd-native-host',
+				name: 'rndevtools-native-host',
+				file: 'rndevtools-native-host',
 				sha256: 'c'.repeat(64),
 				size: 1,
 			},
 			cli: {
-				name: 'pumpd-devtools',
-				file: 'pumpd-devtools',
+				name: 'rndevtools',
+				file: 'rndevtools',
 				sha256: 'c'.repeat(64),
 				size: 1,
 			},

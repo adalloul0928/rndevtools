@@ -30,7 +30,7 @@ import {
 const UDID = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 const SECOND_UDID = '11111111-2222-3333-4444-555555555555';
 const RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-5';
-const PROFILE = 'pumpd-development';
+const PROFILE = 'rndevtools-development';
 const temporaryDirectories: string[] = [];
 
 const AVAILABLE_SIMULATOR_CAPABILITY: SimulatorCapability = {
@@ -241,7 +241,7 @@ class FakeHelper implements SlimmingHelperProvider {
 		profiles: [
 			{
 				id: PROFILE,
-				name: 'PUMPD Development',
+				name: 'App Development',
 				description: 'Development profile.',
 				categoryIds: ['telemetry'],
 				experimental: true,
@@ -441,7 +441,7 @@ async function createService(
 ) {
 	const directory =
 		persistenceDirectory ??
-		(await mkdtemp(path.join(tmpdir(), 'pumpd-slimming-')));
+		(await mkdtemp(path.join(tmpdir(), 'rndevtools-slimming-')));
 	if (!persistenceDirectory) temporaryDirectories.push(directory);
 	const service = new SlimmingService({
 		resourceDirectory: '/unused',
@@ -460,7 +460,7 @@ async function createFleetService(
 	provider = new CoordinatedSlimmingSimulatorProvider()
 ) {
 	const captureDirectory = await mkdtemp(
-		path.join(tmpdir(), 'pumpd-fleet-coordination-')
+		path.join(tmpdir(), 'rndevtools-fleet-coordination-')
 	);
 	temporaryDirectories.push(captureDirectory);
 	const service = new SimulatorService({
@@ -568,7 +568,7 @@ afterEach(async () => {
 describe('slimming service', () => {
 	it('exposes the desktop mutation restriction while retaining read-only discovery', async () => {
 		const directory = await mkdtemp(
-			path.join(tmpdir(), 'pumpd-slimming-preview-')
+			path.join(tmpdir(), 'rndevtools-slimming-preview-')
 		);
 		temporaryDirectories.push(directory);
 		const service = new SlimmingService({
@@ -619,7 +619,7 @@ describe('slimming service', () => {
 			actionId: 'cross-service-launch',
 			kind: 'app.launch',
 			udid: UDID,
-			bundleIdentifier: 'com.example.pumpd',
+			bundleIdentifier: 'com.example.app',
 			terminateRunning: false,
 			arguments: [],
 		});
@@ -652,7 +652,7 @@ describe('slimming service', () => {
 			actionId: 'cross-cancel-launch',
 			kind: 'app.launch',
 			udid: UDID,
-			bundleIdentifier: 'com.example.pumpd',
+			bundleIdentifier: 'com.example.app',
 			terminateRunning: false,
 			arguments: [],
 		});
@@ -1066,7 +1066,7 @@ describe('slimming service', () => {
 		const { directory, service } = await createService(helper);
 		await enableAndAcknowledge(service, 'refused');
 		const reason =
-			"The helper's parent is not an authenticated PUMPD mutation broker: verify live broker signature failed";
+			"The helper's parent is not an authenticated mutation broker: verify live broker signature failed";
 		helper.applyError = new SimHelperError(
 			'mutation_authorization_required',
 			reason,
@@ -1084,7 +1084,7 @@ describe('slimming service', () => {
 					condition: 'unknown',
 					errorCode: 'mutation_authorization_required',
 					message: expect.stringContaining(
-						'not an authenticated PUMPD mutation broker'
+						'not an authenticated mutation broker'
 					),
 				},
 			],

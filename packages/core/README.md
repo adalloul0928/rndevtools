@@ -1,4 +1,4 @@
-# @pumpd/devtools
+# @rndevtools/core
 
 Private, reusable on-device diagnostics for Expo and React Native. The UI is
 iOS-first, with native SwiftUI chrome on iOS and matching React Native panels
@@ -10,12 +10,12 @@ assets from React Buoy or the current `@buoy-gg/*` packages.
 ## Usage
 
 ```tsx
-import { InternalTools } from '@pumpd/devtools';
+import { InternalTools } from '@rndevtools/core';
 import {
 	createEnvironmentPlugin,
 	createNetworkPlugin,
 	createQueryPlugin,
-} from '@pumpd/devtools/plugins';
+} from '@rndevtools/core/plugins';
 
 const network = createNetworkPlugin({
 	captureBody: true,
@@ -47,12 +47,12 @@ export const instrumentedFetch = network.instrumentFetch(fetch, {
 
 The root entry point exposes the runtime, shared panel UI, event stores, and
 public types. Reusable built-in diagnostics and plugin factories are also
-available from the dedicated `@pumpd/devtools/plugins` entry point. Keeping the
+available from the dedicated `@rndevtools/core/plugins` entry point. Keeping the
 entry points separate prevents hosts that only need the shell from traversing
 optional diagnostic dependencies.
 
 Image diagnostics and the storage editor use the separate
-`@pumpd/devtools/plugins/images` and `@pumpd/devtools/plugins/storage` entry points.
+`@rndevtools/core/plugins/images` and `@rndevtools/core/plugins/storage` entry points.
 They are excluded from the shared plugins barrel so hosts can prune their adapters
 from production bundles without depending on tree shaking.
 
@@ -150,7 +150,7 @@ Applications can contribute full React Native panels without changing this
 package:
 
 ```tsx
-import { createCustomPlugin } from '@pumpd/devtools/plugins';
+import { createCustomPlugin } from '@rndevtools/core/plugins';
 
 const fixturesPlugin = createCustomPlugin({
 	id: 'fixtures',
@@ -170,7 +170,7 @@ const fixturesPlugin = createCustomPlugin({
 One-tap application actions use the same registry:
 
 ```tsx
-import { createActionPlugin } from '@pumpd/devtools/plugins';
+import { createActionPlugin } from '@rndevtools/core/plugins';
 
 const clearOnboardingPlugin = createActionPlugin({
 	id: 'clear-onboarding',

@@ -2,7 +2,7 @@ import {
 	formatBytes,
 	formatDuration,
 	formatRelativeTime as formatElapsed,
-} from '@pumpd/devtools/format';
+} from '@rndevtools/core/format';
 
 // Byte and duration rendering is shared with the on-device panels so the same
 // value never reads differently on the two surfaces. The local copies also

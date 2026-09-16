@@ -114,7 +114,7 @@ export function CameraPanel() {
 						<Trash2 className="h-3.5 w-3.5" /> Clear fixture
 					</Button>
 				}
-				description="Send an explicit still, QR, video, unavailable, or error fixture to PUMPD's instrumented development camera provider."
+				description="Send an explicit still, QR, video, unavailable, or error fixture to the app's instrumented development camera provider."
 				eyebrow="App / Instrumented input"
 				meta={
 					<StatusPill dot tone={fixture.active ? 'success' : 'default'}>
@@ -124,8 +124,8 @@ export function CameraPanel() {
 				title="Camera Fixtures"
 			/>
 			<PanelNotice title="App-scoped camera simulation." tone="info">
-				This controls only PUMPD's instrumented development camera provider. It
-				does not replace the macOS camera, Simulator system camera, or camera
+				This controls only the app's instrumented development camera provider.
+				It does not replace the macOS camera, Simulator system camera, or camera
 				input in third-party libraries.
 			</PanelNotice>
 			{localError ? (

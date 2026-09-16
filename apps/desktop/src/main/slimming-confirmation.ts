@@ -16,19 +16,19 @@ export function slimmingConfirmationCopy(
 			: target.profileId;
 		return {
 			title: 'Apply an experimental Simulator profile?',
-			detail: `Operation: Apply experimental profile\nProfile: ${profile}\n${targetList(target.simulatorUdids)}\n\nPUMPD will change managed services, reboot when needed, and verify each exact target sequentially.`,
+			detail: `Operation: Apply experimental profile\nProfile: ${profile}\n${targetList(target.simulatorUdids)}\n\nRN Devtools will change managed services, reboot when needed, and verify each exact target sequentially.`,
 		};
 	}
 	if ('kind' in target && target.kind === 'profile.undo') {
 		return {
 			title: 'Undo using stored restore points?',
-			detail: `Operation: Undo last PUMPD-managed mutation\n${targetList(target.simulatorUdids)}\n\nPUMPD will restore restart-safe checkpoints and verify each exact target sequentially.`,
+			detail: `Operation: Undo last rndevtools-managed mutation\n${targetList(target.simulatorUdids)}\n\nRN Devtools will restore restart-safe checkpoints and verify each exact target sequentially.`,
 		};
 	}
 	if ('kind' in target && target.kind === 'profile.restore') {
 		return {
 			title: 'Restore all managed Simulator services?',
-			detail: `Operation: Restore all PUMPD-managed services\n${targetList(target.simulatorUdids)}\n\nPUMPD will remove its managed service overrides, reboot when needed, and verify each exact target sequentially.`,
+			detail: `Operation: Restore all rndevtools-managed services\n${targetList(target.simulatorUdids)}\n\nRN Devtools will remove its managed service overrides, reboot when needed, and verify each exact target sequentially.`,
 		};
 	}
 	if (
@@ -38,7 +38,7 @@ export function slimmingConfirmationCopy(
 	) {
 		return {
 			title: 'Restore managed services and disable slimming?',
-			detail: `Operation: Restore all PUMPD-managed services, verify, then disable experimental slimming\n${targetList(target.simulatorUdids)}\n\nPUMPD will process every exact target sequentially before disabling mutation controls.`,
+			detail: `Operation: Restore all rndevtools-managed services, verify, then disable experimental slimming\n${targetList(target.simulatorUdids)}\n\nRN Devtools will process every exact target sequentially before disabling mutation controls.`,
 		};
 	}
 	return undefined;

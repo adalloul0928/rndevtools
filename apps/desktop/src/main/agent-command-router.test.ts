@@ -186,7 +186,7 @@ describe('agent command router', () => {
 			connectedDevices: 1,
 			connectedSessions: [
 				{
-					deviceId: 'pumpd-demo-ios',
+					deviceId: 'rndevtools-demo-ios',
 					status: 'simulated',
 					simulatorUdid: UDID,
 				},
@@ -225,7 +225,7 @@ describe('agent command router', () => {
 		expect(doctor).toMatchObject({
 			connectedSessions: [
 				{
-					deviceId: 'pumpd-demo-ios',
+					deviceId: 'rndevtools-demo-ios',
 					status: 'simulated',
 				},
 			],
@@ -234,10 +234,10 @@ describe('agent command router', () => {
 
 		await expect(
 			handler(
-				{ kind: 'screen', target: { deviceId: 'pumpd-demo-ios' } },
+				{ kind: 'screen', target: { deviceId: 'rndevtools-demo-ios' } },
 				context
 			)
-		).resolves.toMatchObject({ device: { id: 'pumpd-demo-ios' } });
+		).resolves.toMatchObject({ device: { id: 'rndevtools-demo-ios' } });
 	});
 
 	it('resolves the exact Simulator session for semantic inspection', async () => {
@@ -273,7 +273,7 @@ describe('agent command router', () => {
 		);
 		expect(dispatched).toHaveLength(1);
 		expect(dispatched[0]).toMatchObject({
-			deviceId: 'pumpd-demo-ios',
+			deviceId: 'rndevtools-demo-ios',
 			tool: 'components',
 			command: 'waitForElement',
 		});
@@ -438,7 +438,7 @@ describe('agent command router', () => {
 					kind: 'slimming',
 					operation: 'preview',
 					udids: [UDID.toLowerCase()],
-					profileId: 'pumpd-development',
+					profileId: 'rndevtools-development',
 				},
 				context
 			)

@@ -6,7 +6,7 @@ import type {
 	RestorePointSourceSnapshot,
 } from './restore-points';
 
-export const DEFAULT_RESTORE_POINTS_KEY = '@pumpd/devtools/restore-points/v1';
+export const DEFAULT_RESTORE_POINTS_KEY = '@rndevtools/core/restore-points/v1';
 
 export type RestorePointStorage = Readonly<{
 	getItem: (
@@ -28,7 +28,7 @@ export type RestorePointImportMode = 'replace' | 'merge';
 
 type PersistedRestorePoints = Readonly<{
 	schemaVersion: 1;
-	namespace: 'pumpd-devtools-restore-points';
+	namespace: 'rndevtools-restore-points';
 	points: readonly RestorePoint[];
 }>;
 
@@ -198,7 +198,7 @@ function parsePoint(value: unknown, maxSourceBytes: number): RestorePoint {
 function documentFor(points: readonly RestorePoint[]): PersistedRestorePoints {
 	return {
 		schemaVersion: 1,
-		namespace: 'pumpd-devtools-restore-points',
+		namespace: 'rndevtools-restore-points',
 		points,
 	};
 }
@@ -220,7 +220,7 @@ function parseDocument(
 	if (
 		!isRecord(parsed) ||
 		parsed.schemaVersion !== 1 ||
-		parsed.namespace !== 'pumpd-devtools-restore-points' ||
+		parsed.namespace !== 'rndevtools-restore-points' ||
 		!Array.isArray(parsed.points)
 	) {
 		throw new Error('Restore-point document has an unsupported schema.');

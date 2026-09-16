@@ -9,9 +9,9 @@ const {
 const path = require('node:path');
 
 const expectedHelperFiles = Object.freeze({
-	simulator: 'pumpd-sim-helper',
-	nativeHost: 'pumpd-native-host',
-	cli: 'pumpd-devtools',
+	simulator: 'rndevtools-sim-helper',
+	nativeHost: 'rndevtools-native-host',
+	cli: 'rndevtools',
 });
 
 function verifyNativeResources(resourcesDirectory) {
@@ -67,7 +67,7 @@ function readSupportedManifest(resolvedDirectory) {
 			helper.name !== expectedFile ||
 			helper.file !== expectedFile ||
 			helper.file !== helper.name ||
-			!/^pumpd-[a-z-]+$/.test(helper.file)
+			!/^rndevtools(?:-[a-z-]+)?$/.test(helper.file)
 		) {
 			throw new Error(`Native resource manifest is missing ${key}.`);
 		}

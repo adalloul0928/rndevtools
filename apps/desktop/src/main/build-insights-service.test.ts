@@ -15,14 +15,14 @@ afterEach(async () => {
 
 async function fixture() {
 	const root = await mkdtemp(
-		path.join(tmpdir(), 'pumpd-build-insights-service-')
+		path.join(tmpdir(), 'rndevtools-build-insights-service-')
 	);
 	temporaryRoots.push(root);
-	const resultPath = path.join(root, 'Build-PUMPD.xcresult');
+	const resultPath = path.join(root, 'Build-ExampleApp.xcresult');
 	await mkdir(resultPath);
 	const now = Date.UTC(2026, 7, 30, 18, 0, 0);
 	const runXcresult = vi.fn(async () => ({
-		actionTitle: 'Build PUMPD',
+		actionTitle: 'Build ExampleApp',
 		destination: {
 			deviceName: 'iPhone 17 Pro',
 			platform: 'iOS Simulator',
@@ -77,7 +77,7 @@ describe('BuildInsightsService', () => {
 		expect(runXcresult).toHaveBeenCalledWith(await realpath(resultPath));
 		expect(state.builds).toHaveLength(1);
 		expect(state.builds[0]).toMatchObject({
-			name: 'Build PUMPD',
+			name: 'Build ExampleApp',
 			durationMs: 18_000,
 			status: 'succeeded',
 			classification: 'unknown',
@@ -94,7 +94,7 @@ describe('BuildInsightsService', () => {
 		const derivedData = path.join(root, 'DerivedData');
 		const nestedResult = path.join(
 			derivedData,
-			'PUMPD',
+			'ExampleApp',
 			'Logs',
 			'Build',
 			'Nested.xcresult'
@@ -106,7 +106,7 @@ describe('BuildInsightsService', () => {
 		const exportPath = path.join(root, 'builds.json');
 		await service.export('json', exportPath);
 		const exported = await readFile(exportPath, 'utf8');
-		expect(exported).toContain('pumpd-build-insights');
+		expect(exported).toContain('rndevtools-build-insights');
 		expect(exported).not.toContain(derivedData);
 		await service.stop();
 	});
@@ -155,7 +155,7 @@ describe('BuildInsightsService', () => {
 	});
 
 	it.each([
-		'Build PUMPD',
+		'Build ExampleApp',
 		'1-2',
 		'build+test',
 		'name@host',
@@ -185,7 +185,7 @@ describe('BuildInsightsService', () => {
 
 	it('keeps a watcher setup failure visible after the initial scan', async () => {
 		const root = await mkdtemp(
-			path.join(tmpdir(), 'pumpd-build-watch-failure-')
+			path.join(tmpdir(), 'rndevtools-build-watch-failure-')
 		);
 		temporaryRoots.push(root);
 		const derivedData = path.join(root, 'DerivedData');
@@ -207,7 +207,9 @@ describe('BuildInsightsService', () => {
 	});
 
 	it('removes a failed watcher so the source can be attached again', async () => {
-		const root = await mkdtemp(path.join(tmpdir(), 'pumpd-build-watch-retry-'));
+		const root = await mkdtemp(
+			path.join(tmpdir(), 'rndevtools-build-watch-retry-')
+		);
 		temporaryRoots.push(root);
 		const derivedData = path.join(root, 'DerivedData');
 		await mkdir(derivedData);
@@ -292,7 +294,7 @@ describe('BuildInsightsService', () => {
 	])('rejects $name without poisoning renderer state', async ({ override }) => {
 		const { resultPath, runXcresult, service } = await fixture();
 		runXcresult.mockResolvedValueOnce({
-			actionTitle: 'Build PUMPD',
+			actionTitle: 'Build ExampleApp',
 			destination: {
 				deviceName: 'iPhone 17 Pro',
 				platform: 'iOS Simulator',

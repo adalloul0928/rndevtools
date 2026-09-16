@@ -5855,6 +5855,38 @@ describe('network presentation model', () => {
 		dispose?.();
 	});
 
+	it('reads correlation ids from host-supplied vendor headers only', async () => {
+		const diagnostics = createNetworkPlugin({
+			correlationIdHeaders: ['x-acme-request-id'],
+			parentEventIdHeaders: ['x-acme-parent-id'],
+		});
+		const dispose = diagnostics.plugin.install?.();
+		const fetchImplementation = jest.fn(async () =>
+			responseWithHeaders('{}', 200, new Headers({ 'content-length': '2' })),
+		) as unknown as typeof fetch;
+		await diagnostics.instrumentFetch(fetchImplementation)(
+			'https://example.test/items',
+			{
+				headers: {
+					'x-acme-request-id': 'vendor-request-1',
+					'x-acme-parent-id': 'vendor-parent-1',
+					// The standard headers must be ignored once a host declares its own.
+					'x-request-id': 'standard-request-1',
+					'x-parent-event-id': 'standard-parent-1',
+				},
+			},
+		);
+		await flushCapture();
+
+		expect(diagnostics.getEvents()[0]).toEqual(
+			expect.objectContaining({
+				correlationId: 'vendor-request-1',
+				parentEventId: 'vendor-parent-1',
+			}),
+		);
+		dispose?.();
+	});
+
 	it('publishes correlated summary references with measured timing and cache evidence', async () => {
 		const timeline = new DevtoolsEventStore({
 			maxEvents: 10,
@@ -5874,8 +5906,8 @@ describe('network presentation model', () => {
 			'https://example.test/items?token=query-secret',
 			{
 				headers: {
-					'x-pumpd-request-id': 'coach-request-7',
-					'x-pumpd-parent-event-id': 'coach-turn-3',
+					'x-request-id': 'coach-request-7',
+					'x-parent-event-id': 'coach-turn-3',
 				},
 			},
 		);
@@ -6005,7 +6037,7 @@ describe('network presentation model', () => {
 					: undefined,
 			}),
 			redactHeader: (name, value) => {
-				if (name.toLowerCase() === 'x-pumpd-request-id') {
+				if (name.toLowerCase() === 'x-request-id') {
 					throw new Error('redaction failed');
 				}
 				return value;
@@ -6017,7 +6049,7 @@ describe('network presentation model', () => {
 		);
 
 		await instrumented('https://example.test/marker', {
-			headers: { 'x-pumpd-request-id': 'secret-correlation' },
+			headers: { 'x-request-id': 'secret-correlation' },
 		});
 		await instrumented('https://example.test/overlong-one');
 		await instrumented('https://example.test/overlong-two');
@@ -6059,8 +6091,8 @@ describe('network presentation model', () => {
 		await instrumented('https://example.test/host');
 		await instrumented('https://example.test/header', {
 			headers: {
-				'x-pumpd-parent-event-id': 'token%253Dhunter2',
-				'x-pumpd-request-id': 'victim%2540example.com',
+				'x-parent-event-id': 'token%253Dhunter2',
+				'x-request-id': 'victim%2540example.com',
 			},
 		});
 		await instrumented('https://example.test/store');

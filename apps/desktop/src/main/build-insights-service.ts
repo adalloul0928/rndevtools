@@ -4,7 +4,7 @@ import path from 'node:path';
 import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import { z } from 'zod';
 import type {
 	BuildInsight,
@@ -173,7 +173,7 @@ export class BuildInsightsService {
 		const state = this.getState();
 		const content =
 			format === 'json'
-				? `${JSON.stringify({ format: 'pumpd-build-insights', version: 1, ...state }, null, 2)}\n`
+				? `${JSON.stringify({ format: 'rndevtools-build-insights', version: 1, ...state }, null, 2)}\n`
 				: buildsCsv(state.builds);
 		await writeFile(destinationPath, content, {
 			encoding: 'utf8',

@@ -8,7 +8,7 @@ import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	matchesNetworkSegment,
 	type NetworkSegment,
-} from '@pumpd/devtools/plugins/network-presentation';
+} from '@rndevtools/core/plugins/network-presentation';
 import {
 	ChevronDown,
 	CirclePause,
@@ -376,13 +376,13 @@ export function NetworkPanel() {
 			<PanelNotice
 				title={
 					currentProfile?.active
-						? `${currentProfile.name} is active · PUMPD requests only`
+						? `${currentProfile.name} is active · instrumented requests only`
 						: 'Network simulation is off'
 				}
 				tone="info"
 			>
 				{currentProfile?.active
-					? `${currentProfile.name} is active for instrumented PUMPD fetch only. `
+					? `${currentProfile.name} is active for instrumented fetch only. `
 					: 'No network profile is currently active. '}
 				Profiles do not change Simulator-wide networking, native SDK traffic,
 				WebSockets, or requests from other apps.

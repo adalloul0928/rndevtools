@@ -36,7 +36,7 @@ describe('slimming protocol', () => {
 				actionId: 'verified-apply',
 				kind: 'profile.apply',
 				simulatorUdids: [UDID],
-				profileId: 'pumpd-ui-automation',
+				profileId: 'rndevtools-ui-automation',
 				confirmation: SLIMMING_CONFIRMATIONS.apply,
 			})
 		).not.toHaveProperty('acknowledgement');

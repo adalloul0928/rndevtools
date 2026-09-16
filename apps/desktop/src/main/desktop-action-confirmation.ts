@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
 	DEFAULT_SCENARIO_USER_LIMIT,
 	parseScenarioDocumentJson,
-} from '@pumpd/devtools/scenario-model';
+} from '@rndevtools/core/scenario-model';
 import type { DesktopAction } from '../shared/protocol';
 
 export type DesktopActionConfirmationCopy = Readonly<{

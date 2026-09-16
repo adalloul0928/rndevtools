@@ -3,7 +3,7 @@ import {
 	parseScenarioDocumentJson,
 	SCENARIO_DOCUMENT_MAX_BYTES,
 	type ScenarioDefinition,
-} from '@pumpd/devtools/scenario-model';
+} from '@rndevtools/core/scenario-model';
 import {
 	createEmptyDeviceTools,
 	type DesktopAction,
@@ -14,7 +14,7 @@ import {
 	type ScenarioDefinitionSummary,
 } from './protocol';
 
-const DEMO_DEVICE_ID = 'pumpd-demo-ios';
+const DEMO_DEVICE_ID = 'rndevtools-demo-ios';
 
 function samplePerformance(now: number): PerformanceReview {
 	const samples: PerformanceSample[] = Array.from(
@@ -98,8 +98,8 @@ function demoTools(now: number): DeviceTools {
 				id: 'net-6',
 				at: now - 2_300,
 				method: 'POST',
-				url: 'https://api.pumpd.fit/functions/v1/coach-message',
-				host: 'api.pumpd.fit',
+				url: 'https://api.example.com/functions/v1/coach-message',
+				host: 'api.example.com',
 				path: '/functions/v1/coach-message',
 				status: 200,
 				state: 'success',
@@ -130,8 +130,8 @@ function demoTools(now: number): DeviceTools {
 				id: 'net-5',
 				at: now - 6_700,
 				method: 'GET',
-				url: 'https://api.pumpd.fit/rest/v1/workout_sessions?limit=20',
-				host: 'api.pumpd.fit',
+				url: 'https://api.example.com/rest/v1/workout_sessions?limit=20',
+				host: 'api.example.com',
 				path: '/rest/v1/workout_sessions',
 				status: 200,
 				state: 'success',
@@ -145,8 +145,8 @@ function demoTools(now: number): DeviceTools {
 				id: 'net-4',
 				at: now - 12_900,
 				method: 'PATCH',
-				url: 'https://api.pumpd.fit/rest/v1/workout_sets?id=eq.[REDACTED_ID]',
-				host: 'api.pumpd.fit',
+				url: 'https://api.example.com/rest/v1/workout_sets?id=eq.[REDACTED_ID]',
+				host: 'api.example.com',
 				path: '/rest/v1/workout_sets',
 				status: 204,
 				state: 'success',
@@ -161,8 +161,8 @@ function demoTools(now: number): DeviceTools {
 				id: 'net-3',
 				at: now - 18_400,
 				method: 'GET',
-				url: 'https://api.pumpd.fit/rest/v1/training_plans?active=eq.true',
-				host: 'api.pumpd.fit',
+				url: 'https://api.example.com/rest/v1/training_plans?active=eq.true',
+				host: 'api.example.com',
 				path: '/rest/v1/training_plans',
 				status: 503,
 				state: 'error',
@@ -177,8 +177,8 @@ function demoTools(now: number): DeviceTools {
 				id: 'net-2',
 				at: now - 24_100,
 				method: 'POST',
-				url: 'https://api.pumpd.fit/rest/v1/device_tokens',
-				host: 'api.pumpd.fit',
+				url: 'https://api.example.com/rest/v1/device_tokens',
+				host: 'api.example.com',
 				path: '/rest/v1/device_tokens',
 				status: 201,
 				state: 'success',
@@ -234,7 +234,7 @@ function demoTools(now: number): DeviceTools {
 		storage: [
 			{
 				id: 'storage-theme',
-				adapterId: 'pumpd-standard-mmkv',
+				adapterId: 'example-standard-mmkv',
 				adapterTitle: 'Standard MMKV',
 				key: 'appearance/theme',
 				valueText: 'dark',
@@ -246,9 +246,9 @@ function demoTools(now: number): DeviceTools {
 			},
 			{
 				id: 'storage-devtools',
-				adapterId: 'pumpd-standard-mmkv',
+				adapterId: 'example-standard-mmkv',
 				adapterTitle: 'Standard MMKV',
-				key: '@pumpd/internal-tools/runtime-state',
+				key: '@rndevtools/core/runtime-state',
 				valueText:
 					'{"dataSourceMode":"real","showDebugBadges":true,"customFlags":{"newStats":true}}',
 				valueType: 'string',
@@ -259,7 +259,7 @@ function demoTools(now: number): DeviceTools {
 			},
 			{
 				id: 'storage-unit',
-				adapterId: 'pumpd-standard-mmkv',
+				adapterId: 'example-standard-mmkv',
 				adapterTitle: 'Standard MMKV',
 				key: 'preferences/weight-unit',
 				valueText: 'kg',
@@ -271,7 +271,7 @@ function demoTools(now: number): DeviceTools {
 			},
 			{
 				id: 'storage-auth',
-				adapterId: 'pumpd-secure-mmkv',
+				adapterId: 'example-secure-mmkv',
 				adapterTitle: 'Secure MMKV',
 				key: 'supabase.auth.token',
 				valueType: 'hidden',
@@ -285,8 +285,8 @@ function demoTools(now: number): DeviceTools {
 			{
 				id: 'storage-event-2',
 				at: now - 42_000,
-				adapterId: 'pumpd-standard-mmkv',
-				key: '@pumpd/internal-tools/runtime-state',
+				adapterId: 'example-standard-mmkv',
+				key: '@rndevtools/core/runtime-state',
 				kind: 'updated',
 				previousText: '{"showDebugBadges":false}',
 				nextText: '{"showDebugBadges":true}',
@@ -379,8 +379,8 @@ function demoTools(now: number): DeviceTools {
 		querySimulation: {
 			families: [
 				{
-					id: 'all-pumpd-queries',
-					label: 'All PUMPD queries',
+					id: 'all-example-queries',
+					label: 'All app queries',
 					description:
 						'Uses the supported TanStack Query online manager; native SDKs and non-query traffic are unaffected.',
 					modes: [
@@ -402,8 +402,8 @@ function demoTools(now: number): DeviceTools {
 				},
 			],
 			active: {
-				familyId: 'all-pumpd-queries',
-				familyLabel: 'All PUMPD queries',
+				familyId: 'all-example-queries',
+				familyLabel: 'All app queries',
 				mode: 'offline',
 				receiptId: 'query-simulation-demo',
 				startedAt: now - 5_000,
@@ -483,7 +483,7 @@ function demoTools(now: number): DeviceTools {
 				id: 'env-id',
 				section: 'Application',
 				key: 'APPLICATION_ID',
-				valueText: 'com.avadworkout.pumpdmobileapp.development',
+				valueText: 'com.example.app.development',
 				status: 'valid',
 			},
 			{
@@ -651,7 +651,7 @@ function demoTools(now: number): DeviceTools {
 		],
 		scenarios: [
 			{
-				id: 'pumpd.powerUser',
+				id: 'example.powerUser',
 				version: 1,
 				definitionToken: 'demo-power-user-v1',
 				name: 'John',
@@ -669,7 +669,7 @@ function demoTools(now: number): DeviceTools {
 				],
 			},
 			{
-				id: 'pumpd.freshUser',
+				id: 'example.freshUser',
 				version: 1,
 				definitionToken: 'demo-fresh-user-v1',
 				name: 'Sarah',
@@ -800,7 +800,7 @@ function demoTools(now: number): DeviceTools {
 				at: now - 74_000,
 				level: 'info',
 				scope: 'device',
-				message: 'PUMPD demo session registered with protocol v1.',
+				message: 'Demo session registered with protocol v1.',
 			},
 			{
 				id: 'diag-redaction',

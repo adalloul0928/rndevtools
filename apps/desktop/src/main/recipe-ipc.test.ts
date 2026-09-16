@@ -24,7 +24,7 @@ function recipe(mutation = false): RecipeDefinition {
 						id: 'slim',
 						kind: 'slimming.mutation',
 						operation: 'apply',
-						profileId: 'pumpd-development',
+						profileId: 'rndevtools-development',
 					},
 				]
 			: [{ id: 'wait', kind: 'wait', durationMs: 0 }],

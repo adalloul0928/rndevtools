@@ -5,14 +5,14 @@ import path from 'node:path';
 import {
 	diagnosticErrorText,
 	redactDiagnosticText,
-} from '@pumpd/devtools/redact';
+} from '@rndevtools/core/redact';
 import {
 	type AgentCliCommand,
 	type AgentCliErrorBody,
 	type AgentCliRequest,
 	type AgentCliResponse,
 	agentCliRequestSchema,
-	PUMPD_AGENT_CLI_PROTOCOL,
+	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
 
 const MAX_CONNECTIONS = 8;
@@ -37,7 +37,7 @@ export type AgentCliHandler = (
 export type AgentCliServiceState = {
 	status: 'stopped' | 'available' | 'unavailable';
 	socketPath?: string;
-	protocol: typeof PUMPD_AGENT_CLI_PROTOCOL;
+	protocol: typeof RNDEVTOOLS_AGENT_CLI_PROTOCOL;
 	error?: string;
 };
 
@@ -103,7 +103,7 @@ function failureResponse(
 	error: AgentCliErrorBody
 ): AgentCliResponse {
 	return {
-		protocol: PUMPD_AGENT_CLI_PROTOCOL,
+		protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 		id: id.slice(0, 256),
 		ok: false,
 		error,
@@ -160,7 +160,7 @@ export class AgentCliService {
 	#server: Server | undefined;
 	#state: AgentCliServiceState = {
 		status: 'stopped',
-		protocol: PUMPD_AGENT_CLI_PROTOCOL,
+		protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 	};
 
 	constructor({
@@ -190,7 +190,7 @@ export class AgentCliService {
 		if (this.#platform !== 'darwin') {
 			this.#state = {
 				status: 'unavailable',
-				protocol: PUMPD_AGENT_CLI_PROTOCOL,
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 				error: 'The local agent CLI is currently available on macOS only.',
 			};
 			return this.getState();
@@ -233,7 +233,7 @@ export class AgentCliService {
 			await chmod(this.#socketPath, 0o600);
 			this.#state = {
 				status: 'available',
-				protocol: PUMPD_AGENT_CLI_PROTOCOL,
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 				socketPath: this.#socketPath,
 			};
 		} catch (error) {
@@ -247,7 +247,7 @@ export class AgentCliService {
 			this.#connections.clear();
 			this.#state = {
 				status: 'unavailable',
-				protocol: PUMPD_AGENT_CLI_PROTOCOL,
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 				error: safeErrorBody(error).message,
 			};
 		}
@@ -267,7 +267,7 @@ export class AgentCliService {
 		}
 		this.#state = {
 			status: 'stopped',
-			protocol: PUMPD_AGENT_CLI_PROTOCOL,
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 		};
 	}
 
@@ -389,7 +389,7 @@ export class AgentCliService {
 				encodeResponse(
 					failureResponse('', {
 						code: 'invalid_request',
-						message: 'The command did not match pumpd-devtools/1.',
+						message: 'The command did not match rndevtools/1.',
 						retryable: false,
 					})
 				)
@@ -413,7 +413,7 @@ export class AgentCliService {
 			if (!socket.destroyed) {
 				socket.end(
 					encodeResponse({
-						protocol: PUMPD_AGENT_CLI_PROTOCOL,
+						protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 						id: request.id,
 						ok: true,
 						result,

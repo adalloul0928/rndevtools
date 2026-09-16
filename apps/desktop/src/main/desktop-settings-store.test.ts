@@ -20,7 +20,9 @@ afterEach(async () => {
 });
 
 async function fixture() {
-	const root = await mkdtemp(path.join(tmpdir(), 'pumpd-desktop-settings-'));
+	const root = await mkdtemp(
+		path.join(tmpdir(), 'rndevtools-desktop-settings-')
+	);
 	roots.push(root);
 	return { root, store: new DesktopSettingsStore(root) };
 }

@@ -479,7 +479,7 @@ function Titlebar({
 		>
 			<div className="titlebar-safe-area">
 				<div className="titlebar-lead">
-					<span className="titlebar-title">PUMPD Devtools</span>
+					<span className="titlebar-title">RN Devtools</span>
 					<span aria-hidden="true" className="titlebar-rule" />
 					<div className="titlebar-control no-drag">
 						<Tooltip delay={500}>
@@ -1115,7 +1115,7 @@ function DesktopLoading() {
 			<div className="waiting-icon">
 				<TerminalSquare className="h-5 w-5" />
 			</div>
-			<h1>Starting PUMPD Devtools</h1>
+			<h1>Starting RN Devtools</h1>
 			<p>
 				Initializing the secure renderer bridge and local diagnostics broker.
 			</p>
@@ -1151,7 +1151,7 @@ function WaitingForDevice() {
 			</h1>
 			<p>
 				{brokerError ??
-					'Open PUMPD in development mode. The local client will discover this desktop broker and publish only registered diagnostic projections.'}
+					'Open your app in development mode. The local client will discover this desktop broker and publish only registered diagnostic projections.'}
 			</p>
 		</div>
 	);
