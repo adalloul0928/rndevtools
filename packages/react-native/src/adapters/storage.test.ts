@@ -62,19 +62,19 @@ describe('storage diagnostic adapters', () => {
 		const getItemAsync = jest.fn(async () => 'encryption-secret');
 		const adapter = createSecureStoreDevtoolsAdapter({ getItemAsync }, [
 			{
-				key: 'pumpd-mmkv-encryption-key',
+				key: 'example-mmkv-encryption-key',
 				description: 'Encryption material',
 			},
 		]);
 
 		expect(adapter.registeredKeys).toEqual([
 			{
-				key: 'pumpd-mmkv-encryption-key',
+				key: 'example-mmkv-encryption-key',
 				description: 'Encryption material',
 			},
 		]);
 		await expect(
-			adapter.revealValue?.('pumpd-mmkv-encryption-key'),
+			adapter.revealValue?.('example-mmkv-encryption-key'),
 		).rejects.toThrow('metadata-only');
 		expect(getItemAsync).not.toHaveBeenCalled();
 	});

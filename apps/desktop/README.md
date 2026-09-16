@@ -1,10 +1,10 @@
 # RN Devtools Desktop
 
-An isolated Electron app for inspecting a running PUMPD development build. The renderer uses React, HeroUI, HeroUI Pro, Tailwind CSS, and a restrained Vercel-inspired visual system. Electron owns the local device broker and exposes only a narrow, typed preload API to the renderer.
+An isolated Electron app for inspecting a running React Native development build. The renderer uses React, HeroUI, HeroUI Pro, Tailwind CSS, and a restrained Vercel-inspired visual system. Electron owns the local device broker and exposes only a narrow, typed preload API to the renderer.
 
 ## Tools
 
-Connected PUMPD app diagnostics:
+Connected app diagnostics:
 
 - Network request history and request/response details
 - Logger-backed, redacted console events
@@ -42,7 +42,7 @@ Local iOS Simulator tooling on macOS:
   The Swift FSEvents adapter and versioned richer-metadata adapters remain deferred.
 - A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket
 
-PUMPD protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
+Protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
 app-scoped network conditions, request/recipe correlation, and development camera
 fixtures. Protocol v1 diagnostics remain accepted.
 
@@ -89,7 +89,7 @@ pnpm --filter @rndevtools/desktop package
 pnpm --filter @rndevtools/desktop make
 ```
 
-`package` creates an unpacked, locally runnable app in `apps/devtools-desktop/release`. `make` creates the configured platform artifacts: DMG and ZIP on macOS, NSIS on Windows, or AppImage and DEB on Linux. Distribution releases still require the normal platform signing and notarization credentials.
+`package` creates an unpacked, locally runnable app in `apps/desktop/release`. `make` creates the configured platform artifacts: DMG and ZIP on macOS, NSIS on Windows, or AppImage and DEB on Linux. Distribution releases still require the normal platform signing and notarization credentials.
 
 Simulator mutations and native helpers are macOS-only. On Windows and Linux, the
 connected-app diagnostics continue to work and Simulator workspaces present a bounded
@@ -161,7 +161,7 @@ HeroUI core and HeroUI Pro are intentionally used together. Pro supplies the den
 ## Architecture
 
 ```text
-PUMPD mobile dev build ── WebSocket protocol v1/v2 ── DesktopBroker
+App dev build         ── WebSocket protocol v1/v2 ── DesktopBroker
                                                         │
 HeroUI renderer ── frozen, typed preload bridges ── Electron main
                                                         ├── fixed xcrun simctl adapter
@@ -178,6 +178,6 @@ a client that omits a projection is rejected so stale and fresh state cannot be 
 
 ScreenCaptureKit live mirroring/audio, the whole-Simulator Network Extension, and
 arbitrary-app XCTest accessibility are shown as capability-gated advanced providers. They
-are not silently approximated: raw `simctl io` capture, PUMPD app-scoped network profiles,
-and PUMPD semantic actions remain the supported fallbacks until those separately signed,
+are not silently approximated: raw `simctl io` capture, app-scoped network profiles,
+and semantic actions remain the supported fallbacks until those separately signed,
 permissioned providers are available.

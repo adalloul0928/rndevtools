@@ -151,6 +151,83 @@ export type DesktopDeviceInfoSnapshot = {
 	capabilities: readonly DesktopActionCapability[];
 };
 
+/**
+ * An empty tools snapshot with every required collection present.
+ *
+ * The snapshot shape has thirty fields and is validated on the desktop side,
+ * so a host that only publishes one or two tools still has to supply the rest.
+ * Spread this and override what you actually collect:
+ *
+ *     { ...createEmptyDesktopToolsSnapshot(), network: myNetworkProjection }
+ */
+export function createEmptyDesktopToolsSnapshot(): DesktopDeviceToolsSnapshot {
+	return {
+		network: [],
+		console: [],
+		storage: [],
+		storageEvents: [],
+		storageSummary: {
+			adapterCount: 0,
+			totalKeyCount: 0,
+			omittedKeyCount: 0,
+			truncated: false,
+			errors: [],
+		},
+		queries: [],
+		mutations: [],
+		querySummary: {
+			sourceQueryCount: 0,
+			omittedQueryCount: 0,
+			sourceMutationCount: 0,
+			omittedMutationCount: 0,
+			truncated: false,
+		},
+		routes: [],
+		routeEvents: [],
+		environment: [],
+		zustandStores: [],
+		zustandChanges: [],
+		zustandStateSnapshots: [],
+		zustandMutationReceipts: [],
+		zustandSummary: {
+			totalStoreCount: 0,
+			omittedStoreCount: 0,
+			truncated: false,
+		},
+		restorePoints: [],
+		restoreReceipts: [],
+		scenarios: [],
+		scenarioRuntime: { running: false },
+		scenarioReceipts: [],
+		identitySession: { running: false, history: [], personas: [] },
+		performance: {
+			isActive: false,
+			startedAt: null,
+			stoppedAt: null,
+			droppedSampleCount: 0,
+			samples: [],
+			summary: {
+				grade: 'idle',
+				durationMs: 0,
+				sampleCount: 0,
+				averageJsFps: 0,
+				averageEventLoopLagMs: 0,
+				p95EventLoopLagMs: 0,
+				maxEventLoopLagMs: 0,
+				longFrameCount: 0,
+			},
+		},
+		components: [],
+		componentRenders: [],
+		componentSummary: {
+			sourceTargetCount: 0,
+			omittedTargetCount: 0,
+			truncated: false,
+		},
+		diagnostics: [],
+	};
+}
+
 export type DesktopCameraFixtureKind =
 	| 'still'
 	| 'qr'

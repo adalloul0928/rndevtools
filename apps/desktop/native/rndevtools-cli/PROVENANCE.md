@@ -5,7 +5,7 @@ RN Devtools desktop app. No source, generated code, protocol definitions, or
 catalog data was copied from SimSlim, Buoy, RocketSim, or another third-party
 project.
 
-The wire contract was developed alongside PUMPD's TypeScript desktop service
+The wire contract was developed alongside this repo's TypeScript desktop service
 and is intentionally fixed to `rndevtools/1`. The Go module has no external
 module dependency: `go list -m all` must return only
 `github.com/adalloul0928/rndevtools-cli`. Its only incorporated

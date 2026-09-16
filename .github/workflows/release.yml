@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-packages:
+    name: Publish packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Required for npm provenance attestation.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      # Publishing ships source, so the gates are the only thing standing
+      # between a tag and a broken release.
+      - name: Verify
+        run: |
+          pnpm --dir packages/core quality
+          pnpm --dir packages/react-native quality
+      - name: Publish @rndevtools/core
+        run: pnpm --dir packages/core publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+      - name: Publish @rndevtools/react-native
+        run: pnpm --dir packages/react-native publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+
+  desktop-app:
+    name: Desktop app
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+      # Compiled into the simulator helper's parent attestation. Without it the
+      # helper fails closed and refuses every mutation.
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/desktop/native/rndevtools-sim-helper/go.mod
+          cache-dependency-path: apps/desktop/native/rndevtools-sim-helper/go.mod
+      - name: Fail fast without a signing team
+        run: |
+          if [ -z "${APPLE_TEAM_ID}" ]; then
+            echo "APPLE_TEAM_ID is unset; the released helper would refuse every mutation." >&2
+            exit 1
+          fi
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build native helpers
+        run: pnpm --filter @rndevtools/desktop native:build
+      - name: Verify native resources
+        run: |
+          pnpm --filter @rndevtools/desktop native:verify
+          pnpm --filter @rndevtools/desktop native:verify:capabilities
+      - name: Package
+        run: pnpm --filter @rndevtools/desktop make
+      - name: Verify packaged cold start
+        run: pnpm --filter @rndevtools/desktop native:verify:cold-start
+      - name: Attach artifacts to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip

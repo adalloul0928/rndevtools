@@ -170,7 +170,7 @@ directly cannot use them to mutate a simulator.
 
 Electron sends the exact helper request to the signed Swift native host over
 protocol v4. The native host authenticates its live parent as the
-production-signed PUMPD application using PUMPD's immutable Apple Team ID,
+production-signed desktop application using the build's pinned Apple Team ID,
 validates the exact helper-manifest bytes against that application's resource
 seal, reads the helper SHA-256 and build commit from the validated manifest,
 verifies the packaged sibling Go helper against the pinned designated
@@ -183,7 +183,7 @@ service delta/prepared checkpoint, tuple, target checkpoint, and cleanup or
 clone payload), expiry, nonce, and broker PID.
 
 The Go helper independently proves that its live parent PID and its own live
-process satisfy pinned PUMPD designated requirements. It reads each process's
+process satisfy pinned designated requirements. It reads each process's
 kernel-attached CodeDirectory hash through `csops(2)` and binds that hash into a
 static `codesign` requirement on the executable, because `codesign`'s `+pid`
 form cannot evaluate an explicit requirement against a process on current
@@ -426,7 +426,7 @@ token, ASCII leaf names, the output format, and a strictly decoded composition r
 
 Recipes support a bounded pixel canvas or aspect canvas, transparent/solid/linear-gradient
 backgrounds, explicit padding, fit/fill, 0/90/180/270-degree rotation, corner radius,
-PUMPD's generic bezel, bounded shadow, optional bounded ASCII metadata, and side-by-side,
+The generic bezel, bounded shadow, optional bounded ASCII metadata, and side-by-side,
 opacity, or deterministic absolute-RGB difference comparisons. A secondary image is
 required only for comparison modes. Transparent JPEG is rejected.
 

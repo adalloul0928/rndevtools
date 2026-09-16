@@ -25,4 +25,8 @@ pnpm --filter @rndevtools/desktop package
 - Use HeroUI core and HeroUI Pro together where each fits. Preserve the compact Vercel-inspired black, gray, white, and blue visual system, keyboard accessibility, and the 1040×700 responsive minimum.
 - Keep heavy tool panels lazy-loaded. Add focused tests for protocol, broker, action, and demo-state behavior.
 - Run `quality` for source changes. For packaging changes, also create an unpacked package, validate its fuses/signature, and launch the packaged app before completion.
+- The Apple Team ID trusted by the simulator helper is injected at build time from `APPLE_TEAM_ID` via Go `-ldflags`, and the helper fails closed without it. Never hardcode a team identifier back into `parent_attestor.go`.
+- App-specific placeholder values live in `src/renderer/simulator/target-config.ts`. Do not scatter product names, URL schemes, or bundle identifiers through the panels.
+- The vendored SimSlim tree and its SHA-256 manifests are byte-anchored, including the `pumpd.1` patch-set identifier inherited from the project this repo was extracted from. Renaming any of it invalidates `native:check:packaging`.
+- Building from source requires a HeroUI Pro license and `HEROUI_AUTH_TOKEN`; 16 renderer modules import `@heroui-pro/react`.
 - Keep generated `dist` and `release` output untracked. Distribution signing and notarization credentials belong in the release environment, never in the repository.

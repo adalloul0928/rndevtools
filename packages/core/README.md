@@ -1,6 +1,6 @@
 # @rndevtools/core
 
-Private, reusable on-device diagnostics for Expo and React Native. The UI is
+Extensible on-device diagnostics for Expo and React Native. The UI is
 iOS-first, with native SwiftUI chrome on iOS and matching React Native panels
 on Android.
 
@@ -309,19 +309,20 @@ adapters, feature flags, account actions, fixture scenarios, and product-specifi
 panels belong in the consuming application. This keeps the package reusable
 without introducing application dependencies into its graph.
 
-The package remains private while the API evolves. Individual diagnostics
-should stay together until a tool needs native code, materially changes bundle
-size, or requires independent release/versioning.
+The API is still settling, so treat minor versions as potentially breaking
+until 1.0. Individual diagnostics stay in this package until a tool needs
+native code, materially changes bundle size, or requires independent
+release/versioning.
 
-## PUMPD build behavior
+## Keeping devtools out of production builds
 
-PUMPD mounts the package in development and preview/TestFlight variants. The
-existing in-app developer-mode preference controls normal visibility. For
-unsigned or onboarding QA, set
-`EXPO_PUBLIC_INTERNAL_TOOLS_ENABLED=true`; the build-time kill switch
-`EXPO_PUBLIC_DISABLE_INTERNAL_TOOLS=true` always wins.
+This package is only safe to depend on because it never reaches a release
+bundle. Tree shaking is not a strong enough guarantee: one retained import
+pulls in the panels and every adapter they reach.
 
-Production Metro builds resolve both the lazy PUMPD host and the package import
-to typed no-op shims, so the tool runtime and custom panels are not included in
-the public production bundle. Do not weaken those aliases when adding a new
-PUMPD plugin.
+`@rndevtools/react-native` ships the mechanism for this. Its
+`withDevtoolsPruning` Metro resolver swaps the devtools modules for typed
+no-op shims at resolution time, so the module graph is cut rather than
+trimmed, and `rndevtools-verify-bundle` asserts over an exported bundle that
+no devtools markers survived. Wire both up before shipping, and keep the shim
+list current when you add a plugin.

@@ -9,7 +9,7 @@ operation and CLI flag is explicitly allowlisted and bounded.
   device set, reads managed launchd overrides, projects the pinned service
   catalog, previews and verifies profiles, runs capability diagnostics, and
   performs compatibility-gated experimental apply, restore, and undo
-  transactions through SimSlim's public library API. PUMPD owns the bounded
+  transactions through SimSlim's public library API. This repo owns the bounded
   request boundary, confirmations, two-phase restart-safe checkpoints,
   independent launchd-registration verification, commit-time exact-UDID
   process-root absence evidence, exact rollback orchestration, and job
@@ -24,14 +24,14 @@ operation and CLI flag is explicitly allowlisted and bounded.
   compositions inside a helper-owned private workspace. Inputs and outputs are staged by
   Electron main; the renderer and helper protocol never exchange application paths.
   Protocol v4 is the sole mutation broker for the Go simulator helper. It authenticates
-  the live production-signed Electron parent against PUMPD's pinned Apple Team ID,
+  the live production-signed Electron parent against the build's pinned Apple Team ID,
   validates the exact manifest bytes against the parent app's resource seal, binds both
   native executables to the same build, and verifies the suspended helper's exact live
   CodeDirectory identity before delivering an operation/UDID/exact-request-bound one-shot
   authorization on inherited FD 3. A separately marked private control pipe on FD 4
   requests graceful cancellation and gives helper rollback its full bounded grace period.
 - `rndevtools` is a standard-library-only Go command-line client for local
-  agents and scripts. It connects only to the current user's private PUMPD
+  agents and scripts. It connects only to the current user's private RN Devtools
   Devtools Unix socket, sends one bounded `rndevtools/1` command, receives
   one bounded response, and exits. It has no shell or network-discovery path.
 

@@ -2,9 +2,9 @@
 
 ## SimSlim
 
-The PUMPD simulator helper includes and links the complete non-test root Go
+The bundled simulator helper includes and links the complete non-test root Go
 package and license from SimSlim v0.8.0 commit
-`09fc9cbbca35db5230e6d571a0a366fe6876266e`, with the separately recorded PUMPD
+`09fc9cbbca35db5230e6d571a0a366fe6876266e`, with the separately recorded
 patch set `pumpd.1`. That patch narrows clone process inspection, preserves boot
 state during cancelled disk cleanup, and exports SimSlim's existing launchd
 status parser for the bounded adapter. SimSlim's CLI, GUI, and their unrelated
