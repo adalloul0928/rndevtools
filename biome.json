@@ -10,7 +10,6 @@
 		"includes": [
 			"!**/node_modules",
 			"!**/dist",
-			"!**/lib",
 			"!**/build",
 			"!**/release",
 			"!**/.turbo"

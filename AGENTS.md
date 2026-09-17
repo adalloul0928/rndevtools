@@ -42,4 +42,4 @@ Use the narrowest workspace command that proves a change, then run that workspac
 ## Repo Configuration
 
 - `pnpm-workspace.yaml` holds the shared catalog and supply-chain policy (`minimumReleaseAge`, `allowBuilds`). Pin dependencies there, not in package manifests.
-- Building `apps/desktop` from source requires a HeroUI Pro license and `HEROUI_AUTH_TOKEN`. CI skips the desktop job for pull requests from forks, which cannot read that secret. The two packages must always build without it.
+- Building `apps/desktop` from source requires a HeroUI Pro license and `HEROUI_AUTH_TOKEN`. Without the token `pnpm install` still succeeds but the package is not hydrated, so the desktop typecheck and build fail on a missing module; CI detects the token and skips only the Electron gate, with a notice. The two packages and the native helpers must always build without it.

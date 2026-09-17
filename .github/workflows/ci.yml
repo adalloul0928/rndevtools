@@ -26,67 +26,80 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      # --ignore-scripts skips @heroui-pro/react's licensed postinstall, which
-      # needs a token the desktop job supplies. Neither npm package depends on
-      # it, so this keeps the packages buildable for fork contributors.
+      # Neither npm package needs an install script, so none run here. That
+      # keeps dependency postinstall code off a job that builds fork PRs.
       - name: Install
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Core
         run: pnpm --dir packages/core quality
       - name: React Native host runtime
         run: pnpm --dir packages/react-native quality
+      - name: Example app
+        run: pnpm --dir examples/expo-demo quality
 
-  desktop:
-    name: Desktop
-    # Forked pull requests cannot read secrets, so the licensed HeroUI Pro
-    # install would fail. A maintainer runs this job for fork contributions.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+  native:
+    name: Native helpers
     runs-on: macos-latest
-    timeout-minutes: 30
-    env:
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
-          cache: pnpm
       - uses: actions/setup-go@v6
         with:
           go-version-file: apps/desktop/native/rndevtools-sim-helper/go.mod
           cache-dependency-path: apps/desktop/native/rndevtools-sim-helper/go.mod
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - name: Install
-        run: pnpm install --frozen-lockfile
-      - name: Native helper checks
-        run: pnpm --filter @rndevtools/desktop native:check
-      - name: Desktop quality
-        run: pnpm --filter @rndevtools/desktop quality
+      # These scripts use only Node builtins, so the project's real native gate
+      # (gofmt, vet, race tests, govulncheck, module allowlist, Swift build and
+      # tests, SimSlim provenance) runs with no install and no secrets. Fork
+      # contributors get the same coverage as maintainers.
+      - name: Go and Swift helper checks
+        working-directory: apps/desktop
+        run: node scripts/check-native-helpers.mjs
+      - name: Vendored SimSlim provenance
+        working-directory: apps/desktop
+        run: node --test scripts/verify-vendored-simslim.node-test.mjs
 
-  native-tests:
-    name: Native helpers
+  desktop:
+    name: Desktop
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
+      # The renderer imports HeroUI Pro, a licensed library. Without a token
+      # the install still succeeds but the package is not hydrated, so
+      # typecheck and build fail on a missing module. Secrets are unavailable
+      # to job-level `if`, and to pull requests from forks, so detect the token
+      # here and skip the Electron gate with a notice instead of failing.
+      - name: Detect HeroUI Pro license
+        id: license
+        run: |
+          if [ -n "${HEROUI_AUTH_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Desktop gate skipped::HEROUI_AUTH_TOKEN is not available to this run, so the Electron app was not built. A maintainer must run this job for changes under apps/desktop."
+          fi
       - uses: actions/checkout@v5
+        if: steps.license.outputs.available == 'true'
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v6
+      - uses: pnpm/action-setup@v4
+        if: steps.license.outputs.available == 'true'
+      - uses: actions/setup-node@v5
+        if: steps.license.outputs.available == 'true'
         with:
-          go-version-file: apps/desktop/native/rndevtools-sim-helper/go.mod
-          cache-dependency-path: apps/desktop/native/rndevtools-sim-helper/go.mod
-      # The Go and Swift helpers have no licensed dependencies, so fork
-      # contributors get full coverage on the native side.
-      - name: Simulator helper
-        working-directory: apps/desktop/native/rndevtools-sim-helper
-        run: go build ./... && go test ./...
-      - name: Agent CLI
-        working-directory: apps/desktop/native/rndevtools-cli
-        run: go build ./... && go test ./...
-      - name: Native host
-        working-directory: apps/desktop/native/rndevtools-native-host
-        run: swift build && swift test
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install
+        if: steps.license.outputs.available == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Desktop quality
+        if: steps.license.outputs.available == 'true'
+        run: pnpm --filter @rndevtools/desktop quality

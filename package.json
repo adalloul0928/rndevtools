@@ -18,11 +18,9 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test:run",
-    "quality": "turbo lint typecheck test:run",
-    "prepare": "husky"
+    "quality": "turbo lint typecheck test:run"
   },
   "devDependencies": {
-    "husky": "^9.1.7",
     "turbo": "2.10.12"
   }
 }

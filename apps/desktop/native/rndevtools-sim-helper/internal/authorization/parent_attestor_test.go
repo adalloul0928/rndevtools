@@ -67,7 +67,7 @@ func TestLiveCodeVerificationBindsKernelCDHashIntoStaticRequirement(t *testing.T
 	for _, required := range []string{
 		"-R=anchor apple generic",
 		`identifier "rndevtools-native-host"`,
-		`certificate leaf[subject.OU] = "`+testTeamIdentifier+`"`,
+		`certificate leaf[subject.OU] = "` + testTeamIdentifier + `"`,
 		`cdhash H"` + fakeCodeDirectoryHash + `"`,
 	} {
 		if !strings.Contains(requirement, required) {

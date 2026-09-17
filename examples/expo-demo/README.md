@@ -9,10 +9,11 @@ same.
 
 | File | Demonstrates |
 | --- | --- |
-| [`src/app.tsx`](src/app.tsx) | Mounting `InternalTools` behind the required providers |
+| [`src/app.tsx`](src/app.tsx) | An app whose **only** devtools import is the host module |
+| [`src/devtools/host.tsx`](src/devtools/host.tsx) | The single seam: mounts `InternalTools`, grants authorization, connects the desktop |
 | [`src/devtools/plugins.ts`](src/devtools/plugins.ts) | Host-specific configuration: URL scheme, vendor correlation headers, environment values |
 | [`src/devtools/desktop.ts`](src/devtools/desktop.ts) | Implementing `DesktopClientHost` to connect to the desktop app |
-| [`src/lib/devtools-disabled.ts`](src/lib/devtools-disabled.ts) | The no-op stub a release build resolves to instead |
+| [`src/lib/devtools-host-disabled.tsx`](src/lib/devtools-host-disabled.tsx) | The no-op stub a release build resolves to instead |
 | [`metro.config.js`](metro.config.js) | `withDevtoolsPruning` cutting devtools out of the module graph |
 
 ## Run it
@@ -26,6 +27,19 @@ Open the desktop app alongside it and the device appears automatically — the
 client discovers a loopback broker on its own.
 
 ## Prove the pruning works
+
+Two checks, at two speeds. The fast one walks the import graph with the same
+replacement table Metro is given, and fails if anything from `@rndevtools/*`
+is still reachable. It runs in the `quality` gate and names the offending
+import:
+
+```sh
+pnpm --dir examples/expo-demo verify:seam
+```
+
+The rule it enforces is the whole trick: the app imports devtools from exactly
+one module, and Metro replaces that module. A second import anywhere else
+reconnects the graph. The slow check confirms it against a real export:
 
 ```sh
 APP_VARIANT=production pnpm --dir examples/expo-demo verify:bundle
