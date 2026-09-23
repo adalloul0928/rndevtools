@@ -54,13 +54,23 @@ jobs:
           cache-dependency-path: apps/desktop/native/rndevtools-sim-helper/go.mod
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      # These scripts use only Node builtins, so the project's real native gate
-      # (gofmt, vet, race tests, govulncheck, module allowlist, Swift build and
-      # tests, SimSlim provenance) runs with no install and no secrets. Fork
-      # contributors get the same coverage as maintainers.
-      - name: Go and Swift helper checks
+      # These scripts use only Node builtins, so the project's real Go gate
+      # (gofmt, vet, race tests, govulncheck, module allowlist) and the SimSlim
+      # provenance check run with no install and no secrets. Fork contributors
+      # get the same coverage as maintainers.
+      - name: Go helper checks
         working-directory: apps/desktop
-        run: node scripts/check-native-helpers.mjs
+        run: node scripts/check-native-helpers.mjs --go
+      # Compile coverage only. `swift test` passes in about a second on real
+      # hardware but hangs indefinitely on GitHub's hosted macOS runners: the
+      # suite probes real media hardware (AVCaptureDevice, a VideoToolbox
+      # compression session) and exercises process-group reaping, and those
+      # runners are headless VMs. Run it locally with `pnpm native:check:swift`,
+      # or use the manual "Swift tests" workflow to identify the blocking test.
+      - name: Swift native host builds
+        working-directory: apps/desktop/native/rndevtools-native-host
+        timeout-minutes: 10
+        run: swift build
       - name: Vendored SimSlim provenance
         working-directory: apps/desktop
         run: node --test scripts/verify-vendored-simslim.node-test.mjs
