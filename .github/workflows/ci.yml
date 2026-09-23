@@ -48,6 +48,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
+          # v5 infers caching from package.json's packageManager and calls
+          # pnpm, which this job deliberately does not install.
+          package-manager-cache: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: apps/desktop/native/rndevtools-sim-helper/go.mod
