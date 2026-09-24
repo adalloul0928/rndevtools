@@ -9,6 +9,7 @@
  * Usage:
  *   npx rndevtools-verify-bundle <bundle-directory> [--marker "Extra String"]
  */
+import { realpathSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -61,7 +62,18 @@ export async function verifyPrunedBundle(root, markers = DEFAULT_MARKERS) {
 	}
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isInvokedAsCli() {
+	if (!process.argv[1]) return false;
+	// Package managers expose this file through a `node_modules/.bin` symlink;
+	// compare real paths or the guard never fires and the check silently passes.
+	try {
+		return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+	} catch {
+		return false;
+	}
+}
+
+if (isInvokedAsCli()) {
 	const [, , root, ...rest] = process.argv;
 	if (!root) {
 		throw new Error(
