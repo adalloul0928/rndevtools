@@ -59,18 +59,34 @@ function withDevtoolsPruning(config, options) {
 	});
 
 	// An import of the same file can arrive as the alias, the extensionless
-	// absolute path, or the path with its extension, depending on the importer.
-	const matches = (moduleName, entry) =>
-		moduleName === entry.module ||
-		moduleName === entry.resolved ||
-		moduleName === `${entry.resolved}.ts` ||
-		moduleName === `${entry.resolved}.tsx`;
+	// absolute path, the path with its extension, or a relative specifier
+	// (babel-plugin-module-resolver rewrites aliases to relative paths before
+	// Metro collects dependencies), depending on the importer.
+	const matches = (moduleName, entry, originModulePath) => {
+		if (
+			moduleName === entry.module ||
+			moduleName === entry.resolved ||
+			moduleName === `${entry.resolved}.ts` ||
+			moduleName === `${entry.resolved}.tsx`
+		) {
+			return true;
+		}
+		if (!moduleName.startsWith('.') || typeof originModulePath !== 'string') {
+			return false;
+		}
+		const fromOrigin = path.resolve(path.dirname(originModulePath), moduleName);
+		return (
+			fromOrigin === entry.resolved ||
+			fromOrigin === `${entry.resolved}.ts` ||
+			fromOrigin === `${entry.resolved}.tsx`
+		);
+	};
 
 	const resolver = config.resolver ?? {};
 	const previous = resolver.resolveRequest;
 	resolver.resolveRequest = (context, moduleName, platform) => {
 		for (const entry of entries) {
-			if (matches(moduleName, entry)) {
+			if (matches(moduleName, entry, context.originModulePath)) {
 				return context.resolveRequest(context, entry.stub, platform);
 			}
 		}
