@@ -10,6 +10,7 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	EmptyPanel,
+	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
@@ -37,8 +38,27 @@ function transitionTone(
 	return 'default';
 }
 
+/**
+ * Explains why the on-device navigate action is disabled, so the button never
+ * looks inert without a reason. Returns null when navigation is available.
+ *
+ * @public
+ */
+export function navigateDisabledReason(
+	route: RouteEntry | null,
+	actionReason: string | null
+): string | null {
+	if (!route) return 'Select a route first.';
+	if (route.isCurrent) return 'This route is already visible.';
+	if (!routeCanNavigate(route)) {
+		return 'Dynamic and layout routes need parameters supplied on the device.';
+	}
+	return actionReason;
+}
+
 export function RoutesPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const routes = selectedDevice?.tools.routes ?? [];
 	const events = selectedDevice?.tools.routeEvents ?? [];
 	const [query, setQuery] = useState('');
@@ -69,6 +89,10 @@ export function RoutesPanel() {
 				.slice(0, MAX_RENDERED_ROUTE_EVENTS),
 		[events]
 	);
+	const navigateReason = navigateDisabledReason(
+		selected,
+		actionUnavailableReason('routes', 'navigate')
+	);
 
 	return (
 		<section className="panel-root">
@@ -77,7 +101,9 @@ export function RoutesPanel() {
 				title="Routes"
 				description="See the current Expo Router stack, browse the generated sitemap, and navigate to explicit static routes."
 				meta={
-					<span className="flex items-center gap-1.5 text-blue-300">
+					<span
+						className={`flex items-center gap-1.5 ${current ? 'text-(--brand)' : 'text-(--text-3)'}`}
+					>
 						<Navigation2 className="h-3 w-3" />{' '}
 						{current?.path ?? 'No active route'}
 					</span>
@@ -90,7 +116,7 @@ export function RoutesPanel() {
 					value={query}
 					onChange={setQuery}
 				/>
-				<span className="ml-auto font-mono text-xs text-(--text-3)">
+				<span className="ml-auto font-mono text-xs tabular-nums text-(--text-3)">
 					{filtered.length} of {routes.length} routes · {events.length}{' '}
 					transitions
 				</span>
@@ -113,35 +139,39 @@ export function RoutesPanel() {
 						/>
 					) : (
 						<div className="space-y-1.5">
-							{visibleRoutes.map((route) => (
-								<button
-									aria-pressed={selected?.id === route.id}
-									className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${selected?.id === route.id ? 'border-white/18 bg-white/[0.07]' : 'border-transparent hover:border-white/8 hover:bg-white/[0.035]'}`}
-									key={route.id}
-									type="button"
-									onClick={() => setSelectedId(route.id)}
-								>
-									<div
-										className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border ${route.isCurrent ? 'border-blue-400/30 bg-blue-400/10 text-blue-300' : 'border-white/8 bg-white/[0.03] text-(--text-3)'}`}
+							{visibleRoutes.map((route) => {
+								const isSelected = selected?.id === route.id;
+								return (
+									<button
+										aria-current={isSelected ? 'true' : undefined}
+										aria-pressed={isSelected}
+										className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-white/18 bg-white/[0.07]' : 'border-transparent hover:border-white/8 hover:bg-white/[0.035]'}`}
+										key={route.id}
+										type="button"
+										onClick={() => setSelectedId(route.id)}
 									>
-										<RouteIcon className="h-3.5 w-3.5" />
-									</div>
-									<div className="min-w-0 flex-1">
-										<div className="flex items-center gap-2">
-											<span className="truncate text-xs font-medium text-(--foreground)">
-												{route.name}
-											</span>
-											{route.isCurrent ? (
-												<StatusPill tone="info">Current</StatusPill>
-											) : null}
+										<div
+											className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border ${route.isCurrent ? 'border-(--brand-border) bg-(--brand-soft) text-(--brand)' : 'border-white/8 bg-white/[0.03] text-(--text-3)'}`}
+										>
+											<RouteIcon className="h-3.5 w-3.5" />
 										</div>
-										<p className="mb-0 mt-1 truncate font-mono text-xs text-(--text-3)">
-											{route.path}
-										</p>
-									</div>
-									<ArrowRight className="h-3.5 w-3.5 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-(--muted)" />
-								</button>
-							))}
+										<div className="min-w-0 flex-1">
+											<div className="flex items-center gap-2">
+												<span className="truncate text-xs font-medium text-(--foreground)">
+													{route.name}
+												</span>
+												{route.isCurrent ? (
+													<StatusPill tone="success">Current</StatusPill>
+												) : null}
+											</div>
+											<p className="mb-0 mt-1 truncate font-mono text-xs text-(--text-3)">
+												{route.path}
+											</p>
+										</div>
+										<ArrowRight className="h-3.5 w-3.5 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-(--muted)" />
+									</button>
+								);
+							})}
 						</div>
 					)}
 				</div>
@@ -157,7 +187,7 @@ export function RoutesPanel() {
 										{selected.name}
 									</h2>
 								</div>
-								<StatusPill tone={selected.isCurrent ? 'info' : 'default'}>
+								<StatusPill tone={selected.isCurrent ? 'success' : 'default'}>
 									{selected.kind}
 								</StatusPill>
 							</div>
@@ -179,11 +209,7 @@ export function RoutesPanel() {
 							</dl>
 							<Button
 								fullWidth
-								isDisabled={
-									selected.isCurrent ||
-									!routeCanNavigate(selected) ||
-									!canRunAction('routes', 'navigate')
-								}
+								isDisabled={navigateReason !== null}
 								variant="primary"
 								onPress={() =>
 									void runAction(
@@ -201,16 +227,30 @@ export function RoutesPanel() {
 										? 'Navigate on device'
 										: 'Parameters required on device'}
 							</Button>
+							{navigateReason &&
+							!selected.isCurrent &&
+							routeCanNavigate(selected) ? (
+								<p className="mb-0 mt-2 text-xs text-(--text-3)">
+									{navigateReason}
+								</p>
+							) : null}
 							{selected.filename ? (
 								<div className="mt-3 flex items-start gap-2 rounded-md border border-white/8 bg-white/[0.025] p-3 text-xs leading-5 text-(--text-3)">
 									<FileCode2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-									<span className="break-all font-mono">
+									<InlineCode className="break-all">
 										{selected.filename}
-									</span>
+									</InlineCode>
 								</div>
 							) : null}
 						</>
-					) : null}
+					) : (
+						<EmptyPanel
+							compact
+							icon={<RouteIcon className="h-5 w-5" />}
+							title="Select a route"
+							description="Pick a route to inspect its descriptor and navigate on device."
+						/>
+					)}
 					<div className="mt-6 border-t border-white/8 pt-4">
 						<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							<History className="h-3.5 w-3.5" /> Recent navigation
@@ -237,7 +277,7 @@ export function RoutesPanel() {
 													{event.route}
 												</span>
 											</div>
-											<span className="shrink-0 font-mono text-xs text-(--text-3)">
+											<span className="shrink-0 font-mono text-xs tabular-nums text-(--text-3)">
 												{formatClock(event.at)}
 											</span>
 										</div>
@@ -254,7 +294,7 @@ export function RoutesPanel() {
 												.join(' · ')}
 										</p>
 										{event.error ? (
-											<p className="mb-0 mt-2 text-xs leading-4 text-red-300">
+											<p className="mb-0 mt-2 text-xs leading-4 text-(--danger)">
 												{event.error}
 											</p>
 										) : null}

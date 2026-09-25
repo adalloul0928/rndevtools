@@ -7,6 +7,7 @@ import {
 	UserRoundCheck,
 } from 'lucide-react';
 import {
+	Badge,
 	ConfirmAction,
 	EmptyPanel,
 	PanelHeader,
@@ -17,13 +18,16 @@ import { formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 
 export function IdentityPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const session = selectedDevice?.tools.identitySession ?? {
 		running: false,
 		history: [],
 		personas: [],
 	};
 	const active = session.active;
+	const startReason = actionUnavailableReason('identity', 'start');
+	const stopReason = actionUnavailableReason('identity', 'stop');
 
 	return (
 		<section className="panel-root">
@@ -79,13 +83,13 @@ export function IdentityPanel() {
 			</PanelNotice>
 			{active ? (
 				<div
-					className={`flex shrink-0 items-center gap-4 border-b px-5 py-4 ${active.status === 'needs-attention' ? 'border-red-400/20 bg-red-400/[0.05]' : 'border-amber-400/20 bg-amber-400/[0.05]'}`}
+					className={`flex shrink-0 items-center gap-4 border-b px-5 py-4 ${active.status === 'needs-attention' ? 'border-(--danger)/25 bg-(--danger)/[0.06]' : 'border-(--warning)/25 bg-(--warning)/[0.06]'}`}
 				>
 					<div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/30">
 						{active.status === 'needs-attention' ? (
-							<ShieldAlert className="h-4 w-4 text-red-300" />
+							<ShieldAlert className="h-4 w-4 text-(--danger)" />
 						) : (
-							<UserRoundCheck className="h-4 w-4 text-amber-300" />
+							<UserRoundCheck className="h-4 w-4 text-(--warning)" />
 						)}
 					</div>
 					<div className="min-w-0 flex-1">
@@ -99,7 +103,14 @@ export function IdentityPanel() {
 							exact original actor session.
 						</p>
 						{active.error ? (
-							<p className="mb-0 mt-1 text-xs text-red-300">{active.error}</p>
+							<p className="mb-0 mt-1 text-xs text-(--danger)">
+								{active.error}
+							</p>
+						) : null}
+						{stopReason ? (
+							<p className="mb-0 mt-1 text-xs text-(--text-3)">
+								Stop unavailable: {stopReason}
+							</p>
 						) : null}
 					</div>
 				</div>
@@ -116,53 +127,60 @@ export function IdentityPanel() {
 						title="No test identities advertised"
 					/>
 				) : (
-					<div className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
-						{session.personas.map((persona) => {
-							const selected = active?.target.personaId === persona.id;
-							return (
-								<Card
-									className="rounded-lg border border-white/8 bg-white/[0.025] shadow-none"
-									key={persona.id}
-									variant="secondary"
-								>
-									<Card.Content className="flex items-center gap-3 p-4">
-										<div className="min-w-0 flex-1">
-											<div className="flex items-center gap-2">
-												<strong className="text-xs text-(--foreground)">
-													{persona.label}
-												</strong>
-												{selected ? (
-													<StatusPill tone="warning">ACTIVE</StatusPill>
-												) : null}
+					<>
+						<div className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
+							{session.personas.map((persona) => {
+								const selected = active?.target.personaId === persona.id;
+								return (
+									<Card
+										className="rounded-lg border border-white/8 bg-white/[0.025] shadow-none"
+										key={persona.id}
+										variant="secondary"
+									>
+										<Card.Content className="flex items-center gap-3 p-4">
+											<div className="min-w-0 flex-1">
+												<div className="flex items-center gap-2">
+													<strong className="text-xs text-(--foreground)">
+														{persona.label}
+													</strong>
+													{selected ? (
+														<Badge tone="warning">Active</Badge>
+													) : null}
+												</div>
+												<p className="mb-0 mt-1 text-xs text-(--muted)">
+													{persona.note}
+												</p>
 											</div>
-											<p className="mb-0 mt-1 text-xs text-(--muted)">
-												{persona.note}
-											</p>
-										</div>
-										<ConfirmAction
-											confirmLabel="Start identity"
-											description={`Secure the current actor on-device, clear owner-bound caches, and continue as ${persona.label}.`}
-											isDisabled={
-												selected || !canRunAction('identity', 'start')
-											}
-											onConfirm={() =>
-												void runAction(
-													'identity',
-													'start',
-													{ personaId: persona.id },
-													`Testing as ${persona.label}.`
-												)
-											}
-											title={`Start ${persona.label}?`}
-											tone="warning"
-											triggerLabel={selected ? 'Active' : 'Start'}
-											triggerVariant="secondary"
-										/>
-									</Card.Content>
-								</Card>
-							);
-						})}
-					</div>
+											<ConfirmAction
+												confirmLabel="Start identity"
+												description={`Secure the current actor on-device, clear owner-bound caches, and continue as ${persona.label}.`}
+												isDisabled={
+													selected || !canRunAction('identity', 'start')
+												}
+												onConfirm={() =>
+													void runAction(
+														'identity',
+														'start',
+														{ personaId: persona.id },
+														`Testing as ${persona.label}.`
+													)
+												}
+												title={`Start ${persona.label}?`}
+												tone="warning"
+												triggerLabel={selected ? 'Active' : 'Start'}
+												triggerVariant="secondary"
+											/>
+										</Card.Content>
+									</Card>
+								);
+							})}
+						</div>
+						{!active && startReason ? (
+							<p className="mt-3 text-xs text-(--text-3)">
+								Starting an identity is unavailable: {startReason}
+							</p>
+						) : null}
+					</>
 				)}
 
 				<h2 className="mb-3 mt-6 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-(--text-3)">

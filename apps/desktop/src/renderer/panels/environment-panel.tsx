@@ -3,6 +3,7 @@ import { CheckCircle2, CircleAlert, Settings2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
 	EmptyPanel,
+	InlineCode,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
@@ -14,13 +15,42 @@ import type { EnvironmentEntry } from '../../shared/protocol';
 
 const MAX_RENDERED_ENVIRONMENT_VALUES = 500;
 
-function validationTone(
+export function validationTone(
 	status: EnvironmentEntry['status']
 ): 'success' | 'warning' | 'danger' | 'default' {
 	if (status === 'valid') return 'success';
 	if (status === 'unchecked') return 'default';
 	if (status === 'missing') return 'warning';
 	return 'danger';
+}
+
+export function statusLabel(status: EnvironmentEntry['status']): string {
+	if (status === 'typeMismatch') return 'type';
+	if (status === 'valueMismatch') return 'value';
+	return status;
+}
+
+/**
+ * Reduces the validated entries to a health summary. Pure so it can be unit
+ * tested independently of the rendered panel.
+ *
+ * @public
+ */
+export function environmentHealth(entries: readonly EnvironmentEntry[]): {
+	hasChecks: boolean;
+	valid: number;
+	failures: number;
+	score: number;
+} {
+	const checked = entries.filter((entry) => entry.status !== 'unchecked');
+	const valid = checked.filter((entry) => entry.status === 'valid').length;
+	const hasChecks = checked.length > 0;
+	return {
+		hasChecks,
+		valid,
+		failures: checked.length - valid,
+		score: hasChecks ? Math.round((valid / checked.length) * 100) : 0,
+	};
 }
 
 export function EnvironmentPanel() {
@@ -54,11 +84,7 @@ export function EnvironmentPanel() {
 			),
 		[visibleEntries]
 	);
-	const checked = entries.filter((entry) => entry.status !== 'unchecked');
-	const valid = checked.filter((entry) => entry.status === 'valid').length;
-	const hasChecks = checked.length > 0;
-	const score = hasChecks ? Math.round((valid / checked.length) * 100) : 0;
-	const failures = checked.length - valid;
+	const { hasChecks, valid, failures, score } = environmentHealth(entries);
 
 	return (
 		<section className="panel-root">
@@ -72,8 +98,8 @@ export function EnvironmentPanel() {
 							!hasChecks
 								? 'text-(--text-3)'
 								: failures === 0
-									? 'text-emerald-300'
-									: 'text-amber-300'
+									? 'text-(--brand)'
+									: 'text-(--warning)'
 						}
 					>
 						{hasChecks ? `Config health ${score}%` : 'Config not evaluated'}
@@ -88,10 +114,10 @@ export function EnvironmentPanel() {
 					onChange={setQuery}
 				/>
 				<div className="ml-auto flex items-center gap-3">
-					<span className="flex items-center gap-1.5 text-xs text-emerald-300">
+					<span className="flex items-center gap-1.5 text-xs text-(--brand)">
 						<CheckCircle2 className="h-3.5 w-3.5" /> {valid} valid
 					</span>
-					<span className="flex items-center gap-1.5 text-xs text-amber-300">
+					<span className="flex items-center gap-1.5 text-xs text-(--warning)">
 						<CircleAlert className="h-3.5 w-3.5" /> {failures} review
 					</span>
 				</div>
@@ -111,7 +137,7 @@ export function EnvironmentPanel() {
 						>
 							<div className="grid h-full w-full place-items-center rounded-full bg-[#080808] text-center">
 								<div>
-									<div className="font-mono text-2xl font-semibold tracking-[-0.04em] text-(--foreground)">
+									<div className="font-mono text-2xl font-semibold tabular-nums tracking-[-0.04em] text-(--foreground)">
 										{hasChecks ? `${score}%` : '—'}
 									</div>
 									<div className="mt-0.5 text-xs uppercase tracking-[0.08em] text-(--text-3)">
@@ -154,7 +180,7 @@ export function EnvironmentPanel() {
 									<Card.Title className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
 										{section.title}
 									</Card.Title>
-									<span className="font-mono text-xs text-(--text-3)">
+									<span className="font-mono text-xs tabular-nums text-(--text-3)">
 										{section.entries.length} values
 									</span>
 								</Card.Header>
@@ -174,15 +200,13 @@ export function EnvironmentPanel() {
 													</p>
 												) : null}
 											</div>
-											<code className="block truncate text-xs text-(--muted)">
-												{entry.valueText}
-											</code>
+											<div className="min-w-0">
+												<InlineCode className="block truncate">
+													{entry.valueText}
+												</InlineCode>
+											</div>
 											<StatusPill tone={validationTone(entry.status)}>
-												{entry.status === 'typeMismatch'
-													? 'type'
-													: entry.status === 'valueMismatch'
-														? 'value'
-														: entry.status}
+												{statusLabel(entry.status)}
 											</StatusPill>
 										</div>
 									))}
