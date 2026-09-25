@@ -17,6 +17,7 @@ import {
 	SimulatorMetric,
 	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
+import { Badge, PanelNotice, StatusPill } from '@/components/ui';
 import type {
 	BuildInsight,
 	BuildInsightsBridge,
@@ -201,13 +202,18 @@ export function BuildInsightsPanel() {
 				title="Build Insights"
 			/>
 			{!bridge ? (
-				<PanelNotice tone="error">
+				<PanelNotice title="Build Insights bridge unavailable." tone="danger">
 					The narrow Build Insights bridge is unavailable. Reopen the updated
 					desktop app; this renderer never reads local paths directly.
 				</PanelNotice>
 			) : null}
 			{message ? (
-				<PanelNotice tone={message.kind}>{message.text}</PanelNotice>
+				<PanelNotice
+					title={message.kind === 'error' ? 'Build action failed.' : 'Done.'}
+					tone={message.kind === 'error' ? 'danger' : 'info'}
+				>
+					{message.text}
+				</PanelNotice>
 			) : null}
 			<div className="sim-metric-grid">
 				<SimulatorMetric
@@ -284,28 +290,6 @@ export function BuildInsightsPanel() {
 	);
 }
 
-function PanelNotice({
-	children,
-	tone,
-}: {
-	children: React.ReactNode;
-	tone: 'error' | 'info' | 'success';
-}) {
-	return (
-		<div
-			className={`sim-build-notice is-${tone}`}
-			role={tone === 'error' ? 'alert' : 'status'}
-		>
-			{tone === 'error' ? (
-				<AlertTriangle className="h-3.5 w-3.5" />
-			) : (
-				<PackageCheck className="h-3.5 w-3.5" />
-			)}
-			<span>{children}</span>
-		</div>
-	);
-}
-
 function BuildRow({ build }: { build: BuildInsight }) {
 	return (
 		<>
@@ -345,9 +329,7 @@ function BuildDetail({
 					<h2>{build.name}</h2>
 					<span>{build.destination}</span>
 				</div>
-				<span className={`sim-state-pill is-${statusTone(build.status)}`}>
-					{build.status}
-				</span>
+				<StatusPill tone={statusTone(build.status)}>{build.status}</StatusPill>
 			</header>
 			<section className="sim-build-facts">
 				<Fact label="Duration" value={formatDuration(build.durationMs)} />
@@ -428,9 +410,9 @@ function SourcesAndActivity({ state }: { state: BuildInsightsState }) {
 							<div key={source.id}>
 								<span className={`sim-source-status is-${source.status}`} />
 								<strong>{source.label}</strong>
-								<code>
+								<Badge>
 									{source.kind === 'xcresult' ? 'result' : 'scan root'}
-								</code>
+								</Badge>
 								{source.error ? <small>{source.error}</small> : null}
 							</div>
 						))
@@ -527,7 +509,9 @@ export function buildClassificationPresentation(
 	};
 }
 
-function statusTone(status: BuildInsight['status']): string {
+function statusTone(
+	status: BuildInsight['status']
+): 'success' | 'danger' | 'warning' {
 	if (status === 'succeeded') return 'success';
 	if (status === 'failed') return 'danger';
 	return 'warning';

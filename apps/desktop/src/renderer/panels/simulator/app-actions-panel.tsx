@@ -26,7 +26,7 @@ import {
 	Type,
 	Upload,
 } from 'lucide-react';
-import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import { type ComponentType, useEffect, useId, useMemo, useState } from 'react';
 import { InfoPopover } from '@/components/ui';
 import { targetConfig } from '@/simulator/target-config';
 import type { SimulatorCapability } from '../../../shared/simulator-protocol';
@@ -36,7 +36,7 @@ import {
 	SimulatorPanelHeader,
 	SimulatorTargetSelect,
 } from '../../components/simulator-ui';
-import { SearchControl, Toolbar } from '../../components/ui';
+import { Badge, SearchControl, Toolbar } from '../../components/ui';
 import {
 	type SimulatorActionInput,
 	useSimulatorRuntime,
@@ -499,7 +499,9 @@ export function AppActionsPanel() {
 										<strong>{action.label}</strong>
 										<span>{action.description}</span>
 									</div>
-									<span className="sim-category-tag">{action.category}</span>
+									<Badge tone={actionCategoryTone(action.category)}>
+										{action.category}
+									</Badge>
 								</>
 							);
 						}}
@@ -552,6 +554,7 @@ function ActionWorkbench({
 	onRun: (action: SimulatorActionInput) => void;
 }) {
 	const Icon = action.icon;
+	const reasonId = useId();
 	const [value, setValue] = useState('');
 	const [preset, setPreset] = useState(() => defaultPreset(action.config));
 	const [locale, setLocale] = useState('');
@@ -593,7 +596,7 @@ function ActionWorkbench({
 	return (
 		<div className="sim-workbench">
 			<div className="sim-workbench-icon">
-				<Icon className="h-5 w-5" />
+				<Icon className="h-5 w-5 text-(--brand)" />
 			</div>
 			<p className="sim-eyebrow">{action.category} action</p>
 			<div className="panel-heading">
@@ -644,7 +647,7 @@ function ActionWorkbench({
 			<div className="sim-run-footer">
 				<div>
 					<strong>{targetName ?? 'No target selected'}</strong>
-					<span>
+					<span id={reasonId}>
 						{canRun
 							? 'Booted and ready'
 							: actionInput
@@ -653,6 +656,7 @@ function ActionWorkbench({
 					</span>
 				</div>
 				<Button
+					{...(canRun ? {} : { 'aria-describedby': reasonId })}
 					isDisabled={!canRun}
 					size="sm"
 					variant="primary"
@@ -665,6 +669,21 @@ function ActionWorkbench({
 			</div>
 		</div>
 	);
+}
+
+export function actionCategoryTone(
+	category: ActionCategory
+): 'brand' | 'info' | 'warning' | 'default' {
+	switch (category) {
+		case 'App':
+			return 'brand';
+		case 'Environment':
+			return 'info';
+		case 'Accessibility':
+			return 'warning';
+		default:
+			return 'default';
+	}
 }
 
 export function defaultPreset(config: AppActionDefinition['config']): string {

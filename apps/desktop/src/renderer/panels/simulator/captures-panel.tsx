@@ -28,6 +28,7 @@ import {
 	SimulatorTargetSelect,
 } from '@/components/simulator-ui';
 import {
+	Badge,
 	ConfirmAction,
 	Disclosure,
 	InfoPopover,
@@ -664,7 +665,7 @@ function CaptureRow({ capture }: { capture: SimulatorCapture }) {
 			</div>
 			<div className="sim-capture-row-tags">
 				{capture.status === 'partial' ? (
-					<span className="sim-state-pill is-warning">Recovered</span>
+					<Badge tone="warning">Recovered</Badge>
 				) : null}
 			</div>
 		</>
