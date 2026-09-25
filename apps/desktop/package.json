@@ -31,6 +31,7 @@
 		"check:cycles": "knip --directory ../.. --workspace apps/desktop --cycles --treat-config-hints-as-errors",
 		"check:dead-code": "pnpm check:unused && pnpm check:cycles",
 		"test:run": "vitest run",
+		"test:e2e": "playwright test",
 		"quality": "pnpm lint && pnpm typecheck && pnpm check:dead-code && pnpm test:run && pnpm build"
 	},
 	"dependencies": {},
@@ -41,6 +42,7 @@
 		"@heroui-pro/react": "1.0.0-beta.8",
 		"@heroui/react": "^3.2.4",
 		"@heroui/styles": "catalog:",
+		"@playwright/test": "catalog:",
 		"@react-aria/i18n": "^3.13.1",
 		"@react-aria/ssr": "^3.10.1",
 		"@react-aria/utils": "^3.34.1",

@@ -8,6 +8,7 @@
 			"src/**/*.css",
 			"src/**/*.html",
 			"scripts/**/*.{cjs,mjs}",
+			"e2e/**/*.ts",
 			"*.json",
 			"*.ts",
 			"*.tsx"

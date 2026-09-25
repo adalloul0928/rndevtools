@@ -56,6 +56,7 @@ catalog:
   "@heroui/styles": 3.2.4
   "@hugeicons/core-free-icons": 4.3.0
   "@hugeicons/react-native": 1.0.16
+  "@playwright/test": 1.63.0
   "@tanstack/react-query": 5.102.8
   "@testing-library/react-native": 14.0.1
   "@types/jest": "29"

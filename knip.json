@@ -18,12 +18,14 @@
 		"apps/desktop": {
 			"entry": [
 				"scripts/before-build.cjs!",
-				"scripts/after-pack.cjs!"
+				"scripts/after-pack.cjs!",
+				"e2e/**/*.e2e.ts!"
 			],
 			"project": [
 				"src/**/*.{ts,tsx}!",
 				"src/**/*.css!",
 				"scripts/**/*.{cjs,mjs}!",
+				"e2e/**/*.ts!",
 				"*.ts!"
 			],
 			"paths": {

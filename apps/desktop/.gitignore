@@ -2,3 +2,6 @@ dist/
 release/
 node_modules/
 *.tsbuildinfo
+e2e/.artifacts/
+playwright-report/
+test-results/
