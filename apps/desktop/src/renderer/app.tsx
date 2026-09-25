@@ -582,19 +582,30 @@ function Titlebar({
 								/>
 								<span aria-hidden="true" className="titlebar-rule" />
 								<div className="titlebar-controls">
-									<button
-										className="connection-button"
-										type="button"
-										onClick={() => {
-											if (connectedTool !== 'diagnostics')
-												setConnectedTool('diagnostics');
-										}}
-									>
-										<span
-											className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
-										/>
-										{connected} live
-									</button>
+									<Tooltip delay={500}>
+										<button
+											aria-current={
+												connectedTool === 'diagnostics' ? 'page' : undefined
+											}
+											aria-label={`${connected} live ${connected === 1 ? 'connection' : 'connections'} · open Diagnostics`}
+											className="connection-button"
+											type="button"
+											onClick={() => {
+												if (connectedTool !== 'diagnostics')
+													setConnectedTool('diagnostics');
+											}}
+										>
+											<span
+												className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
+											/>
+											{connected} live
+										</button>
+										<Tooltip.Content>
+											{connected} live{' '}
+											{connected === 1 ? 'connection' : 'connections'} · open
+											Diagnostics
+										</Tooltip.Content>
+									</Tooltip>
 									<NativeSelect
 										className="device-select"
 										fullWidth={false}
@@ -871,6 +882,7 @@ function SimulatorSidebar({
 			</nav>
 			<footer className="desktop-sidebar-footer">
 				<button
+					aria-label={`Simulator capability ${state.capability.status}${state.capability.xcodeVersion ? ` · Xcode ${state.capability.xcodeVersion}` : ''} · open Settings`}
 					className="broker-summary simulator-capability-summary"
 					type="button"
 					onClick={() => setActiveTool('settings')}
@@ -987,6 +999,7 @@ function DesktopSidebar({
 			</nav>
 			<footer className="desktop-sidebar-footer">
 				<button
+					aria-label={`Broker ${state?.broker.status ?? 'starting'} on ${state ? `${state.broker.host}:${state.broker.port}` : '127.0.0.1'} · open Diagnostics`}
 					className="broker-summary"
 					type="button"
 					onClick={() => setActiveTool('diagnostics')}
@@ -1030,6 +1043,7 @@ function SimulatorContent({
 		<>
 			{state.capability.status !== 'available' && activeTool !== 'settings' ? (
 				<button
+					aria-label="Simulator setup needs attention · open Settings"
 					className="simulator-onboarding-banner"
 					type="button"
 					onClick={() => setActiveTool('settings')}
