@@ -7,13 +7,16 @@ import {
 import { DatabaseZap, RefreshCw, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	DetailPlaceholder,
 	EmptyPanel,
+	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
+	SectionCard,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
@@ -32,7 +35,7 @@ const SIMULATION_LABELS = {
 	offline: 'Offline',
 } as const;
 
-function queryTone(
+export function queryTone(
 	entry: QueryEntry
 ): 'success' | 'warning' | 'danger' | 'info' {
 	if (entry.status === 'error') return 'danger';
@@ -41,7 +44,7 @@ function queryTone(
 	return 'success';
 }
 
-function queryLabel(entry: QueryEntry): string {
+export function queryLabel(entry: QueryEntry): string {
 	if (entry.status === 'error') return 'error';
 	if (entry.fetchStatus === 'fetching') return 'fetching';
 	return entry.isStale ? 'stale' : 'fresh';
@@ -51,7 +54,7 @@ function queryUpdatedLabel(updatedAt: number): string {
 	return updatedAt > 0 ? formatRelativeTime(updatedAt) : 'Never';
 }
 
-function mutationTone(
+export function mutationTone(
 	status: 'idle' | 'pending' | 'success' | 'error'
 ): 'default' | 'info' | 'success' | 'danger' {
 	if (status === 'error') return 'danger';
@@ -244,91 +247,104 @@ export function QueryPanel() {
 				) : null}
 			</Toolbar>
 			{simulation && selectedFamily ? (
-				<div className="mx-5 mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3">
-					<div className="flex items-start justify-between gap-4">
-						<div>
-							<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
-								Query simulation
-							</p>
-							<p className="mb-0 mt-1 text-xs text-(--foreground)">
-								{simulation.active
-									? `${simulation.active.familyLabel} · ${SIMULATION_LABELS[simulation.active.mode]} active`
-									: selectedFamily.label}
-							</p>
-							<p className="mb-0 mt-1 text-xs text-(--text-3)">
-								{selectedFamily.description ??
-									'Only explicitly registered query-family adapters can be changed.'}
-							</p>
-						</div>
-						{activeSimulation ? (
-							<Button
-								isDisabled={!canRunAction('query', 'clearSimulation')}
-								size="sm"
-								variant="secondary"
-								onPress={() =>
-									void runAction(
-										'query',
-										'clearSimulation',
-										{ receiptId: activeSimulation.receiptId },
-										'Query simulation reset.'
-									)
-								}
-							>
-								<RotateCcw className="h-3.5 w-3.5" /> Reset
-							</Button>
-						) : null}
-					</div>
-					{simulation.families.length > 1 ? (
-						<div className="mt-3 flex flex-wrap gap-1">
-							{simulation.families.map((family) => (
+				<div className="mx-5 mt-4">
+					<SectionCard
+						icon={<DatabaseZap className="h-3.5 w-3.5" />}
+						title="Query simulation"
+						actions={
+							activeSimulation ? (
 								<Button
-									aria-pressed={family.id === selectedFamily.id}
-									className="h-7 px-2 text-xs"
-									key={family.id}
+									isDisabled={!canRunAction('query', 'clearSimulation')}
 									size="sm"
-									variant={
-										family.id === selectedFamily.id ? 'secondary' : 'ghost'
+									variant="secondary"
+									onPress={() =>
+										void runAction(
+											'query',
+											'clearSimulation',
+											{ receiptId: activeSimulation.receiptId },
+											'Query simulation reset.'
+										)
 									}
-									onPress={() => setSelectedFamilyId(family.id)}
 								>
-									{family.label}
+									<RotateCcw className="h-3.5 w-3.5" /> Reset
 								</Button>
-							))}
-						</div>
-					) : null}
-					<div className="mt-3 flex flex-wrap gap-2">
-						{selectedFamily.modes.map((mode) => (
-							<Button
-								isDisabled={
-									!mode.supported || !canRunAction('query', 'simulate')
-								}
-								key={mode.mode}
-								size="sm"
-								variant="secondary"
-								onPress={() =>
-									void runAction(
-										'query',
-										'simulate',
-										{ familyId: selectedFamily.id, mode: mode.mode },
-										`${SIMULATION_LABELS[mode.mode]} query simulation applied.`
-									)
-								}
-							>
-								{SIMULATION_LABELS[mode.mode]}
-							</Button>
-						))}
-					</div>
-					{selectedFamily.modes.some((mode) => !mode.supported) ? (
-						<ul className="mb-0 mt-2 space-y-1 pl-4 text-xs text-(--text-3)">
-							{selectedFamily.modes
-								.filter((mode) => !mode.supported)
-								.map((mode) => (
-									<li key={mode.mode}>
-										{SIMULATION_LABELS[mode.mode]}: {mode.reason}
-									</li>
+							) : null
+						}
+					>
+						<p className="m-0 text-xs text-(--foreground)">
+							{simulation.active
+								? `${simulation.active.familyLabel} · ${SIMULATION_LABELS[simulation.active.mode]} active`
+								: selectedFamily.label}
+						</p>
+						<p className="mb-0 mt-1 text-xs text-(--text-3)">
+							{selectedFamily.description ??
+								'Only explicitly registered query-family adapters can be changed.'}
+						</p>
+						{simulation.families.length > 1 ? (
+							<div className="mt-3 flex flex-wrap gap-1">
+								{simulation.families.map((family) => (
+									<Button
+										aria-pressed={family.id === selectedFamily.id}
+										className="h-7 px-2 text-xs"
+										key={family.id}
+										size="sm"
+										variant={
+											family.id === selectedFamily.id ? 'secondary' : 'ghost'
+										}
+										onPress={() => setSelectedFamilyId(family.id)}
+									>
+										{family.label}
+									</Button>
 								))}
-						</ul>
-					) : null}
+							</div>
+						) : null}
+						<div className="mt-3 flex flex-wrap gap-2">
+							{selectedFamily.modes.map((mode) => {
+								const reasonId = `query-sim-${selectedFamily.id}-${mode.mode}`;
+								return (
+									<Button
+										{...(mode.supported
+											? {}
+											: { 'aria-describedby': reasonId })}
+										isDisabled={
+											!mode.supported || !canRunAction('query', 'simulate')
+										}
+										key={mode.mode}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runAction(
+												'query',
+												'simulate',
+												{ familyId: selectedFamily.id, mode: mode.mode },
+												`${SIMULATION_LABELS[mode.mode]} query simulation applied.`
+											)
+										}
+									>
+										{SIMULATION_LABELS[mode.mode]}
+									</Button>
+								);
+							})}
+						</div>
+						{selectedFamily.modes.some((mode) => !mode.supported) ? (
+							<div className="mt-3 flex flex-col gap-1.5">
+								{selectedFamily.modes
+									.filter((mode) => !mode.supported)
+									.map((mode) => (
+										<div
+											className="flex items-start gap-2 text-xs leading-5 text-(--text-3)"
+											id={`query-sim-${selectedFamily.id}-${mode.mode}`}
+											key={mode.mode}
+										>
+											<Badge tone="warning">
+												{SIMULATION_LABELS[mode.mode]} unavailable
+											</Badge>
+											<span className="min-w-0">{mode.reason}</span>
+										</div>
+									))}
+							</div>
+						) : null}
+					</SectionCard>
 				</div>
 			) : null}
 			{omittedCount > 0 ? (
@@ -374,10 +390,10 @@ export function QueryPanel() {
 									key={mutation.id}
 								>
 									<div className="flex items-start justify-between gap-4">
-										<div>
-											<p className="m-0 font-mono text-xs text-(--foreground)">
+										<div className="min-w-0">
+											<InlineCode className="break-all">
 												{mutation.keyText}
-											</p>
+											</InlineCode>
 											<p className="mb-0 mt-1 text-xs text-(--text-3)">
 												{mutation.submittedAt
 													? formatRelativeTime(mutation.submittedAt)

@@ -12,12 +12,15 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	EmptyPanel,
+	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
+	SectionCard,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
@@ -77,9 +80,9 @@ export function ZustandPanel() {
 				title="Zustand"
 				description="Explicit privacy-safe projections, with validated reversible edits only for stores that opt in—never a blind global store crawl."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<Badge tone="success">
 						<ShieldCheck className="h-3 w-3" /> Registered stores
-					</span>
+					</Badge>
 				}
 				actions={
 					<Button
@@ -148,13 +151,21 @@ export function ZustandPanel() {
 										<span className="truncate text-xs font-medium text-(--foreground)">
 											{store.title}
 										</span>
-										<StatusPill tone={store.error ? 'danger' : 'success'} dot>
+										<Badge
+											tone={
+												store.error
+													? 'danger'
+													: store.capabilities.restorable
+														? 'brand'
+														: 'default'
+											}
+										>
 											{store.error
 												? 'Error'
 												: store.capabilities.restorable
 													? 'Reversible'
 													: 'Read only'}
-										</StatusPill>
+										</Badge>
 									</div>
 									<p className="mb-0 mt-1.5 line-clamp-2 text-xs leading-4 text-(--text-3)">
 										{store.description ??
@@ -222,107 +233,109 @@ export function ZustandPanel() {
 								</div>
 							) : null}
 							{selected.capabilities.restorable ? (
-								<div className="mt-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
-									<div className="mb-2 flex items-center justify-between gap-3">
-										<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
-											Validated JSON patch
-										</span>
-										<Button
-											isDisabled={!canRunAction('zustand', 'capture')}
-											size="sm"
-											variant="secondary"
-											onPress={() =>
-												void runAction(
-													'zustand',
-													'capture',
-													{ storeId: selected.id },
-													'Zustand state captured.'
-												)
-											}
-										>
-											<Camera className="h-3.5 w-3.5" /> Capture state
-										</Button>
-									</div>
-									<TextArea
-										aria-label={`JSON patch for ${selected.title}`}
-										className="min-h-32 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-white/25"
-										value={patchDraft}
-										onChange={(event) => {
-											if (!selected) return;
-											const value = event.currentTarget.value;
-											setPatchDrafts((current) => ({
-												...current,
-												[selected.id]: value,
-											}));
-										}}
-									/>
-									<div className="mt-3 flex justify-end">
-										<Button
-											isDisabled={
-												!canRunAction('zustand', 'patch') || !patchDraft.trim()
-											}
-											size="sm"
-											variant="primary"
-											onPress={() =>
-												void runAction(
-													'zustand',
-													'patch',
-													{ storeId: selected.id, patchText: patchDraft },
-													'Zustand patch applied and verified.'
-												)
-											}
-										>
-											<Save className="h-3.5 w-3.5" /> Apply patch
-										</Button>
-									</div>
-									{selectedSnapshots.length > 0 ? (
-										<div className="mt-4 border-t border-white/8 pt-3">
-											<p className="mb-2 mt-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
-												Captured states
-											</p>
-											<div className="space-y-2">
-												{selectedSnapshots.slice(0, 5).map((snapshot) => (
-													<div
-														className="flex items-center justify-between gap-3 rounded border border-white/8 px-2.5 py-2"
-														key={snapshot.id}
-													>
-														<span className="font-mono text-xs text-(--text-3)">
-															{formatClock(snapshot.createdAt)} ·{' '}
-															{snapshot.stateBytes} B
-														</span>
-														<Button
-															isDisabled={!canRunAction('zustand', 'jump')}
-															size="sm"
-															variant="secondary"
-															onPress={() =>
-																void runAction(
-																	'zustand',
-																	'jump',
-																	{
-																		storeId: selected.id,
-																		snapshotId: snapshot.id,
-																	},
-																	'Zustand state restored and verified.'
-																)
-															}
-														>
-															<RotateCcw className="h-3.5 w-3.5" /> Restore
-														</Button>
-													</div>
-												))}
-											</div>
+								<div className="mt-4">
+									<SectionCard
+										title="Validated JSON patch"
+										actions={
+											<Button
+												isDisabled={!canRunAction('zustand', 'capture')}
+												size="sm"
+												variant="secondary"
+												onPress={() =>
+													void runAction(
+														'zustand',
+														'capture',
+														{ storeId: selected.id },
+														'Zustand state captured.'
+													)
+												}
+											>
+												<Camera className="h-3.5 w-3.5" /> Capture state
+											</Button>
+										}
+									>
+										<TextArea
+											aria-label={`JSON patch for ${selected.title}`}
+											className="min-h-32 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-white/25"
+											value={patchDraft}
+											onChange={(event) => {
+												if (!selected) return;
+												const value = event.currentTarget.value;
+												setPatchDrafts((current) => ({
+													...current,
+													[selected.id]: value,
+												}));
+											}}
+										/>
+										<div className="mt-3 flex items-center justify-end gap-3">
+											{!patchDraft.trim() ? (
+												<span className="text-xs text-(--text-3)">
+													Enter a JSON patch to apply.
+												</span>
+											) : null}
+											<Button
+												isDisabled={
+													!canRunAction('zustand', 'patch') ||
+													!patchDraft.trim()
+												}
+												size="sm"
+												variant="primary"
+												onPress={() =>
+													void runAction(
+														'zustand',
+														'patch',
+														{ storeId: selected.id, patchText: patchDraft },
+														'Zustand patch applied and verified.'
+													)
+												}
+											>
+												<Save className="h-3.5 w-3.5" /> Apply patch
+											</Button>
 										</div>
-									) : null}
+										{selectedSnapshots.length > 0 ? (
+											<div className="mt-4 border-t border-(--separator) pt-3">
+												<p className="mb-2 mt-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+													Captured states
+												</p>
+												<div className="space-y-2">
+													{selectedSnapshots.slice(0, 5).map((snapshot) => (
+														<div
+															className="flex items-center justify-between gap-3 rounded border border-(--border) px-2.5 py-2"
+															key={snapshot.id}
+														>
+															<span className="font-mono text-xs text-(--text-3)">
+																{formatClock(snapshot.createdAt)} ·{' '}
+																{snapshot.stateBytes} B
+															</span>
+															<Button
+																isDisabled={!canRunAction('zustand', 'jump')}
+																size="sm"
+																variant="secondary"
+																onPress={() =>
+																	void runAction(
+																		'zustand',
+																		'jump',
+																		{
+																			storeId: selected.id,
+																			snapshotId: snapshot.id,
+																		},
+																		'Zustand state restored and verified.'
+																	)
+																}
+															>
+																<RotateCcw className="h-3.5 w-3.5" /> Restore
+															</Button>
+														</div>
+													))}
+												</div>
+											</div>
+										) : null}
+									</SectionCard>
 								</div>
 							) : null}
 							<div className="mt-4 flex flex-wrap gap-1.5">
 								{selected.keys.map((key) => (
-									<span
-										className="rounded border border-white/8 bg-white/[0.03] px-1.5 py-1 font-mono text-xs text-(--text-3)"
-										key={key}
-									>
-										{key}
-									</span>
+									<InlineCode key={key}>{key}</InlineCode>
 								))}
 							</div>
 						</>
@@ -369,9 +382,7 @@ export function ZustandPanel() {
 											</StatusPill>
 										) : (
 											change.changedKeys.map((key) => (
-												<StatusPill key={key} tone="info">
-													{key}
-												</StatusPill>
+												<InlineCode key={key}>{key}</InlineCode>
 											))
 										)}
 									</div>

@@ -19,14 +19,17 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	ConfirmAction,
 	DetailPlaceholder,
 	EmptyPanel,
+	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
+	SectionCard,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
@@ -34,8 +37,23 @@ import { formatBytes, formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { StorageEntry } from '../../shared/protocol';
 
+/**
+ * Pure helper (unit-tested): explains why the storage write action is
+ * unavailable, or returns null when it can run. Keeps the disabled-reason logic
+ * out of the render tree so it can be asserted without a DOM.
+ */
+export function storageWriteBlockReason(
+	dirty: boolean,
+	capabilityReason: string | null
+): string | null {
+	if (capabilityReason) return capabilityReason;
+	if (!dirty) return 'Edit the value to enable saving.';
+	return null;
+}
+
 export function StoragePanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const entries = selectedDevice?.tools.storage ?? [];
 	const events = selectedDevice?.tools.storageEvents ?? [];
 	const summary = selectedDevice?.tools.storageSummary;
@@ -164,9 +182,9 @@ export function StoragePanel() {
 				title="Storage"
 				description="Browse standard and encrypted MMKV keys, edit explicitly writable values, and review recent changes."
 				meta={
-					<span className="flex items-center gap-1.5 text-amber-300">
+					<Badge tone="warning">
 						<ShieldCheck className="h-3 w-3" /> Secure values never leave device
-					</span>
+					</Badge>
 				}
 			/>
 			<Toolbar>
@@ -306,29 +324,47 @@ export function StoragePanel() {
 									) : (
 										<Input className="h-9 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-xs text-(--foreground)" />
 									)}
-									<div className="mt-3 flex justify-end">
-										<ConfirmAction
-											confirmLabel="Write value"
-											description={`This will replace ${selected.key} in ${selected.adapterTitle}. The change is immediate and is not included in developer-state restore points.`}
-											isDisabled={
-												draft === (selected.valueText ?? '') ||
-												!canRunAction('storage', 'set')
-											}
-											onConfirm={() =>
-												void runAction(
-													'storage',
-													'set',
-													{ id: selected.id, valueText: draft },
-													'Storage value updated.'
-												)
-											}
-											title="Write this storage value?"
-											tone="warning"
-											triggerIcon={<Save className="h-3.5 w-3.5" />}
-											triggerLabel="Save on device"
-											triggerVariant="primary"
-										/>
-									</div>
+									{(() => {
+										const dirty = draft !== (selected.valueText ?? '');
+										const capabilityReason = actionUnavailableReason(
+											'storage',
+											'set'
+										);
+										const blockReason = storageWriteBlockReason(
+											dirty,
+											capabilityReason
+										);
+										return (
+											<div className="mt-3 flex items-center justify-end gap-3">
+												{blockReason ? (
+													<span
+														className="text-xs text-(--text-3)"
+														id="storage-write-reason"
+													>
+														{blockReason}
+													</span>
+												) : null}
+												<ConfirmAction
+													confirmLabel="Write value"
+													description={`This will replace ${selected.key} in ${selected.adapterTitle}. The change is immediate and is not included in developer-state restore points.`}
+													isDisabled={blockReason !== null}
+													onConfirm={() =>
+														void runAction(
+															'storage',
+															'set',
+															{ id: selected.id, valueText: draft },
+															'Storage value updated.'
+														)
+													}
+													title="Write this storage value?"
+													tone="warning"
+													triggerIcon={<Save className="h-3.5 w-3.5" />}
+													triggerLabel="Save on device"
+													triggerVariant="primary"
+												/>
+											</div>
+										);
+									})()}
 								</TextField>
 							) : (
 								<CodePreview
@@ -337,86 +373,86 @@ export function StoragePanel() {
 									maxHeight={300}
 								/>
 							)}
-							<div className="mt-5 border-t border-white/8 pt-4">
-								<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
-									<History className="h-3.5 w-3.5" /> Recent changes
-								</div>
-								{selectedEvents.length === 0 ? (
-									<p className="text-xs text-(--text-3)">
-										No captured changes for this key.
-									</p>
-								) : (
-									<div className="space-y-2">
-										{selectedEvents.map((event) => (
-											<div
-												className="rounded-md border border-white/8 bg-white/[0.025] p-3"
-												key={event.id}
-											>
-												<div className="flex items-center justify-between text-xs">
-													<StatusPill tone="info">{event.kind}</StatusPill>
-													<span className="font-mono text-(--text-3)">
-														{formatRelativeTime(event.at)}
-													</span>
-												</div>
-												<p className="mb-0 mt-2 truncate font-mono text-xs text-(--muted)">
-													{event.previousText ?? '∅'} → {event.nextText ?? '∅'}
-												</p>
-												{event.structuralDiff?.length ? (
-													<div className="mt-2 space-y-1 border-t border-white/8 pt-2">
-														{event.structuralDiff.slice(0, 8).map((diff) => (
-															<p
-																className="m-0 truncate font-mono text-xs text-(--text-3)"
-																key={`${diff.path}:${diff.kind}`}
-															>
-																{diff.kind} {diff.path}
-															</p>
-														))}
+							<div className="mt-5">
+								<SectionCard
+									icon={<History className="h-3.5 w-3.5" />}
+									title="Recent changes"
+								>
+									{selectedEvents.length === 0 ? (
+										<p className="m-0 text-xs text-(--text-3)">
+											No captured changes for this key.
+										</p>
+									) : (
+										<div className="space-y-2">
+											{selectedEvents.map((event) => (
+												<div
+													className="rounded-md border border-(--border) bg-white/[0.025] p-3"
+													key={event.id}
+												>
+													<div className="flex items-center justify-between text-xs">
+														<StatusPill tone="info">{event.kind}</StatusPill>
+														<span className="font-mono text-(--text-3)">
+															{formatRelativeTime(event.at)}
+														</span>
 													</div>
-												) : null}
-												<div className="mt-2 flex justify-end gap-2">
-													<Button
-														className="h-7 px-2 text-xs"
-														isDisabled={!canRunAction('storage', 'bookmark')}
-														size="sm"
-														variant="ghost"
-														onPress={() =>
-															void runAction(
-																'storage',
-																'bookmark',
-																{ id: event.id },
-																event.bookmarked
-																	? 'Storage bookmark removed.'
-																	: 'Storage change bookmarked.'
-															)
-														}
-													>
-														<Bookmark className="h-3 w-3" />{' '}
-														{event.bookmarked ? 'Unbookmark' : 'Bookmark'}
-													</Button>
-													{event.undoAvailable ? (
-														<ConfirmAction
-															confirmLabel="Undo change"
-															description="Restore the bounded previous value captured on the device."
-															isDisabled={!canRunAction('storage', 'undo')}
-															onConfirm={() =>
+													<p className="mb-0 mt-2 truncate font-mono text-xs text-(--muted)">
+														{event.previousText ?? '∅'} →{' '}
+														{event.nextText ?? '∅'}
+													</p>
+													{event.structuralDiff?.length ? (
+														<div className="mt-2 flex flex-wrap gap-1 border-t border-(--separator) pt-2">
+															{event.structuralDiff.slice(0, 8).map((diff) => (
+																<InlineCode key={`${diff.path}:${diff.kind}`}>
+																	{diff.kind} {diff.path}
+																</InlineCode>
+															))}
+														</div>
+													) : null}
+													<div className="mt-2 flex justify-end gap-2">
+														<Button
+															className="h-7 px-2 text-xs"
+															isDisabled={!canRunAction('storage', 'bookmark')}
+															size="sm"
+															variant="ghost"
+															onPress={() =>
 																void runAction(
 																	'storage',
-																	'undo',
+																	'bookmark',
 																	{ id: event.id },
-																	'Storage change undone.'
+																	event.bookmarked
+																		? 'Storage bookmark removed.'
+																		: 'Storage change bookmarked.'
 																)
 															}
-															title="Undo this storage change?"
-															triggerIcon={<RotateCcw className="h-3 w-3" />}
-															triggerLabel="Undo"
-															triggerVariant="secondary"
-														/>
-													) : null}
+														>
+															<Bookmark className="h-3 w-3" />{' '}
+															{event.bookmarked ? 'Unbookmark' : 'Bookmark'}
+														</Button>
+														{event.undoAvailable ? (
+															<ConfirmAction
+																confirmLabel="Undo change"
+																description="Restore the bounded previous value captured on the device."
+																isDisabled={!canRunAction('storage', 'undo')}
+																onConfirm={() =>
+																	void runAction(
+																		'storage',
+																		'undo',
+																		{ id: event.id },
+																		'Storage change undone.'
+																	)
+																}
+																title="Undo this storage change?"
+																triggerIcon={<RotateCcw className="h-3 w-3" />}
+																triggerLabel="Undo"
+																triggerVariant="secondary"
+															/>
+														) : null}
+													</div>
 												</div>
-											</div>
-										))}
-									</div>
-								)}
+											))}
+										</div>
+									)}
+								</SectionCard>
 							</div>
 						</div>
 					) : (
