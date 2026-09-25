@@ -15,10 +15,10 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatBytes, formatDuration } from '@/lib/format';
@@ -32,7 +32,8 @@ const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime'] as const;
 type FixtureKind = 'still' | 'qr' | 'video';
 
 export function CameraPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const fixture = selectedDevice?.tools.cameraFixture ?? {
 		active: false as const,
 	};
@@ -48,6 +49,10 @@ export function CameraPanel() {
 		() => (kind === 'video' ? VIDEO_MIME_TYPES : IMAGE_MIME_TYPES).join(','),
 		[kind]
 	);
+	const setFixtureReason = actionUnavailableReason('camera', 'setFixture');
+	const clearFixtureReason = fixture.active
+		? actionUnavailableReason('camera', 'clearFixture')
+		: 'No fixture is currently active.';
 
 	const setFixture = async () => {
 		if (!file) return;
@@ -117,9 +122,9 @@ export function CameraPanel() {
 				description="Send an explicit still, QR, video, unavailable, or error fixture to the app's instrumented development camera provider."
 				eyebrow="App / Instrumented input"
 				meta={
-					<StatusPill dot tone={fixture.active ? 'success' : 'default'}>
+					<Badge tone={fixture.active ? 'success' : 'default'}>
 						{fixture.active ? 'Fixture active' : 'Live provider'}
-					</StatusPill>
+					</Badge>
 				}
 				title="Camera Fixtures"
 			/>
@@ -128,6 +133,13 @@ export function CameraPanel() {
 				It does not replace the macOS camera, Simulator system camera, or camera
 				input in third-party libraries.
 			</PanelNotice>
+			{setFixtureReason ? (
+				<PanelNotice title="Fixture actions are unavailable." tone="warning">
+					{setFixtureReason} Fixtures can be prepared and validated here, but
+					cannot be sent until the connected device advertises the camera
+					fixture capability.
+				</PanelNotice>
+			) : null}
 			{localError ? (
 				<PanelNotice title="Fixture could not be prepared." tone="danger">
 					{localError}
@@ -291,7 +303,11 @@ export function CameraPanel() {
 					<dl>
 						<KeyValue
 							label="Status"
-							value={fixture.active ? 'Active' : 'Inactive'}
+							value={
+								<Badge tone={fixture.active ? 'success' : 'default'}>
+									{fixture.active ? 'Active' : 'Inactive'}
+								</Badge>
+							}
 						/>
 						<KeyValue label="Kind" value={fixture.kind ?? '—'} />
 						<KeyValue label="Media type" value={fixture.mimeType ?? '—'} mono />
@@ -318,6 +334,11 @@ export function CameraPanel() {
 							}
 						/>
 					</dl>
+					{clearFixtureReason && fixture.active ? (
+						<p className="mb-0 mt-2 text-xs leading-4 text-(--text-3)">
+							{clearFixtureReason}
+						</p>
+					) : null}
 					<p>
 						The desktop receives metadata only after activation; raw fixture
 						bytes remain on the connected development client.
