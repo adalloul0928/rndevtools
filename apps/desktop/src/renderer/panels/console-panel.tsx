@@ -30,7 +30,7 @@ import type { ConsoleEntry } from '../../shared/protocol';
 
 type ConsoleLevel = ConsoleEntry['level'] | 'all';
 
-function levelTone(
+export function levelTone(
 	level: ConsoleEntry['level']
 ): 'default' | 'info' | 'warning' | 'danger' {
 	if (level === 'error') return 'danger';
@@ -39,9 +39,19 @@ function levelTone(
 	return 'default';
 }
 
-function exportLine(entry: ConsoleEntry): string {
+export function exportLine(entry: ConsoleEntry): string {
 	const repeatCount = entry.repeatCount ?? 1;
 	return `[${new Date(entry.at).toISOString()}] ${entry.level.toUpperCase()}${entry.scope ? ` [${entry.scope}]` : entry.source ? ` [${entry.source}]` : ''} ${entry.message}${repeatCount > 1 ? ` (repeated ${repeatCount}x)` : ''}${entry.errorStack ? `\n${entry.errorStack}` : ''}${entry.attributesText ? `\n${entry.attributesText}` : ''}`;
+}
+
+/** Copy-button label from the last copy result. Pure so it is unit-tested. */
+export function copyFeedbackLabel(
+	lastCopy: { ok: boolean; truncated: boolean } | null
+): string {
+	if (lastCopy?.ok === true)
+		return lastCopy.truncated ? 'Copied (bounded)' : 'Copied';
+	if (lastCopy?.ok === false) return 'Copy failed';
+	return 'Copy visible';
 }
 
 export function ConsolePanel() {
@@ -87,14 +97,7 @@ export function ConsolePanel() {
 		ok: boolean;
 		truncated: boolean;
 	} | null>(null);
-	const copyLabel =
-		lastCopy?.ok === true
-			? lastCopy.truncated
-				? 'Copied (bounded)'
-				: 'Copied'
-			: lastCopy?.ok === false
-				? 'Copy failed'
-				: 'Copy visible';
+	const copyLabel = copyFeedbackLabel(lastCopy);
 	useEffect(() => {
 		if (!lastCopy) return;
 		const timer = window.setTimeout(() => setLastCopy(null), 1_800);
@@ -191,7 +194,7 @@ export function ConsolePanel() {
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<span className="flex items-center gap-1.5 text-(--brand)">
 						<ShieldCheck className="h-3 w-3" /> Logger-backed · redacted
 					</span>
 				}
@@ -367,7 +370,7 @@ export function ConsolePanel() {
 									No structured attributes were attached to this event.
 								</div>
 							)}
-							<div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-xs leading-5 text-emerald-200/80">
+							<div className="mt-4 flex items-center gap-2 rounded-md border border-(--brand-border) bg-(--brand-soft) p-3 text-xs leading-5 text-(--brand)">
 								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens,
 								emails, and identifiers are redacted before this event reaches
 								desktop.

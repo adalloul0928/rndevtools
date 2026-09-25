@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	ConfirmAction,
 	DetailPlaceholder,
@@ -59,26 +60,50 @@ const NETWORK_PROFILES = [
 ] as const;
 type NetworkProfileId = (typeof NETWORK_PROFILES)[number]['id'];
 
-function methodTone(method: string): string {
-	if (method === 'GET')
-		return 'border-blue-400/25 bg-blue-400/10 text-blue-300';
-	if (method === 'POST')
-		return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300';
-	if (method === 'DELETE')
-		return 'border-red-400/25 bg-red-400/10 text-red-300';
-	return 'border-amber-400/25 bg-amber-400/10 text-amber-300';
+const NETWORK_FILTERS: {
+	id: NetworkFilter;
+	label: string;
+}[] = [
+	{ id: 'all', label: 'All' },
+	{ id: 'errors', label: 'Errors' },
+	{ id: 'slow', label: 'Slow' },
+	{ id: 'supabase', label: 'Backend' },
+];
+
+/**
+ * Method → `Badge` tone. HTTP verbs read as semantic categories, not status:
+ * GET is neutral information (blue), the mutating verbs escalate — POST creates
+ * (positive/green), DELETE removes (danger/red), PUT/PATCH/other change
+ * (warning/amber). Kept pure so the mapping is unit-tested rather than
+ * eyeballed.
+ */
+export function methodBadgeTone(
+	method: string
+): 'info' | 'success' | 'danger' | 'warning' {
+	const verb = method.toUpperCase();
+	if (verb === 'GET' || verb === 'HEAD') return 'info';
+	if (verb === 'POST') return 'success';
+	if (verb === 'DELETE') return 'danger';
+	return 'warning';
 }
 
-function statusTone(
-	entry: NetworkEntry
+export function statusTone(
+	entry: Pick<NetworkEntry, 'state' | 'status'>
 ): 'success' | 'warning' | 'danger' | 'info' {
 	if (entry.state === 'pending') return 'info';
-	if (entry.state === 'error' || (entry.status ?? 0) >= 400) return 'danger';
+	if (
+		entry.state === 'error' ||
+		entry.state === 'aborted' ||
+		(entry.status ?? 0) >= 400
+	)
+		return 'danger';
 	if ((entry.status ?? 0) >= 300) return 'warning';
 	return 'success';
 }
 
-function headersText(headers: Record<string, string> | undefined): string {
+export function headersText(
+	headers: Record<string, string> | undefined
+): string {
 	if (!headers || Object.keys(headers).length === 0)
 		return 'No captured headers.';
 	return Object.entries(headers)
@@ -87,8 +112,17 @@ function headersText(headers: Record<string, string> | undefined): string {
 		.join('\n');
 }
 
+function MethodBadge({ method }: { method: string }) {
+	return (
+		<Badge className="font-mono font-semibold" tone={methodBadgeTone(method)}>
+			{method}
+		</Badge>
+	);
+}
+
 export function NetworkPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const liveEntries = selectedDevice?.tools.network ?? [];
 	const deviceId = selectedDevice?.info.id;
 	const [pausedSnapshot, setPausedSnapshot] = useState<{
@@ -113,6 +147,7 @@ export function NetworkPanel() {
 			: (currentProfile.id as NetworkProfileId)
 	);
 	const paused = pausedEntries !== null;
+	const setProfileReason = actionUnavailableReason('network', 'setProfile');
 	useEffect(() => {
 		if (pausedSnapshot && pausedSnapshot.deviceId !== deviceId) {
 			setPausedSnapshot(null);
@@ -156,13 +191,7 @@ export function NetworkPanel() {
 				header: 'Method',
 				width: 88,
 				isRowHeader: true,
-				cell: (entry) => (
-					<span
-						className={`inline-flex h-5 items-center rounded border px-1.5 font-mono text-xs font-semibold ${methodTone(entry.method)}`}
-					>
-						{entry.method}
-					</span>
-				),
+				cell: (entry) => <MethodBadge method={entry.method} />,
 			},
 			{
 				id: 'request',
@@ -244,7 +273,7 @@ export function NetworkPanel() {
 				title="Network"
 				description="Every instrumented request, with privacy-safe headers, bodies, timing, and failure context."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<span className="flex items-center gap-1.5 text-(--brand)">
 						<Radio className="h-3 w-3" /> {paused ? 'View paused' : 'Live view'}
 					</span>
 				}
@@ -302,16 +331,16 @@ export function NetworkPanel() {
 					onChange={setQuery}
 				/>
 				<div className="flex items-center gap-1">
-					{(['all', 'errors', 'slow', 'supabase'] as const).map((value) => (
+					{NETWORK_FILTERS.map(({ id, label }) => (
 						<Button
-							aria-pressed={filter === value}
-							className="h-7 rounded-md px-2.5 text-xs capitalize"
-							key={value}
+							aria-pressed={filter === id}
+							className="h-7 rounded-md px-2.5 text-xs"
+							key={id}
 							size="sm"
-							variant={filter === value ? 'secondary' : 'ghost'}
-							onPress={() => setFilter(value)}
+							variant={filter === id ? 'secondary' : 'ghost'}
+							onPress={() => setFilter(id)}
 						>
-							{value}
+							{label}
 						</Button>
 					))}
 				</div>
@@ -338,6 +367,9 @@ export function NetworkPanel() {
 					</NativeSelect>
 				</div>
 				<Button
+					{...(setProfileReason
+						? { 'aria-describedby': 'network-set-reason' }
+						: {})}
 					isDisabled={!canRunAction('network', 'setProfile')}
 					size="sm"
 					variant="secondary"
@@ -353,6 +385,9 @@ export function NetworkPanel() {
 					<Wifi className="h-3.5 w-3.5" /> Set
 				</Button>
 				<Button
+					{...(currentProfile?.active
+						? {}
+						: { 'aria-describedby': 'network-clear-reason' })}
 					isDisabled={
 						!canRunAction('network', 'clearProfile') || !currentProfile?.active
 					}
@@ -369,6 +404,21 @@ export function NetworkPanel() {
 				>
 					<WifiOff className="h-3.5 w-3.5" /> Clear
 				</Button>
+				{setProfileReason ? (
+					<span
+						className="shrink-0 text-xs text-(--warning)"
+						id="network-set-reason"
+					>
+						{setProfileReason}
+					</span>
+				) : !currentProfile?.active ? (
+					<span
+						className="shrink-0 text-xs text-(--text-3)"
+						id="network-clear-reason"
+					>
+						No profile active
+					</span>
+				) : null}
 				<span className="ml-auto shrink-0 font-mono text-xs text-(--text-3)">
 					{filtered.length} of {entries.length} requests
 				</span>
@@ -441,11 +491,7 @@ function NetworkDetail({
 		<div className="flex h-full flex-col">
 			<div className="border-b border-white/8 p-4">
 				<div className="mb-3 flex items-center gap-2">
-					<span
-						className={`rounded border px-1.5 py-0.5 font-mono text-xs font-semibold ${methodTone(entry.method)}`}
-					>
-						{entry.method}
-					</span>
+					<MethodBadge method={entry.method} />
 					<StatusPill tone={statusTone(entry)}>
 						{entry.status ?? entry.state}
 					</StatusPill>
@@ -500,8 +546,10 @@ function NetworkDetail({
 							mono
 						/>
 						{entry.error ? (
-							<div className="mt-4 rounded-md border border-red-400/20 bg-red-400/8 p-3 text-xs leading-5 text-red-300">
-								{entry.error}
+							<div className="mt-4">
+								<PanelNotice title="Request failed" tone="danger">
+									{entry.error}
+								</PanelNotice>
 							</div>
 						) : null}
 					</dl>

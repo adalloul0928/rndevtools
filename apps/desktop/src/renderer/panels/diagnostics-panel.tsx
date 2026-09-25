@@ -12,9 +12,11 @@ import { useMemo, useState } from 'react';
 import {
 	CopyButton,
 	EmptyPanel,
+	InlineCode,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
+	SectionCard,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
@@ -28,11 +30,24 @@ import type { DiagnosticEntry } from '../../shared/protocol';
 
 const MAX_RENDERED_DIAGNOSTICS = 500;
 
-function levelTone(level: DiagnosticEntry['level']) {
+export function levelTone(level: DiagnosticEntry['level']) {
 	if (level === 'error') return 'danger' as const;
 	if (level === 'warn') return 'warning' as const;
 	if (level === 'info') return 'info' as const;
 	return 'default' as const;
+}
+
+type HealthTone = 'brand' | 'warning' | 'danger';
+
+/**
+ * Health-card tone. Blue is reserved for neutral information elsewhere, so the
+ * cards use the brand green for a healthy/positive reading, amber for a pending
+ * or attention state, and red for a hard failure. Pure for unit testing.
+ */
+export function brokerTone(status: string | undefined): HealthTone {
+	if (status === 'listening') return 'brand';
+	if (status === 'error') return 'danger';
+	return 'warning';
 }
 
 export function DiagnosticsPanel() {
@@ -121,13 +136,7 @@ export function DiagnosticsPanel() {
 								? `${broker.host}:${broker.port}`
 								: 'Creating local listener'
 						}
-						tone={
-							broker?.status === 'listening'
-								? 'green'
-								: broker?.status === 'error'
-									? 'red'
-									: 'amber'
-						}
+						tone={brokerTone(broker?.status)}
 					/>
 					<HealthCard
 						icon={<Laptop2 className="h-4 w-4" />}
@@ -140,8 +149,8 @@ export function DiagnosticsPanel() {
 						}
 						tone={
 							!selectedDevice || selectedDevice.status === 'offline'
-								? 'amber'
-								: 'blue'
+								? 'warning'
+								: 'brand'
 						}
 					/>
 					<HealthCard
@@ -159,10 +168,10 @@ export function DiagnosticsPanel() {
 						}
 						tone={
 							!latestSample
-								? 'blue'
+								? 'warning'
 								: latestSample.eventLoopLagMs > 32
-									? 'amber'
-									: 'green'
+									? 'warning'
+									: 'brand'
 						}
 					/>
 					<HealthCard
@@ -176,68 +185,50 @@ export function DiagnosticsPanel() {
 								? `Authenticated access on ${broker.host}; traffic is not encrypted by ws://`
 								: 'Only this computer can connect'
 						}
-						tone={
-							broker?.status === 'listening'
-								? 'green'
-								: broker?.status === 'error'
-									? 'red'
-									: 'amber'
-						}
+						tone={brokerTone(broker?.status)}
 					/>
 				</div>
 
 				<div className="mb-4 grid grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)] gap-4 max-[1080px]:grid-cols-1">
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-						variant="secondary"
+					<SectionCard
+						bodyClassName="p-0"
+						icon={<Radio className="h-4 w-4" />}
+						title="Connection endpoints"
 					>
-						<Card.Header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-							<div>
-								<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
-									Connection endpoints
-								</Card.Title>
-								<Card.Description className="mb-0 mt-1 text-xs text-(--text-3)">
-									Use the first reachable WebSocket URL from a development
-									device.
-								</Card.Description>
+						<p className="m-0 border-b border-white/8 px-4 py-3 text-xs text-(--text-3)">
+							Use the first reachable WebSocket URL from a development device.
+						</p>
+						{broker?.urls.map((url) => (
+							<div
+								className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+								key={url}
+							>
+								<span
+									className={`h-1.5 w-1.5 shrink-0 rounded-full ${broker.status === 'listening' ? 'bg-(--brand)' : 'bg-(--danger)'}`}
+								/>
+								<InlineCode className="min-w-0 flex-1 truncate">
+									{url}
+								</InlineCode>
+								<CopyButton label="Copy endpoint" value={url} />
 							</div>
-							<Radio className="h-4 w-4 text-blue-300" />
-						</Card.Header>
-						<Card.Content className="p-0">
-							{broker?.urls.map((url) => (
-								<div
-									className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
-									key={url}
-								>
-									<span
-										className={`h-1.5 w-1.5 rounded-full ${broker.status === 'listening' ? 'bg-emerald-400' : 'bg-red-400'}`}
-									/>
-									<code className="min-w-0 flex-1 truncate text-xs text-(--foreground)">
-										{url}
-									</code>
-									<CopyButton label="Copy endpoint" value={url} />
-								</div>
-							))}
-							{broker?.urls.length === 0 ? (
-								<p className="m-0 px-4 py-3 text-xs text-(--text-3)">
-									No connection endpoint is available.
-								</p>
-							) : null}
-							{broker?.error ? (
-								<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-xs leading-5 text-red-200">
-									<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{' '}
-									{broker.error}
-								</div>
-							) : null}
-						</Card.Content>
-					</Card>
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
-						variant="secondary"
+						))}
+						{broker?.urls.length === 0 ? (
+							<p className="m-0 px-4 py-3 text-xs text-(--text-3)">
+								No connection endpoint is available.
+							</p>
+						) : null}
+						{broker?.error ? (
+							<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-xs leading-5 text-red-200">
+								<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{' '}
+								{broker.error}
+							</div>
+						) : null}
+					</SectionCard>
+					<SectionCard
+						bodyClassName="p-4"
+						icon={<Cpu className="h-4 w-4" />}
+						title="Runtime"
 					>
-						<div className="mb-3 flex items-center gap-2 text-xs font-semibold text-(--foreground)">
-							<Cpu className="h-4 w-4 text-(--muted)" /> Runtime
-						</div>
 						<VersionRow label="App" value={bootstrap?.versions.app ?? '—'} />
 						<VersionRow
 							label="Electron"
@@ -252,21 +243,12 @@ export function DiagnosticsPanel() {
 							label="Protocol"
 							value={state ? `v${state.protocolVersion}` : '—'}
 						/>
-					</Card>
+					</SectionCard>
 				</div>
 
-				<Card
-					className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-					variant="secondary"
-				>
-					<Card.Header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-						<div className="flex items-center gap-2">
-							<TerminalSquare className="h-4 w-4 text-(--muted)" />
-							<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
-								Internal event stream
-							</Card.Title>
-						</div>
-						{exportText.text ? (
+				<SectionCard
+					actions={
+						exportText.text ? (
 							<CopyButton
 								label={
 									exportText.truncated
@@ -275,38 +257,38 @@ export function DiagnosticsPanel() {
 								}
 								value={exportText.text}
 							/>
-						) : null}
-					</Card.Header>
-					<Card.Content className="p-0">
-						{filtered.length === 0 ? (
-							<EmptyPanel
-								icon={<TerminalSquare className="h-5 w-5" />}
-								title="No diagnostic events"
-								description="Broker and device lifecycle events will appear here."
-							/>
-						) : (
-							filtered.map((entry) => (
-								<div
-									className="grid grid-cols-[78px_72px_110px_minmax(0,1fr)] items-start gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
-									key={`${entry.scope}-${entry.id}`}
-								>
-									<span className="font-mono text-xs text-(--text-3)">
-										{formatClock(entry.at)}
-									</span>
-									<StatusPill tone={levelTone(entry.level)}>
-										{entry.level}
-									</StatusPill>
-									<code className="truncate text-xs text-(--muted)">
-										{entry.scope}
-									</code>
-									<span className="text-xs leading-4 text-(--foreground)">
-										{entry.message}
-									</span>
-								</div>
-							))
-						)}
-					</Card.Content>
-				</Card>
+						) : undefined
+					}
+					bodyClassName="p-0"
+					icon={<TerminalSquare className="h-4 w-4" />}
+					title="Internal event stream"
+				>
+					{filtered.length === 0 ? (
+						<EmptyPanel
+							icon={<TerminalSquare className="h-5 w-5" />}
+							title="No diagnostic events"
+							description="Broker and device lifecycle events will appear here."
+						/>
+					) : (
+						filtered.map((entry) => (
+							<div
+								className="grid grid-cols-[78px_72px_110px_minmax(0,1fr)] items-start gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+								key={`${entry.scope}-${entry.id}`}
+							>
+								<span className="font-mono text-xs text-(--text-3)">
+									{formatClock(entry.at)}
+								</span>
+								<StatusPill tone={levelTone(entry.level)}>
+									{entry.level}
+								</StatusPill>
+								<InlineCode className="truncate">{entry.scope}</InlineCode>
+								<span className="text-xs leading-4 text-(--foreground)">
+									{entry.message}
+								</span>
+							</div>
+						))
+					)}
+				</SectionCard>
 			</div>
 		</section>
 	);
@@ -323,13 +305,12 @@ function HealthCard({
 	label: string;
 	value: string;
 	detail: string;
-	tone: 'blue' | 'green' | 'amber' | 'red';
+	tone: HealthTone;
 }) {
 	const color = {
-		blue: 'border-blue-400/15 bg-blue-400/[0.055] text-blue-300',
-		green: 'border-emerald-400/15 bg-emerald-400/[0.055] text-emerald-300',
-		amber: 'border-amber-400/15 bg-amber-400/[0.055] text-amber-300',
-		red: 'border-red-400/15 bg-red-400/[0.055] text-red-300',
+		brand: 'border-(--brand-border) bg-(--brand-soft) text-(--brand)',
+		warning: 'border-amber-400/15 bg-amber-400/[0.055] text-amber-300',
+		danger: 'border-red-400/15 bg-red-400/[0.055] text-red-300',
 	}[tone];
 	return (
 		<Card
@@ -360,9 +341,7 @@ function VersionRow({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex items-center justify-between gap-3 border-t border-white/[0.06] py-2 first:border-0">
 			<span className="text-xs text-(--text-3)">{label}</span>
-			<code className="max-w-[170px] truncate text-xs text-(--foreground)">
-				{value}
-			</code>
+			<InlineCode className="max-w-[170px] truncate">{value}</InlineCode>
 		</div>
 	);
 }
