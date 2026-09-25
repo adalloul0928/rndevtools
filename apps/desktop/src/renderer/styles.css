@@ -54,9 +54,20 @@
 		--default-foreground: var(--foreground);
 		--accent: #ededed;
 		--accent-foreground: #000;
-		--success: #45d483;
+		/*
+		 * Single brand accent (Supabase green). It carries active states, links,
+		 * focus, live/progress indicators, and positive/success semantics. Primary
+		 * push-button fill stays near-white (--accent) in the Vercel idiom; the
+		 * green is used as a restrained highlight, not a flood fill.
+		 */
+		--brand: #3ecf8e;
+		--brand-foreground: #000;
+		--brand-strong: #34b87d;
+		--brand-soft: rgb(62 207 142 / 14%);
+		--brand-border: rgb(62 207 142 / 40%);
+		--success: #3ecf8e;
 		--success-foreground: #000;
-		--success-soft: rgb(69 212 131 / 14%);
+		--success-soft: rgb(62 207 142 / 14%);
 		--warning: #f4b942;
 		--warning-foreground: #000;
 		--warning-soft: rgb(244 185 66 / 14%);
@@ -65,8 +76,8 @@
 		--danger-soft: rgb(248 113 113 / 14%);
 		--border: rgb(255 255 255 / 11%);
 		--separator: rgb(255 255 255 / 8%);
-		--focus: #52a8ff;
-		--link: #52a8ff;
+		--focus: #3ecf8e;
+		--link: #3ecf8e;
 		--field-background: #090909;
 		--field-foreground: var(--foreground);
 		--field-placeholder: #8a8a8a;
@@ -77,7 +88,7 @@
 		--field-shadow: none;
 		--overlay-shadow: 0 24px 80px rgb(0 0 0 / 70%);
 		--radius: 4px;
-		--signal: #52a8ff;
+		--signal: #3ecf8e;
 		--text-1: var(--foreground);
 		--text-2: var(--muted);
 		--text-3: #8a8a8a;
@@ -134,7 +145,7 @@ button:disabled {
 }
 
 ::selection {
-	background: rgb(82 168 255 / 30%);
+	background: rgb(62 207 142 / 30%);
 }
 
 ::-webkit-scrollbar {
@@ -299,7 +310,7 @@ button:disabled {
 }
 
 .live-bars span.is-live {
-	background: #52a8ff;
+	background: #3ecf8e;
 }
 
 .live-label {
@@ -367,6 +378,11 @@ button:disabled {
 	color: var(--muted);
 }
 
+.connection-button[aria-current='page'] {
+	border-color: var(--brand-border);
+	color: var(--foreground);
+}
+
 .connection-dot,
 .device-status {
 	display: block;
@@ -378,13 +394,13 @@ button:disabled {
 
 .connection-dot.is-online,
 .device-status.is-online {
-	background: #45d483;
-	box-shadow: 0 0 0 3px rgb(69 212 131 / 8%);
+	background: #3ecf8e;
+	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
 }
 
 .device-status.is-simulated {
-	background: #52a8ff;
-	box-shadow: 0 0 0 3px rgb(82 168 255 / 9%);
+	background: #3ecf8e;
+	box-shadow: 0 0 0 3px rgb(62 207 142 / 9%);
 }
 
 .device-select {
@@ -520,7 +536,7 @@ button:disabled {
 }
 
 .tool-nav-item.is-current svg {
-	color: #52a8ff;
+	color: #3ecf8e;
 }
 
 .tool-count {
@@ -744,7 +760,7 @@ button:disabled {
 	width: 3px;
 	height: 13px;
 	border-radius: 2px;
-	background: #52a8ff;
+	background: #3ecf8e;
 	animation: loading-bars 0.8s ease-in-out infinite alternate;
 }
 
@@ -879,7 +895,7 @@ button:disabled {
 }
 
 .workspace-switcher button.is-current svg {
-	color: #52a8ff;
+	color: #3ecf8e;
 }
 
 .workspace-switcher kbd,
@@ -891,13 +907,13 @@ button:disabled {
 }
 
 .simulator-summary {
-	background: rgb(82 168 255 / 2.5%);
+	background: rgb(62 207 142 / 2.5%);
 }
 
 .simulator-device-icon {
-	border-color: rgb(82 168 255 / 16%);
-	background: rgb(82 168 255 / 7%);
-	color: #7ebcff;
+	border-color: rgb(62 207 142 / 16%);
+	background: rgb(62 207 142 / 7%);
+	color: var(--brand);
 }
 
 .tool-nav-item .tool-shortcut {
@@ -915,7 +931,7 @@ button:disabled {
 }
 
 .simulator-capability-summary {
-	border-color: rgb(82 168 255 / 10%);
+	border-color: rgb(62 207 142 / 10%);
 }
 
 .simulator-onboarding-banner {
@@ -1117,7 +1133,7 @@ button:disabled {
 }
 
 .sim-metric.is-success .sim-metric-icon {
-	border-color: rgb(69 212 131 / 17%);
+	border-color: rgb(62 207 142 / 17%);
 	color: #6ccf96;
 }
 
@@ -1249,7 +1265,7 @@ button:disabled {
 }
 
 .sim-selection-box.is-selected {
-	color: #52a8ff;
+	color: #3ecf8e;
 }
 
 .sim-slimming-workspace {
@@ -1301,8 +1317,8 @@ button:disabled {
 }
 
 .sim-unknown-ack.is-acknowledged {
-	border-color: rgb(82 168 255 / 20%);
-	background: rgb(82 168 255 / 5%);
+	border-color: rgb(62 207 142 / 20%);
+	background: rgb(62 207 142 / 5%);
 	color: #79aee0;
 }
 
@@ -1407,8 +1423,8 @@ button:disabled {
 }
 
 .sim-disable-choice.is-recommended {
-	border-color: rgb(82 168 255 / 22%);
-	background: rgb(82 168 255 / 5%);
+	border-color: rgb(62 207 142 / 22%);
+	background: rgb(62 207 142 / 5%);
 }
 
 .sim-disable-choice.is-risky {
@@ -1619,7 +1635,7 @@ button:disabled {
 .sim-job-progress span {
 	display: block;
 	height: 100%;
-	background: #52a8ff;
+	background: #3ecf8e;
 }
 
 .sim-helper-status {
@@ -1784,8 +1800,8 @@ button:disabled {
 }
 
 .sim-disk-categories > button.is-selected {
-	border-color: rgb(82 168 255 / 20%);
-	background: rgb(82 168 255 / 5%);
+	border-color: rgb(62 207 142 / 20%);
+	background: rgb(62 207 142 / 5%);
 }
 
 .sim-disk-categories > button.is-protected {
@@ -1841,9 +1857,9 @@ button:disabled {
 	gap: 12px;
 	margin-top: 8px;
 	padding: 8px;
-	border: 1px solid rgb(82 168 255 / 10%);
+	border: 1px solid rgb(62 207 142 / 10%);
 	border-radius: 5px;
-	background: rgb(82 168 255 / 3%);
+	background: rgb(62 207 142 / 3%);
 }
 
 .sim-disk-cleanup-action strong,
@@ -2036,9 +2052,9 @@ button:disabled {
 .camera-fixture-aside > p {
 	margin: 14px 0 0;
 	padding: 10px;
-	border: 1px solid rgb(82 168 255 / 12%);
+	border: 1px solid rgb(62 207 142 / 12%);
 	border-radius: 6px;
-	background: rgb(82 168 255 / 4%);
+	background: rgb(62 207 142 / 4%);
 	font-size: var(--font-size-caption);
 	line-height: 1.55;
 	color: #66829e;
@@ -2119,8 +2135,8 @@ button:disabled {
 
 .sim-list-item.is-selected,
 .sim-list-item[aria-current='true'] {
-	box-shadow: inset 2px 0 #52a8ff;
-	background: rgb(82 168 255 / 7%);
+	box-shadow: inset 2px 0 #3ecf8e;
+	background: rgb(62 207 142 / 7%);
 }
 
 .sim-list-leading,
@@ -2137,8 +2153,8 @@ button:disabled {
 }
 
 .sim-list-item.is-selected .sim-list-leading {
-	border-color: rgb(82 168 255 / 18%);
-	background: rgb(82 168 255 / 8%);
+	border-color: rgb(62 207 142 / 18%);
+	background: rgb(62 207 142 / 8%);
 	color: #78b9ff;
 }
 
@@ -2187,14 +2203,14 @@ button:disabled {
 }
 
 .sim-state-pill.is-success {
-	border-color: rgb(69 212 131 / 20%);
-	background: rgb(69 212 131 / 8%);
+	border-color: rgb(62 207 142 / 20%);
+	background: rgb(62 207 142 / 8%);
 	color: #75d69d;
 }
 
 .sim-state-pill.is-info {
-	border-color: rgb(82 168 255 / 20%);
-	background: rgb(82 168 255 / 8%);
+	border-color: rgb(62 207 142 / 20%);
+	background: rgb(62 207 142 / 8%);
 	color: #7ebcff;
 }
 
@@ -2428,9 +2444,9 @@ button:disabled {
 	height: 40px;
 	margin-bottom: 16px;
 	place-items: center;
-	border: 1px solid rgb(82 168 255 / 16%);
+	border: 1px solid rgb(62 207 142 / 16%);
 	border-radius: 8px;
-	background: rgb(82 168 255 / 7%);
+	background: rgb(62 207 142 / 7%);
 	color: #79baff;
 }
 
@@ -3171,8 +3187,8 @@ button:disabled {
 }
 
 .sim-readiness-ring.is-ready {
-	border-color: rgb(69 212 131 / 20%);
-	background: rgb(69 212 131 / 6%);
+	border-color: rgb(62 207 142 / 20%);
+	background: rgb(62 207 142 / 6%);
 }
 
 .sim-readiness-ring strong {
@@ -3330,12 +3346,12 @@ button:disabled {
 }
 
 .sim-capability-feature-link:hover {
-	background: rgb(82 168 255 / 7%);
+	background: rgb(62 207 142 / 7%);
 	color: #a7cff6;
 }
 
 .sim-capability-feature-link:focus-visible {
-	outline: 2px solid rgb(82 168 255 / 65%);
+	outline: 2px solid rgb(62 207 142 / 65%);
 	outline-offset: 1px;
 }
 
@@ -3348,8 +3364,8 @@ button:disabled {
 
 .sim-security-boundary {
 	padding: 12px;
-	border-color: rgb(82 168 255 / 12%);
-	background: rgb(82 168 255 / 3%);
+	border-color: rgb(62 207 142 / 12%);
+	background: rgb(62 207 142 / 3%);
 }
 
 .sim-security-boundary header {
@@ -3382,7 +3398,7 @@ button:disabled {
 	align-items: center;
 	gap: 4px;
 	padding: 3px 5px;
-	border: 1px solid rgb(82 168 255 / 10%);
+	border: 1px solid rgb(62 207 142 / 10%);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
@@ -3433,8 +3449,8 @@ button:disabled {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	box-shadow: 0 0 0 3px rgb(82 168 255 / 8%);
-	background: #52a8ff;
+	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
+	background: #3ecf8e;
 }
 
 .recipe-definition-header {
@@ -3493,8 +3509,8 @@ button:disabled {
 .recipe-field input:focus,
 .recipe-field textarea:focus,
 .recipe-field select:focus {
-	border-color: rgb(82 168 255 / 46%);
-	box-shadow: 0 0 0 2px rgb(82 168 255 / 8%);
+	border-color: rgb(62 207 142 / 46%);
+	box-shadow: 0 0 0 2px rgb(62 207 142 / 8%);
 }
 
 .recipe-header-meta {
@@ -3522,8 +3538,8 @@ button:disabled {
 }
 
 .recipe-header-meta .is-dirty {
-	border-color: rgb(82 168 255 / 18%);
-	background: rgb(82 168 255 / 6%);
+	border-color: rgb(62 207 142 / 18%);
+	background: rgb(62 207 142 / 6%);
 	color: #79aee2;
 }
 
@@ -3615,7 +3631,7 @@ button:disabled {
 	bottom: -7px;
 	left: 19px;
 	width: 1px;
-	background: rgb(82 168 255 / 17%);
+	background: rgb(62 207 142 / 17%);
 	content: '';
 }
 
@@ -3650,14 +3666,14 @@ button:disabled {
 .recipe-execution-rail button:focus-visible,
 .recipe-target-list button:focus-visible,
 .recipe-run-history button:focus-visible {
-	outline: 2px solid rgb(82 168 255 / 65%);
+	outline: 2px solid rgb(62 207 142 / 65%);
 	outline-offset: -2px;
 }
 
 .recipe-execution-rail button.is-selected {
-	border-color: rgb(82 168 255 / 26%);
-	box-shadow: inset 2px 0 #52a8ff;
-	background: rgb(82 168 255 / 5%);
+	border-color: rgb(62 207 142 / 26%);
+	box-shadow: inset 2px 0 #3ecf8e;
+	background: rgb(62 207 142 / 5%);
 }
 
 .recipe-execution-rail.is-teardown button.is-selected {
@@ -3828,9 +3844,9 @@ button:disabled {
 	gap: 6px;
 	margin: 2px 0 0;
 	padding: 8px;
-	border: 1px solid rgb(82 168 255 / 12%);
+	border: 1px solid rgb(62 207 142 / 12%);
 	border-radius: 5px;
-	background: rgb(82 168 255 / 3%);
+	background: rgb(62 207 142 / 3%);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
 	color: #70849a;
@@ -3998,7 +4014,7 @@ button:disabled {
 }
 
 .recipe-target-list button.is-selected {
-	background: rgb(82 168 255 / 6%);
+	background: rgb(62 207 142 / 6%);
 }
 
 .recipe-target-check {
@@ -4011,8 +4027,8 @@ button:disabled {
 }
 
 .recipe-target-list button.is-selected .recipe-target-check {
-	border-color: #52a8ff;
-	background: #52a8ff;
+	border-color: #3ecf8e;
+	background: #3ecf8e;
 	color: #050505;
 }
 
@@ -4152,9 +4168,9 @@ button:disabled {
 	gap: 7px;
 	margin: 8px 0;
 	padding: 8px;
-	border: 1px solid rgb(82 168 255 / 16%);
+	border: 1px solid rgb(62 207 142 / 16%);
 	border-radius: 5px;
-	background: rgb(82 168 255 / 4%);
+	background: rgb(62 207 142 / 4%);
 }
 
 .recipe-pending-approval-actions p {
@@ -4181,7 +4197,7 @@ button:disabled {
 	display: block;
 	height: 100%;
 	border-radius: inherit;
-	background: #52a8ff;
+	background: #3ecf8e;
 }
 
 .recipe-target-progress {
@@ -4234,7 +4250,7 @@ button:disabled {
 .recipe-status-dot.is-resolving,
 .recipe-status-dot.is-cancelling,
 .recipe-status-dot.is-needs-approval {
-	background: #52a8ff;
+	background: #3ecf8e;
 }
 
 .recipe-status-dot.is-complete {
@@ -4273,7 +4289,7 @@ button:disabled {
 }
 
 .recipe-run-history button[aria-current='true'] {
-	background: rgb(82 168 255 / 5%);
+	background: rgb(62 207 142 / 5%);
 }
 
 .recipe-run-history button strong,
@@ -4525,8 +4541,8 @@ button:disabled {
 }
 
 .sim-build-notice.is-info {
-	border-color: rgb(82 168 255 / 18%);
-	background: rgb(82 168 255 / 5%);
+	border-color: rgb(62 207 142 / 18%);
+	background: rgb(62 207 142 / 5%);
 	color: #91b9df;
 }
 
@@ -4578,9 +4594,9 @@ button:disabled {
 .sim-classification-card {
 	margin-top: 10px;
 	padding: 11px;
-	border: 1px solid rgb(82 168 255 / 14%);
+	border: 1px solid rgb(62 207 142 / 14%);
 	border-radius: 6px;
-	background: rgb(82 168 255 / 4%);
+	background: rgb(62 207 142 / 4%);
 }
 
 .sim-classification-card strong {
@@ -4652,8 +4668,8 @@ button:disabled {
 }
 
 .sim-source-status.is-scanning {
-	background: #52a8ff;
-	box-shadow: 0 0 0 3px rgb(82 168 255 / 8%);
+	background: #3ecf8e;
+	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
 }
 
 .sim-source-status.is-error {
@@ -4697,7 +4713,7 @@ button:disabled {
 	display: block;
 	height: 100%;
 	border-radius: inherit;
-	background: #52a8ff;
+	background: #3ecf8e;
 }
 
 .sim-build-export-actions {
@@ -4860,5 +4876,178 @@ button:disabled {
 		animation-duration: 0.01ms !important;
 		/* biome-ignore lint/complexity/noImportantStyles: reduced motion must prevent repeating component animations */
 		animation-iteration-count: 1 !important;
+	}
+}
+
+/*
+ * Shared renderer primitives (components/ui.tsx). Panels compose these instead
+ * of hand-rolling border/tint/spacing utilities, so tone and density stay
+ * consistent across every tool. Tones map to the semantic tokens; `brand` is
+ * the single Supabase-green accent.
+ */
+.ui-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 20px;
+	padding: 0 7px;
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	background: rgb(255 255 255 / 4%);
+	color: var(--muted);
+	font-size: var(--font-size-caption);
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.ui-badge.is-brand {
+	border-color: var(--brand-border);
+	background: var(--brand-soft);
+	color: var(--brand);
+}
+
+.ui-badge.is-success {
+	border-color: rgb(62 207 142 / 25%);
+	background: var(--success-soft);
+	color: var(--success);
+}
+
+.ui-badge.is-warning {
+	border-color: rgb(244 185 66 / 25%);
+	background: var(--warning-soft);
+	color: var(--warning);
+}
+
+.ui-badge.is-danger {
+	border-color: rgb(248 113 113 / 25%);
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.ui-badge.is-info {
+	border-color: rgb(96 165 250 / 25%);
+	background: rgb(96 165 250 / 10%);
+	color: #93c5fd;
+}
+
+.ui-kbd {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border: 1px solid rgb(255 255 255 / 12%);
+	border-radius: 4px;
+	background: rgb(255 255 255 / 4%);
+	color: var(--text-3);
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	line-height: 1;
+	white-space: nowrap;
+}
+
+.ui-inline-code {
+	padding: 1px 5px;
+	border: 1px solid rgb(255 255 255 / 8%);
+	border-radius: 4px;
+	background: rgb(255 255 255 / 4%);
+	color: var(--foreground);
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: var(--font-size-caption);
+	font-variant-numeric: tabular-nums;
+	word-break: break-all;
+}
+
+.ui-section-card {
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--surface);
+}
+
+.ui-section-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 40px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--separator);
+}
+
+.ui-section-card-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	font-size: 13px;
+	font-weight: 550;
+	color: var(--foreground);
+}
+
+.ui-section-card-icon {
+	display: grid;
+	place-items: center;
+	color: var(--text-3);
+}
+
+.ui-section-card-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.ui-section-card-actions {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+}
+
+.ui-section-card-body {
+	padding: 12px;
+}
+
+.ui-skeleton {
+	display: block;
+	width: 100%;
+	height: 12px;
+	background: linear-gradient(
+		90deg,
+		rgb(255 255 255 / 5%) 25%,
+		rgb(255 255 255 / 9%) 37%,
+		rgb(255 255 255 / 5%) 63%
+	);
+	background-size: 400% 100%;
+	animation: ui-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.ui-skeleton.is-sm {
+	border-radius: 4px;
+}
+
+.ui-skeleton.is-md {
+	border-radius: 6px;
+}
+
+.ui-skeleton.is-full {
+	border-radius: 999px;
+}
+
+@keyframes ui-skeleton-shimmer {
+	0% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0 50%;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ui-skeleton {
+		/* biome-ignore lint/complexity/noImportantStyles: reduced motion must override the shimmer animation */
+		animation: none !important;
 	}
 }

@@ -3,6 +3,7 @@ import { Button } from '@heroui/react/button';
 import { Popover } from '@heroui/react/popover';
 import { SearchField } from '@heroui/react/search-field';
 import { Tooltip } from '@heroui/react/tooltip';
+import { DataGrid } from '@heroui-pro/react/data-grid';
 import { EmptyState } from '@heroui-pro/react/empty-state';
 import {
 	AlertTriangle,
@@ -373,5 +374,198 @@ export function DetailPlaceholder({
 				<p className="m-0 text-xs text-(--text-3)">{label}</p>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Compact semantic label. Prefer this over hand-rolled `border … bg … text …`
+ * spans so tone tints stay consistent across panels. `StatusPill` is the
+ * mono/uppercase status variant; `Badge` is the softer sentence-case label used
+ * for categories and counts.
+
+ *
+ * @public
+ */
+export function Badge({
+	children,
+	tone = 'default',
+	className = '',
+}: {
+	children: ReactNode;
+	tone?: 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'info';
+	className?: string;
+}) {
+	return <span className={`ui-badge is-${tone} ${className}`}>{children}</span>;
+}
+
+/** Keyboard shortcut hint, styled to match the sidebar and titlebar kbd chips.
+ *
+ * @public
+ */
+export function Kbd({
+	children,
+	className = '',
+}: {
+	children: ReactNode;
+	className?: string;
+}) {
+	return <kbd className={`ui-kbd ${className}`}>{children}</kbd>;
+}
+
+/** Inline monospace token for ids, keys, paths, and small code fragments.
+ *
+ * @public
+ */
+export function InlineCode({
+	children,
+	className = '',
+}: {
+	children: ReactNode;
+	className?: string;
+}) {
+	return <code className={`ui-inline-code ${className}`}>{children}</code>;
+}
+
+/**
+ * Bordered content region with an optional header row. Standardizes the
+ * hairline card used throughout the panels (title + optional actions + body)
+ * so sections do not each re-derive border/padding/spacing.
+
+ *
+ * @public
+ */
+export function SectionCard({
+	title,
+	icon,
+	actions,
+	children,
+	className = '',
+	bodyClassName = '',
+}: {
+	title?: ReactNode;
+	icon?: ReactNode;
+	actions?: ReactNode;
+	children: ReactNode;
+	className?: string;
+	bodyClassName?: string;
+}) {
+	return (
+		<section className={`ui-section-card ${className}`}>
+			{title ? (
+				<header className="ui-section-card-header">
+					<div className="ui-section-card-title">
+						{icon ? (
+							<span aria-hidden="true" className="ui-section-card-icon">
+								{icon}
+							</span>
+						) : null}
+						<span>{title}</span>
+					</div>
+					{actions ? (
+						<div className="ui-section-card-actions">{actions}</div>
+					) : null}
+				</header>
+			) : null}
+			<div className={`ui-section-card-body ${bodyClassName}`}>{children}</div>
+		</section>
+	);
+}
+
+/**
+ * Loading placeholder. Use in place of a blank region while a projection or
+ * native probe is still resolving, so panels share one shimmer treatment.
+
+ *
+ * @public
+ */
+export function Skeleton({
+	className = '',
+	rounded = 'md',
+}: {
+	className?: string;
+	rounded?: 'sm' | 'md' | 'full';
+}) {
+	return (
+		<span
+			aria-hidden="true"
+			className={`ui-skeleton is-${rounded} ${className}`}
+		/>
+	);
+}
+
+/**
+ * Thin wrapper over the HeroUI Pro DataGrid pattern used across panels. It
+ * fixes the shared `desktop-grid` class, dense heading/row heights, and a
+ * consistent in-grid empty state so every data table reads the same. Panels
+ * still pass their own typed columns and data.
+
+ *
+ * @public
+ */
+export function DataTable<T extends object>({
+	ariaLabel,
+	columns,
+	data,
+	getRowId,
+	selectedId,
+	onSelect,
+	selectionMode = 'single',
+	emptyIcon,
+	emptyTitle = 'Nothing to show',
+	emptyDescription = 'Adjust the filters, or interact with the app to generate data.',
+	headingHeight = 36,
+	rowHeight = 42,
+	className = '',
+}: {
+	ariaLabel: string;
+	// biome-ignore lint/suspicious/noExplicitAny: column/cell generics are owned by the DataGrid type; the wrapper is column-shape agnostic.
+	columns: any[];
+	data: T[];
+	getRowId: (row: T) => string;
+	selectedId?: string | null;
+	onSelect?: (id: string | null) => void;
+	selectionMode?: 'single' | 'none';
+	emptyIcon?: ReactNode;
+	emptyTitle?: string;
+	emptyDescription?: string;
+	headingHeight?: number;
+	rowHeight?: number;
+	className?: string;
+}) {
+	if (data.length === 0) {
+		return (
+			<EmptyPanel
+				description={emptyDescription}
+				icon={emptyIcon}
+				title={emptyTitle}
+			/>
+		);
+	}
+	return (
+		<DataGrid
+			aria-label={ariaLabel}
+			className={`desktop-grid ${className}`}
+			columns={columns}
+			data={data}
+			getRowId={getRowId}
+			headingHeight={headingHeight}
+			rowHeight={rowHeight}
+			selectedKeys={
+				selectionMode === 'single' && selectedId
+					? new Set([selectedId])
+					: new Set()
+			}
+			selectionMode={selectionMode}
+			virtualized
+			onSelectionChange={(selection) => {
+				if (!onSelect) return;
+				if (selection === 'all') {
+					onSelect(getRowId(data[0] as T) ?? null);
+					return;
+				}
+				const key = [...selection][0];
+				onSelect(key === undefined ? null : String(key));
+			}}
+		/>
 	);
 }
