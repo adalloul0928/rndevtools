@@ -206,3 +206,60 @@ test('performance panel renders', async () => {
 	expect(await window.locator('.fatal-error').count()).toBe(0);
 	await shot('performance');
 });
+
+// Assertions for host-side wiring added after the initial integration: the
+// primitives register inspector targets, the cold-start performance review
+// runs automatically, persistence is unified, and the scenario library grew.
+
+async function sidebarCount(label: string): Promise<number> {
+	const item = window.locator('.tool-nav-item', { hasText: label }).first();
+	const text = await item
+		.locator('.tool-count')
+		.textContent({ timeout: 15_000 });
+	return Number.parseInt(text ?? '0', 10);
+}
+
+test('components panel lists targets registered by ui primitives', async () => {
+	await openPanel('components');
+	await expect
+		.poll(() => sidebarCount('Components'), { timeout: 30_000 })
+		.toBeGreaterThan(0);
+	await shot('components-targets');
+});
+
+test('performance panel has samples from the automatic startup review', async () => {
+	await openPanel('performance');
+	await expect
+		.poll(() => sidebarCount('Performance'), { timeout: 30_000 })
+		.toBeGreaterThan(0);
+	await shot('performance-startup-review');
+});
+
+test('storage exposes the unified devtools document and no legacy keys', async () => {
+	await openPanel('storage');
+	await expect(window.getByText('woot.devtools.v1').first()).toBeVisible({
+		timeout: 15_000,
+	});
+	expect(
+		await window
+			.getByText(/woot\.devtools\.(identity|scenarios|restore-points)\.v1/)
+			.count()
+	).toBe(0);
+});
+
+test('scenarios lists the expanded bundled library', async () => {
+	await openPanel('scenarios');
+	for (const name of [
+		'Clear cart',
+		'Reset onboarding banners',
+		'Go to search',
+		'Signed-out cart merge check',
+		'Reset push topic subscriptions',
+		'Clear recently viewed',
+		'Clear stuff you missed',
+	]) {
+		await expect(window.getByText(name, { exact: true }).first()).toBeVisible({
+			timeout: 15_000,
+		});
+	}
+});
