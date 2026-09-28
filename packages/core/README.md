@@ -302,6 +302,22 @@ implementations.
 Host applications must provide `GestureHandlerRootView` and
 `SafeAreaProvider` above `InternalTools`.
 
+## Compatibility
+
+| Host | Supported |
+| --- | --- |
+| Expo SDK | 56 and 57 |
+| React Native | 0.85 and 0.86 |
+| `react-native-worklets` | 0.8 through 0.x |
+| `@expo/ui` | 56 and 57 |
+
+The lower bounds were verified against an Expo 56.0.19 / React Native
+0.85.3 host: every named import this package takes from `@expo/ui`,
+`@expo/ui/swift-ui`, `@expo/ui/swift-ui/modifiers`, `@expo/ui/community/menu`,
+`react-native-worklets`, `expo-device`, `expo-file-system`, `expo-constants`,
+and `expo-image-picker` exists in the SDK 56 releases of those packages, and
+the full diagnostic suite runs on-device against that host.
+
 ## Package boundary
 
 Keep generic runtime and diagnostic behavior in `packages/devtools`. Host-app

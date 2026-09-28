@@ -1,6 +1,6 @@
 {
 	"name": "@rndevtools/react-native",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "React Native host runtime for RN Devtools: desktop broker client, authorization, and adapters",
 	"license": "MIT",
 	"author": "Aren Dalloul",
@@ -57,13 +57,13 @@
 	},
 	"peerDependencies": {
 		"@rndevtools/core": "workspace:^",
-		"expo": ">=57 <58",
-		"expo-constants": ">=57 <58",
-		"expo-device": ">=57 <58",
-		"expo-file-system": ">=57 <58",
-		"expo-image-picker": ">=57 <58",
+		"expo": ">=56 <58",
+		"expo-constants": ">=56 <58",
+		"expo-device": ">=56 <58",
+		"expo-file-system": ">=56 <58",
+		"expo-image-picker": ">=56 <58",
 		"react": ">=19 <20",
-		"react-native": ">=0.86 <0.87"
+		"react-native": ">=0.85 <0.87"
 	},
 	"peerDependenciesMeta": {
 		"expo-image-picker": {
