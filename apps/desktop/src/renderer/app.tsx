@@ -163,6 +163,11 @@ const BuildInsightsPanel = lazy(() =>
 		default: module.BuildInsightsPanel,
 	}))
 );
+const LanesPanel = lazy(() =>
+	import('@/panels/simulator/lanes-panel').then((module) => ({
+		default: module.LanesPanel,
+	}))
+);
 const SimulatorSettingsPanel = lazy(() =>
 	import('@/panels/simulator/settings-panel').then((module) => ({
 		default: module.SettingsPanel,
@@ -196,6 +201,7 @@ const SIMULATOR_PANELS: Record<
 	captures: CapturesPanel,
 	automation: AutomationPanel,
 	builds: BuildInsightsPanel,
+	lanes: LanesPanel,
 	settings: SimulatorSettingsPanel,
 };
 
@@ -875,7 +881,10 @@ function SimulatorSidebar({
 							{unavailable > 0 ? (
 								<span className="tool-count is-warning">{unavailable}</span>
 							) : null}
-							<kbd className="tool-shortcut">{navigationModifier}7</kbd>
+							<kbd className="tool-shortcut">
+								{navigationModifier}
+								{settingsTool.shortcut}
+							</kbd>
 						</Button>
 					</section>
 				) : null}

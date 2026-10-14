@@ -13,12 +13,20 @@ import {
 	Plus,
 	Power,
 	RotateCcw,
+	ScrollText,
 	Smartphone,
 	Square,
 	SquareCheckBig,
 	Trash2,
+	Waypoints,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import {
+	AgentBadge,
+	AgentGlyph,
+	LaneChip,
+	SlimChip,
+} from '@/components/lane-ui';
 import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
@@ -44,12 +52,23 @@ import {
 	diskInventorySelectionRevision,
 	sanitizeDiskCleanupCategoryIds,
 } from '@/simulator/disk-inventory-model';
+import {
+	buildFleetRows,
+	type FleetRow,
+	type FleetStateFilter,
+	fleetFilterCounts,
+	fleetRowMatches,
+	shortPath,
+} from '@/simulator/fleet-model';
 import { targetConfig } from '@/simulator/target-config';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
+import { useLaneRuntime } from '@/state/lane-runtime';
 import {
 	type SimulatorActionInput,
 	useSimulatorRuntime,
 } from '@/state/simulator-runtime';
+import { useSlimmingRuntime } from '@/state/slimming-runtime';
+import type { Lane } from '../../../shared/lane-protocol';
 import type { DeviceSession } from '../../../shared/protocol';
 import type {
 	SimulatorApp,
@@ -60,8 +79,6 @@ import type {
 	SimulatorDiskInventory,
 	SimulatorRuntime,
 } from '../../../shared/simulator-protocol';
-
-type TargetFilter = 'all' | SimulatorDevice['state'];
 
 export function parseSimulatorCreateCount(value: string): number | null {
 	const trimmed = value.trim();
@@ -141,8 +158,10 @@ export function FleetPanel() {
 		setSelectedDeviceUdid,
 		state,
 	} = useSimulatorRuntime();
+	const slimming = useSlimmingRuntime();
+	const lanes = useLaneRuntime();
 	const [query, setQuery] = useState('');
-	const [filter, setFilter] = useState<TargetFilter>('all');
+	const [filter, setFilter] = useState<FleetStateFilter>('all');
 	const [batchUdids, setBatchUdids] = useState<string[]>([]);
 	const [showCreate, setShowCreate] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
@@ -158,11 +177,34 @@ export function FleetPanel() {
 			setCreatedJobId(null);
 		}
 	}, [createdJobId, state.jobs, setSelectedDeviceUdid]);
-	const normalizedQuery = query.trim().toLowerCase();
 	const runtimeById = useMemo(
 		() =>
 			new Map(state.runtimes.map((runtime) => [runtime.identifier, runtime])),
 		[state.runtimes]
+	);
+	const rows = useMemo(
+		() =>
+			buildFleetRows({
+				devices: state.devices,
+				runtimes: state.runtimes,
+				metricsByDevice: state.metrics.byDevice,
+				slimmingByDevice: slimming.state.statusBySimulator,
+				lanes: lanes.state.lanes,
+				sessions: desktop.state?.devices ?? [],
+			}),
+		[
+			state.devices,
+			state.runtimes,
+			state.metrics.byDevice,
+			slimming.state.statusBySimulator,
+			lanes.state.lanes,
+			desktop.state?.devices,
+		]
+	);
+	const filterCounts = useMemo(() => fleetFilterCounts(rows), [rows]);
+	const rowByUdid = useMemo(
+		() => new Map(rows.map((row) => [row.device.udid, row])),
+		[rows]
 	);
 	const deviceTypeById = useMemo(
 		() =>
@@ -176,21 +218,10 @@ export function FleetPanel() {
 	);
 	const targets = useMemo(
 		() =>
-			state.devices.filter((target) => {
-				const matchesFilter = filter === 'all' ? true : target.state === filter;
-				const runtimeName =
-					runtimeById.get(target.runtimeIdentifier)?.name ?? '';
-				const deviceTypeName = target.deviceTypeIdentifier
-					? (deviceTypeById.get(target.deviceTypeIdentifier)?.name ?? '')
-					: '';
-				const matchesQuery =
-					normalizedQuery.length === 0 ||
-					`${target.name} ${runtimeName} ${deviceTypeName} ${target.udid}`
-						.toLowerCase()
-						.includes(normalizedQuery);
-				return matchesFilter && matchesQuery;
-			}),
-		[deviceTypeById, filter, normalizedQuery, runtimeById, state.devices]
+			rows
+				.filter((row) => fleetRowMatches(row, filter, query))
+				.map((row) => row.device),
+		[filter, query, rows]
 	);
 	const booted = state.devices.filter(
 		(target) => target.state === 'booted'
@@ -305,7 +336,11 @@ export function FleetPanel() {
 					}
 				/>
 				<SimulatorMetric
-					detail={`${available} usable targets`}
+					detail={
+						lanes.state.lanes.length > 0
+							? `${filterCounts['with-lane']} with a lane · ${filterCounts['with-agent']} driven by agents`
+							: `${available} usable targets`
+					}
 					icon={<Cpu className="h-3.5 w-3.5" />}
 					label="Processes"
 					value={
@@ -338,8 +373,8 @@ export function FleetPanel() {
 			</div>
 			<Toolbar>
 				<SearchControl
-					ariaLabel="Search Simulator targets"
-					placeholder="Search simulators"
+					ariaLabel="Search Simulator targets, branches, and agents"
+					placeholder="Search name, branch, :port, agent"
 					value={query}
 					onChange={setQuery}
 				/>
@@ -348,12 +383,24 @@ export function FleetPanel() {
 						aria-label="Filter targets"
 						value={filter}
 						onChange={(event) =>
-							setFilter(event.currentTarget.value as TargetFilter)
+							setFilter(event.currentTarget.value as FleetStateFilter)
 						}
 					>
-						<NativeSelect.Option value="all">All targets</NativeSelect.Option>
-						<NativeSelect.Option value="booted">Booted</NativeSelect.Option>
-						<NativeSelect.Option value="shutdown">Shutdown</NativeSelect.Option>
+						<NativeSelect.Option value="all">
+							All targets ({filterCounts.all})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="booted">
+							Booted ({filterCounts.booted})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="shutdown">
+							Shut down ({filterCounts.shutdown})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="with-lane">
+							With lane ({filterCounts['with-lane']})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="with-agent">
+							With agent ({filterCounts['with-agent']})
+						</NativeSelect.Option>
 						<NativeSelect.Indicator>
 							<ChevronDown className="h-3 w-3" />
 						</NativeSelect.Indicator>
@@ -431,7 +478,7 @@ export function FleetPanel() {
 							emptyTitle="No targets match these filters"
 							items={targets}
 							getId={(target) => target.udid}
-							rowHeight={58}
+							rowHeight={64}
 							selectedId={selectedDevice?.udid}
 							selectedIds={batchMode ? batchUdids : undefined}
 							onSelectedIdsChange={
@@ -441,23 +488,24 @@ export function FleetPanel() {
 								`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
 							}
 							onSelect={(target) => setSelectedDeviceUdid(target.udid)}
-							renderItem={(target) => (
-								<>
-									{!batchMode ? (
-										<div className="sim-list-leading">
-											<Smartphone className="h-4 w-4" />
-										</div>
-									) : null}
-									<ListRowText
-										description={
-											runtimeById.get(target.runtimeIdentifier)?.name ??
-											target.runtimeIdentifier
-										}
-										title={target.name}
-									/>
-									<TargetStatePill state={target.state} />
-								</>
-							)}
+							renderItem={(target) => {
+								const row = rowByUdid.get(target.udid);
+								return (
+									<>
+										{!batchMode ? (
+											<div className="sim-list-leading">
+												{row?.lane?.agent ? (
+													<AgentGlyph kind={row.lane.agent.kind} />
+												) : (
+													<Smartphone className="h-4 w-4" />
+												)}
+											</div>
+										) : null}
+										<FleetRowText row={row} target={target} />
+										<FleetRowTrailing row={row} target={target} />
+									</>
+								);
+							}}
 						/>
 					</div>
 					<div className="sim-detail-pane panel-scroll">
@@ -466,6 +514,27 @@ export function FleetPanel() {
 								connectedSessions={associatedSessions}
 								key={selectedDevice.udid}
 								isBridgeAvailable={isBridgeAvailable}
+								lane={rowByUdid.get(selectedDevice.udid)?.lane}
+								laneBusy={lanes.pendingOperation !== null}
+								onLaneLaunch={(lane) =>
+									void lanes.runOperation(
+										{ kind: 'lane.launch', laneId: lane.id },
+										{
+											pendingMessage: `Waiting for Metro on :${lane.port}…`,
+											successMessage: `${lane.branch} launched.`,
+										}
+									)
+								}
+								onLaneStop={(lane) =>
+									void lanes.runOperation(
+										{ kind: 'lane.stop', laneId: lane.id },
+										{ successMessage: `Lane ${lane.branch} stopped.` }
+									)
+								}
+								onOpenLanes={() => {
+									window.location.hash = 'simulator/lanes';
+								}}
+								slim={rowByUdid.get(selectedDevice.udid)?.slim}
 								target={selectedDevice}
 								runtime={runtimeById.get(selectedDevice.runtimeIdentifier)}
 								deviceTypeName={
@@ -540,17 +609,61 @@ export function FleetPanel() {
 	);
 }
 
-function ListRowText({
-	title,
-	description,
+function FleetRowText({
+	row,
+	target,
 }: {
-	title: string;
-	description: string;
+	row: FleetRow | undefined;
+	target: SimulatorDevice;
 }) {
 	return (
 		<div className="sim-list-copy">
-			<strong>{title}</strong>
-			<span>{description}</span>
+			<strong>{target.name}</strong>
+			<span className="sim-list-subtitle">
+				<span className="sim-list-subtitle-item">
+					{row?.runtimeName ?? target.runtimeIdentifier}
+				</span>
+				{row?.memoryBytes !== undefined ? (
+					<>
+						<span aria-hidden="true">·</span>
+						<span
+							className="sim-list-subtitle-item sim-list-memory"
+							title={`${row.processCount ?? '?'} processes · physical footprint of the Simulator process tree`}
+						>
+							{formatBytes(row.memoryBytes)}
+						</span>
+					</>
+				) : null}
+				{row?.lane ? (
+					<>
+						<span aria-hidden="true">·</span>
+						<code
+							className="sim-list-subtitle-item sim-list-branch"
+							title={row.lane.worktreePath}
+						>
+							{row.lane.branch}
+						</code>
+					</>
+				) : null}
+			</span>
+		</div>
+	);
+}
+
+function FleetRowTrailing({
+	row,
+	target,
+}: {
+	row: FleetRow | undefined;
+	target: SimulatorDevice;
+}) {
+	return (
+		<div className="sim-list-trailing">
+			{row?.lane ? <LaneChip lane={row.lane} compact /> : null}
+			{row?.live && row.slim.level !== 'unknown' ? (
+				<SlimChip slim={row.slim} />
+			) : null}
+			<TargetStatePill state={target.state} />
 		</div>
 	);
 }
@@ -744,8 +857,14 @@ function TargetDetail({
 	metrics,
 	connectedSessions,
 	isBridgeAvailable,
+	lane,
+	laneBusy,
+	slim,
 	onRunAction,
 	onOpenConnectedSession,
+	onLaneLaunch,
+	onLaneStop,
+	onOpenLanes,
 }: {
 	target: SimulatorDevice;
 	runtime: SimulatorRuntime | undefined;
@@ -755,8 +874,14 @@ function TargetDetail({
 	metrics: SimulatorDeviceMetrics | undefined;
 	connectedSessions: DeviceSession[];
 	isBridgeAvailable: boolean;
+	lane: Lane | undefined;
+	laneBusy: boolean;
+	slim: FleetRow['slim'] | undefined;
 	onRunAction: (action: SimulatorActionInput, successMessage: string) => void;
 	onOpenConnectedSession: (deviceId: string) => void;
+	onLaneLaunch: (lane: Lane) => void;
+	onLaneStop: (lane: Lane) => void;
+	onOpenLanes: () => void;
 }) {
 	const [renameName, setRenameName] = useState(target.name);
 	const [cloneName, setCloneName] = useState(`${target.name} Copy`);
@@ -779,7 +904,12 @@ function TargetDetail({
 					<h2>{target.name}</h2>
 					<span>{deviceTypeName ?? 'iOS Simulator'}</span>
 				</div>
-				<TargetStatePill state={target.state} />
+				<div className="sim-detail-heading-pills">
+					{slim && target.state === 'booted' && slim.level !== 'unknown' ? (
+						<SlimChip slim={slim} />
+					) : null}
+					<TargetStatePill state={target.state} />
+				</div>
 			</div>
 			<div className="sim-action-row">
 				<Button
@@ -855,6 +985,62 @@ function TargetDetail({
 					/>
 				</dl>
 			</Disclosure>
+			<section className="sim-detail-section">
+				<div className="sim-section-heading">
+					<div>
+						<h3>Lane</h3>
+						<InfoPopover label="Lanes">
+							A lane runs one worktree on this Simulator with its own Metro
+							port, so several branches and agents can work in parallel.
+						</InfoPopover>
+					</div>
+					<Waypoints className="h-3.5 w-3.5" />
+				</div>
+				{lane ? (
+					<div className="sim-lane-section">
+						<div className="sim-lane-summary">
+							<LaneChip lane={lane} />
+							{lane.agent ? <AgentBadge agent={lane.agent} /> : null}
+						</div>
+						<p className="sim-inline-note" title={lane.worktreePath}>
+							{shortPath(lane.worktreePath)} · Metro http://127.0.0.1:
+							{lane.port}
+							{lane.metroPid ? ` · pid ${lane.metroPid}` : ''}
+						</p>
+						<div className="sim-action-row">
+							<Button
+								isDisabled={
+									laneBusy || lane.metro === 'stopped' || !lane.scheme
+								}
+								size="sm"
+								variant="primary"
+								onPress={() => onLaneLaunch(lane)}
+							>
+								<Play className="h-3.5 w-3.5" /> Launch app
+							</Button>
+							<Button size="sm" variant="secondary" onPress={onOpenLanes}>
+								<ScrollText className="h-3.5 w-3.5" /> Open in Lanes
+							</Button>
+							<ConfirmAction
+								confirmLabel="Stop lane"
+								description={`Metro on port ${lane.port} stops and ${target.name} is released for another worktree.`}
+								isDisabled={laneBusy}
+								title={`Stop lane ${lane.branch}?`}
+								triggerIcon={<Square className="h-3.5 w-3.5" />}
+								triggerLabel="Stop lane"
+								onConfirm={() => onLaneStop(lane)}
+							/>
+						</div>
+					</div>
+				) : (
+					<div className="sim-lane-section">
+						<p className="sim-section-empty">No lane runs on this Simulator.</p>
+						<Button size="sm" variant="secondary" onPress={onOpenLanes}>
+							<Waypoints className="h-3.5 w-3.5" /> Start a lane here
+						</Button>
+					</div>
+				)}
+			</section>
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>

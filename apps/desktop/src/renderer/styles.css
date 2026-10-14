@@ -5051,3 +5051,337 @@ button:disabled {
 		animation: none !important;
 	}
 }
+
+/* ------------------------------------------------------------------------ */
+/* Lanes: worktree + Simulator + leased Metro port.                          */
+/* The chips below are shared by the fleet wall and the Lanes panel so the   */
+/* two cannot drift in how a lane or an agent is described.                  */
+/* ------------------------------------------------------------------------ */
+
+.lane-chip {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+}
+
+.lane-chip-port {
+	font-family: 'Geist Mono Variable', monospace;
+	font-variant-numeric: tabular-nums;
+	text-transform: none;
+}
+
+.lane-chip-branch,
+.worktree-label-branch,
+.sim-list-branch {
+	overflow: hidden;
+	max-width: 220px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: var(--font-size-caption);
+	color: #cfcfcf;
+}
+
+.slim-chip {
+	text-transform: none;
+}
+
+/*
+ * Agent attribution is the headline signal on a busy wall, so it carries the
+ * only saturated non-brand colour in the Simulator workspace: one hue per
+ * agent kind, never used for anything else.
+ */
+.agent-glyph {
+	display: inline-grid;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	place-items: center;
+	border-radius: 5px;
+	color: #000;
+	background: #a1a1a1;
+}
+
+.agent-glyph.is-claude {
+	background: #d97757;
+}
+
+.agent-glyph.is-codex {
+	background: #8b9dff;
+}
+
+.agent-badge {
+	display: inline-flex;
+	height: 20px;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	padding: 0 7px 0 2px;
+	border: 1px solid rgb(255 255 255 / 10%);
+	border-radius: 5px;
+	background: rgb(255 255 255 / 4%);
+	font-size: var(--font-size-caption);
+	font-weight: 500;
+	color: var(--foreground);
+	white-space: nowrap;
+}
+
+.agent-badge.is-claude {
+	border-color: rgb(217 119 87 / 35%);
+	background: rgb(217 119 87 / 12%);
+}
+
+.agent-badge.is-codex {
+	border-color: rgb(139 157 255 / 35%);
+	background: rgb(139 157 255 / 12%);
+}
+
+.agent-badge-session {
+	overflow: hidden;
+	max-width: 180px;
+	text-overflow: ellipsis;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.worktree-label {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.worktree-label-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	color: #8a8a8a;
+}
+
+/* Fleet rows: runtime · memory · branch on one line, chips on the right. */
+.sim-list-subtitle {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+}
+
+.sim-list-subtitle-item {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sim-list-memory {
+	font-variant-numeric: tabular-nums;
+	color: #b5b5b5;
+}
+
+.sim-list-trailing {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+}
+
+.sim-list-trailing .lane-chip-port {
+	max-width: 150px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sim-detail-heading-pills {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+}
+
+.sim-lane-section {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.sim-lane-section .sim-action-row {
+	margin-top: 4px;
+	padding-bottom: 0;
+	border-bottom: 0;
+}
+
+.sim-lane-summary {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+}
+
+/* Lanes panel */
+.lane-start-form {
+	display: flex;
+	flex: 0 0 auto;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 14px 12px;
+	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	background: #050505;
+}
+
+.lane-start-fields {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.lane-start-fields .sim-toolbar-field-grow {
+	min-width: 240px;
+}
+
+.lane-start-hint {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+}
+
+.lane-start-hint-range {
+	font-variant-numeric: tabular-nums;
+}
+
+.lane-list {
+	margin: 0;
+	padding: 6px;
+	list-style: none;
+}
+
+.lane-row {
+	display: flex;
+	width: 100%;
+	flex-direction: column;
+	gap: 7px;
+	padding: 10px 10px 9px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	text-align: left;
+	color: inherit;
+	cursor: default;
+	transition:
+		background-color 120ms ease,
+		border-color 120ms ease;
+}
+
+.lane-row:hover {
+	background: rgb(255 255 255 / 3%);
+}
+
+.lane-row:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
+}
+
+.lane-row.is-selected {
+	border-color: rgb(62 207 142 / 22%);
+	background: rgb(62 207 142 / 6%);
+}
+
+.lane-row-main,
+.lane-row-meta {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.lane-row-device {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-size-caption);
+	color: #929292;
+}
+
+.lane-empty {
+	display: flex;
+	height: 100%;
+	min-height: 220px;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 24px;
+	text-align: center;
+	color: #8a8a8a;
+}
+
+.lane-empty-title {
+	font-size: var(--font-size-control);
+	color: #cfcfcf;
+}
+
+.lane-empty-copy {
+	max-width: 320px;
+	font-size: var(--font-size-caption);
+	line-height: 1.5;
+}
+
+.lane-empty-command {
+	font-family: 'Geist Mono Variable', monospace;
+	color: #b5b5b5;
+}
+
+.lane-agent-card {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+}
+
+.lane-log-output {
+	max-height: 320px;
+	margin: 0;
+	padding: 10px 12px;
+	overflow: auto;
+	border: 1px solid rgb(255 255 255 / 9%);
+	border-radius: 6px;
+	background: #030303;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: #b5b5b5;
+}
+
+.worktree-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.worktree-list > li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 0;
+	border-top: 1px solid rgb(255 255 255 / 6%);
+}
+
+.worktree-list > li:first-child {
+	border-top: 0;
+}
+
+.worktree-list-meta {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+}

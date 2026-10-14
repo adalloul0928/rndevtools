@@ -6,6 +6,7 @@ import {
 	Layers3,
 	Settings2,
 	Smartphone,
+	Waypoints,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
@@ -16,6 +17,7 @@ export type SimulatorToolId =
 	| 'captures'
 	| 'automation'
 	| 'builds'
+	| 'lanes'
 	| 'settings';
 
 export type SimulatorToolDefinition = {
@@ -76,12 +78,20 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 		shortcut: 6,
 	},
 	{
+		id: 'lanes',
+		label: 'Lanes',
+		description:
+			'Run one worktree per Simulator with its own leased Metro port, for parallel branches and agents.',
+		icon: Waypoints,
+		shortcut: 7,
+	},
+	{
 		id: 'settings',
 		label: 'Settings',
 		description:
 			'Finish capability onboarding and configure local integrations.',
 		icon: Settings2,
-		shortcut: 7,
+		shortcut: 8,
 	},
 ];
 
