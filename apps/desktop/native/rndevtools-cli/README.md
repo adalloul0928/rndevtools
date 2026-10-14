@@ -37,12 +37,34 @@ or:
 ## Commands and input
 
 Commands are `doctor`, `simulators`, `apps`, `screen`, `elements`, `act`,
-`wait`, `capture`, `record`, `network`, `recipe`, `jobs`, and `slimming`.
-Run `rndevtools <command> --help` for structured flags. An optional JSON
+`wait`, `capture`, `record`, `network`, `recipe`, `jobs`, `slimming`, and
+`lane`. Run `rndevtools <command> --help` for structured flags. An optional JSON
 command object may be piped on standard input; flags may add different fields,
 but redefining a stdin field is rejected. `slimming` exposes only the read-only
 `status`, `preview`, `doctor`, and `verify` operations. `act` is limited to the
 desktop service's explicit unattended-action allowlist.
+
+## Lanes
+
+`lane` runs one git worktree on one Simulator with its own leased Metro port,
+so several branches and coding agents can work in parallel:
+
+```bash
+rndevtools lane --operation up --worktree "$PWD" --udid <UDID>   # boot, lease a port, start Metro, launch
+rndevtools lane --operation ls                                   # lanes, environments, discovered worktrees
+rndevtools lane --operation launch --worktree "$PWD" --url checkout
+rndevtools lane --operation log --lane-id <lane-id>
+rndevtools lane --operation down --worktree "$PWD"
+```
+
+`up` requires `--worktree` and `--udid`; `down`, `launch`, and `log` take
+exactly one of `--lane-id` or `--worktree`. Lane creation fails rather than
+stealing a worktree, Simulator, or port another lane owns. The CLI attaches
+`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` (or `RNDEVTOOLS_AGENT_SESSION_ID`)
+to `up` and `launch` so the desktop can show which agent holds a lane. The
+agent skill in [`skills/rndevtools-lanes`](skills/rndevtools-lanes/SKILL.md)
+teaches Claude Code and Codex the workflow; copy it into `.claude/skills` or
+`.codex/skills`.
 
 `doctor` returns a bounded `connectedSessions` list. Use a returned `deviceId`
 with `screen`, `elements`, `act`, `wait`, or `network` when an older mobile

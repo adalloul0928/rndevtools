@@ -11,8 +11,10 @@ Two halves that version together:
   SwiftUI chrome and matching React Native panels on Android.
 - **On your Mac** — an Electron app that connects over a loopback WebSocket and
   gives the same diagnostics a real desktop UI, plus Simulator fleet
-  management, deep links and permissions, screenshot and recording capture,
-  build insights, and experimental Simulator slimming.
+  management, lanes (one git worktree per Simulator with its own Metro port,
+  for parallel branches and coding agents), deep links and permissions,
+  screenshot and recording capture, build insights, and experimental
+  Simulator slimming.
 
 ## Packages
 

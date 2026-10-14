@@ -40,7 +40,12 @@ Local iOS Simulator tooling on macOS:
   does not report scheme, configuration, Xcode version, or reliable clean/incremental
   evidence, so those values remain explicitly unreported instead of being inferred.
   The Swift FSEvents adapter and versioned richer-metadata adapters remain deferred.
-- A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket
+- Lanes: one git worktree on one Simulator with its own leased Metro port, so
+  several branches and coding agents run side by side. Lanes refuse to steal a
+  worktree, Simulator, or port; Metro health, agent attribution, and the Metro
+  log are visible on the fleet wall and in the Lanes panel
+- A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket,
+  including `lane up|down|ls|launch|log` and an agent skill
 
 Protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
 app-scoped network conditions, request/recipe correlation, and development camera
