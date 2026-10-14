@@ -654,7 +654,9 @@ function LaneDetail({
 					<h2>
 						<code>{lane.branch}</code>
 					</h2>
-					<span title={lane.worktreePath}>{shortPath(lane.worktreePath)}</span>
+					<span title={lane.appPath ?? lane.worktreePath}>
+						{shortPath(lane.appPath ?? lane.worktreePath)}
+					</span>
 				</div>
 				<LaneChip lane={lane} compact />
 			</div>
@@ -787,6 +789,9 @@ function LaneDetail({
 				<dl>
 					<KeyValue label="Lane id" mono value={lane.id} />
 					<KeyValue label="Worktree" mono value={lane.worktreePath} />
+					{lane.appPath ? (
+						<KeyValue label="App directory" mono value={lane.appPath} />
+					) : null}
 					<KeyValue label="Branch" mono value={lane.branch} />
 					<KeyValue
 						label="Simulator"

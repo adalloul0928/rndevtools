@@ -3,10 +3,11 @@ import {
 	type AgentCliTarget,
 	isSafeAgentConnectedAction,
 } from '../shared/agent-cli-protocol';
-import type {
-	LaneOperation,
-	LaneOperationReceipt,
-	LaneState,
+import {
+	type LaneOperation,
+	type LaneOperationReceipt,
+	type LaneState,
+	laneAppDirectory,
 } from '../shared/lane-protocol';
 import type {
 	DesktopAction,
@@ -466,7 +467,9 @@ function laneForTarget(
 	const lane = target.laneId
 		? state.lanes.find((candidate) => candidate.id === target.laneId)
 		: state.lanes.find(
-				(candidate) => candidate.worktreePath === target.worktreePath
+				(candidate) =>
+					laneAppDirectory(candidate) === target.worktreePath ||
+					candidate.worktreePath === target.worktreePath
 			);
 	if (!lane) {
 		throw new AgentCliError({

@@ -63,6 +63,12 @@ rndevtools lane --operation up \
   --worktree "$PWD" --udid <UDID> [--environment development]   # 4.
 ```
 
+`--worktree` is wherever you are working: a checkout root, or the app's
+directory inside a monorepo checkout. The lane is keyed on the containing git
+worktree and runs Metro from the directory you gave (`lane.appPath` when it
+differs from `lane.worktreePath`). Two apps in one checkout can each have a
+lane; one app cannot have two.
+
 `lane up` boots the Simulator if needed, starts Metro on the leased port, waits
 up to 15 s for `/status`, and deep-links the dev client with the SDK 57 launch
 form (`<scheme>://expo-development-client/?url=http://127.0.0.1:<port>`). The

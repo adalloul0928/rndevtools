@@ -250,7 +250,7 @@ class FakeSlimming implements LaneSlimmingPort {
 
 class FakeMetro implements MetroSupervisorPort {
 	readonly started: MetroLaunchInput[] = [];
-	readonly stopped: Array<{ pid: number; worktreePath: string }> = [];
+	readonly stopped: Array<{ pid: number; port: number }> = [];
 	readonly busyPorts = new Set<number>();
 	readonly healthyPorts = new Set<number>();
 	readonly deadPids = new Set<number>();
@@ -265,8 +265,8 @@ class FakeMetro implements MetroSupervisorPort {
 	};
 	isHealthy = async (port: number) => this.healthyPorts.has(port);
 	isProcessRunning = (pid: number) => !this.deadPids.has(pid);
-	stop = async (pid: number, worktreePath: string) => {
-		this.stopped.push({ pid, worktreePath });
+	stop = async (pid: number, port: number) => {
+		this.stopped.push({ pid, port });
 	};
 	readLogTail = async (logPath: string) => this.logs.get(logPath) ?? '';
 }
@@ -468,20 +468,72 @@ describe('LaneService', () => {
 		expect(metro.started).toHaveLength(2);
 	});
 
-	it('rejects a worktree that is not a checkout root and an unknown environment', async () => {
-		const subdirectory = await service.runOperation({
+	it('runs a monorepo app from its subdirectory while keying the lane on the containing worktree', async () => {
+		healthyMetro();
+		const receipt = await service.runOperation({
+			actionId: 'op-mono',
+			kind: 'lane.start',
+			worktreePath: `${WORKTREE}/examples/demo`,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: true,
+		});
+		expect(receipt.completed).toBe(true);
+		expect(receipt.lane).toMatchObject({
+			worktreePath: WORKTREE,
+			appPath: `${WORKTREE}/examples/demo`,
+			branch: 'feature/a',
+		});
+		// Metro and the Expo config come from the app directory, not the root.
+		expect(metro.started[0]?.worktreePath).toBe(`${WORKTREE}/examples/demo`);
+		// A second app in the same worktree may have its own lane…
+		const sibling = await service.runOperation({
+			actionId: 'op-mono-2',
+			kind: 'lane.start',
+			worktreePath: `${WORKTREE}/examples/other`,
+			simulatorUdid: OTHER_UDID,
+			environment: 'development',
+			launch: false,
+		});
+		expect(sibling.completed).toBe(true);
+		// …but the same app may not have two.
+		const duplicate = await service.runOperation({
+			actionId: 'op-mono-3',
+			kind: 'lane.start',
+			worktreePath: `${WORKTREE}/examples/demo`,
+			simulatorUdid: OTHER_UDID,
+			environment: 'development',
+			launch: false,
+		});
+		expect(duplicate.completed).toBe(false);
+		expect(duplicate.error).toMatch(/examples\/demo already has lane/);
+		// Stopping proves ownership by the leased port, not a path.
+		await service.runOperation({
+			actionId: 'op-mono-stop',
+			kind: 'lane.stop',
+			laneId: receipt.lane?.id ?? '',
+		});
+		expect(metro.stopped[0]).toEqual({ pid: 4_242, port: 8_100 });
+	});
+
+	it('rejects a path outside every worktree and an unknown environment', async () => {
+		worktrees.repositoryRoot = async () => REPO;
+		worktrees.worktrees = [
+			{ path: REPO, branch: 'main', repositoryRoot: REPO, dirty: false },
+		];
+		const outside = await service.runOperation({
 			actionId: 'op-1',
 			kind: 'lane.start',
-			worktreePath: `${WORKTREE}/src`,
+			worktreePath: '/Users/dev/app-feature-a',
 			simulatorUdid: UDID,
 			environment: 'development',
 			launch: false,
 		});
-		expect(subdirectory.error).toMatch(/not a worktree of/);
+		expect(outside.error).toMatch(/not inside a worktree of/);
 		const environment = await service.runOperation({
 			actionId: 'op-2',
 			kind: 'lane.start',
-			worktreePath: WORKTREE,
+			worktreePath: REPO,
 			simulatorUdid: UDID,
 			environment: 'nope',
 			launch: false,
@@ -599,7 +651,7 @@ describe('LaneService', () => {
 			laneId,
 		});
 		expect(stopped.completed).toBe(true);
-		expect(metro.stopped).toEqual([{ pid: 1_001, worktreePath: WORKTREE }]);
+		expect(metro.stopped).toEqual([{ pid: 1_001, port: 8_100 }]);
 		expect(service.getState().lanes).toHaveLength(0);
 		const again = await service.runOperation({
 			actionId: 'op-3',

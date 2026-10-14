@@ -125,7 +125,14 @@ export type LaneSlim = z.infer<typeof laneSlimSchema>;
 
 export const laneSchema = z.strictObject({
 	id: laneIdSchema,
+	/** The git checkout root this lane runs from. */
 	worktreePath: absolutePathSchema,
+	/**
+	 * The Expo app directory inside the worktree, when it is not the root
+	 * (monorepos). Metro runs here and the Expo config is read here. Absent
+	 * when the app is the checkout itself.
+	 */
+	appPath: absolutePathSchema.optional(),
 	branch: branchSchema,
 	simulatorUdid: laneUdidSchema,
 	environment: laneEnvironmentIdSchema,
@@ -175,6 +182,10 @@ export const laneOperationSchema = z.discriminatedUnion('kind', [
 	z.strictObject({
 		...operationBase,
 		kind: z.literal('lane.start'),
+		/**
+		 * A checkout root, or any directory inside one: the containing worktree
+		 * becomes the lane's worktree and this directory its Expo app.
+		 */
 		worktreePath: absolutePathSchema,
 		simulatorUdid: laneUdidSchema,
 		environment: laneEnvironmentIdSchema.default('development'),
@@ -380,18 +391,27 @@ export async function allocateLanePort({
 	);
 }
 
+/** The directory a lane's Metro and Expo config live in. */
+export function laneAppDirectory(
+	lane: Pick<Lane, 'worktreePath' | 'appPath'>
+): string {
+	return lane.appPath ?? lane.worktreePath;
+}
+
 /**
- * Lane creation fails instead of stealing. A worktree, a Simulator, or a port
- * that another live lane owns is an error, never a takeover.
+ * Lane creation fails instead of stealing. An app directory, a Simulator, or
+ * a port that another live lane owns is an error, never a takeover. Two apps
+ * in one monorepo worktree may each have a lane; one app may not have two.
  */
 export function findLaneConflict(
 	lanes: readonly Lane[],
-	candidate: Pick<Lane, 'worktreePath' | 'simulatorUdid'>
+	candidate: Pick<Lane, 'worktreePath' | 'appPath' | 'simulatorUdid'>
 ): string | undefined {
 	const udid = candidate.simulatorUdid.toUpperCase();
+	const app = laneAppDirectory(candidate);
 	for (const lane of lanes) {
-		if (lane.worktreePath === candidate.worktreePath) {
-			return `Worktree ${candidate.worktreePath} already has lane ${lane.id}.`;
+		if (laneAppDirectory(lane) === app) {
+			return `${app} already has lane ${lane.id}.`;
 		}
 		if (lane.simulatorUdid.toUpperCase() === udid) {
 			return `Simulator ${candidate.simulatorUdid} is already assigned to lane ${lane.id}.`;

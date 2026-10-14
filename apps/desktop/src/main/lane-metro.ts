@@ -22,9 +22,23 @@ export type MetroSupervisorPort = {
 	start: (input: MetroLaunchInput) => Promise<number>;
 	isHealthy: (port: number) => Promise<boolean>;
 	isProcessRunning: (pid: number) => boolean;
-	stop: (pid: number, worktreePath: string) => Promise<void>;
+	/** Stops the Metro at `pid` only if it is the one serving `port`. */
+	stop: (pid: number, port: number) => Promise<void>;
 	readLogTail: (logPath: string, maxCharacters: number) => Promise<string>;
 };
+
+/**
+ * Proves a PID is still the Metro this lane started before signalling it.
+ * The command line is the only thing `ps` gives us; the working directory is
+ * not on it, and a pnpm workspace hoists `.bin/expo` far from the app, so the
+ * proof is the `--port <n>` argument the lane itself passed at launch. PIDs
+ * get reused; without this a stale lease could kill an unrelated process.
+ */
+export function isLaneMetroCommand(commandLine: string, port: number): boolean {
+	if (!/\b(expo|metro)\b/i.test(commandLine)) return false;
+	const match = /(?:^|\s)--port(?:=|\s+)(\d+)(?:\s|$)/.exec(commandLine);
+	return match !== null && Number(match[1]) === port;
+}
 
 /**
  * Finds the Expo CLI the worktree itself depends on. A pnpm workspace member
@@ -154,17 +168,26 @@ async function isMetroHealthy(port: number): Promise<boolean> {
  * Stops only a Metro this lane owns. PIDs are recycled, so before signalling
  * the process group the command line must still name the worktree and Expo.
  */
-async function stopMetro(pid: number, worktreePath: string): Promise<void> {
+async function stopMetro(pid: number, port: number): Promise<void> {
 	if (!isProcessRunning(pid)) return;
-	const result = await runSimulatorCommand(
-		'/bin/ps',
-		['-p', String(pid), '-o', 'command='],
-		{ timeoutMs: 5_000, maxOutputBytes: 64 * 1024 }
-	).catch(() => undefined);
-	const commandLine = result?.stdout ?? '';
-	if (!commandLine.includes(worktreePath) || !/expo|metro/i.test(commandLine)) {
+	let commandLine: string | undefined;
+	try {
+		const result = await runSimulatorCommand(
+			'/bin/ps',
+			['-p', String(pid), '-o', 'command='],
+			{ timeoutMs: 5_000, maxOutputBytes: 64 * 1024 }
+		);
+		commandLine = result.stdout;
+	} catch (error) {
+		// Without `ps` the PID cannot be proven to be ours. Fail closed and say
+		// so: the lane keeps its lease and the operator can stop Metro by hand.
 		throw new Error(
-			`Process ${pid} no longer belongs to this lane's Metro; refusing to stop it.`
+			`Could not inspect process ${pid} to confirm it is this lane's Metro (${(error as Error).message}); refusing to stop it. Stop the Metro on port ${port} manually, then stop the lane again.`
+		);
+	}
+	if (!isLaneMetroCommand(commandLine, port)) {
+		throw new Error(
+			`Process ${pid} is no longer the Metro serving port ${port}; refusing to stop it.`
 		);
 	}
 	try {

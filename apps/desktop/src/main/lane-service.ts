@@ -348,29 +348,43 @@ export class LaneService {
 		signal: AbortSignal,
 		options: LaneRunOptions = {}
 	): Promise<Lane> {
-		const worktreePath = path.resolve(input.worktreePath);
+		const requestedPath = path.resolve(input.worktreePath);
 		const environment = this.#environments.find(
 			(candidate) => candidate.id === input.environment
 		);
 		if (!environment) {
 			throw new Error(`Unknown lane environment "${input.environment}".`);
 		}
+
+		// The agent passes wherever it is working. Resolve the checkout that
+		// contains it: that is the lane's worktree, and the requested directory
+		// (if deeper) is the Expo app inside a monorepo.
+		const repositoryRoot = await this.#worktrees.repositoryRoot(requestedPath);
+		const worktrees = await this.#worktrees.listWorktrees(repositoryRoot);
+		const worktree = worktrees
+			.map((candidate) => ({
+				...candidate,
+				path: path.resolve(candidate.path),
+			}))
+			.filter(
+				(candidate) =>
+					requestedPath === candidate.path ||
+					requestedPath.startsWith(`${candidate.path}${path.sep}`)
+			)
+			.sort((left, right) => right.path.length - left.path.length)[0];
+		if (!worktree) {
+			throw new Error(
+				`${requestedPath} is not inside a worktree of ${repositoryRoot}.`
+			);
+		}
+		const worktreePath = worktree.path;
+		const appPath = requestedPath === worktreePath ? undefined : requestedPath;
 		const conflict = findLaneConflict(this.#store.lanes(), {
 			worktreePath,
+			...(appPath ? { appPath } : {}),
 			simulatorUdid: input.simulatorUdid,
 		});
 		if (conflict) throw new Error(conflict);
-
-		const repositoryRoot = await this.#worktrees.repositoryRoot(worktreePath);
-		const worktrees = await this.#worktrees.listWorktrees(repositoryRoot);
-		const worktree = worktrees.find(
-			(candidate) => path.resolve(candidate.path) === worktreePath
-		);
-		if (!worktree) {
-			throw new Error(
-				`${worktreePath} is not a worktree of ${repositoryRoot}. Lanes run from a checkout root, not a subdirectory.`
-			);
-		}
 		await this.#store.addRepository(repositoryRoot);
 
 		const device = (await this.#simulator.refresh()).devices.find(
@@ -391,7 +405,9 @@ export class LaneService {
 				? { preferredPort: input.preferredPort }
 				: {}),
 		});
-		const identity = await this.#worktrees.readExpoIdentity(worktreePath);
+		const identity = await this.#worktrees.readExpoIdentity(
+			appPath ?? worktreePath
+		);
 		// Validate the slim request before anything is booted or spawned, so a
 		// typo in a profile id fails fast instead of after a 20s boot.
 		const slimRequest = input.slimProfileId
@@ -431,7 +447,7 @@ export class LaneService {
 		}
 
 		const metroPid = await this.#metro.start({
-			worktreePath,
+			worktreePath: appPath ?? worktreePath,
 			port,
 			logPath,
 			maxWorkers: this.#maxWorkers,
@@ -440,6 +456,7 @@ export class LaneService {
 		let lane: Lane = {
 			id,
 			worktreePath,
+			...(appPath ? { appPath } : {}),
 			branch: worktree.branch,
 			simulatorUdid: device.udid,
 			environment: environment.id,
@@ -570,7 +587,7 @@ export class LaneService {
 	async stopLane(laneId: string): Promise<void> {
 		const lane = this.#requireLane(laneId);
 		if (lane.metroPid !== undefined) {
-			await this.#metro.stop(lane.metroPid, lane.worktreePath);
+			await this.#metro.stop(lane.metroPid, lane.port);
 		}
 		await this.#store.remove(laneId);
 		this.#touch();
