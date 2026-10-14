@@ -162,4 +162,80 @@ describe('agent CLI protocol', () => {
 			).success
 		).toBe(false);
 	});
+
+	it('shapes lane commands per operation and refuses ambiguous targets', () => {
+		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+					agent: { kind: 'codex', sessionId: 'thread-1' },
+				})
+			).success
+		).toBe(true);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'up', udid: UDID })
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: 'relative/app',
+					udid: UDID,
+				})
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'ls' })
+			).success
+		).toBe(true);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'ls', laneId })
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'launch', laneId, url: 'checkout' })
+			).success
+		).toBe(true);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({
+					kind: 'lane',
+					operation: 'launch',
+					laneId,
+					worktreePath: '/Users/dev/app',
+				})
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'down' })
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({ kind: 'lane', operation: 'log', laneId, url: 'nope' })
+			).success
+		).toBe(false);
+		expect(
+			agentCliRequestSchema.safeParse(
+				request({
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: '/a',
+					udid: UDID,
+					shell: 'x',
+				})
+			).success
+		).toBe(false);
+	});
 });

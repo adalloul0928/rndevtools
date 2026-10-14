@@ -10,6 +10,15 @@ import {
 } from '../shared/build-insights-protocol';
 import { IPC_CHANNELS } from '../shared/ipc';
 import {
+	type LaneBridge,
+	type LaneOperation,
+	type LaneOperationReceipt,
+	type LaneState,
+	laneOperationReceiptSchema,
+	laneOperationSchema,
+	laneStateSchema,
+} from '../shared/lane-protocol';
+import {
 	type DesktopAction,
 	type DesktopActionResult,
 	type DesktopBootstrap,
@@ -96,7 +105,8 @@ const bridge: DesktopBridge &
 	SimulatorBridge &
 	SlimmingBridge &
 	RecipeBridge &
-	BuildInsightsBridge = {
+	BuildInsightsBridge &
+	LaneBridge = {
 	getBootstrap: async () =>
 		desktopBootstrapSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getBootstrap)
@@ -376,6 +386,33 @@ const bridge: DesktopBridge &
 				validated
 			)
 		) as BuildInsightsOperationReceipt;
+	},
+	getLaneState: async () =>
+		laneStateSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.getLaneState)
+		) as LaneState,
+	subscribeLaneState: (listener: (state: LaneState) => void) => {
+		if (typeof listener !== 'function') {
+			throw new TypeError('Lane state listener must be a function.');
+		}
+		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
+			const parsed = laneStateSchema.safeParse(state);
+			if (!parsed.success) return;
+			try {
+				listener(parsed.data);
+			} catch {
+				// A renderer callback must not break the isolated IPC event handler.
+			}
+		};
+		ipcRenderer.on(IPC_CHANNELS.laneStateChanged, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.laneStateChanged, wrapped);
+	},
+	runLaneOperation: async (operation: LaneOperation) => {
+		const validated = laneOperationSchema.parse(operation);
+		return laneOperationReceiptSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.runLaneOperation, validated)
+		) as LaneOperationReceipt;
 	},
 };
 

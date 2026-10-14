@@ -73,11 +73,12 @@ func Run(config Config) int {
 		)
 		return ExitUsage
 	}
-	parsed, err := command.Parse(
+	parsed, err := command.ParseWithEnvironment(
 		kind,
 		config.Arguments[1:],
 		config.Stdin,
 		config.StdinAvailable,
+		os.Getenv,
 	)
 	if errors.Is(err, command.ErrHelp) {
 		fmt.Fprint(config.Stdout, command.Usage(kind))

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { laneAgentSchema, laneIdSchema } from './lane-protocol';
 import { desktopActionSchema } from './protocol';
 
 export const RNDEVTOOLS_AGENT_CLI_PROTOCOL = 'rndevtools/1' as const;
@@ -190,6 +191,67 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 					code: 'custom',
 					message:
 						'Status takes no target; doctor requires only udids; preview and verify require udids plus profileId.',
+				});
+			}
+		}),
+	z
+		.strictObject({
+			kind: z.literal('lane'),
+			operation: z.enum(['up', 'down', 'ls', 'launch', 'log']),
+			worktreePath: z
+				.string()
+				.min(2)
+				.max(1_024)
+				.refine((value) => value.startsWith('/'), {
+					message: 'worktreePath must be absolute.',
+				})
+				.optional(),
+			udid: udidSchema.optional(),
+			environment: z
+				.string()
+				.regex(/^[a-z][a-z0-9-]{0,31}$/)
+				.optional(),
+			preferredPort: z.number().int().min(1_024).max(65_535).optional(),
+			launch: z.boolean().optional(),
+			laneId: laneIdSchema.optional(),
+			url: z.string().min(1).max(2_048).optional(),
+			maxCharacters: z.number().int().min(256).max(64_000).optional(),
+			/** Filled by the CLI from CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID. */
+			agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
+		})
+		.superRefine((value, context) => {
+			const only = (allowed: readonly string[]) =>
+				Object.entries(value)
+					.filter(([key, field]) => field !== undefined && key !== 'kind')
+					.every(([key]) => allowed.includes(key));
+			const valid =
+				(value.operation === 'up' &&
+					value.worktreePath !== undefined &&
+					value.udid !== undefined &&
+					only([
+						'operation',
+						'worktreePath',
+						'udid',
+						'environment',
+						'preferredPort',
+						'launch',
+						'agent',
+					])) ||
+				(value.operation === 'down' &&
+					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
+					only(['operation', 'laneId', 'worktreePath'])) ||
+				(value.operation === 'ls' && only(['operation'])) ||
+				(value.operation === 'launch' &&
+					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
+					only(['operation', 'laneId', 'worktreePath', 'url', 'agent'])) ||
+				(value.operation === 'log' &&
+					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
+					only(['operation', 'laneId', 'worktreePath', 'maxCharacters']));
+			if (!valid) {
+				context.addIssue({
+					code: 'custom',
+					message:
+						'up requires worktreePath and udid; down, launch, and log take exactly one of laneId or worktreePath; ls takes nothing else.',
 				});
 			}
 		}),

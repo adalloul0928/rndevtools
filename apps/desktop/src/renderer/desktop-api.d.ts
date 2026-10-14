@@ -1,4 +1,5 @@
 import type { BuildInsightsBridge } from '../shared/build-insights-protocol';
+import type { LaneBridge } from '../shared/lane-protocol';
 import type { DesktopBridge } from '../shared/protocol';
 import type { RecipeBridge } from '../shared/recipe-protocol';
 import type { SimulatorBridge } from '../shared/simulator-protocol';
@@ -10,6 +11,7 @@ declare global {
 			SimulatorBridge &
 			SlimmingBridge &
 			RecipeBridge &
-			BuildInsightsBridge;
+			BuildInsightsBridge &
+			LaneBridge;
 	}
 }

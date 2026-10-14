@@ -26,6 +26,7 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandRecipe:     `{"kind":"recipe","operation":"run","recipeId":"smoke","udids":["` + testUDID + `"]}`,
 		protocol.CommandJobs:       `{"kind":"jobs","operation":"cancel","jobId":"job-1"}`,
 		protocol.CommandSlimming:   `{"kind":"slimming","operation":"verify","udids":["` + testUDID + `"],"profileId":"rndevtools-development"}`,
+		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"agent":{"kind":"claude","sessionId":"session-1"}}`,
 	}
 	for kind, encoded := range tests {
 		t.Run(string(kind), func(t *testing.T) {
@@ -50,6 +51,14 @@ func TestValidateRejectsMutationUnknownFieldsAndNullOptionals(t *testing.T) {
 		{protocol.CommandSlimming, `{"kind":"slimming","operation":"preview","udids":["` + testUDID + `"]}`},
 		{protocol.CommandScreen, `{"kind":"screen","target":{"udid":"` + testUDID + `","deviceId":"device-1"}}`},
 		{protocol.CommandAct, `{"kind":"act","target":{"deviceId":"device-1"},"action":{"tool":"storage","command":"set","payload":{}}}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","udid":"` + testUDID + `"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"relative","udid":"` + testUDID + `"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"ls","laneId":"lane-11111111-2222-4333-8444-555555555555"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"launch","laneId":"lane-11111111-2222-4333-8444-555555555555","worktreePath":"/Users/dev/app"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"down"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"log","laneId":"lane-11111111-2222-4333-8444-555555555555","url":"x"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","agent":{"kind":"gpt","sessionId":"s"}}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","shell":"whoami"}`},
 	}
 	for _, test := range tests {
 		if err := Validate(json.RawMessage(test.encoded), test.kind); err == nil {
@@ -148,5 +157,84 @@ func TestParseStructuredNestedActionFlags(t *testing.T) {
 	}
 	if !strings.Contains(string(parsed.Command), `"command":"navigate"`) {
 		t.Fatalf("unexpected command: %s", parsed.Command)
+	}
+}
+
+func TestLaneFlagsBuildOperationSpecificCommands(t *testing.T) {
+	parsed, err := Parse(protocol.CommandLane, []string{
+		"--operation", "launch",
+		"--lane-id", "lane-11111111-2222-4333-8444-555555555555",
+		"--url", "checkout",
+	}, strings.NewReader(""), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(parsed.Command, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["operation"] != "launch" || decoded["url"] != "checkout" {
+		t.Fatalf("unexpected command: %s", parsed.Command)
+	}
+	if parsed.Timeout < 240*time.Second {
+		t.Fatalf("lane commands need a long socket deadline, got %s", parsed.Timeout)
+	}
+}
+
+func TestLaneAttributionComesFromAgentEnvironment(t *testing.T) {
+	env := map[string]string{"CLAUDE_CODE_SESSION_ID": "session-abc"}
+	lookup := func(key string) string { return env[key] }
+	parsed, err := ParseWithEnvironment(protocol.CommandLane, []string{
+		"--operation", "up",
+		"--worktree", "/Users/dev/app",
+		"--udid", testUDID,
+	}, strings.NewReader(""), false, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Agent map[string]string `json:"agent"`
+	}
+	if err := json.Unmarshal(parsed.Command, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Agent["kind"] != "claude" || decoded.Agent["sessionId"] != "session-abc" {
+		t.Fatalf("expected claude attribution, got %s", parsed.Command)
+	}
+
+	// Explicit stdin attribution wins over the environment.
+	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{
+		"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID,
+	}, strings.NewReader(`{"agent":{"kind":"codex","sessionId":"thread-9"}}`), true, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(parsed.Command, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Agent["kind"] != "codex" {
+		t.Fatalf("stdin attribution should win, got %s", parsed.Command)
+	}
+
+	// Operations that do not accept attribution never receive it.
+	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{"--operation", "ls"},
+		strings.NewReader(""), false, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(parsed.Command), "agent") {
+		t.Fatalf("ls must not carry attribution: %s", parsed.Command)
+	}
+
+	// Malformed identifiers are dropped rather than forwarded.
+	bad := func(string) string { return "has spaces" }
+	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{
+		"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID,
+	}, strings.NewReader(""), false, bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(parsed.Command), "agent") {
+		t.Fatalf("invalid session ids must be ignored: %s", parsed.Command)
 	}
 }

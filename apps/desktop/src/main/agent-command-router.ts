@@ -4,6 +4,11 @@ import {
 	isSafeAgentConnectedAction,
 } from '../shared/agent-cli-protocol';
 import type {
+	LaneOperation,
+	LaneOperationReceipt,
+	LaneState,
+} from '../shared/lane-protocol';
+import type {
 	DesktopAction,
 	DesktopActionResult,
 	DesktopState,
@@ -68,6 +73,15 @@ type SlimmingPort = {
 	subscribe: (listener: (state: SlimmingState) => void) => () => void;
 };
 
+type LanePort = {
+	getState: () => LaneState;
+	refresh: () => Promise<LaneState>;
+	runOperation: (
+		operation: LaneOperation,
+		signal: AbortSignal
+	) => Promise<LaneOperationReceipt>;
+};
+
 type AgentRecipePort = {
 	list: () => Promise<unknown> | unknown;
 	get: (recipeId: string) => Promise<unknown> | unknown;
@@ -81,6 +95,7 @@ export type AgentCommandRouterDependencies = {
 	simulator: SimulatorPort;
 	slimming: SlimmingPort;
 	recipes?: AgentRecipePort;
+	lanes?: LanePort;
 };
 
 function unavailable(message: string, recovery?: string): never {
@@ -444,11 +459,47 @@ async function waitForNetworkIdle(
 	throw abortError();
 }
 
+function laneForTarget(
+	state: LaneState,
+	target: { laneId?: string | undefined; worktreePath?: string | undefined }
+) {
+	const lane = target.laneId
+		? state.lanes.find((candidate) => candidate.id === target.laneId)
+		: state.lanes.find(
+				(candidate) => candidate.worktreePath === target.worktreePath
+			);
+	if (!lane) {
+		throw new AgentCliError({
+			code: 'lane_not_found',
+			message: target.laneId
+				? `No lane ${target.laneId} exists.`
+				: `No lane is running for worktree ${target.worktreePath}.`,
+			retryable: false,
+			recovery:
+				'Run rndevtools lane --operation ls to see live lanes, or lane --operation up to start one.',
+		});
+	}
+	return lane;
+}
+
+function laneReceiptResult(receipt: LaneOperationReceipt) {
+	if (!receipt.completed) {
+		throw new AgentCliError({
+			code: receipt.cancelled ? 'cancelled' : 'lane_failed',
+			message: receipt.error ?? 'The lane operation did not complete.',
+			retryable: true,
+		});
+	}
+	const { state: _state, actionId: _actionId, ...rest } = receipt;
+	return rest;
+}
+
 export function createAgentCommandRouter({
 	broker,
 	simulator,
 	slimming,
 	recipes,
+	lanes,
 }: AgentCommandRouterDependencies): AgentCliHandler {
 	return async (command, context) => {
 		switch (command.kind) {
@@ -805,6 +856,84 @@ export function createAgentCommandRouter({
 						);
 					case 'status':
 						return await recipes.status(command.runId);
+					default:
+						return required('Unsupported recipe operation.');
+				}
+			}
+			case 'lane': {
+				if (!lanes) {
+					unavailable(
+						'Lanes are not available in this desktop session.',
+						'Update RN Devtools and retry.'
+					);
+				}
+				const operationId = actionId(context.requestId);
+				switch (command.operation) {
+					case 'ls': {
+						const state = await lanes.refresh();
+						return {
+							environments: state.environments,
+							lanes: state.lanes,
+							worktrees: state.worktrees,
+							...(state.error ? { error: state.error } : {}),
+						};
+					}
+					case 'up': {
+						const receipt = await lanes.runOperation(
+							{
+								actionId: operationId,
+								kind: 'lane.start',
+								worktreePath:
+									command.worktreePath ??
+									required('lane up requires worktreePath.'),
+								simulatorUdid:
+									command.udid ?? required('lane up requires udid.'),
+								environment: command.environment ?? 'development',
+								launch: command.launch ?? true,
+								...(command.preferredPort !== undefined
+									? { preferredPort: command.preferredPort }
+									: {}),
+								...(command.agent ? { agent: command.agent } : {}),
+							},
+							context.signal
+						);
+						return laneReceiptResult(receipt);
+					}
+					case 'launch': {
+						const lane = laneForTarget(lanes.getState(), command);
+						const receipt = await lanes.runOperation(
+							{
+								actionId: operationId,
+								kind: 'lane.launch',
+								laneId: lane.id,
+								...(command.url ? { url: command.url } : {}),
+								...(command.agent ? { agent: command.agent } : {}),
+							},
+							context.signal
+						);
+						return laneReceiptResult(receipt);
+					}
+					case 'down': {
+						const lane = laneForTarget(lanes.getState(), command);
+						const receipt = await lanes.runOperation(
+							{ actionId: operationId, kind: 'lane.stop', laneId: lane.id },
+							context.signal
+						);
+						return { ...laneReceiptResult(receipt), laneId: lane.id };
+					}
+					case 'log': {
+						const lane = laneForTarget(lanes.getState(), command);
+						const receipt = await lanes.runOperation(
+							{
+								actionId: operationId,
+								kind: 'lane.log',
+								laneId: lane.id,
+								maxCharacters: command.maxCharacters ?? 16 * 1024,
+							},
+							context.signal
+						);
+						return laneReceiptResult(receipt);
+					}
 				}
 			}
 		}

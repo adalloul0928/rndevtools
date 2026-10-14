@@ -277,9 +277,112 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			}
 			return validateIdentifier(*value.ProfileID, "profileId")
 		}
+	case protocol.CommandLane:
+		var value struct {
+			Kind          string             `json:"kind"`
+			Operation     string             `json:"operation"`
+			WorktreePath  *string            `json:"worktreePath,omitempty"`
+			UDID          *string            `json:"udid,omitempty"`
+			Environment   *string            `json:"environment,omitempty"`
+			PreferredPort *int               `json:"preferredPort,omitempty"`
+			Launch        *bool              `json:"launch,omitempty"`
+			LaneID        *string            `json:"laneId,omitempty"`
+			URL           *string            `json:"url,omitempty"`
+			MaxCharacters *int               `json:"maxCharacters,omitempty"`
+			Agent         *map[string]string `json:"agent,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
+			value.PreferredPort, value.Launch, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
 	default:
 		return fmt.Errorf("unsupported command %q", expectedKind)
 	}
+}
+
+var (
+	laneIDPattern          = regexp.MustCompile(`(?i)^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+	laneEnvironmentPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+)
+
+func validateLane(
+	operation string,
+	worktreePath, udid, environment *string,
+	preferredPort *int,
+	launch *bool,
+	laneID, url *string,
+	maxCharacters *int,
+	agent *map[string]string,
+) error {
+	if !oneOf(operation, "up", "down", "ls", "launch", "log") {
+		return errors.New("lane operation must be up, down, ls, launch, or log")
+	}
+	if worktreePath != nil {
+		if !strings.HasPrefix(*worktreePath, "/") || len(*worktreePath) < 2 || len(*worktreePath) > 1024 || strings.ContainsRune(*worktreePath, 0) {
+			return errors.New("worktreePath must be an absolute path")
+		}
+	}
+	if udid != nil {
+		if err := validateUDID(*udid); err != nil {
+			return err
+		}
+	}
+	if environment != nil && !laneEnvironmentPattern.MatchString(*environment) {
+		return errors.New("environment must be a lowercase slug")
+	}
+	if preferredPort != nil && (*preferredPort < 1024 || *preferredPort > 65535) {
+		return errors.New("preferredPort must be between 1024 and 65535")
+	}
+	if laneID != nil && !laneIDPattern.MatchString(*laneID) {
+		return errors.New("laneId is invalid")
+	}
+	if url != nil && (len(*url) == 0 || utf8.RuneCountInString(*url) > 2048) {
+		return errors.New("url must contain 1..2048 characters")
+	}
+	if maxCharacters != nil && (*maxCharacters < 256 || *maxCharacters > 64000) {
+		return errors.New("maxCharacters must be between 256 and 64000")
+	}
+	if agent != nil {
+		kind := (*agent)["kind"]
+		if !oneOf(kind, "claude", "codex", "other") {
+			return errors.New("agent kind must be claude, codex, or other")
+		}
+		if err := validateIdentifier((*agent)["sessionId"], "agent.sessionId"); err != nil {
+			return err
+		}
+		if len(*agent) != 2 {
+			return errors.New("agent accepts only kind and sessionId")
+		}
+	}
+	targetsLane := (laneID != nil) != (worktreePath != nil)
+	switch operation {
+	case "up":
+		if worktreePath == nil || udid == nil {
+			return errors.New("lane up requires worktreePath and udid")
+		}
+		if laneID != nil || url != nil || maxCharacters != nil {
+			return errors.New("lane up does not accept laneId, url, or maxCharacters")
+		}
+	case "ls":
+		if worktreePath != nil || udid != nil || environment != nil || preferredPort != nil ||
+			launch != nil || laneID != nil || url != nil || maxCharacters != nil || agent != nil {
+			return errors.New("lane ls does not accept other fields")
+		}
+	case "down":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || url != nil || maxCharacters != nil || agent != nil {
+			return errors.New("lane down takes exactly one of laneId or worktreePath")
+		}
+	case "launch":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || maxCharacters != nil {
+			return errors.New("lane launch takes exactly one of laneId or worktreePath, plus an optional url")
+		}
+	case "log":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || url != nil || agent != nil {
+			return errors.New("lane log takes exactly one of laneId or worktreePath, plus an optional maxCharacters")
+		}
+	}
+	return nil
 }
 
 func rejectUnsupportedNulls(encoded json.RawMessage, kind protocol.Command) error {

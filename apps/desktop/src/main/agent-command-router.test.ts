@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoDevice } from '../shared/demo-data';
+import {
+	DEFAULT_LANE_ENVIRONMENTS,
+	type Lane,
+	type LaneOperation,
+	type LaneState,
+} from '../shared/lane-protocol';
 import type { DesktopAction, DesktopState } from '../shared/protocol';
 import type {
 	SimulatorAction,
@@ -665,5 +671,166 @@ describe('agent command router', () => {
 				context
 			)
 		).resolves.toEqual({ runId: 'recipe-run-smoke', status: 'complete' });
+	});
+
+	it('reports absent lane support with a typed recovery path', async () => {
+		const { handler } = fixture();
+		await expect(
+			handler({ kind: 'lane', operation: 'ls' }, context)
+		).rejects.toEqual(
+			expect.objectContaining<Partial<AgentCliError>>({
+				code: 'unavailable',
+				recovery: expect.stringContaining('Update RN Devtools'),
+			})
+		);
+	});
+
+	it('routes lane up/launch/down/log through the lane service and resolves worktree targets', async () => {
+		const { dependencies } = fixture();
+		const lane: Lane = {
+			id: 'lane-11111111-2222-4333-8444-555555555555',
+			worktreePath: '/Users/dev/app-feature',
+			branch: 'feature',
+			simulatorUdid: UDID,
+			environment: 'development',
+			port: 8_100,
+			metroPid: 42,
+			metro: 'ready',
+			logPath: '/Users/dev/lane.log',
+			scheme: 'exampleapp',
+			startedAt: now,
+		};
+		let state: LaneState = {
+			revision: 1,
+			updatedAt: now,
+			environments: [...DEFAULT_LANE_ENVIRONMENTS],
+			lanes: [],
+			worktrees: [],
+			repositories: [],
+		};
+		const operations: LaneOperation[] = [];
+		const lanes = {
+			getState: () => state,
+			refresh: async () => state,
+			runOperation: async (operation: LaneOperation) => {
+				operations.push(operation);
+				if (operation.kind === 'lane.start') {
+					state = { ...state, lanes: [lane] };
+					return { ...operation, completed: true, lane, state };
+				}
+				if (operation.kind === 'lane.log') {
+					return { ...operation, completed: true, lane, log: 'metro ready' };
+				}
+				if (operation.kind === 'lane.stop') {
+					state = { ...state, lanes: [] };
+					return { ...operation, completed: true, state };
+				}
+				return { ...operation, completed: true, lane, state };
+			},
+		};
+		const handler = createAgentCommandRouter({ ...dependencies, lanes });
+
+		const up = (await handler(
+			{
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app-feature',
+				udid: UDID,
+				agent: { kind: 'claude', sessionId: 'session-1' },
+			},
+			context
+		)) as { lane: Lane; completed: boolean };
+		expect(up.completed).toBe(true);
+		expect(up.lane.port).toBe(8_100);
+		expect(operations[0]).toMatchObject({
+			kind: 'lane.start',
+			environment: 'development',
+			launch: true,
+			agent: { kind: 'claude', sessionId: 'session-1' },
+		});
+		expect(operations[0]).not.toHaveProperty('state');
+
+		await expect(
+			handler({ kind: 'lane', operation: 'ls' }, context)
+		).resolves.toMatchObject({ lanes: [lane] });
+
+		await handler(
+			{
+				kind: 'lane',
+				operation: 'launch',
+				worktreePath: '/Users/dev/app-feature',
+				url: 'checkout',
+			},
+			context
+		);
+		expect(operations[1]).toMatchObject({
+			kind: 'lane.launch',
+			laneId: lane.id,
+			url: 'checkout',
+		});
+
+		const log = (await handler(
+			{ kind: 'lane', operation: 'log', laneId: lane.id },
+			context
+		)) as { log: string };
+		expect(log.log).toBe('metro ready');
+
+		await expect(
+			handler({ kind: 'lane', operation: 'down', laneId: lane.id }, context)
+		).resolves.toMatchObject({ completed: true, laneId: lane.id });
+		await expect(
+			handler({ kind: 'lane', operation: 'down', laneId: lane.id }, context)
+		).rejects.toEqual(
+			expect.objectContaining<Partial<AgentCliError>>({
+				code: 'lane_not_found',
+			})
+		);
+	});
+
+	it('surfaces a failed lane receipt as a retryable typed error', async () => {
+		const { dependencies } = fixture();
+		const lanes = {
+			getState: () => ({
+				revision: 1,
+				updatedAt: now,
+				environments: [...DEFAULT_LANE_ENVIRONMENTS],
+				lanes: [],
+				worktrees: [],
+				repositories: [],
+			}),
+			refresh: async () => ({
+				revision: 1,
+				updatedAt: now,
+				environments: [...DEFAULT_LANE_ENVIRONMENTS],
+				lanes: [],
+				worktrees: [],
+				repositories: [],
+			}),
+			runOperation: async (operation: LaneOperation) => ({
+				actionId: operation.actionId,
+				kind: operation.kind,
+				completed: false,
+				error: 'Metro port 8100 is already in use.',
+			}),
+		};
+		const handler = createAgentCommandRouter({ ...dependencies, lanes });
+		await expect(
+			handler(
+				{
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+					preferredPort: 8_100,
+				},
+				context
+			)
+		).rejects.toEqual(
+			expect.objectContaining<Partial<AgentCliError>>({
+				code: 'lane_failed',
+				message: 'Metro port 8100 is already in use.',
+				retryable: true,
+			})
+		);
 	});
 });

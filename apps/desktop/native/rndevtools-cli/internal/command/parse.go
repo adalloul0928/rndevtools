@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -96,6 +97,50 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "udids", path: []string{"udids"}, kind: fieldCSV, usage: "Comma-separated simulator UDIDs (max 20)."},
 		{flagName: "profile-id", path: []string{"profileId"}, kind: fieldString, usage: "Pinned profile identifier required only for preview and verify."},
 	},
+	protocol.CommandLane: {
+		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "up, down, ls, launch, or log."},
+		{flagName: "worktree", path: []string{"worktreePath"}, kind: fieldString, usage: "Absolute worktree path (up; or to address a lane)."},
+		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID the lane runs on (up)."},
+		{flagName: "environment", path: []string{"environment"}, kind: fieldString, usage: "Lane environment id; selects the Metro port range (up)."},
+		{flagName: "preferred-port", path: []string{"preferredPort"}, kind: fieldInteger, usage: "Specific Metro port inside the environment range (up)."},
+		{flagName: "launch", path: []string{"launch"}, kind: fieldBoolean, usage: "Open the dev client once Metro is ready (up; default true)."},
+		{flagName: "lane-id", path: []string{"laneId"}, kind: fieldString, usage: "Lane identifier (down, launch, log)."},
+		{flagName: "url", path: []string{"url"}, kind: fieldString, usage: "Path or full URL to open through the lane scheme (launch)."},
+		{flagName: "max-characters", path: []string{"maxCharacters"}, kind: fieldInteger, usage: "Log tail size (log; 256..64000)."},
+	},
+}
+
+// Agent attribution. Claude Code and Codex export a session identifier into
+// every subprocess they spawn; the CLI forwards it so the desktop can show
+// which agent holds which lane. Only lane commands carry it today.
+const (
+	envClaudeSession  = "CLAUDE_CODE_SESSION_ID"
+	envCodexThread    = "CODEX_THREAD_ID"
+	envGenericSession = "RNDEVTOOLS_AGENT_SESSION_ID"
+)
+
+var agentSessionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+// AgentFromEnvironment reports the coding-agent session that owns this
+// process, or nil when none is detectable.
+func AgentFromEnvironment(lookup func(string) string) map[string]any {
+	if lookup == nil {
+		return nil
+	}
+	for _, candidate := range []struct {
+		variable string
+		kind     string
+	}{
+		{envClaudeSession, "claude"},
+		{envCodexThread, "codex"},
+		{envGenericSession, "other"},
+	} {
+		value := strings.TrimSpace(lookup(candidate.variable))
+		if value != "" && agentSessionPattern.MatchString(value) {
+			return map[string]any{"kind": candidate.kind, "sessionId": value}
+		}
+	}
+	return nil
 }
 
 func Parse(
@@ -103,6 +148,19 @@ func Parse(
 	arguments []string,
 	stdin io.Reader,
 	stdinAvailable bool,
+) (Parsed, error) {
+	return ParseWithEnvironment(kind, arguments, stdin, stdinAvailable, nil)
+}
+
+// ParseWithEnvironment is Parse plus agent attribution read from `lookup`
+// (normally os.Getenv). Attribution is attached only to lane commands that
+// accept it and only when the caller did not already provide one.
+func ParseWithEnvironment(
+	kind protocol.Command,
+	arguments []string,
+	stdin io.Reader,
+	stdinAvailable bool,
+	lookup func(string) string,
 ) (Parsed, error) {
 	specs, ok := commandFields[kind]
 	if !ok {
@@ -153,6 +211,15 @@ func Parse(
 		}
 	}
 
+	if kind == protocol.CommandLane {
+		operation, _ := command["operation"].(string)
+		if _, provided := command["agent"]; !provided && (operation == "up" || operation == "launch") {
+			if agent := AgentFromEnvironment(lookup); agent != nil {
+				command["agent"] = agent
+			}
+		}
+	}
+
 	timeout := client.DefaultTimeout
 	if requestTimeout.set {
 		milliseconds := requestTimeout.value.(int)
@@ -160,6 +227,12 @@ func Parse(
 			return Parsed{}, errors.New("request-timeout-ms must be between 100 and 660000")
 		}
 		timeout = time.Duration(milliseconds) * time.Millisecond
+	} else if kind == protocol.CommandLane {
+		// Booting a Simulator and waiting for Metro can exceed the default
+		// socket deadline; lanes get the same headroom as a long wait.
+		if derived := 240 * time.Second; derived > timeout {
+			timeout = derived
+		}
 	} else if kind == protocol.CommandWait {
 		waitMilliseconds := 30_000
 		if value, ok := command["timeoutMs"]; ok {

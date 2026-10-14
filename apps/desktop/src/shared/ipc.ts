@@ -39,4 +39,7 @@ export const IPC_CHANNELS = {
 	getBuildInsightsState: 'rndevtools-desktop:build-insights:get-state',
 	buildInsightsStateChanged: 'rndevtools-desktop:build-insights:state-changed',
 	runBuildInsightsOperation: 'rndevtools-desktop:build-insights:run-operation',
+	getLaneState: 'rndevtools-desktop:lane:get-state',
+	laneStateChanged: 'rndevtools-desktop:lane:state-changed',
+	runLaneOperation: 'rndevtools-desktop:lane:run-operation',
 } as const;

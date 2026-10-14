@@ -16,6 +16,7 @@ import {
 } from 'electron';
 import type { BuildInsightsState } from '../shared/build-insights-protocol';
 import { IPC_CHANNELS } from '../shared/ipc';
+import type { LaneState } from '../shared/lane-protocol';
 import {
 	DEFAULT_BROKER_HOST,
 	DEFAULT_BROKER_PORT,
@@ -69,6 +70,9 @@ import { BuildInsightsService } from './build-insights-service';
 import { BuildInsightsStore } from './build-insights-store';
 import { desktopActionConfirmationCopy } from './desktop-action-confirmation';
 import { DesktopSettingsStore } from './desktop-settings-store';
+import { createLaneIpcHandlers } from './lane-ipc';
+import { LaneService } from './lane-service';
+import { LaneStore } from './lane-store';
 import { verifyAgentCli } from './native-helper-trust';
 import { NativeHostClient } from './native-host-client';
 import { createRecipeIpcHandlers } from './recipe-ipc';
@@ -138,6 +142,7 @@ let slimmingService: SlimmingService | undefined;
 let recipeService: RecipeService | undefined;
 let agentCliService: AgentCliService | undefined;
 let buildInsightsService: BuildInsightsService | undefined;
+let laneService: LaneService | undefined;
 let stagedCertificateStore: StagedCertificateStore | undefined;
 
 function rendererEntryUrl(): string {
@@ -260,6 +265,19 @@ function sendBuildInsightsState(
 function broadcastBuildInsightsState(state: BuildInsightsState): void {
 	for (const window of windows)
 		sendBuildInsightsState(window.webContents, state);
+}
+
+function sendLaneState(webContents: WebContents, state: LaneState): void {
+	if (webContents.isDestroyed()) return;
+	try {
+		webContents.send(IPC_CHANNELS.laneStateChanged, state);
+	} catch {
+		// A renderer can disappear between the destroyed check and send.
+	}
+}
+
+function broadcastLaneState(state: LaneState): void {
+	for (const window of windows) sendLaneState(window.webContents, state);
 }
 
 function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow | undefined {
@@ -545,6 +563,23 @@ async function selectBuildInsightsSource(
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
+async function selectLaneRepository(
+	event: IpcMainInvokeEvent
+): Promise<string | undefined> {
+	const options: Electron.OpenDialogOptions = {
+		title: 'Track a repository for lanes',
+		message:
+			'Choose a git checkout. Its worktrees become available as lane targets.',
+		buttonLabel: 'Track Repository',
+		properties: ['openDirectory'],
+	};
+	const owner = ownerWindow(event);
+	const result = owner
+		? await dialog.showOpenDialog(owner, options)
+		: await dialog.showOpenDialog(options);
+	return result.canceled ? undefined : result.filePaths[0];
+}
+
 async function selectBuildInsightsExportDestination(
 	event: IpcMainInvokeEvent,
 	format: 'csv' | 'json'
@@ -638,6 +673,7 @@ function registerIpc(
 	slimming: SlimmingService,
 	recipes: RecipeService,
 	buildInsights: BuildInsightsService,
+	lanes: LaneService,
 	certificates: StagedCertificateStore,
 	nativeResourceDirectory: string,
 	settings: DesktopSettingsStore
@@ -673,6 +709,11 @@ function registerIpc(
 		selectWatchRoot: (event) =>
 			selectBuildInsightsSource(event, 'derived-data-root'),
 		selectExportDestination: selectBuildInsightsExportDestination,
+	});
+	const laneHandlers = createLaneIpcHandlers({
+		service: lanes,
+		assertTrustedRenderer,
+		selectRepository: selectLaneRepository,
 	});
 	const simulatorOnboardingHandlers = createSimulatorOnboardingIpcHandlers({
 		assertTrustedRenderer,
@@ -1120,6 +1161,8 @@ function registerIpc(
 		IPC_CHANNELS.runBuildInsightsOperation,
 		buildInsightsHandlers.runOperation
 	);
+	ipcMain.handle(IPC_CHANNELS.getLaneState, laneHandlers.getState);
+	ipcMain.handle(IPC_CHANNELS.runLaneOperation, laneHandlers.runOperation);
 }
 
 function updateSimulatorPolling(): void {
@@ -1323,6 +1366,10 @@ if (!app.requestSingleInstanceLock()) {
 					path.join(app.getPath('userData'), 'build-insights')
 				),
 			});
+			laneService = new LaneService({
+				store: new LaneStore(path.join(app.getPath('userData'), 'lanes')),
+				simulator: simulatorService,
+			});
 			agentCliService = new AgentCliService({
 				socketPath: path.join(
 					app.getPath('userData'),
@@ -1333,6 +1380,7 @@ if (!app.requestSingleInstanceLock()) {
 					broker,
 					simulator: simulatorService,
 					slimming: slimmingService,
+					lanes: laneService,
 					recipes: {
 						list: () => recipeService?.getState().recipes ?? [],
 						get: (recipeId) => recipeService?.getRecipe(recipeId) ?? null,
@@ -1371,6 +1419,7 @@ if (!app.requestSingleInstanceLock()) {
 				slimmingService,
 				recipeService,
 				buildInsightsService,
+				laneService,
 				stagedCertificateStore,
 				nativeResourceDirectory,
 				settings
@@ -1380,12 +1429,14 @@ if (!app.requestSingleInstanceLock()) {
 			slimmingService.subscribe(broadcastSlimmingState);
 			recipeService.subscribe(broadcastRecipeState);
 			buildInsightsService.subscribe(broadcastBuildInsightsState);
+			laneService.subscribe(broadcastLaneState);
 			await Promise.all([
 				broker.start(),
 				simulatorService.start(),
 				slimmingService.start(),
 				recipeService.start(),
 				buildInsightsService.start(),
+				laneService.start(),
 				agentCliService.start(),
 			]);
 			if (shutdownStarted) return;
@@ -1425,6 +1476,7 @@ app.on('before-quit', (event) => {
 		slimmingService?.stop(),
 		recipeService?.stop(),
 		buildInsightsService?.stop(),
+		laneService?.stop(),
 		agentCliService?.stop(),
 		certificateShutdown,
 	]).finally(() => {
