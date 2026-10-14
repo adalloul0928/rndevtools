@@ -79,6 +79,16 @@ import {
 	simulatorStateSchema,
 } from '../shared/simulator-protocol';
 import {
+	SIMULATOR_STREAM_MAX_FRAME_BYTES,
+	type SimulatorStreamBridge,
+	type SimulatorStreamFrame,
+	type SimulatorStreamStatus,
+	type SimulatorStreamSubscription,
+	simulatorStreamFrameSchema,
+	simulatorStreamStatusSchema,
+	simulatorStreamSubscriptionsSchema,
+} from '../shared/simulator-stream-protocol';
+import {
 	type SlimmingAcknowledgementReceipt,
 	type SlimmingAcknowledgementRequest,
 	type SlimmingAction,
@@ -106,7 +116,8 @@ const bridge: DesktopBridge &
 	SlimmingBridge &
 	RecipeBridge &
 	BuildInsightsBridge &
-	LaneBridge = {
+	LaneBridge &
+	SimulatorStreamBridge = {
 	getBootstrap: async () =>
 		desktopBootstrapSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getBootstrap)
@@ -413,6 +424,63 @@ const bridge: DesktopBridge &
 		return laneOperationReceiptSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.runLaneOperation, validated)
 		) as LaneOperationReceipt;
+	},
+	setSimulatorStreamSubscriptions: async (
+		subscriptions: readonly SimulatorStreamSubscription[]
+	) => {
+		await ipcRenderer.invoke(
+			IPC_CHANNELS.setSimulatorStreamSubscriptions,
+			simulatorStreamSubscriptionsSchema.parse(subscriptions)
+		);
+	},
+	subscribeSimulatorStreamFrames: (
+		listener: (frame: SimulatorStreamFrame, bytes: Uint8Array) => void
+	) => {
+		if (typeof listener !== 'function') {
+			throw new TypeError('Stream frame listener must be a function.');
+		}
+		const wrapped = (
+			_event: Electron.IpcRendererEvent,
+			frame: unknown,
+			bytes: unknown
+		) => {
+			const parsed = simulatorStreamFrameSchema.safeParse(frame);
+			if (
+				!parsed.success ||
+				!(bytes instanceof Uint8Array) ||
+				bytes.byteLength === 0 ||
+				bytes.byteLength > SIMULATOR_STREAM_MAX_FRAME_BYTES
+			) {
+				return;
+			}
+			try {
+				listener(parsed.data, bytes);
+			} catch {
+				// A renderer callback must not break the isolated IPC event handler.
+			}
+		};
+		ipcRenderer.on(IPC_CHANNELS.simulatorStreamFrame, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.simulatorStreamFrame, wrapped);
+	},
+	subscribeSimulatorStreamStatus: (
+		listener: (status: SimulatorStreamStatus) => void
+	) => {
+		if (typeof listener !== 'function') {
+			throw new TypeError('Stream status listener must be a function.');
+		}
+		const wrapped = (_event: Electron.IpcRendererEvent, status: unknown) => {
+			const parsed = simulatorStreamStatusSchema.safeParse(status);
+			if (!parsed.success) return;
+			try {
+				listener(parsed.data);
+			} catch {
+				// A renderer callback must not break the isolated IPC event handler.
+			}
+		};
+		ipcRenderer.on(IPC_CHANNELS.simulatorStreamStatus, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.simulatorStreamStatus, wrapped);
 	},
 };
 

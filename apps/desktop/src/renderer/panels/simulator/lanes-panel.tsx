@@ -12,6 +12,7 @@ import {
 	X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { DeviceScreen, VisibleDeviceScreen } from '@/components/device-screen';
 import { AgentBadge, LaneChip, WorktreeLabel } from '@/components/lane-ui';
 import {
 	SimulatorMetric,
@@ -289,19 +290,31 @@ export function LanesPanel() {
 											aria-pressed={selected}
 											onClick={() => setSelectedLaneId(lane.id)}
 										>
-											<div className="lane-row-main">
-												<WorktreeLabel
-													path={lane.worktreePath}
-													branch={lane.branch}
-												/>
-												<LaneChip lane={lane} compact />
-											</div>
-											<div className="lane-row-meta">
-												<span className="lane-row-device">
-													{device?.name ?? lane.simulatorUdid}
-													{device ? ` · ${device.state}` : ''}
-												</span>
-												{lane.agent ? <AgentBadge agent={lane.agent} /> : null}
+											<VisibleDeviceScreen
+												className="lane-row-thumb"
+												live={device?.state === 'booted'}
+												name={device?.name ?? lane.branch}
+												quality="tile"
+												size="thumb"
+												udid={lane.simulatorUdid}
+											/>
+											<div className="lane-row-copy">
+												<div className="lane-row-main">
+													<WorktreeLabel
+														path={lane.worktreePath}
+														branch={lane.branch}
+													/>
+													<LaneChip lane={lane} compact />
+												</div>
+												<div className="lane-row-meta">
+													<span className="lane-row-device">
+														{device?.name ?? lane.simulatorUdid}
+														{device ? ` · ${device.state}` : ''}
+													</span>
+													{lane.agent ? (
+														<AgentBadge agent={lane.agent} />
+													) : null}
+												</div>
 											</div>
 										</button>
 									</li>
@@ -576,6 +589,15 @@ function LaneDetail({
 					<span title={lane.worktreePath}>{shortPath(lane.worktreePath)}</span>
 				</div>
 				<LaneChip lane={lane} compact />
+			</div>
+			<div className="sim-focus-screen">
+				<DeviceScreen
+					className="sim-focus-screen-frame"
+					live={device?.state === 'booted'}
+					name={device?.name ?? lane.branch}
+					quality="focus"
+					udid={lane.simulatorUdid}
+				/>
 			</div>
 			<div className="sim-action-row">
 				<Button

@@ -8,6 +8,7 @@ import {
 	dialog,
 	type IpcMainInvokeEvent,
 	ipcMain,
+	nativeImage,
 	nativeTheme,
 	net,
 	protocol,
@@ -44,6 +45,11 @@ import {
 	simulatorConfirmationResultSchema,
 	simulatorJobIdSchema,
 } from '../shared/simulator-protocol';
+import type {
+	SimulatorStreamFrame,
+	SimulatorStreamStatus,
+} from '../shared/simulator-stream-protocol';
+import { simulatorStreamSubscriptionsSchema } from '../shared/simulator-stream-protocol';
 import {
 	type SlimmingAcknowledgementReceipt,
 	type SlimmingActionReceipt,
@@ -100,6 +106,10 @@ import {
 	validateXcodeDeveloperDirectory,
 } from './simulator-onboarding-ipc';
 import { SimulatorService } from './simulator-service';
+import {
+	createNativeImageFrameEncoder,
+	SimulatorStreamService,
+} from './simulator-stream-service';
 import { slimmingConfirmationCopy } from './slimming-confirmation';
 import { SlimmingService } from './slimming-service';
 import { StagedCertificateStore } from './staged-certificate-store';
@@ -143,6 +153,7 @@ let recipeService: RecipeService | undefined;
 let agentCliService: AgentCliService | undefined;
 let buildInsightsService: BuildInsightsService | undefined;
 let laneService: LaneService | undefined;
+let simulatorStreamService: SimulatorStreamService | undefined;
 let stagedCertificateStore: StagedCertificateStore | undefined;
 
 function rendererEntryUrl(): string {
@@ -278,6 +289,33 @@ function sendLaneState(webContents: WebContents, state: LaneState): void {
 
 function broadcastLaneState(state: LaneState): void {
 	for (const window of windows) sendLaneState(window.webContents, state);
+}
+
+function broadcastSimulatorStreamFrame(
+	frame: SimulatorStreamFrame,
+	bytes: Uint8Array
+): void {
+	for (const window of windows) {
+		const webContents = window.webContents;
+		if (webContents.isDestroyed()) continue;
+		try {
+			webContents.send(IPC_CHANNELS.simulatorStreamFrame, frame, bytes);
+		} catch {
+			// A renderer can disappear between the destroyed check and send.
+		}
+	}
+}
+
+function broadcastSimulatorStreamStatus(status: SimulatorStreamStatus): void {
+	for (const window of windows) {
+		const webContents = window.webContents;
+		if (webContents.isDestroyed()) continue;
+		try {
+			webContents.send(IPC_CHANNELS.simulatorStreamStatus, status);
+		} catch {
+			// A renderer can disappear between the destroyed check and send.
+		}
+	}
 }
 
 function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow | undefined {
@@ -1163,6 +1201,15 @@ function registerIpc(
 	);
 	ipcMain.handle(IPC_CHANNELS.getLaneState, laneHandlers.getState);
 	ipcMain.handle(IPC_CHANNELS.runLaneOperation, laneHandlers.runOperation);
+	ipcMain.handle(
+		IPC_CHANNELS.setSimulatorStreamSubscriptions,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			await simulatorStreamService?.setSubscriptions(
+				simulatorStreamSubscriptionsSchema.parse(value)
+			);
+		}
+	);
 }
 
 function updateSimulatorPolling(): void {
@@ -1172,6 +1219,12 @@ function updateSimulatorPolling(): void {
 	);
 	simulatorService?.setPollingActive(visible);
 	slimmingService?.setPollingActive(visible);
+	// Live screens are the most expensive poller; they also stop when every
+	// window is merely unfocused, not just hidden.
+	const focused = [...windows].some(
+		(window) => !window.isDestroyed() && window.isFocused()
+	);
+	simulatorStreamService?.setPaused(!(visible && focused));
 }
 
 function createWindow(): BrowserWindow {
@@ -1211,6 +1264,8 @@ function createWindow(): BrowserWindow {
 	});
 	window.on('show', updateSimulatorPolling);
 	window.on('hide', updateSimulatorPolling);
+	window.on('focus', updateSimulatorPolling);
+	window.on('blur', updateSimulatorPolling);
 	window.on('minimize', updateSimulatorPolling);
 	window.on('restore', updateSimulatorPolling);
 	const senderId = window.webContents.id;
@@ -1370,6 +1425,13 @@ if (!app.requestSingleInstanceLock()) {
 				store: new LaneStore(path.join(app.getPath('userData'), 'lanes')),
 				simulator: simulatorService,
 			});
+			simulatorStreamService = new SimulatorStreamService({
+				frameDirectory: path.join(
+					app.getPath('temp'),
+					`rndevtools-stream-${process.pid}`
+				),
+				encode: createNativeImageFrameEncoder(nativeImage),
+			});
 			agentCliService = new AgentCliService({
 				socketPath: path.join(
 					app.getPath('userData'),
@@ -1430,6 +1492,8 @@ if (!app.requestSingleInstanceLock()) {
 			recipeService.subscribe(broadcastRecipeState);
 			buildInsightsService.subscribe(broadcastBuildInsightsState);
 			laneService.subscribe(broadcastLaneState);
+			simulatorStreamService.subscribeFrames(broadcastSimulatorStreamFrame);
+			simulatorStreamService.subscribeStatus(broadcastSimulatorStreamStatus);
 			await Promise.all([
 				broker.start(),
 				simulatorService.start(),
@@ -1477,6 +1541,7 @@ app.on('before-quit', (event) => {
 		recipeService?.stop(),
 		buildInsightsService?.stop(),
 		laneService?.stop(),
+		simulatorStreamService?.stop(),
 		agentCliService?.stop(),
 		certificateShutdown,
 	]).finally(() => {

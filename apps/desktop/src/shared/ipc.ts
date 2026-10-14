@@ -42,4 +42,8 @@ export const IPC_CHANNELS = {
 	getLaneState: 'rndevtools-desktop:lane:get-state',
 	laneStateChanged: 'rndevtools-desktop:lane:state-changed',
 	runLaneOperation: 'rndevtools-desktop:lane:run-operation',
+	setSimulatorStreamSubscriptions:
+		'rndevtools-desktop:simulator:stream:set-subscriptions',
+	simulatorStreamFrame: 'rndevtools-desktop:simulator:stream:frame',
+	simulatorStreamStatus: 'rndevtools-desktop:simulator:stream:status',
 } as const;

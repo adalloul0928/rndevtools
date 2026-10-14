@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceSession } from '../../../shared/protocol';
 import {
+	clampFleetTile,
 	connectedSessionsForSimulator,
+	FLEET_TILE_RANGE,
 	parseSimulatorCreateCount,
 	simulatorEraseAvailability,
 	simulatorOpenPresentation,
@@ -132,5 +134,13 @@ describe('Simulator Fleet connected-session association', () => {
 			'simulated',
 			'offline-newer',
 		]);
+	});
+
+	it('clamps and steps the wall tile size, falling back to the default', () => {
+		expect(clampFleetTile(Number.NaN)).toBe(FLEET_TILE_RANGE.default);
+		expect(clampFleetTile(0)).toBe(FLEET_TILE_RANGE.min);
+		expect(clampFleetTile(10_000)).toBe(FLEET_TILE_RANGE.max);
+		expect(clampFleetTile(207)).toBe(200);
+		expect(clampFleetTile(211)).toBe(220);
 	});
 });

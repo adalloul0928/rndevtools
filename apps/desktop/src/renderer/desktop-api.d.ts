@@ -3,6 +3,7 @@ import type { LaneBridge } from '../shared/lane-protocol';
 import type { DesktopBridge } from '../shared/protocol';
 import type { RecipeBridge } from '../shared/recipe-protocol';
 import type { SimulatorBridge } from '../shared/simulator-protocol';
+import type { SimulatorStreamBridge } from '../shared/simulator-stream-protocol';
 import type { SlimmingBridge } from '../shared/slimming-protocol';
 
 declare global {
@@ -12,6 +13,7 @@ declare global {
 			SlimmingBridge &
 			RecipeBridge &
 			BuildInsightsBridge &
-			LaneBridge;
+			LaneBridge &
+			SimulatorStreamBridge;
 	}
 }

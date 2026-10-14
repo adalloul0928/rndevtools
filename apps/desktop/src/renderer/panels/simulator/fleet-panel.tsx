@@ -7,6 +7,8 @@ import {
 	Copy,
 	Cpu,
 	HardDrive,
+	LayoutGrid,
+	List,
 	MemoryStick,
 	Pencil,
 	Play,
@@ -21,6 +23,7 @@ import {
 	Waypoints,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { DeviceScreen, VisibleDeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
 	AgentGlyph,
@@ -148,6 +151,41 @@ export function connectedSessionsForSimulator(
 		});
 }
 
+type FleetLayout = 'wall' | 'list';
+const FLEET_LAYOUT_KEY = 'rndevtools.desktop.fleet.layout';
+const FLEET_TILE_KEY = 'rndevtools.desktop.fleet.tile';
+export const FLEET_TILE_RANGE = { min: 140, max: 320, step: 20, default: 200 };
+
+function readStoredLayout(): FleetLayout {
+	try {
+		return window.localStorage.getItem(FLEET_LAYOUT_KEY) === 'list'
+			? 'list'
+			: 'wall';
+	} catch {
+		return 'wall';
+	}
+}
+
+export function clampFleetTile(value: number): number {
+	if (!Number.isFinite(value)) return FLEET_TILE_RANGE.default;
+	const stepped =
+		Math.round((value - FLEET_TILE_RANGE.min) / FLEET_TILE_RANGE.step) *
+			FLEET_TILE_RANGE.step +
+		FLEET_TILE_RANGE.min;
+	return Math.min(
+		FLEET_TILE_RANGE.max,
+		Math.max(FLEET_TILE_RANGE.min, stepped)
+	);
+}
+
+function readStoredTile(): number {
+	try {
+		return clampFleetTile(Number(window.localStorage.getItem(FLEET_TILE_KEY)));
+	} catch {
+		return FLEET_TILE_RANGE.default;
+	}
+}
+
 export function FleetPanel() {
 	const desktop = useDesktopRuntime();
 	const {
@@ -162,6 +200,8 @@ export function FleetPanel() {
 	const lanes = useLaneRuntime();
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<FleetStateFilter>('all');
+	const [layout, setLayout] = useState<FleetLayout>(readStoredLayout);
+	const [tile, setTile] = useState<number>(readStoredTile);
 	const [batchUdids, setBatchUdids] = useState<string[]>([]);
 	const [showCreate, setShowCreate] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
@@ -247,6 +287,14 @@ export function FleetPanel() {
 		[desktop.state?.devices, selectedDevice]
 	);
 
+	useEffect(() => {
+		try {
+			window.localStorage.setItem(FLEET_LAYOUT_KEY, layout);
+			window.localStorage.setItem(FLEET_TILE_KEY, String(tile));
+		} catch {
+			// Preferences are best-effort.
+		}
+	}, [layout, tile]);
 	useEffect(() => {
 		const known = new Set(state.devices.map((device) => device.udid));
 		setBatchUdids((current) => {
@@ -406,6 +454,48 @@ export function FleetPanel() {
 						</NativeSelect.Indicator>
 					</NativeSelect.Trigger>
 				</NativeSelect>
+				<span className="sim-toolbar-separator" />
+				<fieldset className="sim-layout-toggle">
+					<legend className="sr-only">Fleet layout</legend>
+					<Button
+						aria-label="Show as wall of live screens"
+						aria-pressed={layout === 'wall'}
+						className="sim-icon-button"
+						isIconOnly
+						size="sm"
+						variant={layout === 'wall' ? 'secondary' : 'ghost'}
+						onPress={() => setLayout('wall')}
+					>
+						<LayoutGrid className="h-3.5 w-3.5" />
+					</Button>
+					<Button
+						aria-label="Show as list"
+						aria-pressed={layout === 'list'}
+						className="sim-icon-button"
+						isIconOnly
+						size="sm"
+						variant={layout === 'list' ? 'secondary' : 'ghost'}
+						onPress={() => setLayout('list')}
+					>
+						<List className="h-3.5 w-3.5" />
+					</Button>
+				</fieldset>
+				{layout === 'wall' ? (
+					<label className="sim-tile-size">
+						<span>Tile</span>
+						<input
+							aria-label="Tile size"
+							max={FLEET_TILE_RANGE.max}
+							min={FLEET_TILE_RANGE.min}
+							step={FLEET_TILE_RANGE.step}
+							type="range"
+							value={tile}
+							onChange={(event) =>
+								setTile(clampFleetTile(Number(event.currentTarget.value)))
+							}
+						/>
+					</label>
+				) : null}
 				{batchMode ? (
 					<>
 						<span className="sim-toolbar-separator" />
@@ -472,41 +562,54 @@ export function FleetPanel() {
 			) : (
 				<div className="sim-fleet-layout">
 					<div className="sim-list-pane">
-						<DenseVirtualList
-							ariaLabel="Simulator fleet"
-							emptyDescription="Try a different name, state, runtime, or device identifier."
-							emptyTitle="No targets match these filters"
-							items={targets}
-							getId={(target) => target.udid}
-							rowHeight={64}
-							selectedId={selectedDevice?.udid}
-							selectedIds={batchMode ? batchUdids : undefined}
-							onSelectedIdsChange={
-								batchMode ? (ids) => setBatchUdids(ids.slice(0, 20)) : undefined
-							}
-							textValue={(target) =>
-								`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
-							}
-							onSelect={(target) => setSelectedDeviceUdid(target.udid)}
-							renderItem={(target) => {
-								const row = rowByUdid.get(target.udid);
-								return (
-									<>
-										{!batchMode ? (
-											<div className="sim-list-leading">
-												{row?.lane?.agent ? (
-													<AgentGlyph kind={row.lane.agent.kind} />
-												) : (
-													<Smartphone className="h-4 w-4" />
-												)}
-											</div>
-										) : null}
-										<FleetRowText row={row} target={target} />
-										<FleetRowTrailing row={row} target={target} />
-									</>
-								);
-							}}
-						/>
+						{layout === 'wall' && !batchMode ? (
+							<DeviceWall
+								rows={targets
+									.map((target) => rowByUdid.get(target.udid))
+									.filter((row): row is FleetRow => Boolean(row))}
+								selectedUdid={selectedDevice?.udid}
+								tile={tile}
+								onSelect={setSelectedDeviceUdid}
+							/>
+						) : (
+							<DenseVirtualList
+								ariaLabel="Simulator fleet"
+								emptyDescription="Try a different name, state, runtime, or device identifier."
+								emptyTitle="No targets match these filters"
+								items={targets}
+								getId={(target) => target.udid}
+								rowHeight={64}
+								selectedId={selectedDevice?.udid}
+								selectedIds={batchMode ? batchUdids : undefined}
+								onSelectedIdsChange={
+									batchMode
+										? (ids) => setBatchUdids(ids.slice(0, 20))
+										: undefined
+								}
+								textValue={(target) =>
+									`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
+								}
+								onSelect={(target) => setSelectedDeviceUdid(target.udid)}
+								renderItem={(target) => {
+									const row = rowByUdid.get(target.udid);
+									return (
+										<>
+											{!batchMode ? (
+												<div className="sim-list-leading">
+													{row?.lane?.agent ? (
+														<AgentGlyph kind={row.lane.agent.kind} />
+													) : (
+														<Smartphone className="h-4 w-4" />
+													)}
+												</div>
+											) : null}
+											<FleetRowText row={row} target={target} />
+											<FleetRowTrailing row={row} target={target} />
+										</>
+									);
+								}}
+							/>
+						)}
 					</div>
 					<div className="sim-detail-pane panel-scroll">
 						{selectedDevice ? (
@@ -606,6 +709,103 @@ export function FleetPanel() {
 				</div>
 			) : null}
 		</section>
+	);
+}
+
+/**
+ * The wall: every Simulator as a live tile, busiest first. Tiles stream only
+ * while on screen (IntersectionObserver), the selected tile gets the focus
+ * profile, and the tile slider sets the column width.
+ */
+function DeviceWall({
+	rows,
+	selectedUdid,
+	tile,
+	onSelect,
+}: {
+	rows: readonly FleetRow[];
+	selectedUdid: string | undefined;
+	tile: number;
+	onSelect: (udid: string) => void;
+}) {
+	if (rows.length === 0) {
+		return (
+			<div className="sim-list-empty">
+				<strong>No targets match these filters</strong>
+				<span>Try a different name, state, branch, or agent.</span>
+			</div>
+		);
+	}
+	return (
+		<ul
+			className="device-wall panel-scroll"
+			aria-label="Simulator wall"
+			style={{ '--tile': `${tile}px` } as React.CSSProperties}
+		>
+			{rows.map((row) => {
+				const selected = row.device.udid === selectedUdid;
+				return (
+					<li
+						key={row.device.udid}
+						className={`device-tile ${selected ? 'is-selected' : ''} ${row.live ? 'is-live' : ''}`}
+					>
+						<VisibleDeviceScreen
+							className="device-tile-screen"
+							live={row.live}
+							name={row.device.name}
+							quality="tile"
+							udid={row.device.udid}
+							onActivate={() => onSelect(row.device.udid)}
+						/>
+						<button
+							type="button"
+							className="device-tile-body"
+							aria-current={selected ? 'true' : undefined}
+							onClick={() => onSelect(row.device.udid)}
+						>
+							<span className="device-tile-title">
+								{row.lane?.agent ? (
+									<AgentGlyph kind={row.lane.agent.kind} />
+								) : null}
+								<strong className="device-tile-name">{row.device.name}</strong>
+								<span
+									className={`device-tile-dot ${row.live ? 'is-live' : row.transitioning ? 'is-transitioning' : ''}`}
+									aria-hidden="true"
+								/>
+								<span className="sr-only">{row.device.state}</span>
+							</span>
+							<span className="device-tile-meta">
+								<span className="sim-list-subtitle-item">
+									{row.runtimeName}
+								</span>
+								{row.memoryBytes !== undefined ? (
+									<>
+										<span aria-hidden="true">·</span>
+										<span className="sim-list-memory">
+											{formatBytes(row.memoryBytes)}
+										</span>
+									</>
+								) : null}
+							</span>
+							<span className="device-tile-chips">
+								{row.lane ? <LaneChip lane={row.lane} compact /> : null}
+								{row.live && row.slim.level !== 'unknown' ? (
+									<SlimChip slim={row.slim} />
+								) : null}
+							</span>
+							{row.lane ? (
+								<code
+									className="device-tile-branch"
+									title={row.lane.worktreePath}
+								>
+									{row.lane.branch}
+								</code>
+							) : null}
+						</button>
+					</li>
+				);
+			})}
+		</ul>
 	);
 }
 
@@ -911,6 +1111,22 @@ function TargetDetail({
 					<TargetStatePill state={target.state} />
 				</div>
 			</div>
+			<Disclosure defaultOpen title="Live screen">
+				<div className="sim-focus-screen">
+					<DeviceScreen
+						className="sim-focus-screen-frame"
+						live={target.state === 'booted'}
+						name={target.name}
+						quality="focus"
+						udid={target.udid}
+					/>
+					<p className="sim-inline-note">
+						Frames come from bounded <code>simctl io screenshot</code> polling,
+						about four a second for this view and one a second per wall tile.
+						Nothing is recorded; the view pauses when the window is unfocused.
+					</p>
+				</div>
+			</Disclosure>
 			<div className="sim-action-row">
 				<Button
 					isDisabled={!openPresentation.allowed}

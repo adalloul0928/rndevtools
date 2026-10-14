@@ -9,6 +9,7 @@ import { DesktopRuntimeProvider } from './state/desktop-runtime';
 import { LaneRuntimeProvider } from './state/lane-runtime';
 import { RecipeRuntimeProvider } from './state/recipe-runtime';
 import { SimulatorRuntimeProvider } from './state/simulator-runtime';
+import { SimulatorStreamProvider } from './state/simulator-stream-runtime';
 import { SlimmingRuntimeProvider } from './state/slimming-runtime';
 
 const root = document.getElementById('root');
@@ -22,7 +23,9 @@ createRoot(root).render(
 					<SlimmingRuntimeProvider>
 						<RecipeRuntimeProvider>
 							<LaneRuntimeProvider>
-								<App />
+								<SimulatorStreamProvider>
+									<App />
+								</SimulatorStreamProvider>
 							</LaneRuntimeProvider>
 						</RecipeRuntimeProvider>
 					</SlimmingRuntimeProvider>
