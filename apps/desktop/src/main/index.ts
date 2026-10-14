@@ -51,6 +51,7 @@ import type {
 } from '../shared/simulator-stream-protocol';
 import { simulatorStreamSubscriptionsSchema } from '../shared/simulator-stream-protocol';
 import {
+	SLIMMING_CONFIRMATIONS,
 	type SlimmingAcknowledgementReceipt,
 	type SlimmingActionReceipt,
 	type SlimmingConfirmationResult,
@@ -752,6 +753,23 @@ function registerIpc(
 		service: lanes,
 		assertTrustedRenderer,
 		selectRepository: selectLaneRepository,
+		confirmSlim: (event, confirmation) =>
+			confirmSlimmingTarget(
+				event,
+				{
+					actionId: `lane-slim-${randomUUID()}`,
+					kind: 'profile.apply',
+					profileId: confirmation.profileId,
+					simulatorUdids: [confirmation.simulatorUdid],
+					confirmation: SLIMMING_CONFIRMATIONS.apply,
+				},
+				slimming
+					.getState()
+					.profiles.find((profile) => profile.id === confirmation.profileId)
+					?.name
+			),
+		findLane: (laneId) =>
+			lanes.getState().lanes.find((lane) => lane.id === laneId),
 	});
 	const simulatorOnboardingHandlers = createSimulatorOnboardingIpcHandlers({
 		assertTrustedRenderer,
@@ -1424,6 +1442,8 @@ if (!app.requestSingleInstanceLock()) {
 			laneService = new LaneService({
 				store: new LaneStore(path.join(app.getPath('userData'), 'lanes')),
 				simulator: simulatorService,
+				slimming: slimmingService,
+				mutationCoordinator: simulatorMutationCoordinator,
 			});
 			simulatorStreamService = new SimulatorStreamService({
 				frameDirectory: path.join(

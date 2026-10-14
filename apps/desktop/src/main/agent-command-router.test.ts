@@ -709,11 +709,17 @@ describe('agent command router', () => {
 			repositories: [],
 		};
 		const operations: LaneOperation[] = [];
+		const runOptions: unknown[] = [];
 		const lanes = {
 			getState: () => state,
 			refresh: async () => state,
-			runOperation: async (operation: LaneOperation) => {
+			runOperation: async (
+				operation: LaneOperation,
+				_signal?: AbortSignal,
+				options?: unknown
+			) => {
 				operations.push(operation);
+				runOptions.push(options);
 				if (operation.kind === 'lane.start') {
 					state = { ...state, lanes: [lane] };
 					return { ...operation, completed: true, lane, state };
@@ -736,6 +742,7 @@ describe('agent command router', () => {
 				operation: 'up',
 				worktreePath: '/Users/dev/app-feature',
 				udid: UDID,
+				slimProfileId: 'rndevtools-development',
 				agent: { kind: 'claude', sessionId: 'session-1' },
 			},
 			context
@@ -746,9 +753,12 @@ describe('agent command router', () => {
 			kind: 'lane.start',
 			environment: 'development',
 			launch: true,
+			slimProfileId: 'rndevtools-development',
 			agent: { kind: 'claude', sessionId: 'session-1' },
 		});
 		expect(operations[0]).not.toHaveProperty('state');
+		// The unattended CLI may request slimming but can never approve it.
+		expect(runOptions[0]).toBeUndefined();
 
 		await expect(
 			handler({ kind: 'lane', operation: 'ls' }, context)

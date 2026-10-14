@@ -213,6 +213,12 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 				.optional(),
 			preferredPort: z.number().int().min(1_024).max(65_535).optional(),
 			launch: z.boolean().optional(),
+			/**
+			 * SimSlim profile to request for the lane's Simulator. The CLI cannot
+			 * approve a mutation, so the lane comes back `needs-approval` until an
+			 * operator approves it in the desktop app.
+			 */
+			slimProfileId: identifierSchema.optional(),
 			laneId: laneIdSchema.optional(),
 			url: z.string().min(1).max(2_048).optional(),
 			maxCharacters: z.number().int().min(256).max(64_000).optional(),
@@ -235,6 +241,7 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 						'environment',
 						'preferredPort',
 						'launch',
+						'slimProfileId',
 						'agent',
 					])) ||
 				(value.operation === 'down' &&

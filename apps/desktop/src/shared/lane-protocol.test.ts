@@ -10,6 +10,7 @@ import {
 	laneHealth,
 	laneOperationSchema,
 	laneSchema,
+	laneSlimSummary,
 	laneStateSchema,
 } from './lane-protocol';
 
@@ -127,6 +128,53 @@ describe('laneDeepLink', () => {
 
 	it('refuses a bare path when the lane has no scheme', () => {
 		expect(() => laneDeepLink({}, 'checkout')).toThrow(/no URL scheme/);
+	});
+});
+
+describe('laneSlimSummary', () => {
+	it('describes every slim status for rows and CLI output', () => {
+		expect(laneSlimSummary(undefined)).toBeUndefined();
+		const at = { profileId: 'rndevtools-development', updatedAt: 1 };
+		expect(laneSlimSummary({ ...at, status: 'applied' })).toEqual({
+			label: 'slim: rndevtools-development',
+			tone: 'success',
+		});
+		expect(laneSlimSummary({ ...at, status: 'needs-approval' })).toEqual({
+			label: 'slim: approve in app',
+			tone: 'warning',
+		});
+		expect(laneSlimSummary({ ...at, status: 'failed' })?.tone).toBe('danger');
+		expect(laneSlimSummary({ ...at, status: 'skipped' })?.tone).toBe('muted');
+	});
+
+	it('accepts lane.start with a slim profile and the lane.slim decision operation', () => {
+		expect(
+			laneOperationSchema.parse({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: '/Users/dev/app',
+				simulatorUdid: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+				slimProfileId: 'rndevtools-development',
+			})
+		).toMatchObject({ slimProfileId: 'rndevtools-development', launch: true });
+		expect(() =>
+			laneOperationSchema.parse({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: '/Users/dev/app',
+				simulatorUdid: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+				slimProfileId: '../escape',
+			})
+		).toThrow();
+		expect(() =>
+			laneOperationSchema.parse({
+				actionId: 'op-2',
+				kind: 'lane.slim',
+				laneId: 'lane-11111111-2222-4333-8444-555555555555',
+				decision: 'approve',
+				slimApproved: true,
+			})
+		).toThrow(); // approval is not part of the wire schema
 	});
 });
 

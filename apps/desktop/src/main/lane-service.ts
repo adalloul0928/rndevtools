@@ -15,6 +15,7 @@ import {
 	type LaneEnvironment,
 	type LaneOperation,
 	type LaneOperationReceipt,
+	type LaneSlim,
 	type LaneState,
 	type LaneWorktree,
 	laneDeepLink,
@@ -29,9 +30,20 @@ import type {
 	SimulatorJob,
 	SimulatorState,
 } from '../shared/simulator-protocol';
+import {
+	SLIMMING_CONFIRMATIONS,
+	type SlimmingAction,
+	type SlimmingActionReceipt,
+	type SlimmingJob,
+	type SlimmingState,
+} from '../shared/slimming-protocol';
 import { type MetroSupervisorPort, metroSupervisor } from './lane-metro';
 import type { LaneStore } from './lane-store';
 import { type WorktreeInspectorPort, worktreeInspector } from './lane-worktree';
+import type {
+	SimulatorMutationCoordinatorPort,
+	SimulatorMutationLease,
+} from './simulator-mutation-coordinator';
 
 const TERMINAL_SIMULATOR_STATUSES = new Set([
 	'complete',
@@ -51,7 +63,40 @@ export type LaneSimulatorPort = {
 	subscribe: (listener: (state: SimulatorState) => void) => () => void;
 };
 
+/**
+ * The slice of the SimSlim service a lane may drive. It is the same entry
+ * point the Simulator panel and recipes use, so every gate in `runAction`
+ * (experimental setting, compatibility tuple, signed-helper authorization)
+ * applies to a lane exactly as it does to a click in the panel.
+ */
+export type LaneSlimmingPort = {
+	getState: () => SlimmingState;
+	refresh: () => Promise<SlimmingState>;
+	runAction: (
+		action: SlimmingAction,
+		mutationLease?: SimulatorMutationLease
+	) => SlimmingActionReceipt;
+	cancelJob: (jobId: string) => boolean;
+	subscribe: (listener: (state: SlimmingState) => void) => () => void;
+};
+
+/**
+ * Out-of-schema options only the main process can set. `slimApproved` means a
+ * person confirmed the slim in a native dialog this process showed; nothing
+ * that arrives over IPC or the CLI socket can carry it.
+ */
+export type LaneRunOptions = { slimApproved?: boolean };
+
 type LaneListener = (state: LaneState) => void;
+
+const TERMINAL_SLIMMING_STATUSES = new Set([
+	'complete',
+	'failed',
+	'needs-attention',
+	'cancelled',
+]);
+const SLIM_APPROVAL_MESSAGE =
+	'Slimming needs operator approval. Open the lane in RN Devtools and approve it there; the mutation requires the signed desktop app.';
 
 function safeError(error: unknown): string {
 	return redactDiagnosticText(diagnosticErrorText(error)).slice(
@@ -77,16 +122,23 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /**
  * Owns lane leases and the lifecycle around them: validate the worktree,
  * refuse to steal a device or port, boot the Simulator through the shared
- * mutation pipeline, start a detached Metro, wait for it to answer, and send
- * the dev client a launch URL that points at exactly that Metro.
+ * mutation pipeline, optionally slim it, start a detached Metro, wait for it
+ * to answer, and send the dev client a launch URL that points at exactly
+ * that Metro.
  *
- * Slimming is deliberately not part of a lane start. The Simulator panel owns
- * slim profiles with its own confirmation and verification; a lane just reports
- * which device it uses so the fleet view can show the two together.
+ * Slimming rides along but never bypasses its gates. A lane start may name a
+ * SimSlim profile; the mutation only runs when this process was told the
+ * operator approved it (`LaneRunOptions.slimApproved`), and even then the
+ * SimSlim service re-checks the experimental setting, the device's
+ * compatibility tuple, and the helper's signed-parent authorization. An
+ * unattended `lane up --slim` parks the lane in `needs-approval` and starts
+ * Metro anyway, so the agent is never blocked on a dialog it cannot see.
  */
 export class LaneService {
 	readonly #store: LaneStore;
 	readonly #simulator: LaneSimulatorPort;
+	readonly #slimming: LaneSlimmingPort | undefined;
+	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort | undefined;
 	readonly #metro: MetroSupervisorPort;
 	readonly #worktrees: WorktreeInspectorPort;
 	readonly #environments: readonly LaneEnvironment[];
@@ -104,6 +156,8 @@ export class LaneService {
 	constructor({
 		store,
 		simulator,
+		slimming,
+		mutationCoordinator,
 		metro = metroSupervisor,
 		worktrees = worktreeInspector,
 		environments = DEFAULT_LANE_ENVIRONMENTS,
@@ -112,6 +166,9 @@ export class LaneService {
 	}: {
 		store: LaneStore;
 		simulator: LaneSimulatorPort;
+		/** Both must be given for a lane to slim; neither means "report only". */
+		slimming?: LaneSlimmingPort;
+		mutationCoordinator?: SimulatorMutationCoordinatorPort;
 		metro?: MetroSupervisorPort;
 		worktrees?: WorktreeInspectorPort;
 		environments?: readonly LaneEnvironment[];
@@ -120,6 +177,8 @@ export class LaneService {
 	}) {
 		this.#store = store;
 		this.#simulator = simulator;
+		this.#slimming = slimming;
+		this.#mutationCoordinator = mutationCoordinator;
 		this.#metro = metro;
 		this.#worktrees = worktrees;
 		this.#environments = environments;
@@ -182,7 +241,8 @@ export class LaneService {
 
 	async runOperation(
 		value: LaneOperation,
-		signal: AbortSignal = new AbortController().signal
+		signal: AbortSignal = new AbortController().signal,
+		options: LaneRunOptions = {}
 	): Promise<LaneOperationReceipt> {
 		const operation = laneOperationSchema.parse(value);
 		const base = { actionId: operation.actionId, kind: operation.kind };
@@ -190,7 +250,21 @@ export class LaneService {
 			if (this.#stopped) throw new Error('Lanes are shutting down.');
 			switch (operation.kind) {
 				case 'lane.start': {
-					const lane = await this.startLane(operation, signal);
+					const lane = await this.startLane(operation, signal, options);
+					return laneOperationReceiptSchema.parse({
+						...base,
+						completed: true,
+						lane,
+						state: this.getState(),
+					});
+				}
+				case 'lane.slim': {
+					const lane = await this.resolveSlim(
+						operation.laneId,
+						operation.decision,
+						signal,
+						options
+					);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
@@ -271,7 +345,8 @@ export class LaneService {
 
 	async startLane(
 		input: Extract<LaneOperation, { kind: 'lane.start' }>,
-		signal: AbortSignal
+		signal: AbortSignal,
+		options: LaneRunOptions = {}
 	): Promise<Lane> {
 		const worktreePath = path.resolve(input.worktreePath);
 		const environment = this.#environments.find(
@@ -317,6 +392,11 @@ export class LaneService {
 				: {}),
 		});
 		const identity = await this.#worktrees.readExpoIdentity(worktreePath);
+		// Validate the slim request before anything is booted or spawned, so a
+		// typo in a profile id fails fast instead of after a 20s boot.
+		const slimRequest = input.slimProfileId
+			? this.#slimRequest(input.slimProfileId)
+			: undefined;
 		const id = this.#store.newLaneId();
 		const logPath = this.#store.logPathFor(id);
 		const startedAt = this.#now();
@@ -333,6 +413,21 @@ export class LaneService {
 				},
 				signal
 			);
+		}
+
+		// Slim before Metro so the dev client's first launch lands on a device
+		// that already has its services trimmed. Without approval the lane is
+		// parked in needs-approval and everything else proceeds.
+		let slim: LaneSlim | undefined;
+		if (slimRequest) {
+			slim = options.slimApproved
+				? await this.#applySlim(device.udid, slimRequest, signal)
+				: {
+						profileId: slimRequest,
+						status: 'needs-approval',
+						message: SLIM_APPROVAL_MESSAGE,
+						updatedAt: this.#now(),
+					};
 		}
 
 		const metroPid = await this.#metro.start({
@@ -358,6 +453,7 @@ export class LaneService {
 			...(identity.scheme ? { scheme: identity.scheme } : {}),
 			startedAt,
 			...(agent ? { agent } : {}),
+			...(slim ? { slim } : {}),
 		};
 		await this.#store.upsert(lane);
 		this.#touch();
@@ -367,6 +463,54 @@ export class LaneService {
 
 		if (input.launch) {
 			lane = await this.launchLane(id, undefined, input.agent, signal);
+		}
+		return lane;
+	}
+
+	/**
+	 * Settles a lane parked in `needs-approval`. Approving runs the SimSlim
+	 * mutation now and relaunches the dev client if Metro is already up, since
+	 * applying a profile restarts services under the running app. Dismissing
+	 * records the operator's choice so the row stops asking.
+	 */
+	async resolveSlim(
+		laneId: string,
+		decision: 'approve' | 'dismiss',
+		signal: AbortSignal,
+		options: LaneRunOptions = {}
+	): Promise<Lane> {
+		let lane = this.#requireLane(laneId);
+		const pending = lane.slim;
+		if (pending?.status !== 'needs-approval') {
+			throw new Error('This lane has no slimming request waiting on approval.');
+		}
+		if (decision === 'dismiss') {
+			lane = {
+				...lane,
+				slim: {
+					profileId: pending.profileId,
+					status: 'skipped',
+					message: 'Dismissed by the operator.',
+					updatedAt: this.#now(),
+				},
+			};
+			await this.#store.upsert(lane);
+			this.#touch();
+			return lane;
+		}
+		if (!options.slimApproved) {
+			throw new Error(SLIM_APPROVAL_MESSAGE);
+		}
+		const slim = await this.#applySlim(
+			lane.simulatorUdid,
+			pending.profileId,
+			signal
+		);
+		lane = { ...lane, slim };
+		await this.#store.upsert(lane);
+		this.#touch();
+		if (slim.status === 'applied' && lane.metro === 'ready' && lane.scheme) {
+			lane = await this.launchLane(laneId, undefined, undefined, signal);
 		}
 		return lane;
 	}
@@ -563,6 +707,124 @@ export class LaneService {
 		const lane = this.#store.get(laneId);
 		if (!lane) throw new Error(`Lane ${laneId} does not exist.`);
 		return lane;
+	}
+
+	/** Checks a requested profile exists in the signed helper's catalog. */
+	#slimRequest(profileId: string): string {
+		if (!this.#slimming || !this.#mutationCoordinator) {
+			throw new Error(
+				'Slimming is not available in this build, so --slim cannot be honoured.'
+			);
+		}
+		const state = this.#slimming.getState();
+		if (state.helper.status !== 'available') {
+			throw new Error(
+				state.helper.error ??
+					'The SimSlim helper is unavailable, so the lane cannot slim.'
+			);
+		}
+		if (!state.profiles.some((profile) => profile.id === profileId)) {
+			const known = state.profiles.map((profile) => profile.id).join(', ');
+			throw new Error(
+				`Unknown SimSlim profile "${profileId}". Known profiles: ${known || 'none'}.`
+			);
+		}
+		return profileId;
+	}
+
+	/**
+	 * Runs one `profile.apply` through the SimSlim service under the shared
+	 * per-Simulator mutation lease, and folds the job's outcome into the lane.
+	 * A rejected or failed job never throws: Metro and the launch still happen,
+	 * and the lane carries the reason.
+	 */
+	async #applySlim(
+		udid: string,
+		profileId: string,
+		signal: AbortSignal
+	): Promise<LaneSlim> {
+		const slimming = this.#slimming;
+		const coordinator = this.#mutationCoordinator;
+		if (!slimming || !coordinator) {
+			return {
+				profileId,
+				status: 'skipped',
+				message: 'Slimming is not available in this build.',
+				updatedAt: this.#now(),
+			};
+		}
+		try {
+			return await coordinator.runExclusive(udid, signal, async (lease) => {
+				await slimming.refresh();
+				const receipt = slimming.runAction(
+					{
+						actionId: `lane-slim-${randomUUID()}`,
+						kind: 'profile.apply',
+						profileId,
+						simulatorUdids: [udid],
+						confirmation: SLIMMING_CONFIRMATIONS.apply,
+					},
+					lease
+				);
+				if (!receipt.accepted || !receipt.jobId) {
+					return {
+						profileId,
+						status: 'skipped' as const,
+						message: receipt.error ?? 'SimSlim rejected the profile.',
+						updatedAt: this.#now(),
+					};
+				}
+				const job = await this.#waitForSlimmingJob(receipt.jobId, signal);
+				return {
+					profileId,
+					status:
+						job.status === 'complete'
+							? ('applied' as const)
+							: ('failed' as const),
+					message: job.message,
+					jobId: receipt.jobId,
+					updatedAt: this.#now(),
+				};
+			});
+		} catch (error) {
+			if (signal.aborted) throw error;
+			return {
+				profileId,
+				status: 'failed',
+				message: safeError(error),
+				updatedAt: this.#now(),
+			};
+		}
+	}
+
+	#waitForSlimmingJob(
+		jobId: string,
+		signal: AbortSignal
+	): Promise<SlimmingJob> {
+		const slimming = this.#slimming;
+		if (!slimming) return Promise.reject(new Error('Slimming unavailable.'));
+		return new Promise((resolve, reject) => {
+			let unsubscribe: () => void = () => undefined;
+			const finish = (state: SlimmingState) => {
+				const job = state.jobs.find((candidate) => candidate.id === jobId);
+				if (!job || !TERMINAL_SLIMMING_STATUSES.has(job.status)) return;
+				cleanup();
+				resolve(job);
+			};
+			const onAbort = () => {
+				slimming.cancelJob(jobId);
+				cleanup();
+				reject(new Error('Lane operation cancelled.'));
+			};
+			const cleanup = () => {
+				unsubscribe();
+				signal.removeEventListener('abort', onAbort);
+			};
+			unsubscribe = slimming.subscribe(finish);
+			signal.addEventListener('abort', onAbort, { once: true });
+			finish(slimming.getState());
+			if (signal.aborted) onAbort();
+		});
 	}
 
 	#agentWithTimestamp(

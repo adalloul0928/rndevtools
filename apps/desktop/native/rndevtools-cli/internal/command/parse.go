@@ -104,6 +104,7 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "environment", path: []string{"environment"}, kind: fieldString, usage: "Lane environment id; selects the Metro port range (up)."},
 		{flagName: "preferred-port", path: []string{"preferredPort"}, kind: fieldInteger, usage: "Specific Metro port inside the environment range (up)."},
 		{flagName: "launch", path: []string{"launch"}, kind: fieldBoolean, usage: "Open the dev client once Metro is ready (up; default true)."},
+		{flagName: "slim", path: []string{"slimProfileId"}, kind: fieldString, usage: "SimSlim profile to request for the Simulator (up). The lane reports needs-approval until an operator approves it in RN Devtools; the CLI cannot approve a mutation."},
 		{flagName: "lane-id", path: []string{"laneId"}, kind: fieldString, usage: "Lane identifier (down, launch, log)."},
 		{flagName: "url", path: []string{"url"}, kind: fieldString, usage: "Path or full URL to open through the lane scheme (launch)."},
 		{flagName: "max-characters", path: []string{"maxCharacters"}, kind: fieldInteger, usage: "Log tail size (log; 256..64000)."},

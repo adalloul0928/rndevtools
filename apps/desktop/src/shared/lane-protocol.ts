@@ -93,6 +93,36 @@ export type LaneAgent = z.infer<typeof laneAgentSchema>;
 
 const laneMetroStatusSchema = z.enum(['starting', 'ready', 'stopped']);
 
+/**
+ * Slimming folded into a lane start. The lane only records the request and
+ * its outcome; the mutation itself still goes through the SimSlim service,
+ * which keeps every gate it has today: the experimental setting, the device
+ * compatibility tuple, and the signed-parent authorization the native helper
+ * demands before it disables a single service.
+ *
+ * `needs-approval` is where an unattended `rndevtools lane up --slim` lands.
+ * Only the desktop app can approve, because approval means a person clicked
+ * a native dialog; a CLI flag is not a person.
+ */
+const laneSlimStatusSchema = z.enum([
+	'needs-approval',
+	'applying',
+	'applied',
+	'skipped',
+	'failed',
+]);
+
+const laneSlimSchema = z.strictObject({
+	profileId: identifierSchema,
+	status: laneSlimStatusSchema,
+	/** Why slimming was skipped or failed, for the operator and the agent. */
+	message: shortTextSchema.optional(),
+	/** The SimSlim job that applied the profile, when one ran. */
+	jobId: identifierSchema.optional(),
+	updatedAt: timestampSchema,
+});
+export type LaneSlim = z.infer<typeof laneSlimSchema>;
+
 export const laneSchema = z.strictObject({
 	id: laneIdSchema,
 	worktreePath: absolutePathSchema,
@@ -114,6 +144,7 @@ export const laneSchema = z.strictObject({
 	startedAt: timestampSchema,
 	lastLaunchedAt: timestampSchema.optional(),
 	agent: laneAgentSchema.optional(),
+	slim: laneSlimSchema.optional(),
 });
 export type Lane = z.infer<typeof laneSchema>;
 
@@ -150,7 +181,19 @@ export const laneOperationSchema = z.discriminatedUnion('kind', [
 		preferredPort: portSchema.optional(),
 		/** Open the dev client against the leased Metro once it is healthy. */
 		launch: z.boolean().default(true),
+		/**
+		 * Apply this SimSlim profile to the Simulator before Metro starts.
+		 * Requires operator approval in the desktop app; see `laneSlimSchema`.
+		 */
+		slimProfileId: identifierSchema.optional(),
 		agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
+	}),
+	/** Resolves a lane whose slimming is waiting on the operator. */
+	z.strictObject({
+		...operationBase,
+		kind: z.literal('lane.slim'),
+		laneId: laneIdSchema,
+		decision: z.enum(['approve', 'dismiss']),
 	}),
 	z.strictObject({
 		...operationBase,
@@ -197,6 +240,7 @@ export const laneOperationReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
 	kind: z.enum([
 		'lane.start',
+		'lane.slim',
 		'lane.launch',
 		'lane.stop',
 		'lane.log',
@@ -263,6 +307,27 @@ export type LaneHealth = {
 	label: 'ready' | 'starting' | 'stopped';
 	tone: 'success' | 'warning' | 'danger';
 };
+
+/** How a lane's slimming request reads in a row or a CLI summary. */
+export function laneSlimSummary(
+	slim: LaneSlim | undefined
+):
+	| { label: string; tone: 'success' | 'warning' | 'danger' | 'muted' }
+	| undefined {
+	if (!slim) return undefined;
+	switch (slim.status) {
+		case 'applied':
+			return { label: `slim: ${slim.profileId}`, tone: 'success' };
+		case 'applying':
+			return { label: `slimming: ${slim.profileId}`, tone: 'warning' };
+		case 'needs-approval':
+			return { label: 'slim: approve in app', tone: 'warning' };
+		case 'failed':
+			return { label: 'slim failed', tone: 'danger' };
+		default:
+			return { label: 'slim skipped', tone: 'muted' };
+	}
+}
 
 export function laneHealth(lane: Pick<Lane, 'metro'>): LaneHealth {
 	switch (lane.metro) {

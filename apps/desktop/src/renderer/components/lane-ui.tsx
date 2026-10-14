@@ -6,7 +6,7 @@ import {
 	shortPath,
 } from '@/simulator/fleet-model';
 import type { Lane, LaneAgent } from '../../shared/lane-protocol';
-import { laneHealth } from '../../shared/lane-protocol';
+import { laneHealth, laneSlimSummary } from '../../shared/lane-protocol';
 
 /**
  * Chips shared by the fleet wall and the Lanes panel. They only read the
@@ -32,6 +32,20 @@ export function LaneChip({
 			) : null}
 			{!compact ? <Badge>{lane.environment}</Badge> : null}
 		</span>
+	);
+}
+
+/** The lane's own slimming request (not the device's measured slim level). */
+export function LaneSlimBadge({ lane }: { lane: Pick<Lane, 'slim'> }) {
+	const summary = laneSlimSummary(lane.slim);
+	if (!summary) return null;
+	return (
+		<Badge
+			className="lane-slim-badge"
+			tone={summary.tone === 'muted' ? 'default' : summary.tone}
+		>
+			{summary.label}
+		</Badge>
 	);
 }
 

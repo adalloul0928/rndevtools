@@ -13,7 +13,12 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { DeviceScreen, VisibleDeviceScreen } from '@/components/device-screen';
-import { AgentBadge, LaneChip, WorktreeLabel } from '@/components/lane-ui';
+import {
+	AgentBadge,
+	LaneChip,
+	LaneSlimBadge,
+	WorktreeLabel,
+} from '@/components/lane-ui';
 import {
 	SimulatorMetric,
 	SimulatorPanelHeader,
@@ -29,6 +34,7 @@ import {
 import { shortPath } from '@/simulator/fleet-model';
 import { useLaneRuntime } from '@/state/lane-runtime';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
+import { useSlimmingRuntime } from '@/state/slimming-runtime';
 import type {
 	Lane,
 	LaneEnvironment,
@@ -40,6 +46,7 @@ import {
 	laneDevClientLaunchUrl,
 } from '../../../shared/lane-protocol';
 import type { SimulatorDevice } from '../../../shared/simulator-protocol';
+import type { SlimmingProfile } from '../../../shared/slimming-protocol';
 
 /**
  * Picks the worktree to preselect: the first one without a lane, so a second
@@ -97,6 +104,7 @@ export function laneSummaryCounts(state: LaneState): {
 }
 
 export function LanesPanel() {
+	const slimming = useSlimmingRuntime();
 	const lanes = useLaneRuntime();
 	const simulator = useSimulatorRuntime();
 	const [selectedLaneId, setSelectedLaneId] = useState<string>('');
@@ -137,6 +145,16 @@ export function LanesPanel() {
 		void lanes.runOperation(
 			{ kind: 'lane.stop', laneId: lane.id },
 			{ successMessage: `Lane ${lane.branch} stopped; its Simulator is free.` }
+		);
+	const decideSlim = (lane: Lane, decision: 'approve' | 'dismiss') =>
+		void lanes.runOperation(
+			{ kind: 'lane.slim', laneId: lane.id, decision },
+			decision === 'approve'
+				? {
+						pendingMessage: `Applying ${lane.slim?.profileId ?? 'the profile'} to ${deviceByUdid.get(lane.simulatorUdid.toUpperCase())?.name ?? 'the Simulator'}…`,
+						successMessage: 'Slimming finished; see the lane for the outcome.',
+					}
+				: { successMessage: 'Slimming request dismissed.' }
 		);
 	const readLog = async (lane: Lane) => {
 		const receipt = await lanes.runOperation({
@@ -244,6 +262,19 @@ export function LanesPanel() {
 					environments={lanes.state.environments}
 					isBusy={lanes.pendingOperation === 'lane.start'}
 					lanes={lanes.state.lanes}
+					slimProfiles={
+						slimming.state.helper.status === 'available'
+							? slimming.state.profiles
+							: []
+					}
+					slimUnavailableReason={
+						slimming.state.helper.status === 'available'
+							? (slimming.state.helper.mutationUnavailableReason ??
+								(slimming.state.setting.experimentalMutationsEnabled
+									? undefined
+									: 'Enable experimental mutations in the SimSlim panel first.'))
+							: 'The SimSlim helper is not available.'
+					}
 					worktrees={lanes.state.worktrees}
 					onAddRepository={() =>
 						void lanes.runOperation({ kind: 'lane.add-repository' })
@@ -252,7 +283,9 @@ export function LanesPanel() {
 						const receipt = await lanes.runOperation(
 							{ kind: 'lane.start', ...input },
 							{
-								pendingMessage: 'Booting the Simulator and starting Metro…',
+								pendingMessage: input.slimProfileId
+									? 'Booting, slimming, and starting Metro…'
+									: 'Booting the Simulator and starting Metro…',
 								successMessage: 'Lane started.',
 							}
 						);
@@ -314,6 +347,7 @@ export function LanesPanel() {
 													{lane.agent ? (
 														<AgentBadge agent={lane.agent} />
 													) : null}
+													<LaneSlimBadge lane={lane} />
 												</div>
 											</div>
 										</button>
@@ -340,6 +374,7 @@ export function LanesPanel() {
 								simulator.setSelectedDeviceUdid(selectedLane.simulatorUdid);
 								window.location.hash = 'simulator/fleet';
 							}}
+							onSlimDecision={(decision) => decideSlim(selectedLane, decision)}
 							onStop={() => stop(selectedLane)}
 						/>
 					) : (
@@ -369,6 +404,8 @@ function StartLaneForm({
 	devices,
 	environments,
 	lanes,
+	slimProfiles,
+	slimUnavailableReason,
 	isBusy,
 	onStart,
 	onAddRepository,
@@ -377,12 +414,16 @@ function StartLaneForm({
 	devices: readonly SimulatorDevice[];
 	environments: readonly LaneEnvironment[];
 	lanes: readonly Lane[];
+	slimProfiles: readonly SlimmingProfile[];
+	/** Why the slim select is disabled, when it is. */
+	slimUnavailableReason: string | undefined;
 	isBusy: boolean;
 	onStart: (input: {
 		worktreePath: string;
 		simulatorUdid: string;
 		environment: string;
 		launch: boolean;
+		slimProfileId?: string;
 	}) => Promise<void>;
 	onAddRepository: () => void;
 }) {
@@ -393,6 +434,7 @@ function StartLaneForm({
 	const [environmentId, setEnvironmentId] = useState(
 		environments[0]?.id ?? 'development'
 	);
+	const [slimProfileId, setSlimProfileId] = useState('');
 	const options = useMemo(
 		() => laneDeviceOptions(devices, lanes),
 		[devices, lanes]
@@ -434,6 +476,7 @@ function StartLaneForm({
 					simulatorUdid: udid,
 					environment: environmentId,
 					launch: true,
+					...(slimProfileId && !slimUnavailableReason ? { slimProfileId } : {}),
 				});
 			}}
 		>
@@ -515,6 +558,28 @@ function StartLaneForm({
 						</NativeSelect.Trigger>
 					</NativeSelect>
 				</div>
+				<div className="sim-toolbar-field">
+					<span>Slim</span>
+					<NativeSelect fullWidth={false}>
+						<NativeSelect.Trigger
+							aria-label="SimSlim profile"
+							disabled={Boolean(slimUnavailableReason)}
+							title={slimUnavailableReason}
+							value={slimProfileId}
+							onChange={(event) => setSlimProfileId(event.currentTarget.value)}
+						>
+							<NativeSelect.Option value="">No slimming</NativeSelect.Option>
+							{slimProfiles.map((profile) => (
+								<NativeSelect.Option key={profile.id} value={profile.id}>
+									{profile.name}
+								</NativeSelect.Option>
+							))}
+							<NativeSelect.Indicator>
+								<ChevronDown className="h-3 w-3" />
+							</NativeSelect.Indicator>
+						</NativeSelect.Trigger>
+					</NativeSelect>
+				</div>
 				<Button
 					isDisabled={!canStart}
 					size="sm"
@@ -543,11 +608,12 @@ function StartLaneForm({
 					'Choose an environment to see its Metro port range.'
 				)}
 				<InfoPopover label="Starting a lane">
-					A lane boots the Simulator if needed, starts{' '}
-					<code>expo start --dev-client --localhost</code> from the worktree on
-					the leased port, and deep-links the installed dev client to it. The
-					dev client must already be installed on the Simulator; lanes never
-					trigger a native build.
+					A lane boots the Simulator if needed, optionally applies a SimSlim
+					profile (you confirm it in a native dialog; the signed helper applies
+					it), starts <code>expo start --dev-client --localhost</code> from the
+					worktree on the leased port, and deep-links the installed dev client
+					to it. The dev client must already be installed on the Simulator;
+					lanes never trigger a native build.
 				</InfoPopover>
 			</p>
 		</form>
@@ -564,6 +630,7 @@ function LaneDetail({
 	onCloseLog,
 	onStop,
 	onOpenSimulator,
+	onSlimDecision,
 }: {
 	lane: Lane;
 	device: SimulatorDevice | undefined;
@@ -574,6 +641,7 @@ function LaneDetail({
 	onCloseLog: () => void;
 	onStop: () => void;
 	onOpenSimulator: () => void;
+	onSlimDecision: (decision: 'approve' | 'dismiss') => void;
 }) {
 	const launchUrl = lane.scheme
 		? laneDevClientLaunchUrl(lane.scheme, lane.port)
@@ -635,6 +703,58 @@ function LaneDetail({
 					start it again.
 				</PanelNotice>
 			) : null}
+			{lane.slim?.status === 'needs-approval' ? (
+				<PanelNotice
+					title="Slimming is waiting for your approval."
+					tone="warning"
+				>
+					An agent (or the CLI) asked to apply{' '}
+					<code>{lane.slim.profileId}</code> to{' '}
+					{device?.name ?? 'this Simulator'}. Only you can approve a Simulator
+					mutation; the CLI cannot. Approving shows the SimSlim confirmation and
+					relaunches the dev client afterwards.
+					<div className="sim-action-row lane-slim-actions">
+						<Button
+							isDisabled={isBusy}
+							size="sm"
+							variant="primary"
+							onPress={() => onSlimDecision('approve')}
+						>
+							Approve and slim
+						</Button>
+						<Button
+							isDisabled={isBusy}
+							size="sm"
+							variant="ghost"
+							onPress={() => onSlimDecision('dismiss')}
+						>
+							Dismiss
+						</Button>
+					</div>
+				</PanelNotice>
+			) : null}
+			{lane.slim && lane.slim.status !== 'needs-approval' ? (
+				<PanelNotice
+					title={
+						lane.slim.status === 'applied'
+							? `Slimmed with ${lane.slim.profileId}.`
+							: lane.slim.status === 'applying'
+								? `Applying ${lane.slim.profileId}…`
+								: lane.slim.status === 'failed'
+									? `Slimming with ${lane.slim.profileId} failed.`
+									: `Slimming with ${lane.slim.profileId} was skipped.`
+					}
+					tone={
+						lane.slim.status === 'failed'
+							? 'danger'
+							: lane.slim.status === 'applied'
+								? 'info'
+								: 'warning'
+					}
+				>
+					{lane.slim.message ?? 'The SimSlim job finished.'}
+				</PanelNotice>
+			) : null}
 			{!lane.scheme ? (
 				<PanelNotice title="No URL scheme in app.json." tone="info">
 					The worktree declares no <code>expo.scheme</code>, so the dev client
@@ -677,6 +797,12 @@ function LaneDetail({
 						}
 					/>
 					<KeyValue label="Environment" value={lane.environment} />
+					{lane.slim ? (
+						<KeyValue
+							label="Slim request"
+							value={`${lane.slim.profileId} · ${lane.slim.status}${lane.slim.jobId ? ` · job ${lane.slim.jobId}` : ''}`}
+						/>
+					) : null}
 					<KeyValue
 						label="Metro"
 						value={`http://127.0.0.1:${lane.port} · ${lane.metro}${lane.metroPid ? ` · pid ${lane.metroPid}` : ''}`}

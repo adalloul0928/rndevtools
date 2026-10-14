@@ -286,6 +286,7 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			Environment   *string            `json:"environment,omitempty"`
 			PreferredPort *int               `json:"preferredPort,omitempty"`
 			Launch        *bool              `json:"launch,omitempty"`
+			SlimProfileID *string            `json:"slimProfileId,omitempty"`
 			LaneID        *string            `json:"laneId,omitempty"`
 			URL           *string            `json:"url,omitempty"`
 			MaxCharacters *int               `json:"maxCharacters,omitempty"`
@@ -295,7 +296,7 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			return err
 		}
 		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
-			value.PreferredPort, value.Launch, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
 	default:
 		return fmt.Errorf("unsupported command %q", expectedKind)
 	}
@@ -311,7 +312,7 @@ func validateLane(
 	worktreePath, udid, environment *string,
 	preferredPort *int,
 	launch *bool,
-	laneID, url *string,
+	slimProfileID, laneID, url *string,
 	maxCharacters *int,
 	agent *map[string]string,
 ) error {
@@ -333,6 +334,11 @@ func validateLane(
 	}
 	if preferredPort != nil && (*preferredPort < 1024 || *preferredPort > 65535) {
 		return errors.New("preferredPort must be between 1024 and 65535")
+	}
+	if slimProfileID != nil {
+		if err := validateIdentifier(*slimProfileID, "slimProfileId"); err != nil {
+			return err
+		}
 	}
 	if laneID != nil && !laneIDPattern.MatchString(*laneID) {
 		return errors.New("laneId is invalid")
@@ -366,19 +372,19 @@ func validateLane(
 		}
 	case "ls":
 		if worktreePath != nil || udid != nil || environment != nil || preferredPort != nil ||
-			launch != nil || laneID != nil || url != nil || maxCharacters != nil || agent != nil {
+			launch != nil || slimProfileID != nil || laneID != nil || url != nil || maxCharacters != nil || agent != nil {
 			return errors.New("lane ls does not accept other fields")
 		}
 	case "down":
-		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || url != nil || maxCharacters != nil || agent != nil {
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || maxCharacters != nil || agent != nil {
 			return errors.New("lane down takes exactly one of laneId or worktreePath")
 		}
 	case "launch":
-		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || maxCharacters != nil {
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || maxCharacters != nil {
 			return errors.New("lane launch takes exactly one of laneId or worktreePath, plus an optional url")
 		}
 	case "log":
-		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || url != nil || agent != nil {
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || agent != nil {
 			return errors.New("lane log takes exactly one of laneId or worktreePath, plus an optional maxCharacters")
 		}
 	}

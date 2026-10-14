@@ -26,7 +26,7 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandRecipe:     `{"kind":"recipe","operation":"run","recipeId":"smoke","udids":["` + testUDID + `"]}`,
 		protocol.CommandJobs:       `{"kind":"jobs","operation":"cancel","jobId":"job-1"}`,
 		protocol.CommandSlimming:   `{"kind":"slimming","operation":"verify","udids":["` + testUDID + `"],"profileId":"rndevtools-development"}`,
-		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"agent":{"kind":"claude","sessionId":"session-1"}}`,
+		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"slimProfileId":"rndevtools-development","agent":{"kind":"claude","sessionId":"session-1"}}`,
 	}
 	for kind, encoded := range tests {
 		t.Run(string(kind), func(t *testing.T) {
@@ -59,6 +59,8 @@ func TestValidateRejectsMutationUnknownFieldsAndNullOptionals(t *testing.T) {
 		{protocol.CommandLane, `{"kind":"lane","operation":"log","laneId":"lane-11111111-2222-4333-8444-555555555555","url":"x"}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","agent":{"kind":"gpt","sessionId":"s"}}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","shell":"whoami"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","slimProfileId":"../escape"}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"launch","laneId":"lane-11111111-2222-4333-8444-555555555555","slimProfileId":"rndevtools-development"}`},
 	}
 	for _, test := range tests {
 		if err := Validate(json.RawMessage(test.encoded), test.kind); err == nil {

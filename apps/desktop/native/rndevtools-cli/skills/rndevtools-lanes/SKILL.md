@@ -45,9 +45,13 @@ a private local socket.
 - **Attribution is automatic.** The CLI forwards `CLAUDE_CODE_SESSION_ID` or
   `CODEX_THREAD_ID` so the desktop shows which session holds which lane. Other
   agents can export `RNDEVTOOLS_AGENT_SESSION_ID`.
-- Slimming is a separate, operator-confirmed workflow in the desktop's SimSlim
-  panel. Prefer Simulators the fleet already reports as slim; do not try to slim
-  from the CLI.
+- **You can request slimming, not perform it.** `lane up --slim <profileId>`
+  asks the desktop to apply a SimSlim profile to the lane's Simulator. The CLI
+  has no way to approve a Simulator mutation, so the lane comes back with
+  `slim.status: "needs-approval"` and Metro still starts. A person approves it
+  from the lane in the desktop app (a native confirmation plus the signed
+  helper's own authorization); then the dev client is relaunched for you. Do not
+  wait on it, do not retry it, and never try to slim any other way.
 
 ## Start a worktree on a Simulator
 
@@ -65,6 +69,14 @@ form (`<scheme>://expo-development-client/?url=http://127.0.0.1:<port>`). The
 result includes `lane.id`, `lane.port`, `lane.simulatorUdid`, and `lane.metro`
 (`starting` | `ready` | `stopped`). Pass `--launch=false` to lease and start
 Metro without opening the app.
+
+Add `--slim <profileId>` (ids come from `rndevtools slimming --operation
+status`, e.g. `rndevtools-development`) to request a slimmer Simulator. The
+response's `lane.slim` tells you where it stands: `needs-approval` (waiting on
+the operator in the desktop app; the lane is fully usable meanwhile), `applied`
+(with the SimSlim `jobId`), `skipped` or `failed` (with the reason, e.g. the
+experimental setting is off or this is an unsigned build). An unknown profile id
+fails the whole `lane up` before anything boots.
 
 If Metro does not become ready, the lease is kept so you can read the bundler
 error:

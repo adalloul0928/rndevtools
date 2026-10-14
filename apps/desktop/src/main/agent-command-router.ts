@@ -893,9 +893,14 @@ export function createAgentCommandRouter({
 								...(command.preferredPort !== undefined
 									? { preferredPort: command.preferredPort }
 									: {}),
+								...(command.slimProfileId
+									? { slimProfileId: command.slimProfileId }
+									: {}),
 								...(command.agent ? { agent: command.agent } : {}),
 							},
 							context.signal
+							// No LaneRunOptions here, on purpose: the unattended CLI can
+							// request slimming but never approve it.
 						);
 						return laneReceiptResult(receipt);
 					}
