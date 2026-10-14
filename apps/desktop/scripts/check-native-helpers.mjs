@@ -10,7 +10,7 @@ const goPackages = [
 		directory: resolve(desktopDirectory, 'native', 'rndevtools-sim-helper'),
 		modules: [
 			'github.com/adalloul0928/rndevtools-sim-helper',
-			'github.com/mobai-app/simslim v0.8.0',
+			'github.com/mobai-app/simslim v0.12.2',
 		],
 		name: 'simulator helper',
 		vendored: true,

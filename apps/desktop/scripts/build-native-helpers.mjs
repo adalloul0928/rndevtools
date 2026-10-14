@@ -43,7 +43,7 @@ if (!simulatorHelperTeamFlag) {
 const packageManifest = JSON.parse(
 	readFileSync(join(desktopDirectory, 'package.json'), 'utf8')
 );
-const catalogVersion = 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2';
+const catalogVersion = 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3';
 verifyVendoredSimSlim(goPackage);
 const sourceCommit = nativeSourceIdentity();
 

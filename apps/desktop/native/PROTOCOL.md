@@ -120,7 +120,7 @@ cross the native boundary as arbitrary service lists.
     "hostArchitecture": "arm64 | x64",
     "helperVersion": "0.1.0",
     "helperBuildCommit": "40-hex-commit-or-dirty-aware-source-identity",
-    "catalogVersion": "simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2"
+    "catalogVersion": "simslim-v0.12.2-6518ba7e-pumpd.1-presets.3"
   },
   "verifiedOperations": []
 }

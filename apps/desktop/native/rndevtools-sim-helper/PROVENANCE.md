@@ -7,8 +7,8 @@ accept arbitrary launchd labels from Electron or the renderer.
 Base source:
 
 - Repository: <https://github.com/MobAI-App/simslim>
-- Release: `v0.8.0`
-- Commit: `09fc9cbbca35db5230e6d571a0a366fe6876266e`
+- Release: `v0.12.2`
+- Commit: `6518ba7eab1123d7e1d7797b0e05f51043b42a5b`
 - License: MIT, reproduced in `apps/desktop/THIRD_PARTY_NOTICES.md`
 - Clean-base manifest: `UPSTREAM_SOURCE_SHA256SUMS`
 - Reviewed patch: `PUMPD_PATCHSET_pumpd.1.patch`
@@ -20,13 +20,15 @@ from. Those bytes are anchored by the SHA-256 manifests below and by hard-coded
 digests in the build verifier, so renaming them would invalidate the audit
 trail without changing any behaviour.
 
-The vendored package contains all 14 non-test root Go files and `LICENSE` from
-that commit. Eleven Go files and the license remain byte-identical to upstream.
-Patch set `pumpd.1` changes exactly three files:
+The vendored package contains all 17 non-test root Go files and `LICENSE` from
+that commit. Fourteen Go files and the license remain byte-identical to
+upstream. Patch set `pumpd.1` changes exactly three files:
 
 - `clone.go` replaces upstream's same-user `ps eww` environment scan with an
   exact CoreSimulator launchd-root lookup, a PID/PPID/CPU/comm-only process-tree
-  projection, and `lsof` limited to that tree.
+  projection, and `lsof` limited to that tree. (The in-file comment still names
+  the v0.8.0 release where the scan was first replaced; the hunk applies to
+  v0.12.2 unchanged.)
 - `disk_cleanup.go` restores a previously booted Simulator with an independent,
   bounded context even when the cleanup request is cancelled.
 - `simctl.go` exports the upstream package's canonical disabled-override parser
@@ -36,7 +38,7 @@ The build-time verifier hard-codes and checks the SHA-256 of the clean-base
 manifest, the deterministic patch artifact, and the final vendored manifest.
 It proves unchanged files still match the pinned base, only the three disclosed
 files differ, every final vendored byte matches the reviewed snapshot, and the
-module graph contains only this helper plus `github.com/mobai-app/simslim v0.8.0`.
+module graph contains only this helper plus `github.com/mobai-app/simslim v0.12.2`.
 Changing source and merely regenerating an editable checksum file therefore
 does not pass the build.
 
@@ -49,7 +51,7 @@ boundary, exact-UDID validation, compatibility and confirmation policy,
 two-phase durable restore-point persistence, helper-supervision time budgets,
 and sequential per-Simulator jobs.
 
-Preset revision `presets.2` uses upstream `Profile.Keep` to preserve
+Preset revision `presets.3` uses upstream `Profile.Keep` to preserve
 `com.apple.MapKit.SnapshotService`, `com.apple.siri.acousticsignature`, and
 `com.apple.siri.context.service` in the two bundled presets. These jobs remained
 registered after reboot in real iOS 26.5 apply attempts, which correctly failed
@@ -57,6 +59,17 @@ verification and rolled back. They remain in the managed universe for legacy
 override repair. The upstream source and patch set remain unchanged; Maximum
 Density still projects the complete upstream desired set. Profile responses
 disclose these exceptions through optional `preservedServiceIds`.
+
+`presets.3` differs from `presets.2` only because the upstream v0.12.2 catalog
+moved `com.apple.assistantd` (dictation host; Spotlight leaks memory without it)
+and `com.apple.gamed` (XCUITest launch latency) from slimmable labels to
+restore-only `AlwaysEnabled` services, next to `com.apple.sharingd`, and listed
+`com.apple.navd` under widgets as well as connectivity. The slimmable universe is
+168 labels and the managed universe 171. Upstream also added
+`EnableSlimNoReboot`, an offline override store that applies profiles to a shut
+down Simulator in seconds, and `Watch`; this helper does not call them yet, and
+the compatibility matrix remains empty until the disposable-Simulator suite is
+rerun against this base.
 
 Verification proves exact managed override equality and the absence of
 disabled launchd job registrations through `launchctl print`. Immediately
@@ -72,7 +85,7 @@ macOS/Xcode/CoreSimulator/runtime/helper/catalog tuple.
 
 ## Hermetic module pin
 
-`go.mod` names `github.com/mobai-app/simslim v0.8.0`; `vendor/modules.txt`
+`go.mod` names `github.com/mobai-app/simslim v0.12.2`; `vendor/modules.txt`
 binds the checked-in package to that identity. Checks force vendor mode with
 network and workspace resolution disabled. Builds use a minimal allowlisted
 environment, `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOWORK=off`, and explicit

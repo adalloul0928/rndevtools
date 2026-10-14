@@ -32,6 +32,9 @@ func TestCatalogInvariants(t *testing.T) {
 		}
 	}
 
+	// SimSlim v0.12.2 moved assistantd and gamed from slimmable labels to
+	// restore-only AlwaysEnabled services (alongside sharingd). The slimmable
+	// universe is therefore 168 and the managed universe 168 + 3.
 	if len(ManagedServiceIDs()) != 171 {
 		t.Fatalf("managed allowlist count = %d, want 171", len(ManagedServiceIDs()))
 	}
@@ -39,8 +42,33 @@ func TestCatalogInvariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(maximum) != 170 {
-		t.Fatalf("maximum profile count = %d, want 170 plus one restore-only label", len(maximum))
+	if len(maximum) != 168 {
+		t.Fatalf("maximum profile count = %d, want 168 plus three restore-only labels", len(maximum))
+	}
+}
+
+func TestUpstreamRestoreOnlyServicesAreNeverSlimTargetsButRemainRestorable(t *testing.T) {
+	restoreOnly := []string{
+		"com.apple.sharingd",   // system share sheets
+		"com.apple.assistantd", // dictation host; Spotlight leaks memory without it
+		"com.apple.gamed",      // XCUITest launch latency (DTServiceHub / GameKit)
+	}
+	for _, label := range restoreOnly {
+		if simslim.SlimmableSet()[label] {
+			t.Fatalf("test assumption drifted: %s is slimmable upstream again", label)
+		}
+		if !slices.Contains(ManagedServiceIDs(), label) {
+			t.Errorf("legacy override for %s can no longer be restored", label)
+		}
+		for _, profile := range Profiles() {
+			desired, err := DesiredServiceIDs(profile.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(desired, label) {
+				t.Errorf("profile %q disables restore-only service %s", profile.ID, label)
+			}
+		}
 	}
 }
 

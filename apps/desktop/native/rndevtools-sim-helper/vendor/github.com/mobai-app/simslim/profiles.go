@@ -40,6 +40,10 @@ var Categories = []Category{
 			"com.apple.PosterBoard",
 			"com.apple.chronod",
 			"com.apple.liveactivitiesd",
+			// chronod runs the stock Maps widget, which retries its navd
+			// connection in a tight loop while navd is down and floods the
+			// unified log; shared with the connectivity category.
+			"com.apple.navd",
 		},
 	},
 	{
@@ -49,7 +53,6 @@ var Categories = []Category{
 		Downside:       "Siri, speech features, and Apple Intelligence services are unavailable.",
 		ApproxMemoryMB: 265,
 		Labels: []string{
-			"com.apple.assistantd",
 			"com.apple.assistant_cdmd",
 			"com.apple.assistant_service",
 			"com.apple.siriactionsd",
@@ -78,6 +81,12 @@ var Categories = []Category{
 			"com.apple.parsecd",
 			"com.apple.parsec-fbf",
 			"com.apple.proactiveeventtrackerd",
+		},
+		AlwaysEnabled: []AlwaysEnabledService{
+			{
+				Label:  "com.apple.assistantd",
+				Reason: "Hosts the dictation service; without it the system Spotlight app leaks memory.",
+			},
 		},
 	},
 	{
@@ -260,9 +269,14 @@ var Categories = []Category{
 			"com.apple.MapKit.SnapshotService",
 			"com.apple.jetpackassetd",
 			"com.apple.tipsd",
-			"com.apple.gamed",
 			"com.apple.gamesaved",
 			"com.apple.GameController.gamecontrollerd",
+		},
+		AlwaysEnabled: []AlwaysEnabledService{
+			{
+				Label:  "com.apple.gamed",
+				Reason: "Required for timely XCUITest app launches (DTServiceHub / GameKit).",
+			},
 		},
 	},
 	{
@@ -404,6 +418,32 @@ func (p Profile) Desired() map[string]bool {
 	}
 	for l := range p.Keep {
 		delete(set, l)
+	}
+	return set
+}
+
+// DesiredForDevice applies platform-specific service requirements to a profile.
+// Desired remains the platform-independent catalog for profile editors.
+func (p Profile) DesiredForDevice(d Device) map[string]bool {
+	return desiredForDevice(d, p.Desired())
+}
+
+func desiredForDevice(d Device, desired map[string]bool) map[string]bool {
+	set := make(map[string]bool, len(desired))
+	for label, disabled := range desired {
+		// watchOS 26.5 re-enables homed after startup, even when launchd
+		// initially honours the override. Keep it enabled rather than report
+		// a full slim that drifts as soon as the Watch finishes starting up.
+		if d.PlatformName() == "watchOS" && label == "com.apple.homed" {
+			continue
+		}
+		// visionOS serves the simulated surroundings as mobile assets.
+		// Without mobileassetd the device boots into a black space: the
+		// Home View icons float in the dark, and apps still launch.
+		if d.PlatformName() == "visionOS" && label == "com.apple.mobileassetd" {
+			continue
+		}
+		set[label] = disabled
 	}
 	return set
 }

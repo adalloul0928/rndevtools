@@ -1,5 +1,5 @@
 diff --git a/clone.go b/clone.go
-index 8ea293ecf..9c64d4041 100644
+index 9c5bceaa676b2d242dc7b52b4b473c8560d56c65..50fcf0504b1a7c31e74f69edf5cb94739395c418 100644
 --- a/clone.go
 +++ b/clone.go
 @@ -757,11 +757,19 @@ func verifyRunningCloneDoesNotOpenSource(ctx context.Context, paths cloneFilesys
@@ -69,7 +69,7 @@ index 8ea293ecf..9c64d4041 100644
  	references, _ := parseCloneLsofOutput(output, paths)
  	return references
 diff --git a/disk_cleanup.go b/disk_cleanup.go
-index f27b89961..060dc7ed8 100644
+index f27b899611e12b96af7d3f5ac38bebbe542c9949..060dc7ed847a4d08ed9fb784c1cd7bfe6db8a8e5 100644
 --- a/disk_cleanup.go
 +++ b/disk_cleanup.go
 @@ -173,7 +173,7 @@ func diskCleanupPlanAt(udid, dataDirectory string) (DiskCleanupPlan, error) {
@@ -123,10 +123,10 @@ index f27b89961..060dc7ed8 100644
  }
  
 diff --git a/simctl.go b/simctl.go
-index 147bbfe09..33558e08a 100644
+index a21e75c30e9636aeb0d64227d460f32b0db47cb9..db8388edd695a8d691143e033f54acf45f47a1cf 100644
 --- a/simctl.go
 +++ b/simctl.go
-@@ -356,6 +356,14 @@ func parseDisabled(output string) map[string]bool {
+@@ -386,6 +386,14 @@ func parseDisabled(output string) map[string]bool {
  	return set
  }
  

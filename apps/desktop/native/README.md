@@ -5,7 +5,7 @@ downloads code, opens a network listener, or exposes a shell. Every protocol
 operation and CLI flag is explicitly allowlisted and bounded.
 
 - `rndevtools-sim-helper` is a first-party Go protocol adapter linked to an exact,
-  checked-in snapshot of SimSlim v0.8.0. It discovers the default iOS Simulator
+  checked-in snapshot of SimSlim v0.12.2. It discovers the default iOS Simulator
   device set, reads managed launchd overrides, projects the pinned service
   catalog, previews and verifies profiles, runs capability diagnostics, and
   performs compatibility-gated experimental apply, restore, and undo
