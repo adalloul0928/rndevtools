@@ -18,6 +18,7 @@
 		"expo": "catalog:",
 		"expo-constants": "57.0.18",
 		"expo-device": "57.0.2",
+		"expo-file-system": "57.0.7",
 		"react": "catalog:",
 		"react-native": "catalog:",
 		"react-native-gesture-handler": "catalog:",

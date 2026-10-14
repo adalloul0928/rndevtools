@@ -48,6 +48,7 @@ export {
 	projectDesktopHeaders,
 	projectDesktopQueryKey,
 } from './desktop/projection';
+export { simulatorUdidFromPath } from './desktop/simulator-identity';
 
 export {
 	type ComponentVisualState,
