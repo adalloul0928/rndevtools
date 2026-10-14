@@ -34,6 +34,10 @@
 		"./camera": "./src/camera/provider.ts",
 		"./diagnostics/image-overlay": "./src/diagnostics/image-overlay.ts",
 		"./metro": "./metro.js",
+		"./build-cache": {
+			"types": "./build-cache.d.ts",
+			"default": "./build-cache.js"
+		},
 		"./package.json": "./package.json",
 		"./verify-bundle": "./verify-bundle.mjs"
 	},
@@ -42,6 +46,8 @@
 		"!src/**/*.test.ts",
 		"!src/**/*.test.tsx",
 		"metro.js",
+		"build-cache.js",
+		"build-cache.d.ts",
 		"README.md",
 		"LICENSE",
 		"verify-bundle.mjs"

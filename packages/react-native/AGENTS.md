@@ -21,3 +21,4 @@ pnpm --dir packages/react-native quality
 - The secure-store adapter reads only keys in its caller-supplied manifest. Never enumerate a keychain.
 - `withDevtoolsPruning` and `rndevtools-verify-bundle` are a pair. Changing either without the other silently weakens the production guarantee.
 - `expo-file-system` and `expo-image-picker` are optional peers reached only through the `./camera` subpath, and are listed in the root `knip.json` `ignoreDependencies` for that reason.
+- `build-cache.js` is a Node-only Expo build cache provider (`./build-cache`), the same shape as `metro.js`: plain CommonJS at the package root, typed by a hand-written `.d.ts`, tested from `src/` through a typed `require` because this package deliberately has no `@types/node`. It must stay free of product paths; cache roots come from the OS cache directory, an env var, or an option.

@@ -14,6 +14,7 @@ same.
 | [`src/devtools/desktop.ts`](src/devtools/desktop.ts) | Implementing `DesktopClientHost` to connect to the desktop app |
 | [`src/lib/devtools-disabled.ts`](src/lib/devtools-disabled.ts) | The no-op stub a release build resolves to instead |
 | [`metro.config.js`](metro.config.js) | `withDevtoolsPruning` cutting devtools out of the module graph |
+| [`app.config.js`](app.config.js) | The build cache provider that shares native builds between git worktrees (lanes) |
 
 ## Run it
 
@@ -24,6 +25,19 @@ pnpm --dir examples/expo-demo start
 
 Open the desktop app alongside it and the device appears automatically — the
 client discovers a loopback broker on its own.
+
+## Run several branches at once
+
+Lanes in the desktop app (or `rndevtools lane --operation up`) run one worktree
+per Simulator with its own Metro port. The dev client has to exist on that
+Simulator first; build it once and the cache provider in `app.config.js`
+shares the binary with every other worktree whose native fingerprint matches:
+
+```sh
+npx expo run:ios --device <udid> --no-bundler    # first worktree builds and caches
+git worktree add ../demo-feature feature/x        # same native shell, new JS
+cd ../demo-feature && npx expo run:ios --device <other-udid> --no-bundler   # installs from cache
+```
 
 ## Prove the pruning works
 

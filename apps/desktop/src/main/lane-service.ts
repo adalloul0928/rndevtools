@@ -542,6 +542,10 @@ export class LaneService {
 				'The worktree declares no URL scheme in app.json, so the dev client cannot be deep-linked. Pass --url with the full launch URL.'
 			);
 		}
+		// Opening a scheme the Simulator has no app for fails with an opaque
+		// FBSOpenApplicationServiceErrorDomain error; check first and say what to
+		// build. The check only runs when the worktree told us its bundle id.
+		await this.#assertDevClientInstalled(lane, signal);
 		await this.#runSimulatorAction(
 			{
 				actionId: `lane-launch-${randomUUID()}`,
@@ -707,6 +711,39 @@ export class LaneService {
 		const lane = this.#store.get(laneId);
 		if (!lane) throw new Error(`Lane ${laneId} does not exist.`);
 		return lane;
+	}
+
+	async #assertDevClientInstalled(
+		lane: Lane,
+		signal: AbortSignal
+	): Promise<void> {
+		if (!lane.bundleIdentifier) return;
+		try {
+			await this.#runSimulatorAction(
+				{
+					actionId: `lane-apps-${randomUUID()}`,
+					kind: 'app.list',
+					udid: lane.simulatorUdid,
+				},
+				signal
+			);
+		} catch {
+			// Listing apps is advisory. If it fails, let url.open report instead.
+			return;
+		}
+		const apps =
+			this.#simulator.getState().appsByDevice[lane.simulatorUdid] ??
+			this.#simulator.getState().appsByDevice[
+				lane.simulatorUdid.toUpperCase()
+			] ??
+			[];
+		const wanted = lane.bundleIdentifier.toLowerCase();
+		if (apps.some((app) => app.bundleIdentifier.toLowerCase() === wanted)) {
+			return;
+		}
+		throw new Error(
+			`${lane.bundleIdentifier} is not installed on this Simulator, so there is no dev client to open. Build it once from the worktree with \`npx expo run:ios --device ${lane.simulatorUdid} --no-bundler\` (the RN Devtools build cache shares the result with other worktrees), then run lane launch again. Metro on port ${lane.port} is still running.`
+		);
 	}
 
 	/** Checks a requested profile exists in the signed helper's catalog. */

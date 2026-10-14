@@ -78,6 +78,18 @@ the operator in the desktop app; the lane is fully usable meanwhile), `applied`
 experimental setting is off or this is an unsigned build). An unknown profile id
 fails the whole `lane up` before anything boots.
 
+If the dev client is not installed on that Simulator, `lane up` fails with
+`<bundle id> is not installed on this Simulator` and leaves Metro running. Build
+it once from the worktree and launch again; when the project uses the
+`@rndevtools/react-native/build-cache` provider, a worktree whose native
+fingerprint matches an earlier build installs from the cache instead of
+compiling:
+
+```bash
+npx expo run:ios --device <UDID> --no-bundler
+rndevtools lane --operation launch --worktree "$PWD"
+```
+
 If Metro does not become ready, the lease is kept so you can read the bundler
 error:
 

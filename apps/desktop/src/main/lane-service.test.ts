@@ -87,6 +87,8 @@ class FakeSimulator implements LaneSimulatorPort {
 	readonly listeners = new Set<(state: SimulatorState) => void>();
 	state: SimulatorState;
 	failNext: string | undefined;
+	/** Bundle ids `app.list` reports as installed; undefined = everything. */
+	installedApps: string[] | undefined;
 
 	constructor(devices: Array<{ udid: string; state: 'booted' | 'shutdown' }>) {
 		this.state = simulatorState(devices);
@@ -125,6 +127,20 @@ class FakeSimulator implements LaneSimulatorPort {
 					})),
 					[job]
 				);
+			} else if (action.kind === 'app.list' && !failure) {
+				const installed = this.installedApps ?? ['com.example.app'];
+				this.state = {
+					...this.state,
+					jobs: [...this.state.jobs, job],
+					appsByDevice: {
+						...this.state.appsByDevice,
+						[action.udid]: installed.map((bundleIdentifier) => ({
+							bundleIdentifier,
+							displayName: bundleIdentifier,
+							isSystem: false,
+						})),
+					},
+				};
 			} else {
 				this.state = { ...this.state, jobs: [...this.state.jobs, job] };
 			}
@@ -366,9 +382,10 @@ describe('LaneService', () => {
 		});
 		expect(simulator.actions.map((action) => action.kind)).toEqual([
 			'device.boot',
+			'app.list',
 			'url.open',
 		]);
-		const launch = simulator.actions[1] as Extract<
+		const launch = simulator.actions[2] as Extract<
 			SimulatorAction,
 			{ kind: 'url.open' }
 		>;
@@ -400,6 +417,7 @@ describe('LaneService', () => {
 			launch: true,
 		});
 		expect(simulator.actions.map((action) => action.kind)).toEqual([
+			'app.list',
 			'url.open',
 		]);
 	});
@@ -700,6 +718,7 @@ describe('LaneService', () => {
 			expect(slimming.actions).toHaveLength(0);
 			expect(simulator.actions.map((action) => action.kind)).toEqual([
 				'device.boot',
+				'app.list',
 				'url.open',
 			]);
 		});
@@ -726,6 +745,7 @@ describe('LaneService', () => {
 			// Order: boot, slim, then Metro + launch.
 			expect(simulator.actions.map((action) => action.kind)).toEqual([
 				'device.boot',
+				'app.list',
 				'url.open',
 			]);
 			expect(metro.started).toHaveLength(1);
@@ -811,6 +831,7 @@ describe('LaneService', () => {
 			expect(approved.lane?.slim).toMatchObject({ status: 'applied' });
 			expect(slimming.actions).toHaveLength(1);
 			expect(simulator.actions.map((action) => action.kind)).toEqual([
+				'app.list',
 				'url.open',
 			]);
 			expect(approved.lane?.lastLaunchedAt).toBe(now);
@@ -862,6 +883,52 @@ describe('LaneService', () => {
 			expect(receipt.completed).toBe(false);
 			expect(receipt.error).toMatch(/not available in this build/);
 			await bare.stop();
+		});
+	});
+
+	describe('dev client presence', () => {
+		it('refuses to launch when the worktree bundle is not installed and says what to build', async () => {
+			healthyMetro();
+			simulator.installedApps = ['com.apple.mobilesafari'];
+			const receipt = await service.runOperation({
+				actionId: 'op-no-client',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: true,
+			});
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toMatch(/com\.example\.app is not installed/);
+			expect(receipt.error).toMatch(
+				new RegExp(`expo run:ios --device ${UDID} --no-bundler`)
+			);
+			expect(receipt.error).toMatch(/Metro on port 8100 is still running/);
+			expect(simulator.actions.map((action) => action.kind)).toEqual([
+				'device.boot',
+				'app.list',
+			]);
+			// The lease survives so the operator can build and relaunch.
+			expect(service.getState().lanes).toHaveLength(1);
+		});
+
+		it('skips the check when the worktree declares no bundle identifier', async () => {
+			healthyMetro();
+			worktrees.identity = { scheme: 'exampleapp' };
+			simulator.installedApps = [];
+			const receipt = await service.runOperation({
+				actionId: 'op-no-bundle-id',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: true,
+			});
+			expect(receipt.completed).toBe(true);
+			expect(simulator.actions.map((action) => action.kind)).toEqual([
+				'device.boot',
+				'url.open',
+			]);
 		});
 	});
 });

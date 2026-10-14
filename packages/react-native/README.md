@@ -113,6 +113,46 @@ The verifier greps for devtools markers in the emitted JavaScript and fails the
 build if any survive. The `--marker` flag adds strings specific to your own
 panels.
 
+## Sharing native builds across worktrees
+
+Running several git worktrees of one app side by side (the desktop app's
+*lanes*) means several `expo run:ios` builds of the same native shell. The
+build cache provider stores a finished Simulator or emulator binary once,
+keyed by Expo's native fingerprint, and hands it to any worktree whose
+fingerprint matches. A JavaScript-only branch installs in seconds instead of
+rebuilding for twenty minutes, and two worktrees that miss at the same time
+produce one build: the second waits for the first.
+
+Expo loads providers from a dynamic config, so add an `app.config.js` next to
+your `app.json`:
+
+```js
+// app.config.js
+module.exports = ({ config }) => ({
+  ...config,
+  experiments: {
+    ...config.experiments,
+    buildCacheProvider: {
+      plugin: '@rndevtools/react-native/build-cache',
+      // options: { cacheDirectory: '~/Library/Caches/my-app/native' },
+    },
+  },
+});
+```
+
+Then build as usual: `npx expo run:ios --device <udid> --no-bundler`. The
+first worktree builds and uploads; later ones with the same fingerprint are
+installed from `~/Library/Caches/rndevtools/native/<platform>/<configuration>/<hash>/`
+(`RNDEVTOOLS_BUILD_CACHE_DIR` or the `cacheDirectory` option relocates it).
+Entries are split by platform and build configuration, so a Release binary is
+never installed for a Debug run. Delete the directory to start clean; there is
+no eviction.
+
+`@expo/fingerprint` decides what counts as a native change. If your project
+has native inputs outside the usual places, configure them in
+[`.fingerprintignore` / `fingerprint.config.js`](https://docs.expo.dev/versions/latest/sdk/fingerprint/)
+rather than here; this provider only stores what Expo hands it.
+
 ## Adapters
 
 `createAsyncStorageDevtoolsAdapter` and `createSecureStoreDevtoolsAdapter`
