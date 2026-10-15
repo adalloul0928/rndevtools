@@ -139,3 +139,44 @@ func appTestServer(t *testing.T, response func(string) string) string {
 	}()
 	return socketPath
 }
+
+func TestRunServesMCPOverStdio(t *testing.T) {
+	socketPath := appTestServer(t, func(id string) string {
+		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"healthy":true}}`
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run(Config{
+		Version:   "test",
+		Arguments: []string{"mcp"},
+		Stdin: strings.NewReader(
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"test"}}}` + "\n" +
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doctor","arguments":{}}}` + "\n"),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		SocketPath: socketPath,
+	})
+	if exitCode != ExitSuccess {
+		t.Fatalf("exit = %d; stderr=%s", exitCode, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two JSON-RPC responses, got %q", stdout.String())
+	}
+	if !strings.Contains(lines[0], `"serverInfo":{"name":"rndevtools","version":"test"}`) {
+		t.Fatalf("initialize response: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"healthy":true`) || !strings.Contains(lines[1], `"isError":false`) {
+		t.Fatalf("tool response: %s", lines[1])
+	}
+	if !strings.Contains(RootUsage(), "  mcp\n") {
+		t.Fatal("root usage must list mcp")
+	}
+	var usage bytes.Buffer
+	if Run(Config{Arguments: []string{"mcp", "--help"}, Stdout: &usage, Stderr: &stderr}) != ExitSuccess {
+		t.Fatal("mcp --help should succeed")
+	}
+	if Run(Config{Arguments: []string{"mcp", "--bogus"}, Stdout: &usage, Stderr: &stderr}) != ExitUsage {
+		t.Fatal("mcp with flags should be a usage error")
+	}
+}

@@ -37,12 +37,40 @@ or:
 ## Commands and input
 
 Commands are `doctor`, `simulators`, `apps`, `screen`, `elements`, `act`,
-`wait`, `capture`, `record`, `network`, `recipe`, `jobs`, `slimming`, and
-`lane`. Run `rndevtools <command> --help` for structured flags. An optional JSON
+`wait`, `capture`, `record`, `network`, `recipe`, `jobs`, `slimming`, `lane`,
+`native`, `agents`, `claim`, `release`, and `input`. Run `rndevtools <command> --help` for structured flags. An optional JSON
 command object may be piped on standard input; flags may add different fields,
 but redefining a stdin field is rejected. `slimming` exposes only the read-only
 `status`, `preview`, `doctor`, and `verify` operations. `act` is limited to the
 desktop service's explicit unattended-action allowlist.
+
+## MCP server
+
+`rndevtools mcp` serves the same commands to coding agents as a Model Context
+Protocol server over stdio (JSON-RPC 2.0, one message per line, protocol
+revision 2025-06-18). It is the recommended way for Claude Code, Codex,
+Cursor, and Kiro to reach RN Devtools: MCP tools are always in the model's
+tool list with a typed schema, so the agent picks `lane` over raw `simctl` the
+same way it picks `Read` over `cat`, without first deciding that a skill
+applies. `rndevtools setup` registers it with each agent.
+
+Every command is one tool of the same name. Input schemas are generated from
+the CLI's own flag table (`command.Describe`), and every call is assembled and
+validated by `command.Build`, the same code path the flag parser uses, then
+sent on the same socket with the same agent attribution, so the desktop sees
+one kind of peer. Tool descriptions carry the workflow guidance a skill would
+(when to use `lane`, how `input` coordinates work, what to call first), and the
+`initialize` response's `instructions` carry the rule against driving
+Simulators with `xcrun simctl` directly. Argument errors come back as tool
+errors (`isError: true`) with the desktop's recovery text so the model can
+correct the call; only malformed JSON-RPC is a protocol error.
+
+`capture` returns the screenshot as an image content block alongside the JSON,
+so the model can look at the device. Read-only resources:
+`rndevtools://simulators`, `rndevtools://lanes`, `rndevtools://agents` (JSON),
+and the template `rndevtools://screen/{udid}` (a fresh JPEG). Attribution comes
+from `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`, which both agents pass to
+the servers they spawn, falling back to the MCP client's name.
 
 ## Lanes
 

@@ -245,14 +245,7 @@ func ParseWithEnvironment(
 		}
 	}
 
-	if kind == protocol.CommandLane {
-		operation, _ := command["operation"].(string)
-		if _, provided := command["agent"]; !provided && (operation == "up" || operation == "launch") {
-			if agent := AgentFromEnvironment(lookup); agent != nil {
-				command["agent"] = agent
-			}
-		}
-	}
+	attachAgent(kind, command, lookup)
 
 	timeout := client.DefaultTimeout
 	if requestTimeout.set {
@@ -261,28 +254,8 @@ func ParseWithEnvironment(
 			return Parsed{}, errors.New("request-timeout-ms must be between 100 and 660000")
 		}
 		timeout = time.Duration(milliseconds) * time.Millisecond
-	} else if kind == protocol.CommandLane || kind == protocol.CommandNative {
-		// Booting a Simulator and waiting for Metro, or fingerprinting a
-		// worktree with Expo's tooling, can exceed the default socket
-		// deadline; both get the same headroom as a long wait.
-		if derived := 240 * time.Second; derived > timeout {
-			timeout = derived
-		}
-	} else if kind == protocol.CommandWait {
-		waitMilliseconds := 30_000
-		if value, ok := command["timeoutMs"]; ok {
-			switch typed := value.(type) {
-			case int:
-				waitMilliseconds = typed
-			case float64:
-				waitMilliseconds = int(typed)
-			}
-		}
-		derived := time.Duration(waitMilliseconds+10_000) * time.Millisecond
-		if derived > timeout {
-			timeout = derived
-		}
 	}
+	timeout = deriveTimeout(kind, command, timeout, requestTimeout.set)
 	encoded, err := json.Marshal(command)
 	if err != nil {
 		return Parsed{}, fmt.Errorf("encode command: %w", err)

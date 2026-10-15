@@ -12,6 +12,11 @@ description: >
 
 # RN Devtools lanes
 
+> If an `rndevtools` MCP server is connected, its tools (`lane`, `simulators`,
+> `capture`, `input`, …) are the same commands as the CLI below with the same
+> arguments; prefer them, and read this skill for the workflow. The CLI remains
+> the fallback when no MCP server is registered.
+
 A **lane** is one git worktree running on one Simulator, served by one Metro on
 a port the desktop leased for it. Lanes are how several branches, and the agents
 working on them, run side by side without fighting over port 8081 or a shared

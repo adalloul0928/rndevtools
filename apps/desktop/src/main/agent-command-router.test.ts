@@ -348,6 +348,83 @@ describe('agent command router', () => {
 		});
 	});
 
+	it('returns the verified file path with a completed capture when the port can resolve it', async () => {
+		const job = {
+			id: 'simulator-shot',
+			actionId: 'agent-cli-0123456789abcdef0123456789abcdef-1',
+			kind: 'capture.screenshot',
+			deviceUdid: UDID,
+			status: 'complete',
+			progressSequence: 2,
+			phase: 'complete',
+			createdAt: now,
+			startedAt: now,
+			finishedAt: now + 1,
+			message: 'Complete.',
+			captureId: 'capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+		};
+		const capture = {
+			id: 'capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+			deviceUdid: UDID,
+			kind: 'screenshot',
+			status: 'complete',
+			createdAt: now,
+			name: 'shot',
+			mimeType: 'image/png',
+			bytes: 7,
+		};
+		const state = simulatorStateSchema.parse({
+			...simulatorState(),
+			jobs: [job],
+			captures: [capture],
+		});
+		const resolved: string[] = [];
+		const port = (withPath: boolean) => ({
+			getState: () => state,
+			refresh: async () => state,
+			runAction: (action: SimulatorAction) => ({
+				actionId: action.actionId,
+				accepted: true,
+				jobId: 'simulator-shot',
+			}),
+			cancelJob: () => false,
+			subscribe: () => () => undefined,
+			...(withPath
+				? {
+						verifiedCapturePath: async (captureId: string) => {
+							resolved.push(captureId);
+							return '/captures/capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d.png';
+						},
+					}
+				: {}),
+		});
+		const { dependencies } = fixture();
+		const withPath = createAgentCommandRouter({
+			...dependencies,
+			simulator: port(true),
+		});
+		await expect(
+			withPath({ kind: 'capture', udid: UDID, format: 'png' }, context)
+		).resolves.toMatchObject({
+			capture: { id: 'capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d' },
+			path: '/captures/capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d.png',
+		});
+		expect(resolved).toEqual(['capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d']);
+
+		const withoutPath = createAgentCommandRouter({
+			...dependencies,
+			simulator: port(false),
+		});
+		const result = (await withoutPath(
+			{ kind: 'capture', udid: UDID, format: 'png' },
+			context
+		)) as Record<string, unknown>;
+		expect(result).toMatchObject({
+			capture: { id: 'capture-0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d' },
+		});
+		expect(result).not.toHaveProperty('path');
+	});
+
 	it('refuses to stop cross-target, non-video, or terminal jobs', async () => {
 		const { cancelledSimulatorJobs, handler, setSimulator } = fixture();
 		const state = simulatorState();

@@ -79,6 +79,8 @@ type SimulatorPort = {
 	) => SimulatorActionReceipt;
 	cancelJob: (jobId: string) => boolean;
 	subscribe: (listener: (state: SimulatorState) => void) => () => void;
+	/** Absolute path of a completed capture's file, verified against the store. */
+	verifiedCapturePath?: (captureId: string) => Promise<string>;
 };
 
 /** Delivers native HID input to a Simulator; see `native-host-client.ts`. */
@@ -992,7 +994,13 @@ function createRoutes({
 						context.signal
 					)) as SimulatorJob
 				);
-				return { job, capture: captureForJob(simulator.getState(), job) };
+				const capture = captureForJob(simulator.getState(), job);
+				// The CLI is a verified local peer reading the operator's own files, so the
+				// path lets it (and the MCP server built on it) return the image itself.
+				const path = simulator.verifiedCapturePath
+					? await simulator.verifiedCapturePath(capture.id)
+					: undefined;
+				return { job, capture, ...(path ? { path } : {}) };
 			}
 			case 'record': {
 				if (command.operation === 'start') {
