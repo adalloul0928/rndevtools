@@ -82,6 +82,7 @@ import { LaneService } from './lane-service';
 import { LaneStore } from './lane-store';
 import { verifyAgentCli } from './native-helper-trust';
 import { NativeHostClient } from './native-host-client';
+import { runNativePlan } from './native-plan';
 import { createRecipeIpcHandlers } from './recipe-ipc';
 import { RecipeService } from './recipe-service';
 import { RecipeStore } from './recipe-store';
@@ -1463,6 +1464,7 @@ if (!app.requestSingleInstanceLock()) {
 					simulator: simulatorService,
 					slimming: slimmingService,
 					lanes: laneService,
+					nativePlan: runNativePlan,
 					recipes: {
 						list: () => recipeService?.getState().recipes ?? [],
 						get: (recipeId) => recipeService?.getRecipe(recipeId) ?? null,

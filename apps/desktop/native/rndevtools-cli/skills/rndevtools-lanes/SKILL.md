@@ -85,14 +85,30 @@ experimental setting is off or this is an unsigned build). An unknown profile id
 fails the whole `lane up` before anything boots.
 
 If the dev client is not installed on that Simulator, `lane up` fails with
-`<bundle id> is not installed on this Simulator` and leaves Metro running. Build
-it once from the worktree and launch again; when the project uses the
-`@rndevtools/react-native/build-cache` provider, a worktree whose native
-fingerprint matches an earlier build installs from the cache instead of
-compiling:
+`<bundle id> is not installed on this Simulator` and leaves Metro running.
+**Do not reach for `expo run:ios` first.** Ask the desktop what the worktree
+needs; it fingerprints the native inputs with the project's own Expo tooling
+and checks the shared build cache, so ten worktrees of one native shell build
+once:
 
 ```bash
-npx expo run:ios --device <UDID> --no-bundler
+rndevtools native --operation plan --worktree "$PWD" --udid <UDID>
+```
+
+The result carries `fingerprintHash`, `cache` (`hit` | `miss` | `no-provider`),
+`installed`, and a one-line `recommendation` that starts with the verb to act
+on:
+
+| `recommendation` starts with | Do |
+| --- | --- |
+| `installed:` | Nothing; launch the lane. |
+| `install:` | `rndevtools native --operation install --worktree "$PWD" --udid <UDID>` puts the cached binary on the Simulator in seconds. |
+| `build:` | Run the quoted `npx expo run:ios … --no-bundler` once. The build cache stores the result for every other worktree with the same fingerprint. |
+
+A JavaScript-only branch reports the same `fingerprintHash` as the branch it
+came from, so it is a cache hit, never a build. Then:
+
+```bash
 rndevtools lane --operation launch --worktree "$PWD"
 ```
 

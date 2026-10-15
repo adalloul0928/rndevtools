@@ -32,6 +32,7 @@ const (
 	CommandJobs       Command = "jobs"
 	CommandSlimming   Command = "slimming"
 	CommandLane       Command = "lane"
+	CommandNative     Command = "native"
 )
 
 var validCommands = map[Command]struct{}{
@@ -49,6 +50,7 @@ var validCommands = map[Command]struct{}{
 	CommandJobs:       {},
 	CommandSlimming:   {},
 	CommandLane:       {},
+	CommandNative:     {},
 }
 
 type Request struct {
@@ -88,6 +90,7 @@ func Commands() []Command {
 		CommandJobs,
 		CommandSlimming,
 		CommandLane,
+		CommandNative,
 	}
 }
 

@@ -194,6 +194,34 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 				});
 			}
 		}),
+	/**
+	 * Native build planning. `plan` fingerprints a worktree with its own Expo
+	 * tooling and reports whether the configured build cache holds a binary and
+	 * whether that binary is installed on a Simulator; it never builds.
+	 * `install` puts a cached binary onto the Simulator when there is a hit.
+	 */
+	z
+		.strictObject({
+			kind: z.literal('native'),
+			operation: z.enum(['plan', 'install']),
+			worktreePath: z
+				.string()
+				.min(2)
+				.max(1_024)
+				.refine((value) => value.startsWith('/'), {
+					message: 'worktreePath must be absolute.',
+				}),
+			udid: udidSchema.optional(),
+			configuration: z.enum(['Debug', 'Release']).default('Debug'),
+		})
+		.superRefine((value, context) => {
+			if (value.operation === 'install' && value.udid === undefined) {
+				context.addIssue({
+					code: 'custom',
+					message: 'native install requires udid.',
+				});
+			}
+		}),
 	z
 		.strictObject({
 			kind: z.literal('lane'),

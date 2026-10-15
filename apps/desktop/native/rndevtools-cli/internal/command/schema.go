@@ -297,6 +297,34 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 		}
 		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
 			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+	case protocol.CommandNative:
+		var value struct {
+			Kind          string  `json:"kind"`
+			Operation     string  `json:"operation"`
+			WorktreePath  *string `json:"worktreePath,omitempty"`
+			UDID          *string `json:"udid,omitempty"`
+			Configuration *string `json:"configuration,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if !oneOf(value.Operation, "plan", "install") {
+			return errors.New("native operation must be plan or install")
+		}
+		if value.WorktreePath == nil || !strings.HasPrefix(*value.WorktreePath, "/") || len(*value.WorktreePath) < 2 || len(*value.WorktreePath) > 1024 || strings.ContainsRune(*value.WorktreePath, 0) {
+			return errors.New("native requires an absolute worktreePath")
+		}
+		if value.UDID != nil {
+			if err := validateUDID(*value.UDID); err != nil {
+				return err
+			}
+		} else if value.Operation == "install" {
+			return errors.New("native install requires udid")
+		}
+		if value.Configuration != nil && !oneOf(*value.Configuration, "Debug", "Release") {
+			return errors.New("configuration must be Debug or Release")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported command %q", expectedKind)
 	}

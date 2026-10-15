@@ -673,6 +673,270 @@ describe('agent command router', () => {
 		).resolves.toEqual({ runId: 'recipe-run-smoke', status: 'complete' });
 	});
 
+	describe('native plan and install', () => {
+		/** Simulator port whose app.list/app.install jobs complete and update appsByDevice. */
+		function simulatorWithApps(initial: string[]) {
+			let apps = [...initial];
+			const listeners = new Set<(state: SimulatorState) => void>();
+			let state = simulatorState();
+			const actions: Array<{
+				action: SimulatorAction;
+				context: { selectedPath?: string } | undefined;
+			}> = [];
+			const port = {
+				getState: () => state,
+				refresh: async () => state,
+				runAction: (
+					action: SimulatorAction,
+					actionContext?: { selectedPath?: string }
+				) => {
+					actions.push({ action, context: actionContext });
+					const jobId = `job-${actions.length}`;
+					queueMicrotask(() => {
+						if (action.kind === 'app.install')
+							apps = [...apps, 'com.example.app'];
+						state = simulatorStateSchema.parse({
+							...state,
+							appsByDevice: {
+								[UDID]: apps.map((bundleIdentifier) => ({
+									bundleIdentifier,
+									displayName: bundleIdentifier,
+									isSystem: false,
+								})),
+							},
+							jobs: [
+								{
+									id: jobId,
+									actionId: action.actionId,
+									kind: action.kind,
+									status: 'complete',
+									progressSequence: 1,
+									phase: 'complete',
+									message: 'done',
+									createdAt: now,
+									finishedAt: now + 1,
+									deviceUdid: UDID,
+								},
+							],
+						});
+						for (const listener of listeners) listener(state);
+					});
+					return { actionId: action.actionId, accepted: true, jobId };
+				},
+				cancelJob: () => false,
+				subscribe: (listener: (state: SimulatorState) => void) => {
+					listeners.add(listener);
+					return () => listeners.delete(listener);
+				},
+			};
+			return { port, actions };
+		}
+		const plan = (cache: 'hit' | 'miss' | 'no-provider') => async () => ({
+			projectRoot: '/Users/dev/app',
+			platform: 'ios' as const,
+			configuration: 'Debug',
+			fingerprintHash: 'f'.repeat(40),
+			sourceCount: 12,
+			...(cache === 'no-provider'
+				? {}
+				: {
+						provider: {
+							plugin: '@rndevtools/react-native/build-cache',
+							cacheEntry: '/Users/dev/Library/Caches/rndevtools/native/x',
+						},
+					}),
+			cache,
+			...(cache === 'hit'
+				? {
+						artifactPath:
+							'/Users/dev/Library/Caches/rndevtools/native/x/ExampleApp.app',
+					}
+				: {}),
+			bundleIdentifier: 'com.example.app',
+			scheme: 'exampleapp',
+		});
+
+		it('reports the absent planner with a typed recovery path', async () => {
+			const { dependencies } = fixture();
+			await expect(
+				createAgentCommandRouter(dependencies)(
+					{
+						kind: 'native',
+						operation: 'plan',
+						configuration: 'Debug',
+						worktreePath: '/Users/dev/app',
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({ code: 'unavailable' })
+			);
+		});
+
+		it('plans without a device: fingerprint, cache state, and a build recommendation', async () => {
+			const { dependencies } = fixture();
+			const { port, actions } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('miss'),
+			});
+			const result = (await handler(
+				{
+					kind: 'native',
+					operation: 'plan',
+					configuration: 'Debug',
+					worktreePath: '/Users/dev/app',
+				},
+				context
+			)) as Record<string, unknown>;
+			expect(result).toMatchObject({
+				fingerprintHash: 'f'.repeat(40),
+				cache: 'miss',
+				bundleIdentifier: 'com.example.app',
+			});
+			expect(result).not.toHaveProperty('installed');
+			expect(String(result.recommendation)).toMatch(/^build: /);
+			expect(String(result.recommendation)).toMatch(
+				/expo run:ios --configuration Debug --no-bundler/
+			);
+			expect(actions).toHaveLength(0);
+		});
+
+		it('plans with a device and reports installed state from the Simulator app list', async () => {
+			const { dependencies } = fixture();
+			const { port } = simulatorWithApps(['com.example.app']);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('hit'),
+			});
+			const result = (await handler(
+				{
+					kind: 'native',
+					operation: 'plan',
+					configuration: 'Debug',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+				},
+				context
+			)) as Record<string, unknown>;
+			expect(result).toMatchObject({
+				cache: 'hit',
+				installed: true,
+				simulatorUdid: UDID,
+			});
+			expect(String(result.recommendation)).toMatch(/^installed: /);
+		});
+
+		it('recommends install on a cache hit that is not yet on the device', async () => {
+			const { dependencies } = fixture();
+			const { port } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('hit'),
+			});
+			const result = (await handler(
+				{
+					kind: 'native',
+					operation: 'plan',
+					configuration: 'Debug',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+				},
+				context
+			)) as Record<string, unknown>;
+			expect(result).toMatchObject({ cache: 'hit', installed: false });
+			expect(String(result.recommendation)).toMatch(/^install: /);
+		});
+
+		it('installs the cached artifact through app.install with the artifact as the selected path', async () => {
+			const { dependencies } = fixture();
+			const { port, actions } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('hit'),
+			});
+			const result = (await handler(
+				{
+					kind: 'native',
+					operation: 'install',
+					configuration: 'Debug',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+				},
+				context
+			)) as Record<string, unknown>;
+			expect(result).toMatchObject({
+				action: 'installed-from-cache',
+				installed: true,
+			});
+			const install = actions.find(
+				({ action }) => action.kind === 'app.install'
+			);
+			expect(install?.context).toEqual({
+				selectedPath:
+					'/Users/dev/Library/Caches/rndevtools/native/x/ExampleApp.app',
+			});
+		});
+
+		it('refuses to install on a miss and names the build command', async () => {
+			const { dependencies } = fixture();
+			const { port, actions } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('miss'),
+			});
+			await expect(
+				handler(
+					{
+						kind: 'native',
+						operation: 'install',
+						configuration: 'Debug',
+						worktreePath: '/Users/dev/app',
+						udid: UDID,
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({
+					code: 'cache_miss',
+					recovery: expect.stringContaining(`--device ${UDID}`),
+				})
+			);
+			expect(actions.some(({ action }) => action.kind === 'app.install')).toBe(
+				false
+			);
+		});
+
+		it('does nothing when the bundle is already installed', async () => {
+			const { dependencies } = fixture();
+			const { port, actions } = simulatorWithApps(['com.example.app']);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('miss'),
+			});
+			const result = await handler(
+				{
+					kind: 'native',
+					operation: 'install',
+					configuration: 'Debug',
+					worktreePath: '/Users/dev/app',
+					udid: UDID,
+				},
+				context
+			);
+			expect(result).toMatchObject({ action: 'already-installed' });
+			expect(actions.some(({ action }) => action.kind === 'app.install')).toBe(
+				false
+			);
+		});
+	});
+
 	it('reports absent lane support with a typed recovery path', async () => {
 		const { handler } = fixture();
 		await expect(

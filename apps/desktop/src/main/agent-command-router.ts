@@ -30,6 +30,7 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
+import type { NativePlanResult } from './native-plan';
 
 const TERMINAL_JOB_STATUSES = new Set([
 	'complete',
@@ -61,10 +62,23 @@ type BrokerPort = {
 type SimulatorPort = {
 	getState: () => SimulatorState;
 	refresh: () => Promise<SimulatorState>;
-	runAction: (action: SimulatorAction) => SimulatorActionReceipt;
+	runAction: (
+		action: SimulatorAction,
+		context?: { selectedPath?: string }
+	) => SimulatorActionReceipt;
 	cancelJob: (jobId: string) => boolean;
 	subscribe: (listener: (state: SimulatorState) => void) => () => void;
 };
+
+/** Fingerprints a worktree; see `native-plan.ts`. Absent in tests that skip it. */
+type NativePlanPort = (
+	input: {
+		projectRoot: string;
+		platform: 'ios' | 'android';
+		configuration: string;
+	},
+	signal?: AbortSignal
+) => Promise<NativePlanResult>;
 
 type SlimmingPort = {
 	getState: () => SlimmingState;
@@ -97,6 +111,7 @@ export type AgentCommandRouterDependencies = {
 	slimming: SlimmingPort;
 	recipes?: AgentRecipePort;
 	lanes?: LanePort;
+	nativePlan?: NativePlanPort;
 };
 
 function unavailable(message: string, recovery?: string): never {
@@ -308,9 +323,10 @@ async function runSimulatorAction(
 	service: SimulatorPort,
 	action: SimulatorAction,
 	signal: AbortSignal,
-	wait = true
+	wait = true,
+	actionContext?: { selectedPath?: string }
 ): Promise<SimulatorActionReceipt | SimulatorJob> {
-	const receipt = service.runAction(action);
+	const receipt = service.runAction(action, actionContext);
 	if (!receipt.accepted || !receipt.jobId) {
 		throw new AgentCliError({
 			code: 'action_rejected',
@@ -503,9 +519,104 @@ export function createAgentCommandRouter({
 	slimming,
 	recipes,
 	lanes,
+	nativePlan,
 }: AgentCommandRouterDependencies): AgentCliHandler {
 	return async (command, context) => {
 		switch (command.kind) {
+			case 'native': {
+				if (!nativePlan) {
+					unavailable(
+						'Native build planning is not available in this desktop session.',
+						'Update RN Devtools and retry.'
+					);
+				}
+				const plan = await nativePlan(
+					{
+						projectRoot: command.worktreePath,
+						platform: 'ios',
+						configuration: command.configuration,
+					},
+					context.signal
+				);
+				// Installed state: list the Simulator's apps and look for the bundle
+				// the worktree declares. Only when a UDID was given.
+				let installed: boolean | undefined;
+				let target: SimulatorState['devices'][number] | undefined;
+				if (command.udid) {
+					target = simulatorByUdid(await simulator.refresh(), command.udid);
+					if (plan.bundleIdentifier) {
+						await runSimulatorAction(
+							simulator,
+							{
+								actionId: actionId(context.requestId),
+								kind: 'app.list',
+								udid: target.udid,
+							},
+							context.signal
+						);
+						const wanted = plan.bundleIdentifier.toLowerCase();
+						installed = (
+							simulator.getState().appsByDevice[target.udid] ?? []
+						).some((app) => app.bundleIdentifier.toLowerCase() === wanted);
+					}
+				}
+				const buildCommand = `npx expo run:ios --configuration ${plan.configuration}${target ? ` --device ${target.udid}` : ''} --no-bundler`;
+				const recommendation =
+					installed === true
+						? 'installed: the Simulator already has this native build; start or launch a lane.'
+						: plan.cache === 'hit'
+							? target
+								? 'install: a cached binary matches this fingerprint; run native --operation install to put it on the Simulator without building.'
+								: 'cached: a binary for this fingerprint exists; pass --udid to install it.'
+							: plan.cache === 'miss'
+								? `build: no cached binary for this fingerprint; run \`${buildCommand}\` once (the build cache will store it for every other worktree).`
+								: `build: this project declares no buildCacheProvider, so every worktree builds; run \`${buildCommand}\`.`;
+				if (command.operation === 'plan') {
+					return {
+						...plan,
+						...(target ? { simulatorUdid: target.udid } : {}),
+						...(installed !== undefined ? { installed } : {}),
+						recommendation,
+					};
+				}
+				if (!target) required('native install requires udid.');
+				if (installed) {
+					return {
+						...plan,
+						simulatorUdid: target.udid,
+						installed: true,
+						action: 'already-installed',
+					};
+				}
+				if (plan.cache !== 'hit' || !plan.artifactPath) {
+					throw new AgentCliError({
+						code: 'cache_miss',
+						message: `No cached binary for fingerprint ${plan.fingerprintHash}; build it first.`,
+						retryable: false,
+						recovery: buildCommand,
+					});
+				}
+				const job = ensureComplete(
+					(await runSimulatorAction(
+						simulator,
+						{
+							actionId: actionId(context.requestId),
+							kind: 'app.install',
+							udid: target.udid,
+						},
+						context.signal,
+						true,
+						{ selectedPath: plan.artifactPath }
+					)) as SimulatorJob
+				);
+				return {
+					...plan,
+					simulatorUdid: target.udid,
+					installed: true,
+					action: 'installed-from-cache',
+					job,
+				};
+			}
 			case 'doctor': {
 				const [simulatorState, slimmingState] = await Promise.all([
 					simulator.refresh(),

@@ -109,6 +109,12 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "url", path: []string{"url"}, kind: fieldString, usage: "Path or full URL to open through the lane scheme (launch)."},
 		{flagName: "max-characters", path: []string{"maxCharacters"}, kind: fieldInteger, usage: "Log tail size (log; 256..64000)."},
 	},
+	protocol.CommandNative: {
+		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "plan (fingerprint + cache + installed state, builds nothing) or install (put a cached binary on the Simulator)."},
+		{flagName: "worktree", path: []string{"worktreePath"}, kind: fieldString, usage: "Absolute path of the Expo app directory to fingerprint."},
+		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID to check or install on (required for install)."},
+		{flagName: "configuration", path: []string{"configuration"}, kind: fieldString, usage: "Debug (default) or Release."},
+	},
 }
 
 // Agent attribution. Claude Code and Codex export a session identifier into
@@ -228,9 +234,10 @@ func ParseWithEnvironment(
 			return Parsed{}, errors.New("request-timeout-ms must be between 100 and 660000")
 		}
 		timeout = time.Duration(milliseconds) * time.Millisecond
-	} else if kind == protocol.CommandLane {
-		// Booting a Simulator and waiting for Metro can exceed the default
-		// socket deadline; lanes get the same headroom as a long wait.
+	} else if kind == protocol.CommandLane || kind == protocol.CommandNative {
+		// Booting a Simulator and waiting for Metro, or fingerprinting a
+		// worktree with Expo's tooling, can exceed the default socket
+		// deadline; both get the same headroom as a long wait.
 		if derived := 240 * time.Second; derived > timeout {
 			timeout = derived
 		}
