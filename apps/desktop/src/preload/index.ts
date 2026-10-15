@@ -61,6 +61,13 @@ import {
 	recipeSummarySchema,
 } from '../shared/recipe-protocol';
 import {
+	type SimulatorInput,
+	type SimulatorInputBridge,
+	type SimulatorInputResult,
+	simulatorInputResultSchema,
+	simulatorInputSchema,
+} from '../shared/simulator-input-protocol';
+import {
 	type SimulatorAction,
 	type SimulatorActionReceipt,
 	type SimulatorBridge,
@@ -125,6 +132,7 @@ const bridge: DesktopBridge &
 	BuildInsightsBridge &
 	LaneBridge &
 	AgentBridge &
+	SimulatorInputBridge &
 	SimulatorStreamBridge = {
 	getBootstrap: async () =>
 		desktopBootstrapSchema.parse(
@@ -432,6 +440,12 @@ const bridge: DesktopBridge &
 		return laneOperationReceiptSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.runLaneOperation, validated)
 		) as LaneOperationReceipt;
+	},
+	sendSimulatorInput: async (input: SimulatorInput) => {
+		const validated = simulatorInputSchema.parse(input);
+		return simulatorInputResultSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.sendSimulatorInput, validated)
+		) as SimulatorInputResult;
 	},
 	getAgentState: async () =>
 		agentStateSchema.parse(

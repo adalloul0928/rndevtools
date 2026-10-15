@@ -38,6 +38,7 @@ import type {
 	RecipeSummary,
 } from '../shared/recipe-protocol';
 import { recipeRunConfirmationResultSchema } from '../shared/recipe-protocol';
+import { simulatorInputSchema } from '../shared/simulator-input-protocol';
 import {
 	SIMULATOR_CAPTURE_PROTOCOL_SCHEME,
 	type SimulatorAction,
@@ -732,6 +733,7 @@ function registerIpc(
 	recipes: RecipeService,
 	buildInsights: BuildInsightsService,
 	lanes: LaneService,
+	nativeHost: NativeHostClient,
 	certificates: StagedCertificateStore,
 	nativeResourceDirectory: string,
 	settings: DesktopSettingsStore
@@ -1238,6 +1240,13 @@ function registerIpc(
 	);
 	ipcMain.handle(IPC_CHANNELS.getLaneState, laneHandlers.getState);
 	ipcMain.handle(IPC_CHANNELS.runLaneOperation, laneHandlers.runOperation);
+	ipcMain.handle(
+		IPC_CHANNELS.sendSimulatorInput,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			return nativeHost.sendSimulatorInput(simulatorInputSchema.parse(value));
+		}
+	);
 	ipcMain.handle(IPC_CHANNELS.getAgentState, (event) => {
 		assertTrustedRenderer(event);
 		if (!agentService) throw new Error('Agents are not available.');
@@ -1506,6 +1515,8 @@ if (!app.requestSingleInstanceLock()) {
 					lanes: laneService,
 					agents: agentService,
 					nativePlan: runNativePlan,
+					simulatorInput: (input, signal) =>
+						nativeHostClient.sendSimulatorInput(input, signal),
 					recipes: {
 						list: () => recipeService?.getState().recipes ?? [],
 						get: (recipeId) => recipeService?.getRecipe(recipeId) ?? null,
@@ -1545,6 +1556,7 @@ if (!app.requestSingleInstanceLock()) {
 				recipeService,
 				buildInsightsService,
 				laneService,
+				nativeHostClient,
 				stagedCertificateStore,
 				nativeResourceDirectory,
 				settings

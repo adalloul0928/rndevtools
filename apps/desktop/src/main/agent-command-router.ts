@@ -23,6 +23,10 @@ import type {
 } from '../shared/protocol';
 import { desktopActionSchema } from '../shared/protocol';
 import type {
+	SimulatorInput,
+	SimulatorInputResult,
+} from '../shared/simulator-input-protocol';
+import type {
 	SimulatorAction,
 	SimulatorActionReceipt,
 	SimulatorCapture,
@@ -36,6 +40,7 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
+import { NativeHostResponseError } from './native-host-client';
 import type { NativePlanResult } from './native-plan';
 
 const TERMINAL_JOB_STATUSES = new Set([
@@ -75,6 +80,12 @@ type SimulatorPort = {
 	cancelJob: (jobId: string) => boolean;
 	subscribe: (listener: (state: SimulatorState) => void) => () => void;
 };
+
+/** Delivers native HID input to a Simulator; see `native-host-client.ts`. */
+type SimulatorInputPort = (
+	input: SimulatorInput,
+	signal?: AbortSignal
+) => Promise<SimulatorInputResult>;
 
 /** Fingerprints a worktree; see `native-plan.ts`. Absent in tests that skip it. */
 type NativePlanPort = (
@@ -129,6 +140,7 @@ export type AgentCommandRouterDependencies = {
 	lanes?: LanePort;
 	agents?: AgentPort;
 	nativePlan?: NativePlanPort;
+	simulatorInput?: SimulatorInputPort;
 };
 
 function unavailable(message: string, recovery?: string): never {
@@ -565,6 +577,8 @@ function touchedSimulators(
 			return command.udids ?? [];
 		case 'native':
 			return command.udid ? [command.udid] : [];
+		case 'input':
+			return [command.input.udid];
 		case 'lane': {
 			const lane = (result as { lane?: { simulatorUdid?: string } } | null)
 				?.lane;
@@ -602,9 +616,56 @@ function createRoutes({
 	lanes,
 	agents,
 	nativePlan,
+	simulatorInput,
 }: AgentCommandRouterDependencies): AgentCliHandler {
 	return async (command, context) => {
 		switch (command.kind) {
+			case 'input': {
+				if (!simulatorInput) {
+					unavailable(
+						'Native Simulator input is not available in this desktop session.',
+						'Update RN Devtools and retry.'
+					);
+				}
+				// Resolve against the fresh inventory so a typo in the UDID reads as
+				// target_not_found rather than a HID error from the host.
+				const target = simulatorByUdid(
+					await simulator.refresh(),
+					command.input.udid
+				);
+				if (target.state !== 'booted') {
+					throw new AgentCliError({
+						code: 'simulator_not_booted',
+						message: `${target.name} is ${target.state}; input needs a booted Simulator.`,
+						retryable: true,
+						recovery:
+							'Boot it (rndevtools lane up, or the desktop app) and retry.',
+					});
+				}
+				try {
+					return await simulatorInput(
+						{ ...command.input, udid: target.udid },
+						context.signal
+					);
+				} catch (error) {
+					if (error instanceof AgentCliError) throw error;
+					const code =
+						error instanceof NativeHostResponseError
+							? error.code
+							: 'input_failed';
+					throw new AgentCliError({
+						code: code.replace(/[^a-z0-9_]/g, '_'),
+						message: error instanceof Error ? error.message : String(error),
+						retryable: true,
+						...(code === 'simulator_input_unavailable'
+							? {
+									recovery:
+										'This Xcode does not expose the Simulator HID path the host needs; update Xcode or drive the app through its connected session instead.',
+								}
+							: {}),
+					});
+				}
+			}
 			case 'agents': {
 				if (!agents) {
 					unavailable(

@@ -155,6 +155,29 @@ rndevtools capture  --udid <UDID> --name "after-checkout"
 The connected app reports its own Simulator UDID, so `--udid` reaches both the
 Simulator and the app session running inside it.
 
+## Drive the Simulator itself
+
+`rndevtools input` sends real touches and keys through the native host, the
+same path Simulator.app uses, so it works on Springboard, system alerts, the
+login screen, and the dev client before it has connected. Coordinates are
+ratios of the screen (`0..1` from the top-left); divide a pixel position by the
+screenshot's width and height to get them.
+
+```bash
+rndevtools input --udid <UDID> --kind tap --x 0.39 --y 0.92              # tap
+rndevtools input --udid <UDID> --kind tap --x 0.5 --y 0.5 --hold-ms 700  # long press
+rndevtools input --udid <UDID> --kind swipe --from-x 0.5 --from-y 0.85 --to-x 0.5 --to-y 0.3
+rndevtools input --udid <UDID> --kind text --text "user@example.com"      # typed, never pasted
+rndevtools input --udid <UDID> --kind key --usage 40                      # Return (HID usages: 40 Return, 42 Delete, 41 Escape, 43 Tab)
+rndevtools input --udid <UDID> --kind button --button home                # home, lock, siri, volume-up, volume-down, apple-pay
+```
+
+Prefer `rndevtools act` for the app's own screens: it drives the connected
+app's semantic actions and reports structured results. Use `input` when there
+is no connected app to talk to, or for anything outside the app. After an
+input, take a screenshot (`rndevtools capture`) or re-read `elements` to see
+what changed; the result only says the Simulator acknowledged the gesture.
+
 ## Stop
 
 ```bash

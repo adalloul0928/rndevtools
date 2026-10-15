@@ -13,7 +13,8 @@ import {
 	X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { DeviceScreen, VisibleDeviceScreen } from '@/components/device-screen';
+import { ControllableScreen } from '@/components/controllable-screen';
+import { VisibleDeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
 	LaneChip,
@@ -702,11 +703,9 @@ function LaneDetail({
 				<LaneChip lane={lane} compact />
 			</div>
 			<div className="sim-focus-screen">
-				<DeviceScreen
-					className="sim-focus-screen-frame"
+				<ControllableScreen
 					live={device?.state === 'booted'}
 					name={device?.name ?? lane.branch}
-					quality="focus"
 					udid={lane.simulatorUdid}
 				/>
 			</div>

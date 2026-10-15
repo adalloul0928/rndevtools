@@ -31,6 +31,7 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandAgents:     `{"kind":"agents"}`,
 		protocol.CommandClaim:      `{"kind":"claim","udid":"` + testUDID + `","note":"checkout flow"}`,
 		protocol.CommandRelease:    `{"kind":"release","udid":"` + testUDID + `"}`,
+		protocol.CommandInput:      `{"kind":"input","input":{"kind":"swipe","udid":"` + testUDID + `","fromX":0.5,"fromY":0.9,"toX":0.5,"toY":0.2,"durationMilliseconds":300,"steps":20}}`,
 	}
 	for kind, encoded := range tests {
 		t.Run(string(kind), func(t *testing.T) {
@@ -72,6 +73,13 @@ func TestValidateRejectsMutationUnknownFieldsAndNullOptionals(t *testing.T) {
 		{protocol.CommandClaim, `{"kind":"claim"}`},
 		{protocol.CommandRelease, `{"kind":"release","udid":"` + testUDID + `","note":"x"}`},
 		{protocol.CommandAgents, `{"kind":"agents","udid":"` + testUDID + `"}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"tap","udid":"` + testUDID + `","x":1.5,"y":0.5}}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"tap","udid":"booted","x":0.5,"y":0.5}}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"tap","udid":"` + testUDID + `","x":0.5,"y":0.5,"button":"home"}}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"text","udid":"` + testUDID + `","text":"héllo"}}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"key","udid":"` + testUDID + `","usage":3}}`},
+		{protocol.CommandInput, `{"kind":"input","input":{"kind":"button","udid":"` + testUDID + `","button":"power"}}`},
+		{protocol.CommandInput, `{"kind":"input"}`},
 	}
 	for _, test := range tests {
 		if err := Validate(json.RawMessage(test.encoded), test.kind); err == nil {

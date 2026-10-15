@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ type fieldKind uint8
 const (
 	fieldString fieldKind = iota
 	fieldInteger
+	fieldNumber
 	fieldBoolean
 	fieldCSV
 	fieldObject
@@ -116,6 +118,22 @@ var commandFields = map[protocol.Command][]fieldSpec{
 	},
 	protocol.CommandRelease: {
 		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID to release."},
+	},
+	protocol.CommandInput: {
+		{flagName: "udid", path: []string{"input", "udid"}, kind: fieldString, usage: "Booted Simulator UDID to drive."},
+		{flagName: "kind", path: []string{"input", "kind"}, kind: fieldString, usage: "tap, swipe, text, key, or button."},
+		{flagName: "x", path: []string{"input", "x"}, kind: fieldNumber, usage: "Tap X as a 0..1 ratio of the screen width."},
+		{flagName: "y", path: []string{"input", "y"}, kind: fieldNumber, usage: "Tap Y as a 0..1 ratio of the screen height."},
+		{flagName: "hold-ms", path: []string{"input", "holdMilliseconds"}, kind: fieldInteger, usage: "Tap contact time (tap; 500+ for a long press)."},
+		{flagName: "from-x", path: []string{"input", "fromX"}, kind: fieldNumber, usage: "Swipe start X ratio."},
+		{flagName: "from-y", path: []string{"input", "fromY"}, kind: fieldNumber, usage: "Swipe start Y ratio."},
+		{flagName: "to-x", path: []string{"input", "toX"}, kind: fieldNumber, usage: "Swipe end X ratio."},
+		{flagName: "to-y", path: []string{"input", "toY"}, kind: fieldNumber, usage: "Swipe end Y ratio."},
+		{flagName: "duration-ms", path: []string{"input", "durationMilliseconds"}, kind: fieldInteger, usage: "Swipe duration (swipe; default 250)."},
+		{flagName: "text", path: []string{"input", "text"}, kind: fieldString, usage: "Printable ASCII to type (text)."},
+		{flagName: "usage", path: []string{"input", "usage"}, kind: fieldInteger, usage: "USB HID keyboard usage (key): 40 Return, 42 Delete, 41 Escape."},
+		{flagName: "modifiers", path: []string{"input", "modifiers"}, kind: fieldCSV, usage: "Comma-separated shift,control,option,command (key)."},
+		{flagName: "button", path: []string{"input", "button"}, kind: fieldString, usage: "home, lock, siri, volume-up, volume-down, or apple-pay (button)."},
 	},
 	protocol.CommandNative: {
 		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "plan (fingerprint + cache + installed state, builds nothing) or install (put a cached binary on the Simulator)."},
@@ -332,6 +350,12 @@ func parseOptionValue(kind fieldKind, raw string) (any, error) {
 		value, err := strconv.Atoi(raw)
 		if err != nil {
 			return nil, errors.New("value must be an integer")
+		}
+		return value, nil
+	case fieldNumber:
+		value, err := strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, errors.New("value must be a finite number")
 		}
 		return value, nil
 	case fieldBoolean:

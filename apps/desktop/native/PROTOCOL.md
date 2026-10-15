@@ -450,3 +450,45 @@ helper path, authorization token, signing identity, executable, argument
 vector, expiry, or nonce from Electron. Cancellation terminates the isolated
 helper process group and reserves the existing operation-specific rollback
 grace before Electron's outer forced-kill deadline.
+
+### Protocol v5 simulator input
+
+Protocol v5 preserves every earlier native-host operation and adds
+`send_simulator_input`, which drives a booted Simulator over the same HID path
+Simulator.app uses for the mouse and keyboard. The guest cannot tell these
+events from a user's, so they work on Springboard, system alerts, and the
+login screen, not only inside a connected development app. Nothing on disk is
+mutated, so the operation is available in unsigned builds.
+
+The payload is one gesture, addressed by exact UDID. Coordinates are ratios of
+the device screen (`0…1` from the top-left) so any screenshot size converts
+without knowing the device geometry:
+
+| `kind` | Fields | Delivered as |
+| --- | --- | --- |
+| `tap` | `x`, `y`, `holdMilliseconds` (default 40; 500+ is a long press) | digitizer down, hold, up |
+| `swipe` | `fromX`, `fromY`, `toX`, `toY`, `durationMilliseconds` (default 250), `steps` (default 16, max 120) | down, interpolated moves, up |
+| `text` | `text` (printable ASCII plus `\n` and `\t`, max 2048) | one key down/up per character, shift held for upper case and symbols |
+| `key` | `usage` (USB HID keyboard usage 0x04…0xE7, e.g. 0x28 Return, 0x2A Delete, 0x29 Escape), `modifiers` (`shift`, `control`, `option`, `command`) | modifiers down, key down/up, modifiers up |
+| `button` | `button`: `home`, `lock`, `siri`, `volume-up`, `volume-down`, `apple-pay` | hardware button down/up |
+
+Text is typed, never pasted: iOS 16+ gates the pasteboard behind an
+"Allow Paste" prompt that blocks unattended use.
+
+The result reports `messages` (HID messages the Simulator acknowledged) and
+`elapsedMilliseconds`. Errors: `invalid_payload` for anything outside the
+table; `simulator_not_found` and `simulator_not_booted` from the live
+CoreSimulator inventory; `simulator_input_unavailable` when this Xcode does
+not expose the SimulatorKit symbols the host resolves at run time (the host
+links no private framework, it `dlopen`s CoreSimulator and SimulatorKit from
+the active developer directory and resolves `SimServiceContext`,
+`SimDeviceLegacyHIDClient`, and the `IndigoHIDMessageFor*` builders by name);
+`simulator_input_failed` when a message is refused or unacknowledged within 5 s.
+
+Message layout follows the publicly documented Indigo wire format: buttons and
+keys come from SimulatorKit's own builders; a single-touch message is the
+320-byte envelope (`eventType` 2) around the digitizer contact SimulatorKit's
+multi-touch builder produces, repeated once as the second payload. On
+CoreSimulator ≥ 1155.4 Apple routes input through `dtuhidd` and the legacy
+client stops delivering touches; the host reports that as
+`simulator_input_failed` and a DTUHID transport would be the follow-up.

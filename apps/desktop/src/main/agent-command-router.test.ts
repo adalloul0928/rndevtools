@@ -20,6 +20,7 @@ import type {
 import { slimmingStateSchema } from '../shared/slimming-protocol';
 import type { AgentCliError } from './agent-cli-service';
 import { createAgentCommandRouter } from './agent-command-router';
+import { NativeHostResponseError } from './native-host-client';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
 const now = 1_800_000_000_000;
@@ -1095,6 +1096,168 @@ describe('agent command router', () => {
 				{ agent: session, udid: UDID },
 				{ agent: session, udid: UDID },
 			]);
+		});
+	});
+
+	describe('native input', () => {
+		it('delivers input to a booted Simulator through the port and records a touch', async () => {
+			const { dependencies } = fixture();
+			const sent: unknown[] = [];
+			const touches: string[] = [];
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulatorInput: async (input) => {
+					sent.push(input);
+					return {
+						udid: input.udid,
+						kind: input.kind,
+						messages: 2,
+						elapsedMilliseconds: 150,
+					};
+				},
+				agents: {
+					getState: () => ({
+						revision: 0,
+						updatedAt: 0,
+						sessions: [],
+						byDevice: {},
+						claims: [],
+						discovery: { claude: 'ok', codex: 'ok' },
+					}),
+					refresh: async () => ({
+						revision: 0,
+						updatedAt: 0,
+						sessions: [],
+						byDevice: {},
+						claims: [],
+						discovery: { claude: 'ok', codex: 'ok' },
+					}),
+					runOperation: async () => {
+						throw new Error('unused');
+					},
+					touch: (_agent, udid) => {
+						touches.push(udid);
+					},
+				},
+			});
+			const result = await handler(
+				{
+					kind: 'input',
+					input: {
+						kind: 'tap',
+						udid: UDID.toLowerCase(),
+						x: 0.5,
+						y: 0.5,
+						holdMilliseconds: 40,
+					},
+				},
+				{ ...context, agent: { kind: 'claude', sessionId: 'claude-1' } }
+			);
+			expect(result).toMatchObject({ kind: 'tap', messages: 2 });
+			// The UDID is canonicalised from the inventory before it reaches the host.
+			expect(sent).toEqual([
+				{ kind: 'tap', udid: UDID, x: 0.5, y: 0.5, holdMilliseconds: 40 },
+			]);
+			expect(touches).toEqual([UDID]);
+		});
+
+		it('refuses input to an unknown or shut-down Simulator with typed errors', async () => {
+			const { dependencies } = fixture();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulatorInput: async () => {
+					throw new Error('must not be called');
+				},
+			});
+			await expect(
+				handler(
+					{
+						kind: 'input',
+						input: {
+							kind: 'button',
+							udid: '00000000-0000-4000-8000-000000000000',
+							button: 'home',
+						},
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({
+					code: 'target_not_found',
+				})
+			);
+			const shutdown = {
+				...dependencies,
+				simulator: {
+					...dependencies.simulator,
+					refresh: async () =>
+						simulatorStateSchema.parse({
+							...simulatorState(),
+							devices: simulatorState().devices.map((d) => ({
+								...d,
+								state: 'shutdown',
+							})),
+						}),
+				},
+			};
+			await expect(
+				createAgentCommandRouter({
+					...shutdown,
+					simulatorInput: async () => {
+						throw new Error('no');
+					},
+				})(
+					{
+						kind: 'input',
+						input: { kind: 'button', udid: UDID, button: 'home' },
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({
+					code: 'simulator_not_booted',
+				})
+			);
+		});
+
+		it('maps a host failure to a typed, retryable error and reports a missing port', async () => {
+			const { dependencies } = fixture();
+			await expect(
+				createAgentCommandRouter(dependencies)(
+					{
+						kind: 'input',
+						input: { kind: 'button', udid: UDID, button: 'home' },
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({ code: 'unavailable' })
+			);
+			const failing = createAgentCommandRouter({
+				...dependencies,
+				simulatorInput: async () => {
+					throw new NativeHostResponseError(
+						'simulator_input_unavailable',
+						'SimulatorKit missing',
+						false
+					);
+				},
+			});
+			await expect(
+				failing(
+					{
+						kind: 'input',
+						input: { kind: 'button', udid: UDID, button: 'home' },
+					},
+					context
+				)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({
+					code: 'simulator_input_unavailable',
+					retryable: true,
+					recovery: expect.stringContaining('Xcode'),
+				})
+			);
 		});
 	});
 

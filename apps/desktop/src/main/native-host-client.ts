@@ -4,6 +4,12 @@ import { chmod, lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
+	type SimulatorInput,
+	type SimulatorInputResult,
+	simulatorInputResultSchema,
+	simulatorInputSchema,
+} from '../shared/simulator-input-protocol';
+import {
 	type CaptureCompositionRecipe,
 	captureCompositionRecipeSchema,
 	type SimulatorNativeState,
@@ -22,6 +28,7 @@ import {
 const INSPECTION_PROTOCOL_VERSION = 2;
 const COMPOSITION_PROTOCOL_VERSION = 3;
 const MUTATION_BROKER_PROTOCOL_VERSION = 4;
+const SIMULATOR_INPUT_PROTOCOL_VERSION = 5;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_MUTATION_BROKER_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_COMPOSITION_INPUT_BYTES = 32 * 1024 * 1024;
@@ -102,6 +109,7 @@ const responseSchema = z.union([
 			z.literal(INSPECTION_PROTOCOL_VERSION),
 			z.literal(COMPOSITION_PROTOCOL_VERSION),
 			z.literal(MUTATION_BROKER_PROTOCOL_VERSION),
+			z.literal(SIMULATOR_INPUT_PROTOCOL_VERSION),
 		]),
 		requestId: identifierSchema,
 		ok: z.literal(true),
@@ -112,6 +120,7 @@ const responseSchema = z.union([
 			z.literal(INSPECTION_PROTOCOL_VERSION),
 			z.literal(COMPOSITION_PROTOCOL_VERSION),
 			z.literal(MUTATION_BROKER_PROTOCOL_VERSION),
+			z.literal(SIMULATOR_INPUT_PROTOCOL_VERSION),
 		]),
 		requestId: identifierSchema,
 		ok: z.literal(false),
@@ -486,13 +495,35 @@ export class NativeHostClient {
 		return result.helperResponse;
 	}
 
+	/**
+	 * Delivers one input gesture to a Simulator through the host's HID path.
+	 * The payload is validated by the shared schema before it leaves this
+	 * process and again by the host; an unsigned build may use this freely
+	 * because touching a Simulator's screen mutates nothing on disk.
+	 */
+	async sendSimulatorInput(
+		input: SimulatorInput,
+		signal?: AbortSignal
+	): Promise<SimulatorInputResult> {
+		const validated = simulatorInputSchema.parse(input);
+		return simulatorInputResultSchema.parse(
+			await this.#call('send_simulator_input', signal, {
+				protocolVersion: SIMULATOR_INPUT_PROTOCOL_VERSION,
+				payload: validated,
+				// A 2 KiB text at ~12 ms per key is ~25 s; swipes are bounded at 10 s.
+				timeoutMs: 60_000,
+			})
+		);
+	}
+
 	async #call(
 		operation:
 			| 'handshake'
 			| 'permission_status'
 			| 'capability_status'
 			| 'compose_image'
-			| 'run_simulator_mutation',
+			| 'run_simulator_mutation'
+			| 'send_simulator_input',
 		signal?: AbortSignal,
 		{
 			protocolVersion = INSPECTION_PROTOCOL_VERSION,
@@ -501,7 +532,7 @@ export class NativeHostClient {
 			forceKillDelayMs,
 			maxResponseBytes = MAX_RESPONSE_BYTES,
 		}: {
-			protocolVersion?: 2 | 3 | 4;
+			protocolVersion?: 2 | 3 | 4 | 5;
 			payload?: Record<string, unknown>;
 			timeoutMs?: number;
 			forceKillDelayMs?: number;

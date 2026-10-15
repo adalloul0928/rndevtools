@@ -23,7 +23,8 @@ import {
 	Waypoints,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { DeviceScreen, VisibleDeviceScreen } from '@/components/device-screen';
+import { ControllableScreen } from '@/components/controllable-screen';
+import { VisibleDeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
 	AgentGlyph,
@@ -1125,11 +1126,9 @@ function TargetDetail({
 			</div>
 			<Disclosure defaultOpen title="Live screen">
 				<div className="sim-focus-screen">
-					<DeviceScreen
-						className="sim-focus-screen-frame"
+					<ControllableScreen
 						live={target.state === 'booted'}
 						name={target.name}
-						quality="focus"
 						udid={target.udid}
 					/>
 					<p className="sim-inline-note">

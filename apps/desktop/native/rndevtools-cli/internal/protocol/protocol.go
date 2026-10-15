@@ -36,6 +36,7 @@ const (
 	CommandAgents     Command = "agents"
 	CommandClaim      Command = "claim"
 	CommandRelease    Command = "release"
+	CommandInput      Command = "input"
 )
 
 var validCommands = map[Command]struct{}{
@@ -57,6 +58,7 @@ var validCommands = map[Command]struct{}{
 	CommandAgents:     {},
 	CommandClaim:      {},
 	CommandRelease:    {},
+	CommandInput:      {},
 }
 
 type Request struct {
@@ -103,6 +105,7 @@ func Commands() []Command {
 		CommandAgents,
 		CommandClaim,
 		CommandRelease,
+		CommandInput,
 	}
 }
 

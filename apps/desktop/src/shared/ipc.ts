@@ -42,6 +42,7 @@ export const IPC_CHANNELS = {
 	getLaneState: 'rndevtools-desktop:lane:get-state',
 	laneStateChanged: 'rndevtools-desktop:lane:state-changed',
 	runLaneOperation: 'rndevtools-desktop:lane:run-operation',
+	sendSimulatorInput: 'rndevtools-desktop:simulator:send-input',
 	getAgentState: 'rndevtools-desktop:agent:get-state',
 	agentStateChanged: 'rndevtools-desktop:agent:state-changed',
 	runAgentOperation: 'rndevtools-desktop:agent:run-operation',

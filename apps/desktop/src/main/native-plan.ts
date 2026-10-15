@@ -45,7 +45,7 @@ export type NativePlanResult = z.infer<typeof nativePlanResultSchema>;
  * bundle stays independent of the project's Expo version; every `require`
  * resolves from the project root, exactly as `expo run:ios` would.
  */
-const PLAN_SCRIPT = String.raw`
+const PLAN_SCRIPT = `
 const path = require('node:path');
 const fs = require('node:fs');
 const [projectRoot, platform, configuration] = process.argv.slice(1);

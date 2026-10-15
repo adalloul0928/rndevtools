@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { laneAgentSchema, laneIdSchema } from './lane-protocol';
 import { desktopActionSchema } from './protocol';
+import { simulatorInputSchema } from './simulator-input-protocol';
 
 export const RNDEVTOOLS_AGENT_CLI_PROTOCOL = 'rndevtools/1' as const;
 
@@ -222,6 +223,15 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 				});
 			}
 		}),
+	/**
+	 * Native Simulator input through the signed host (SimulatorKit HID): tap,
+	 * swipe, text, key, button. Works on any screen, connected app or not.
+	 * Coordinates are 0…1 ratios of the device screen.
+	 */
+	z.strictObject({
+		kind: z.literal('input'),
+		input: simulatorInputSchema,
+	}),
 	/** Live coding-agent sessions and which Simulators they are attached to. */
 	z.strictObject({ kind: z.literal('agents') }),
 	/**

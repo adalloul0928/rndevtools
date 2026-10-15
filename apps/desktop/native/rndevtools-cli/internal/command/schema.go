@@ -326,6 +326,37 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			}
 		}
 		return nil
+	case protocol.CommandInput:
+		var value struct {
+			Kind  string `json:"kind"`
+			Input *struct {
+				Kind                 string   `json:"kind"`
+				UDID                 string   `json:"udid"`
+				X                    *float64 `json:"x,omitempty"`
+				Y                    *float64 `json:"y,omitempty"`
+				FromX                *float64 `json:"fromX,omitempty"`
+				FromY                *float64 `json:"fromY,omitempty"`
+				ToX                  *float64 `json:"toX,omitempty"`
+				ToY                  *float64 `json:"toY,omitempty"`
+				HoldMilliseconds     *int     `json:"holdMilliseconds,omitempty"`
+				DurationMilliseconds *int     `json:"durationMilliseconds,omitempty"`
+				Steps                *int     `json:"steps,omitempty"`
+				Text                 *string  `json:"text,omitempty"`
+				Usage                *int     `json:"usage,omitempty"`
+				Modifiers            []string `json:"modifiers,omitempty"`
+				Button               *string  `json:"button,omitempty"`
+			} `json:"input"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if value.Input == nil {
+			return errors.New("input requires --udid and --kind")
+		}
+		return validateSimulatorInput(value.Input.Kind, value.Input.UDID, value.Input.X, value.Input.Y,
+			value.Input.FromX, value.Input.FromY, value.Input.ToX, value.Input.ToY,
+			value.Input.HoldMilliseconds, value.Input.DurationMilliseconds, value.Input.Steps,
+			value.Input.Text, value.Input.Usage, value.Input.Modifiers, value.Input.Button)
 	case protocol.CommandNative:
 		var value struct {
 			Kind          string  `json:"kind"`
@@ -444,6 +475,82 @@ func validateLane(
 		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || agent != nil {
 			return errors.New("lane log takes exactly one of laneId or worktreePath, plus an optional maxCharacters")
 		}
+	}
+	return nil
+}
+
+func ratioOK(value *float64) bool {
+	return value != nil && *value >= 0 && *value <= 1
+}
+
+func validateSimulatorInput(
+	kind, udid string,
+	x, y, fromX, fromY, toX, toY *float64,
+	hold, duration, steps *int,
+	text *string, usage *int, modifiers []string, button *string,
+) error {
+	if err := validateUDID(udid); err != nil {
+		return err
+	}
+	coords := x != nil || y != nil
+	swipeCoords := fromX != nil || fromY != nil || toX != nil || toY != nil
+	switch kind {
+	case "tap":
+		if !ratioOK(x) || !ratioOK(y) {
+			return errors.New("tap requires --x and --y between 0 and 1")
+		}
+		if hold != nil && (*hold < 0 || *hold > 10000) {
+			return errors.New("hold-ms must be between 0 and 10000")
+		}
+		if swipeCoords || duration != nil || steps != nil || text != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("tap accepts only --x, --y, and --hold-ms")
+		}
+	case "swipe":
+		if !ratioOK(fromX) || !ratioOK(fromY) || !ratioOK(toX) || !ratioOK(toY) {
+			return errors.New("swipe requires --from-x, --from-y, --to-x, and --to-y between 0 and 1")
+		}
+		if duration != nil && (*duration < 1 || *duration > 10000) {
+			return errors.New("duration-ms must be between 1 and 10000")
+		}
+		if steps != nil && (*steps < 2 || *steps > 120) {
+			return errors.New("steps must be between 2 and 120")
+		}
+		if coords || hold != nil || text != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("swipe accepts only its coordinates, --duration-ms, and --steps")
+		}
+	case "text":
+		if text == nil || *text == "" || utf8.RuneCountInString(*text) > 2048 {
+			return errors.New("text requires --text with 1..2048 characters")
+		}
+		for _, r := range *text {
+			if !(r == '\n' || r == '\t' || (r >= 0x20 && r <= 0x7e)) {
+				return errors.New("text must be printable ASCII (plus newline and tab)")
+			}
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("text accepts only --text")
+		}
+	case "key":
+		if usage == nil || *usage < 0x04 || *usage > 0xE7 {
+			return errors.New("key requires --usage, a USB HID keyboard usage between 4 and 231")
+		}
+		for _, modifier := range modifiers {
+			if !oneOf(modifier, "shift", "control", "option", "command") {
+				return errors.New("modifiers may only contain shift, control, option, and command")
+			}
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || text != nil || button != nil {
+			return errors.New("key accepts only --usage and --modifiers")
+		}
+	case "button":
+		if button == nil || !oneOf(*button, "home", "lock", "siri", "volume-up", "volume-down", "apple-pay") {
+			return errors.New("button requires --button: home, lock, siri, volume-up, volume-down, or apple-pay")
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || text != nil || usage != nil || modifiers != nil {
+			return errors.New("button accepts only --button")
+		}
+	default:
+		return errors.New("input kind must be tap, swipe, text, key, or button")
 	}
 	return nil
 }

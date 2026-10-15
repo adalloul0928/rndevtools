@@ -37,8 +37,10 @@ operation and CLI flag is explicitly allowlisted and bounded.
 
 The simulator helper consumes protocol v2. The native host keeps its exact
 protocol-v1 surface for the existing Electron client, adds the protocol-v2
-`capability_status` operation, protocol-v3 `compose_image`, and protocol-v4's
-signed-parent `run_simulator_mutation` broker. Both consume one bounded JSON object from
+`capability_status` operation, protocol-v3 `compose_image`, protocol-v4's
+signed-parent `run_simulator_mutation` broker, and protocol-v5's
+`send_simulator_input` (taps, swipes, typed text, keys, and hardware buttons
+over SimulatorKit's HID transport; see PROTOCOL.md). Both consume one bounded JSON object from
 standard input, emit one bounded JSON object to standard output, and exit. The
 CLI uses its separately versioned local-socket contract. The build emits a
 SHA-256 manifest beside all three binaries. On macOS, the packaging hook first

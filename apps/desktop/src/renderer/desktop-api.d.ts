@@ -3,6 +3,7 @@ import type { BuildInsightsBridge } from '../shared/build-insights-protocol';
 import type { LaneBridge } from '../shared/lane-protocol';
 import type { DesktopBridge } from '../shared/protocol';
 import type { RecipeBridge } from '../shared/recipe-protocol';
+import type { SimulatorInputBridge } from '../shared/simulator-input-protocol';
 import type { SimulatorBridge } from '../shared/simulator-protocol';
 import type { SimulatorStreamBridge } from '../shared/simulator-stream-protocol';
 import type { SlimmingBridge } from '../shared/slimming-protocol';
@@ -16,6 +17,7 @@ declare global {
 			BuildInsightsBridge &
 			LaneBridge &
 			AgentBridge &
+			SimulatorInputBridge &
 			SimulatorStreamBridge;
 	}
 }
