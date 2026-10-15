@@ -36,16 +36,21 @@ type Provider = {
 		options?: { cacheDirectory?: string },
 	) => Promise<string | null>;
 };
+type Internals = {
+	now?: () => number;
+	sleep?: (ms: number) => Promise<void>;
+	arch?: string;
+	xcodeIdentity?: () => string;
+};
 type BuildCacheModule = Provider & {
-	createBuildCacheProvider: (internals?: {
-		now?: () => number;
-		sleep?: (ms: number) => Promise<void>;
-	}) => Provider;
+	createBuildCacheProvider: (internals?: Internals) => Provider;
 	entryDirectory: (
 		context: Context,
 		options?: { cacheDirectory?: string },
+		internals?: Internals,
 	) => string;
 	defaultCacheRoot: (env?: Record<string, string>, homedir?: string) => string;
+	toolchainSegment: (platform: string, internals?: Internals) => string;
 };
 
 const fs = require('node:fs') as Fs;
@@ -57,7 +62,14 @@ const {
 	entryDirectory,
 	resolveBuildCache,
 	uploadBuildCache,
+	toolchainSegment,
 } = require('../build-cache.js') as BuildCacheModule;
+const TOOLCHAIN = {
+	arch: 'arm64',
+	xcodeIdentity: () => 'Xcode 26.6\nBuild version 17F100',
+};
+const iosToolchain = toolchainSegment('ios', TOOLCHAIN);
+const androidToolchain = toolchainSegment('android', TOOLCHAIN);
 const {
 	mkdtempSync,
 	mkdirSync,
@@ -103,8 +115,11 @@ describe('build cache provider', () => {
 		const ios = entryDirectory(
 			{ fingerprintHash: HASH, platform: 'ios', runOptions: {} },
 			{ cacheDirectory },
+			TOOLCHAIN,
 		);
-		expect(ios).toBe(path.join(cacheDirectory, 'ios', 'Debug', HASH));
+		expect(ios).toBe(
+			path.join(cacheDirectory, 'ios', 'Debug', iosToolchain, HASH),
+		);
 		const release = entryDirectory(
 			{
 				fingerprintHash: HASH,
@@ -112,8 +127,11 @@ describe('build cache provider', () => {
 				runOptions: { configuration: 'Release' },
 			},
 			{ cacheDirectory },
+			TOOLCHAIN,
 		);
-		expect(release).toBe(path.join(cacheDirectory, 'ios', 'Release', HASH));
+		expect(release).toBe(
+			path.join(cacheDirectory, 'ios', 'Release', iosToolchain, HASH),
+		);
 		const android = entryDirectory(
 			{
 				fingerprintHash: HASH,
@@ -121,8 +139,11 @@ describe('build cache provider', () => {
 				runOptions: { variant: 'debug' },
 			},
 			{ cacheDirectory },
+			TOOLCHAIN,
 		);
-		expect(android).toBe(path.join(cacheDirectory, 'android', 'debug', HASH));
+		expect(android).toBe(
+			path.join(cacheDirectory, 'android', 'debug', androidToolchain, HASH),
+		);
 		// Hostile segments cannot climb out of the cache root.
 		const hostile = entryDirectory(
 			{
@@ -140,6 +161,27 @@ describe('build cache provider', () => {
 		expect(defaultCacheRoot({}, '/Users/dev')).toMatch(
 			/rndevtools[/\\]native$/,
 		);
+	});
+
+	it('keys iOS entries by Xcode version and arch so an upgraded toolchain never serves a stale build', () => {
+		const before = toolchainSegment('ios', TOOLCHAIN);
+		const upgraded = toolchainSegment('ios', {
+			...TOOLCHAIN,
+			xcodeIdentity: () => 'Xcode 27.0\nBuild version 18A1',
+		});
+		const otherArch = toolchainSegment('ios', { ...TOOLCHAIN, arch: 'x64' });
+		expect(before).toMatch(/^arm64-[0-9a-f]{12}$/);
+		expect(upgraded).not.toBe(before);
+		expect(otherArch).toMatch(/^x64-/);
+		// Android has no Xcode dependency: the Xcode version must not matter.
+		expect(
+			toolchainSegment('android', {
+				...TOOLCHAIN,
+				xcodeIdentity: () => 'Xcode 27.0',
+			}),
+		).toBe(androidToolchain);
+		// The real host resolves a toolchain without being told one.
+		expect(toolchainSegment('ios')).toMatch(/^[a-z0-9]+-[0-9a-f]{12}$/);
 	});
 
 	it('misses once, claims the build, then serves the uploaded .app to the next worktree', async () => {
@@ -169,6 +211,7 @@ describe('build cache provider', () => {
 			artifact: 'ExampleApp.app',
 			platform: 'ios',
 			fingerprintHash: HASH,
+			toolchain: toolchainSegment('ios'),
 		});
 
 		// A second worktree with the same fingerprint gets the binary, no build.
@@ -309,7 +352,14 @@ describe('build cache provider', () => {
 			{ cacheDirectory },
 		);
 		expect(stored).toBe(
-			path.join(cacheDirectory, 'android', 'debug', HASH, 'app-debug.apk'),
+			path.join(
+				cacheDirectory,
+				'android',
+				'debug',
+				toolchainSegment('android'),
+				HASH,
+				'app-debug.apk',
+			),
 		);
 		expect(await resolveBuildCache(context, { cacheDirectory })).toBe(stored);
 	});

@@ -59,6 +59,15 @@ export function entryDirectory(
 	options?: BuildCacheProviderOptions,
 ): string;
 
+/**
+ * The toolchain path segment for a platform: `<arch>-<12 hex>`, where the
+ * digest covers the CPU architecture and, for iOS, `xcodebuild -version`.
+ */
+export function toolchainSegment(
+	platform: BuildCachePlatform | string,
+	internals?: { arch?: string; xcodeIdentity?: () => string },
+): string;
+
 /** Default cache root for this machine. */
 export function defaultCacheRoot(
 	env?: Record<string, string | undefined>,

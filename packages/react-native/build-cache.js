@@ -1,3 +1,5 @@
+const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -75,12 +77,54 @@ function configurationOf(runOptions = {}) {
 	return runOptions.configuration || runOptions.variant || 'Debug';
 }
 
+let xcodeIdentityCache;
+/**
+ * `xcodebuild -version` output ("Xcode 26.6\nBuild version 17F…"), read once
+ * per process. Expo's fingerprint does not include the toolchain, so without
+ * this an `.app` built by an older Xcode would still be served after an
+ * upgrade and fail to install or run against the new runtime.
+ */
+function xcodeIdentity() {
+	if (xcodeIdentityCache !== undefined) return xcodeIdentityCache;
+	try {
+		xcodeIdentityCache = execFileSync('xcodebuild', ['-version'], {
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore'],
+			timeout: 15_000,
+		}).trim();
+	} catch {
+		xcodeIdentityCache = 'xcode-unknown';
+	}
+	return xcodeIdentityCache;
+}
+
+/**
+ * Short, stable id for the host toolchain a binary was produced with. iOS
+ * builds depend on the Xcode version and the CPU architecture; Android APKs
+ * only on the architecture of the emulator image being targeted, which Expo
+ * folds into the build itself, so arch alone keeps distinct hosts apart.
+ */
+function toolchainSegment(platform, internals = {}) {
+	const arch = internals.arch || process.arch;
+	const parts =
+		platform === 'ios'
+			? [arch, (internals.xcodeIdentity || xcodeIdentity)()]
+			: [arch];
+	const digest = crypto
+		.createHash('sha256')
+		.update(parts.join('\n'))
+		.digest('hex')
+		.slice(0, 12);
+	return `${safeSegment(arch)}-${digest}`;
+}
+
 /**
  * Directory for one cache entry. Expo's fingerprint already covers native
- * inputs; the platform and configuration are split out so a Release build is
- * never handed to a Debug run of the same fingerprint.
+ * inputs; the platform, configuration, and toolchain are split out so a
+ * Release build, or a build from another Xcode, is never handed to a Debug
+ * run of the same fingerprint.
  */
-function entryDirectory(context, options = {}) {
+function entryDirectory(context, options = {}, internals = {}) {
 	if (!context || typeof context.fingerprintHash !== 'string') {
 		throw new TypeError('build-cache: a fingerprintHash is required.');
 	}
@@ -91,6 +135,7 @@ function entryDirectory(context, options = {}) {
 		root,
 		safeSegment(context.platform, 'unknown-platform'),
 		safeSegment(configurationOf(context.runOptions)),
+		toolchainSegment(context.platform, internals),
 		safeSegment(context.fingerprintHash, 'no-fingerprint'),
 	);
 }
@@ -188,7 +233,7 @@ function createBuildCacheProvider(internals = {}) {
 	const wait = internals.sleep || sleep;
 
 	async function resolveBuildCache(context, options = {}) {
-		const entry = entryDirectory(context, options);
+		const entry = entryDirectory(context, options, internals);
 		const waitTimeoutMs =
 			Number.isFinite(options.waitTimeoutMs) && options.waitTimeoutMs >= 0
 				? options.waitTimeoutMs
@@ -197,7 +242,7 @@ function createBuildCacheProvider(internals = {}) {
 	}
 
 	async function uploadBuildCache(context, options = {}) {
-		const entry = entryDirectory(context, options);
+		const entry = entryDirectory(context, options, internals);
 		const lockPath = path.join(entry, LOCK_FILE);
 		try {
 			const buildPath = path.resolve(String(context.buildPath || ''));
@@ -236,6 +281,7 @@ function createBuildCacheProvider(internals = {}) {
 							artifact: name,
 							platform: context.platform,
 							configuration: configurationOf(context.runOptions),
+							toolchain: toolchainSegment(context.platform, internals),
 							fingerprintHash: context.fingerprintHash,
 							createdAt: new Date(now()).toISOString(),
 							sourceProject: context.projectRoot,
@@ -269,4 +315,5 @@ module.exports = {
 	createBuildCacheProvider,
 	entryDirectory,
 	defaultCacheRoot,
+	toolchainSegment,
 };

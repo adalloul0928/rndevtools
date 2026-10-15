@@ -142,11 +142,14 @@ module.exports = ({ config }) => ({
 
 Then build as usual: `npx expo run:ios --device <udid> --no-bundler`. The
 first worktree builds and uploads; later ones with the same fingerprint are
-installed from `~/Library/Caches/rndevtools/native/<platform>/<configuration>/<hash>/`
+installed from
+`~/Library/Caches/rndevtools/native/<platform>/<configuration>/<toolchain>/<hash>/`
 (`RNDEVTOOLS_BUILD_CACHE_DIR` or the `cacheDirectory` option relocates it).
-Entries are split by platform and build configuration, so a Release binary is
-never installed for a Debug run. Delete the directory to start clean; there is
-no eviction.
+Entries are split by platform, build configuration, and toolchain (CPU
+architecture plus, for iOS, the `xcodebuild -version` output), so a Release
+binary is never installed for a Debug run and an Xcode upgrade never serves a
+build from the old SDK. Delete the directory to start clean; there is no
+eviction.
 
 `@expo/fingerprint` decides what counts as a native change. If your project
 has native inputs outside the usual places, configure them in
