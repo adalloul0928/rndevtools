@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+	type AgentBridge,
+	type AgentOperation,
+	type AgentState,
+	agentOperationSchema,
+	agentStateSchema,
+} from '../shared/agent-protocol';
+import {
 	type BuildInsightsBridge,
 	type BuildInsightsOperation,
 	type BuildInsightsOperationReceipt,
@@ -117,6 +124,7 @@ const bridge: DesktopBridge &
 	RecipeBridge &
 	BuildInsightsBridge &
 	LaneBridge &
+	AgentBridge &
 	SimulatorStreamBridge = {
 	getBootstrap: async () =>
 		desktopBootstrapSchema.parse(
@@ -424,6 +432,33 @@ const bridge: DesktopBridge &
 		return laneOperationReceiptSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.runLaneOperation, validated)
 		) as LaneOperationReceipt;
+	},
+	getAgentState: async () =>
+		agentStateSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.getAgentState)
+		) as AgentState,
+	subscribeAgentState: (listener: (state: AgentState) => void) => {
+		if (typeof listener !== 'function') {
+			throw new TypeError('Agent state listener must be a function.');
+		}
+		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
+			const parsed = agentStateSchema.safeParse(state);
+			if (!parsed.success) return;
+			try {
+				listener(parsed.data);
+			} catch {
+				// A renderer callback must not break the isolated IPC event handler.
+			}
+		};
+		ipcRenderer.on(IPC_CHANNELS.agentStateChanged, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.agentStateChanged, wrapped);
+	},
+	runAgentOperation: async (operation: AgentOperation) => {
+		const validated = agentOperationSchema.parse(operation);
+		return agentStateSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.runAgentOperation, validated)
+		) as AgentState;
 	},
 	setSimulatorStreamSubscriptions: async (
 		subscriptions: readonly SimulatorStreamSubscription[]

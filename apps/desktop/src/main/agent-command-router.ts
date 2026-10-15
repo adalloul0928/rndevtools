@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
+	type AgentCliCommand,
 	type AgentCliTarget,
 	isSafeAgentConnectedAction,
 } from '../shared/agent-cli-protocol';
+import type {
+	AgentKind,
+	AgentOperation,
+	AgentState,
+} from '../shared/agent-protocol';
 import {
 	type LaneOperation,
 	type LaneOperationReceipt,
@@ -97,6 +103,16 @@ type LanePort = {
 	) => Promise<LaneOperationReceipt>;
 };
 
+type AgentPort = {
+	getState: () => AgentState;
+	refresh: () => Promise<AgentState>;
+	runOperation: (operation: AgentOperation) => Promise<AgentState>;
+	touch: (
+		agent: { kind: AgentKind; sessionId: string },
+		simulatorUdid: string
+	) => void;
+};
+
 type AgentRecipePort = {
 	list: () => Promise<unknown> | unknown;
 	get: (recipeId: string) => Promise<unknown> | unknown;
@@ -111,6 +127,7 @@ export type AgentCommandRouterDependencies = {
 	slimming: SlimmingPort;
 	recipes?: AgentRecipePort;
 	lanes?: LanePort;
+	agents?: AgentPort;
 	nativePlan?: NativePlanPort;
 };
 
@@ -513,16 +530,142 @@ function laneReceiptResult(receipt: LaneOperationReceipt) {
 	return rest;
 }
 
-export function createAgentCommandRouter({
+/**
+ * The Simulators a command drove, for agent attribution. Read after the
+ * command succeeded so a rejected command never counts as a touch. Connected
+ * app targets are resolved to the Simulator the session reported.
+ */
+function touchedSimulators(
+	command: AgentCliCommand,
+	broker: BrokerPort,
+	result: unknown
+): string[] {
+	const fromTarget = (target: AgentCliTarget | undefined): string[] => {
+		if (!target) return [];
+		if ('udid' in target) return [target.udid];
+		const device = broker
+			.getState()
+			.devices.find((candidate) => candidate.info.id === target.deviceId);
+		return device?.info.simulatorUdid ? [device.info.simulatorUdid] : [];
+	};
+	switch (command.kind) {
+		case 'apps':
+		case 'capture':
+		case 'record':
+			return [command.udid];
+		case 'screen':
+		case 'elements':
+		case 'act':
+		case 'network':
+			return fromTarget(command.target);
+		case 'wait':
+			return fromTarget(command.target);
+		case 'slimming':
+		case 'recipe':
+			return command.udids ?? [];
+		case 'native':
+			return command.udid ? [command.udid] : [];
+		case 'lane': {
+			const lane = (result as { lane?: { simulatorUdid?: string } } | null)
+				?.lane;
+			return lane?.simulatorUdid ? [lane.simulatorUdid] : [];
+		}
+		default:
+			return [];
+	}
+}
+
+export function createAgentCommandRouter(
+	dependencies: AgentCommandRouterDependencies
+): AgentCliHandler {
+	const route = createRoutes(dependencies);
+	return async (command, context) => {
+		const result = await route(command, context);
+		if (context.agent && dependencies.agents) {
+			for (const udid of touchedSimulators(
+				command,
+				dependencies.broker,
+				result
+			)) {
+				dependencies.agents.touch(context.agent, udid);
+			}
+		}
+		return result;
+	};
+}
+
+function createRoutes({
 	broker,
 	simulator,
 	slimming,
 	recipes,
 	lanes,
+	agents,
 	nativePlan,
 }: AgentCommandRouterDependencies): AgentCliHandler {
 	return async (command, context) => {
 		switch (command.kind) {
+			case 'agents': {
+				if (!agents) {
+					unavailable(
+						'Agent attribution is not available in this desktop session.',
+						'Update RN Devtools and retry.'
+					);
+				}
+				const state = await agents.refresh();
+				return {
+					sessions: state.sessions,
+					devices: Object.entries(state.byDevice).map(([udid, attached]) => ({
+						udid,
+						agents: attached,
+					})),
+					claims: state.claims,
+					discovery: state.discovery,
+					...(context.agent ? { you: context.agent } : {}),
+				};
+			}
+			case 'claim':
+			case 'release': {
+				if (!agents) {
+					unavailable(
+						'Agent attribution is not available in this desktop session.',
+						'Update RN Devtools and retry.'
+					);
+				}
+				if (!context.agent) {
+					throw new AgentCliError({
+						code: 'no_agent_session',
+						message:
+							'This CLI is not running inside a recognised agent session, so it cannot claim or release.',
+						retryable: false,
+						recovery:
+							'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
+					});
+				}
+				const target = simulatorByUdid(await simulator.refresh(), command.udid);
+				const state = await agents.runOperation(
+					command.kind === 'claim'
+						? {
+								kind: 'agent.claim',
+								simulatorUdid: target.udid,
+								agent: context.agent,
+								...(command.note ? { note: command.note } : {}),
+							}
+						: {
+								kind: 'agent.release',
+								simulatorUdid: target.udid,
+								agent: context.agent,
+							}
+				);
+				return {
+					udid: target.udid,
+					you: context.agent,
+					agents: state.byDevice[target.udid] ?? [],
+					claims: state.claims.filter(
+						(claim) => claim.simulatorUdid === target.udid
+					),
+				};
+			}
 			case 'native': {
 				if (!nativePlan) {
 					unavailable(

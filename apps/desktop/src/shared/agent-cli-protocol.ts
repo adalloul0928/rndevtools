@@ -222,6 +222,19 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 				});
 			}
 		}),
+	/** Live coding-agent sessions and which Simulators they are attached to. */
+	z.strictObject({ kind: z.literal('agents') }),
+	/**
+	 * Claims make ownership explicit. The agent identity comes from the request
+	 * envelope (CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID), never from a flag,
+	 * so a session cannot claim on behalf of another.
+	 */
+	z.strictObject({
+		kind: z.literal('claim'),
+		udid: udidSchema,
+		note: z.string().max(4_096).optional(),
+	}),
+	z.strictObject({ kind: z.literal('release'), udid: udidSchema }),
 	z
 		.strictObject({
 			kind: z.literal('lane'),
@@ -297,6 +310,12 @@ export const agentCliRequestSchema = z.strictObject({
 	protocol: z.literal(RNDEVTOOLS_AGENT_CLI_PROTOCOL),
 	id: identifierSchema,
 	command: agentCliCommandSchema,
+	/**
+	 * The coding-agent session the CLI is running inside, when it can tell.
+	 * Every device-targeted command records a touch for it, so the desktop can
+	 * show who is driving which Simulator.
+	 */
+	agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
 });
 export type AgentCliRequest = z.infer<typeof agentCliRequestSchema>;
 

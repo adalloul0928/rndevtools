@@ -43,8 +43,21 @@ a private local socket.
 - **Stop only the lanes you started.** `lane down` stops the lane's Metro and
   frees the Simulator. It does not shut the Simulator down.
 - **Attribution is automatic.** The CLI forwards `CLAUDE_CODE_SESSION_ID` or
-  `CODEX_THREAD_ID` so the desktop shows which session holds which lane. Other
-  agents can export `RNDEVTOOLS_AGENT_SESSION_ID`.
+  `CODEX_THREAD_ID` on every request, so each Simulator you touch is shown with
+  your session in the desktop's Agents view for 30 minutes. Other agents can
+  export `RNDEVTOOLS_AGENT_SESSION_ID`.
+- **Check who else is on a device before you drive it.** `rndevtools agents`
+  lists live Claude Code and Codex sessions and the Simulators each is attached
+  to (`claim`, `touch`, or `lane`). Never drive a Simulator another live session
+  has **claimed**. Make your own ownership explicit for longer work:
+
+  ```bash
+  rndevtools claim --udid <UDID> --note "reviewing the checkout flow"
+  rndevtools release --udid <UDID>      # when you are done
+  ```
+
+  Claims are a convention agents follow, not a lock; they expire once your
+  session has been gone for 30 minutes.
 - **You can request slimming, not perform it.** `lane up --slim <profileId>`
   asks the desktop to apply a SimSlim profile to the lane's Simulator. The CLI
   has no way to approve a Simulator mutation, so the lane comes back with

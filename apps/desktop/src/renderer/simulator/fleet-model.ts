@@ -1,3 +1,4 @@
+import type { DeviceAgent } from '../../shared/agent-protocol';
 import type { Lane, LaneAgent, LaneHealth } from '../../shared/lane-protocol';
 import { laneHealth } from '../../shared/lane-protocol';
 import type { DeviceSession } from '../../shared/protocol';
@@ -24,6 +25,8 @@ export type FleetRow = {
 	lane: Lane | undefined;
 	laneHealth: LaneHealth | undefined;
 	sessions: DeviceSession[];
+	/** Coding-agent sessions attached by claim, touch, or lane cwd. */
+	agents: readonly DeviceAgent[];
 	/** Lower sorts first: busy devices (agents, lanes) rise above idle ones. */
 	rank: number;
 };
@@ -86,11 +89,20 @@ export function fleetSlimSummary(
 	}
 }
 
+/** The agent to show first on a row: the lane's own, else the strongest attachment. */
+export function primaryAgent(
+	row: Pick<FleetRow, 'lane' | 'agents'>
+): { kind: DeviceAgent['kind']; sessionId: string } | undefined {
+	return (
+		row.lane?.agent ?? row.agents.find((agent) => agent.live) ?? row.agents[0]
+	);
+}
+
 function fleetRank(
-	row: Pick<FleetRow, 'live' | 'transitioning' | 'lane' | 'sessions'>
+	row: Pick<FleetRow, 'live' | 'transitioning' | 'lane' | 'sessions' | 'agents'>
 ): number {
 	if (row.live) {
-		if (row.lane?.agent) return 0;
+		if (row.lane?.agent || row.agents.some((agent) => agent.live)) return 0;
 		if (row.lane) return 1;
 		if (row.sessions.some((session) => session.status === 'online')) return 2;
 		return 3;
@@ -106,6 +118,7 @@ export function buildFleetRows({
 	slimmingByDevice,
 	lanes,
 	sessions,
+	agentsByDevice = {},
 }: {
 	devices: readonly SimulatorDevice[];
 	runtimes: readonly SimulatorRuntime[];
@@ -113,6 +126,7 @@ export function buildFleetRows({
 	slimmingByDevice: Readonly<Record<string, SlimmingSimulatorStatus>>;
 	lanes: readonly Lane[];
 	sessions: readonly DeviceSession[];
+	agentsByDevice?: Readonly<Record<string, readonly DeviceAgent[]>>;
 }): FleetRow[] {
 	const runtimeById = new Map(
 		runtimes.map((runtime) => [runtime.identifier, runtime.name])
@@ -141,6 +155,7 @@ export function buildFleetRows({
 				sessions: (sessionsByUdid.get(key) ?? []).sort(
 					(left, right) => right.lastSeenAt - left.lastSeenAt
 				),
+				agents: agentsByDevice[key] ?? agentsByDevice[device.udid] ?? [],
 			};
 			return {
 				device,
@@ -178,7 +193,7 @@ export function fleetRowMatches(
 			if (!row.lane) return false;
 			break;
 		case 'with-agent':
-			if (!row.lane?.agent) return false;
+			if (!primaryAgent(row)) return false;
 			break;
 		default:
 			break;
@@ -196,6 +211,9 @@ export function fleetRowMatches(
 		row.lane?.agent
 			? `${row.lane.agent.kind} ${row.lane.agent.sessionId}`
 			: undefined,
+		...row.agents.map(
+			(agent) => `${agent.kind} ${agent.sessionId} ${agent.title}`
+		),
 		...row.sessions.map((session) => session.info.name),
 	]
 		.filter((value): value is string => Boolean(value))
@@ -212,7 +230,7 @@ export function fleetFilterCounts(
 		booted: rows.filter((row) => row.live).length,
 		shutdown: rows.filter((row) => row.device.state === 'shutdown').length,
 		'with-lane': rows.filter((row) => row.lane).length,
-		'with-agent': rows.filter((row) => row.lane?.agent).length,
+		'with-agent': rows.filter((row) => primaryAgent(row)).length,
 	};
 }
 

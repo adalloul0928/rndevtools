@@ -33,6 +33,9 @@ const (
 	CommandSlimming   Command = "slimming"
 	CommandLane       Command = "lane"
 	CommandNative     Command = "native"
+	CommandAgents     Command = "agents"
+	CommandClaim      Command = "claim"
+	CommandRelease    Command = "release"
 )
 
 var validCommands = map[Command]struct{}{
@@ -51,12 +54,18 @@ var validCommands = map[Command]struct{}{
 	CommandSlimming:   {},
 	CommandLane:       {},
 	CommandNative:     {},
+	CommandAgents:     {},
+	CommandClaim:      {},
+	CommandRelease:    {},
 }
 
 type Request struct {
 	Protocol string          `json:"protocol"`
 	ID       string          `json:"id"`
 	Command  json.RawMessage `json:"command"`
+	// Agent is the coding-agent session the CLI runs inside, when known. The
+	// desktop records a touch for every device-targeted command it carries.
+	Agent map[string]any `json:"agent,omitempty"`
 }
 
 type Response struct {
@@ -91,6 +100,9 @@ func Commands() []Command {
 		CommandSlimming,
 		CommandLane,
 		CommandNative,
+		CommandAgents,
+		CommandClaim,
+		CommandRelease,
 	}
 }
 

@@ -9,9 +9,11 @@ import type { SlimmingSimulatorStatus } from '../../shared/slimming-protocol';
 import {
 	agentLabel,
 	buildFleetRows,
+	type FleetRow,
 	fleetFilterCounts,
 	fleetRowMatches,
 	fleetSlimSummary,
+	primaryAgent,
 	shortPath,
 } from './fleet-model';
 
@@ -240,5 +242,68 @@ describe('helpers', () => {
 		expect(agentLabel('claude')).toBe('Claude');
 		expect(agentLabel('codex')).toBe('Codex');
 		expect(agentLabel('other')).toBe('Agent');
+	});
+});
+
+describe('agent attachments on rows', () => {
+	it('ranks a device with a live attached agent with agent lanes, and exposes a primary agent', () => {
+		const rows = buildFleetRows({
+			devices: [device(A, 'Claimed', 'booted'), device(B, 'Plain', 'booted')],
+			runtimes: [{ identifier: RUNTIME, name: 'iOS 26.5', isAvailable: true }],
+			metricsByDevice: {},
+			slimmingByDevice: {},
+			lanes: [],
+			sessions: [],
+			agentsByDevice: {
+				[A]: [
+					{
+						kind: 'codex',
+						sessionId: 'thread-7',
+						title: 'onboarding',
+						via: 'claim',
+						lastSeenAt: 5,
+						live: true,
+						note: 'reviewing onboarding',
+					},
+				],
+			},
+		});
+		expect(rows.map((row) => row.device.name)).toEqual(['Claimed', 'Plain']);
+		expect(primaryAgent(rows[0] as FleetRow)).toEqual(
+			expect.objectContaining({ kind: 'codex', sessionId: 'thread-7' })
+		);
+		expect(primaryAgent(rows[1] as FleetRow)).toBeUndefined();
+		expect(fleetFilterCounts(rows)['with-agent']).toBe(1);
+		expect(fleetRowMatches(rows[0] as FleetRow, 'all', 'onboarding')).toBe(
+			true
+		);
+	});
+
+	it('prefers the lane agent over an attachment when both exist', () => {
+		const rows = buildFleetRows({
+			devices: [device(A, 'Both', 'booted')],
+			runtimes: [],
+			metricsByDevice: {},
+			slimmingByDevice: {},
+			lanes: [
+				lane(A, {
+					agent: { kind: 'claude', sessionId: 'lane-owner', lastSeenAt: 1 },
+				}),
+			],
+			sessions: [],
+			agentsByDevice: {
+				[A]: [
+					{
+						kind: 'codex',
+						sessionId: 'toucher',
+						title: 't',
+						via: 'touch',
+						lastSeenAt: 9,
+						live: true,
+					},
+				],
+			},
+		});
+		expect(primaryAgent(rows[0] as FleetRow)?.sessionId).toBe('lane-owner');
 	});
 });

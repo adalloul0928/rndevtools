@@ -28,6 +28,9 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandSlimming:   `{"kind":"slimming","operation":"verify","udids":["` + testUDID + `"],"profileId":"rndevtools-development"}`,
 		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"slimProfileId":"rndevtools-development","agent":{"kind":"claude","sessionId":"session-1"}}`,
 		protocol.CommandNative:     `{"kind":"native","operation":"install","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","configuration":"Release"}`,
+		protocol.CommandAgents:     `{"kind":"agents"}`,
+		protocol.CommandClaim:      `{"kind":"claim","udid":"` + testUDID + `","note":"checkout flow"}`,
+		protocol.CommandRelease:    `{"kind":"release","udid":"` + testUDID + `"}`,
 	}
 	for kind, encoded := range tests {
 		t.Run(string(kind), func(t *testing.T) {
@@ -66,6 +69,9 @@ func TestValidateRejectsMutationUnknownFieldsAndNullOptionals(t *testing.T) {
 		{protocol.CommandNative, `{"kind":"native","operation":"plan","worktreePath":"relative"}`},
 		{protocol.CommandNative, `{"kind":"native","operation":"build","worktreePath":"/Users/dev/app"}`},
 		{protocol.CommandNative, `{"kind":"native","operation":"plan","worktreePath":"/Users/dev/app","configuration":"debug"}`},
+		{protocol.CommandClaim, `{"kind":"claim"}`},
+		{protocol.CommandRelease, `{"kind":"release","udid":"` + testUDID + `","note":"x"}`},
+		{protocol.CommandAgents, `{"kind":"agents","udid":"` + testUDID + `"}`},
 	}
 	for _, test := range tests {
 		if err := Validate(json.RawMessage(test.encoded), test.kind); err == nil {

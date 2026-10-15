@@ -27,6 +27,8 @@ const MAX_ERROR_LENGTH = 4 * 1024;
 type AgentCliHandlerContext = {
 	requestId: string;
 	signal: AbortSignal;
+	/** Session attribution from the request envelope, when the CLI had one. */
+	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string };
 };
 
 export type AgentCliHandler = (
@@ -409,6 +411,7 @@ export class AgentCliService {
 			const result = await this.#handler(request.command, {
 				requestId: request.id || randomUUID(),
 				signal: controller.signal,
+				...(request.agent ? { agent: request.agent } : {}),
 			});
 			if (!socket.destroyed) {
 				socket.end(

@@ -1,6 +1,7 @@
 import { Button } from '@heroui/react/button';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
+	Bot,
 	ChevronDown,
 	FolderGit2,
 	FolderPlus,
@@ -32,6 +33,7 @@ import {
 	StatusPill,
 } from '@/components/ui';
 import { shortPath } from '@/simulator/fleet-model';
+import { useAgentRuntime } from '@/state/agent-runtime';
 import { useLaneRuntime } from '@/state/lane-runtime';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
@@ -47,6 +49,7 @@ import {
 } from '../../../shared/lane-protocol';
 import type { SimulatorDevice } from '../../../shared/simulator-protocol';
 import type { SlimmingProfile } from '../../../shared/slimming-protocol';
+import { AgentsView } from './agents-view';
 
 /**
  * Picks the worktree to preselect: the first one without a lane, so a second
@@ -109,6 +112,9 @@ export function LanesPanel() {
 	const simulator = useSimulatorRuntime();
 	const [selectedLaneId, setSelectedLaneId] = useState<string>('');
 	const [showStart, setShowStart] = useState(false);
+	const [view, setView] = useState<'lanes' | 'agents'>('lanes');
+	const agents = useAgentRuntime();
+	const liveAgentCount = agents.state.sessions.length;
 	const [log, setLog] = useState<{ laneId: string; text: string } | null>(null);
 	const counts = laneSummaryCounts(lanes.state);
 	const hostFree = simulator.state.metrics.host;
@@ -187,12 +193,35 @@ export function LanesPanel() {
 								className={`h-3.5 w-3.5 ${lanes.pendingOperation === 'lane.refresh' ? 'animate-spin' : ''}`}
 							/>
 						</Button>
+						<fieldset className="sim-layout-toggle">
+							<legend className="sr-only">Lanes view</legend>
+							<Button
+								aria-pressed={view === 'lanes'}
+								size="sm"
+								variant={view === 'lanes' ? 'secondary' : 'ghost'}
+								onPress={() => setView('lanes')}
+							>
+								<Waypoints className="h-3.5 w-3.5" /> Lanes
+							</Button>
+							<Button
+								aria-pressed={view === 'agents'}
+								size="sm"
+								variant={view === 'agents' ? 'secondary' : 'ghost'}
+								onPress={() => setView('agents')}
+							>
+								<Bot className="h-3.5 w-3.5" /> Agents
+								{liveAgentCount > 0 ? ` (${liveAgentCount})` : ''}
+							</Button>
+						</fieldset>
 						<Button
 							isDisabled={!lanes.isBridgeAvailable}
 							size="sm"
 							variant="primary"
 							aria-expanded={showStart}
-							onPress={() => setShowStart((shown) => !shown)}
+							onPress={() => {
+								setView('lanes');
+								setShowStart((shown) => !shown);
+							}}
 						>
 							<Waypoints className="h-4 w-4" />
 							{showStart ? 'Close' : 'Start lane'}
@@ -234,11 +263,11 @@ export function LanesPanel() {
 					value={String(counts.lanes)}
 				/>
 				<SimulatorMetric
-					detail="sessions attached"
-					icon={<Play className="h-3.5 w-3.5" />}
-					label="Agents"
-					tone={counts.agents > 0 ? 'info' : 'default'}
-					value={String(counts.agents)}
+					detail={`${counts.agents} attached to lanes`}
+					icon={<Bot className="h-3.5 w-3.5" />}
+					label="Live agents"
+					tone={liveAgentCount > 0 ? 'info' : 'default'}
+					value={String(liveAgentCount)}
 				/>
 				<SimulatorMetric
 					detail={`${lanes.state.repositories.length} repositories`}
@@ -296,105 +325,117 @@ export function LanesPanel() {
 					}}
 				/>
 			) : null}
-			<div className="sim-fleet-layout">
-				<div className="sim-list-pane panel-scroll">
-					{lanes.state.lanes.length === 0 ? (
-						<div className="lane-empty">
-							<Waypoints className="h-5 w-5" />
-							<strong>No lanes yet</strong>
-							<span>
-								Start a lane to run a worktree on its own Simulator with its own
-								Metro port, or let an agent run{' '}
-								<code>rndevtools lane --operation up</code>.
-							</span>
-						</div>
-					) : (
-						<ul className="lane-list" aria-label="Lanes">
-							{lanes.state.lanes.map((lane) => {
-								const device = deviceByUdid.get(
-									lane.simulatorUdid.toUpperCase()
-								);
-								const selected = lane.id === selectedLaneId;
-								return (
-									<li key={lane.id}>
-										<button
-											type="button"
-											className={`lane-row ${selected ? 'is-selected' : ''}`}
-											aria-pressed={selected}
-											onClick={() => setSelectedLaneId(lane.id)}
-										>
-											<VisibleDeviceScreen
-												className="lane-row-thumb"
-												live={device?.state === 'booted'}
-												name={device?.name ?? lane.branch}
-												quality="tile"
-												size="thumb"
-												udid={lane.simulatorUdid}
-											/>
-											<div className="lane-row-copy">
-												<div className="lane-row-main">
-													<WorktreeLabel
-														path={lane.worktreePath}
-														branch={lane.branch}
-													/>
-													<LaneChip lane={lane} compact />
+			{view === 'agents' ? (
+				<AgentsView
+					devices={simulator.state.devices}
+					onSelectSimulator={(udid) => {
+						simulator.setSelectedDeviceUdid(udid);
+						window.location.hash = 'simulator/fleet';
+					}}
+				/>
+			) : (
+				<div className="sim-fleet-layout">
+					<div className="sim-list-pane panel-scroll">
+						{lanes.state.lanes.length === 0 ? (
+							<div className="lane-empty">
+								<Waypoints className="h-5 w-5" />
+								<strong>No lanes yet</strong>
+								<span>
+									Start a lane to run a worktree on its own Simulator with its
+									own Metro port, or let an agent run{' '}
+									<code>rndevtools lane --operation up</code>.
+								</span>
+							</div>
+						) : (
+							<ul className="lane-list" aria-label="Lanes">
+								{lanes.state.lanes.map((lane) => {
+									const device = deviceByUdid.get(
+										lane.simulatorUdid.toUpperCase()
+									);
+									const selected = lane.id === selectedLaneId;
+									return (
+										<li key={lane.id}>
+											<button
+												type="button"
+												className={`lane-row ${selected ? 'is-selected' : ''}`}
+												aria-pressed={selected}
+												onClick={() => setSelectedLaneId(lane.id)}
+											>
+												<VisibleDeviceScreen
+													className="lane-row-thumb"
+													live={device?.state === 'booted'}
+													name={device?.name ?? lane.branch}
+													quality="tile"
+													size="thumb"
+													udid={lane.simulatorUdid}
+												/>
+												<div className="lane-row-copy">
+													<div className="lane-row-main">
+														<WorktreeLabel
+															path={lane.worktreePath}
+															branch={lane.branch}
+														/>
+														<LaneChip lane={lane} compact />
+													</div>
+													<div className="lane-row-meta">
+														<span className="lane-row-device">
+															{device?.name ?? lane.simulatorUdid}
+															{device ? ` · ${device.state}` : ''}
+														</span>
+														{lane.agent ? (
+															<AgentBadge agent={lane.agent} />
+														) : null}
+														<LaneSlimBadge lane={lane} />
+													</div>
 												</div>
-												<div className="lane-row-meta">
-													<span className="lane-row-device">
-														{device?.name ?? lane.simulatorUdid}
-														{device ? ` · ${device.state}` : ''}
-													</span>
-													{lane.agent ? (
-														<AgentBadge agent={lane.agent} />
-													) : null}
-													<LaneSlimBadge lane={lane} />
-												</div>
-											</div>
-										</button>
-									</li>
-								);
-							})}
-						</ul>
-					)}
+											</button>
+										</li>
+									);
+								})}
+							</ul>
+						)}
+					</div>
+					<div className="sim-detail-pane panel-scroll">
+						{selectedLane ? (
+							<LaneDetail
+								key={selectedLane.id}
+								device={deviceByUdid.get(
+									selectedLane.simulatorUdid.toUpperCase()
+								)}
+								isBusy={lanes.pendingOperation !== null}
+								lane={selectedLane}
+								log={log?.laneId === selectedLane.id ? log.text : undefined}
+								onCloseLog={() => setLog(null)}
+								onLaunch={() => launch(selectedLane)}
+								onLog={() => void readLog(selectedLane)}
+								onOpenSimulator={() => {
+									simulator.setSelectedDeviceUdid(selectedLane.simulatorUdid);
+									window.location.hash = 'simulator/fleet';
+								}}
+								onSlimDecision={(decision) =>
+									decideSlim(selectedLane, decision)
+								}
+								onStop={() => stop(selectedLane)}
+							/>
+						) : (
+							<WorktreesOverview
+								lanes={lanes.state.lanes}
+								onAddRepository={() =>
+									void lanes.runOperation({ kind: 'lane.add-repository' })
+								}
+								onRemoveRepository={(root) =>
+									void lanes.runOperation({
+										kind: 'lane.remove-repository',
+										repositoryRoot: root,
+									})
+								}
+								repositories={lanes.state.repositories}
+								worktrees={lanes.state.worktrees}
+							/>
+						)}
+					</div>
 				</div>
-				<div className="sim-detail-pane panel-scroll">
-					{selectedLane ? (
-						<LaneDetail
-							key={selectedLane.id}
-							device={deviceByUdid.get(
-								selectedLane.simulatorUdid.toUpperCase()
-							)}
-							isBusy={lanes.pendingOperation !== null}
-							lane={selectedLane}
-							log={log?.laneId === selectedLane.id ? log.text : undefined}
-							onCloseLog={() => setLog(null)}
-							onLaunch={() => launch(selectedLane)}
-							onLog={() => void readLog(selectedLane)}
-							onOpenSimulator={() => {
-								simulator.setSelectedDeviceUdid(selectedLane.simulatorUdid);
-								window.location.hash = 'simulator/fleet';
-							}}
-							onSlimDecision={(decision) => decideSlim(selectedLane, decision)}
-							onStop={() => stop(selectedLane)}
-						/>
-					) : (
-						<WorktreesOverview
-							lanes={lanes.state.lanes}
-							onAddRepository={() =>
-								void lanes.runOperation({ kind: 'lane.add-repository' })
-							}
-							onRemoveRepository={(root) =>
-								void lanes.runOperation({
-									kind: 'lane.remove-repository',
-									repositoryRoot: root,
-								})
-							}
-							repositories={lanes.state.repositories}
-							worktrees={lanes.state.worktrees}
-						/>
-					)}
-				</div>
-			</div>
+			)}
 		</section>
 	);
 }

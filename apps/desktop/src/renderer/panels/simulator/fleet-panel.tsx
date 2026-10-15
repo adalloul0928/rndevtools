@@ -61,9 +61,11 @@ import {
 	type FleetStateFilter,
 	fleetFilterCounts,
 	fleetRowMatches,
+	primaryAgent,
 	shortPath,
 } from '@/simulator/fleet-model';
 import { targetConfig } from '@/simulator/target-config';
+import { useAgentRuntime } from '@/state/agent-runtime';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import { useLaneRuntime } from '@/state/lane-runtime';
 import {
@@ -198,6 +200,7 @@ export function FleetPanel() {
 	} = useSimulatorRuntime();
 	const slimming = useSlimmingRuntime();
 	const lanes = useLaneRuntime();
+	const agents = useAgentRuntime();
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<FleetStateFilter>('all');
 	const [layout, setLayout] = useState<FleetLayout>(readStoredLayout);
@@ -231,6 +234,7 @@ export function FleetPanel() {
 				slimmingByDevice: slimming.state.statusBySimulator,
 				lanes: lanes.state.lanes,
 				sessions: desktop.state?.devices ?? [],
+				agentsByDevice: agents.state.byDevice,
 			}),
 		[
 			state.devices,
@@ -238,6 +242,7 @@ export function FleetPanel() {
 			state.metrics.byDevice,
 			slimming.state.statusBySimulator,
 			lanes.state.lanes,
+			agents.state.byDevice,
 			desktop.state?.devices,
 		]
 	);
@@ -596,8 +601,10 @@ export function FleetPanel() {
 										<>
 											{!batchMode ? (
 												<div className="sim-list-leading">
-													{row?.lane?.agent ? (
-														<AgentGlyph kind={row.lane.agent.kind} />
+													{row && primaryAgent(row) ? (
+														<AgentGlyph
+															kind={primaryAgent(row)?.kind ?? 'other'}
+														/>
 													) : (
 														<Smartphone className="h-4 w-4" />
 													)}
@@ -618,6 +625,9 @@ export function FleetPanel() {
 								key={selectedDevice.udid}
 								isBridgeAvailable={isBridgeAvailable}
 								lane={rowByUdid.get(selectedDevice.udid)?.lane}
+								attachedAgents={
+									rowByUdid.get(selectedDevice.udid)?.agents ?? []
+								}
 								laneBusy={lanes.pendingOperation !== null}
 								onLaneLaunch={(lane) =>
 									void lanes.runOperation(
@@ -764,8 +774,8 @@ function DeviceWall({
 							onClick={() => onSelect(row.device.udid)}
 						>
 							<span className="device-tile-title">
-								{row.lane?.agent ? (
-									<AgentGlyph kind={row.lane.agent.kind} />
+								{primaryAgent(row) ? (
+									<AgentGlyph kind={primaryAgent(row)?.kind ?? 'other'} />
 								) : null}
 								<strong className="device-tile-name">{row.device.name}</strong>
 								<span
@@ -1058,6 +1068,7 @@ function TargetDetail({
 	connectedSessions,
 	isBridgeAvailable,
 	lane,
+	attachedAgents,
 	laneBusy,
 	slim,
 	onRunAction,
@@ -1075,6 +1086,7 @@ function TargetDetail({
 	connectedSessions: DeviceSession[];
 	isBridgeAvailable: boolean;
 	lane: Lane | undefined;
+	attachedAgents: FleetRow['agents'];
 	laneBusy: boolean;
 	slim: FleetRow['slim'] | undefined;
 	onRunAction: (action: SimulatorActionInput, successMessage: string) => void;
@@ -1212,6 +1224,25 @@ function TargetDetail({
 					</div>
 					<Waypoints className="h-3.5 w-3.5" />
 				</div>
+				{attachedAgents.length > 0 ? (
+					<ul className="sim-agent-list">
+						{attachedAgents.map((agent) => (
+							<li
+								key={`${agent.kind}:${agent.sessionId}`}
+								className="sim-agent-row"
+							>
+								<AgentBadge
+									agent={{ ...agent, lastSeenAt: agent.lastSeenAt }}
+								/>
+								<span className="sim-inline-note">
+									{agent.title} · {agent.via}
+									{agent.live ? '' : ' · session gone'}
+									{agent.note ? ` · ${agent.note}` : ''}
+								</span>
+							</li>
+						))}
+					</ul>
+				) : null}
 				{lane ? (
 					<div className="sim-lane-section">
 						<div className="sim-lane-summary">

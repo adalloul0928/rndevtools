@@ -5,6 +5,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
 import { DesktopErrorBoundary } from './components/error-boundary';
+import { AgentRuntimeProvider } from './state/agent-runtime';
 import { DesktopRuntimeProvider } from './state/desktop-runtime';
 import { LaneRuntimeProvider } from './state/lane-runtime';
 import { RecipeRuntimeProvider } from './state/recipe-runtime';
@@ -23,9 +24,11 @@ createRoot(root).render(
 					<SlimmingRuntimeProvider>
 						<RecipeRuntimeProvider>
 							<LaneRuntimeProvider>
-								<SimulatorStreamProvider>
-									<App />
-								</SimulatorStreamProvider>
+								<AgentRuntimeProvider>
+									<SimulatorStreamProvider>
+										<App />
+									</SimulatorStreamProvider>
+								</AgentRuntimeProvider>
 							</LaneRuntimeProvider>
 						</RecipeRuntimeProvider>
 					</SlimmingRuntimeProvider>

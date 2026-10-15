@@ -297,6 +297,35 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 		}
 		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
 			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+	case protocol.CommandAgents:
+		var value struct {
+			Kind string `json:"kind"`
+		}
+		return decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind))
+	case protocol.CommandClaim, protocol.CommandRelease:
+		var value struct {
+			Kind string  `json:"kind"`
+			UDID *string `json:"udid,omitempty"`
+			Note *string `json:"note,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if value.UDID == nil {
+			return fmt.Errorf("%s requires udid", expectedKind)
+		}
+		if err := validateUDID(*value.UDID); err != nil {
+			return err
+		}
+		if value.Note != nil {
+			if expectedKind == protocol.CommandRelease {
+				return errors.New("release does not accept note")
+			}
+			if utf8.RuneCountInString(*value.Note) > 4096 {
+				return errors.New("note must be at most 4096 characters")
+			}
+		}
+		return nil
 	case protocol.CommandNative:
 		var value struct {
 			Kind          string  `json:"kind"`

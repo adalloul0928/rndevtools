@@ -1,3 +1,4 @@
+import type { AgentBridge } from '../shared/agent-protocol';
 import type { BuildInsightsBridge } from '../shared/build-insights-protocol';
 import type { LaneBridge } from '../shared/lane-protocol';
 import type { DesktopBridge } from '../shared/protocol';
@@ -14,6 +15,7 @@ declare global {
 			RecipeBridge &
 			BuildInsightsBridge &
 			LaneBridge &
+			AgentBridge &
 			SimulatorStreamBridge;
 	}
 }

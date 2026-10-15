@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentOperation, AgentState } from '../shared/agent-protocol';
 import { createDemoDevice } from '../shared/demo-data';
 import {
 	DEFAULT_LANE_ENVIRONMENTS,
@@ -934,6 +935,166 @@ describe('agent command router', () => {
 			expect(actions.some(({ action }) => action.kind === 'app.install')).toBe(
 				false
 			);
+		});
+	});
+
+	describe('agents, claims, and touches', () => {
+		function agentsPort() {
+			const touches: Array<{
+				agent: { kind: string; sessionId: string };
+				udid: string;
+			}> = [];
+			const operations: AgentOperation[] = [];
+			const state: AgentState = {
+				revision: 1,
+				updatedAt: now,
+				sessions: [
+					{
+						kind: 'claude',
+						sessionId: 'claude-1',
+						title: 'checkout',
+						cwd: '/Users/dev/app',
+						pid: 7,
+					},
+				],
+				byDevice: {},
+				claims: [],
+				discovery: { claude: 'ok', codex: 'unavailable' },
+			};
+			const port = {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async (operation: AgentOperation) => {
+					operations.push(operation);
+					if (operation.kind === 'agent.claim') {
+						state.claims = [
+							{
+								simulatorUdid: operation.simulatorUdid,
+								kind: operation.agent.kind,
+								sessionId: operation.agent.sessionId,
+								...(operation.note ? { note: operation.note } : {}),
+								claimedAt: now,
+							},
+						];
+						state.byDevice = {
+							[operation.simulatorUdid]: [
+								{
+									kind: operation.agent.kind,
+									sessionId: operation.agent.sessionId,
+									title: 'checkout',
+									via: 'claim',
+									lastSeenAt: now,
+									live: true,
+								},
+							],
+						};
+					}
+					if (operation.kind === 'agent.release') {
+						state.claims = [];
+						state.byDevice = {};
+					}
+					return state;
+				},
+				touch: (agent: { kind: string; sessionId: string }, udid: string) => {
+					touches.push({ agent, udid });
+				},
+			};
+			return { port, touches, operations };
+		}
+		const session = { kind: 'claude' as const, sessionId: 'claude-1' };
+
+		it('lists sessions and per-device attachments', async () => {
+			const { dependencies } = fixture();
+			const { port } = agentsPort();
+			const result = (await createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			})({ kind: 'agents' }, { ...context, agent: session })) as Record<
+				string,
+				unknown
+			>;
+			expect(result).toMatchObject({
+				sessions: [expect.objectContaining({ sessionId: 'claude-1' })],
+				devices: [],
+				you: session,
+				discovery: { claude: 'ok', codex: 'unavailable' },
+			});
+		});
+
+		it('claims and releases only as the session the CLI is running inside', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			});
+			await expect(
+				handler({ kind: 'claim', udid: UDID }, context)
+			).rejects.toEqual(
+				expect.objectContaining<Partial<AgentCliError>>({
+					code: 'no_agent_session',
+				})
+			);
+			const claimed = (await handler(
+				{ kind: 'claim', udid: UDID.toLowerCase(), note: 'checkout flow' },
+				{ ...context, agent: session }
+			)) as Record<string, unknown>;
+			expect(operations[0]).toEqual({
+				kind: 'agent.claim',
+				simulatorUdid: UDID,
+				agent: session,
+				note: 'checkout flow',
+			});
+			expect(claimed).toMatchObject({ udid: UDID, you: session });
+			expect((claimed.agents as unknown[]).length).toBe(1);
+			await handler(
+				{ kind: 'release', udid: UDID },
+				{ ...context, agent: session }
+			);
+			expect(operations[1]).toEqual({
+				kind: 'agent.release',
+				simulatorUdid: UDID,
+				agent: session,
+			});
+		});
+
+		it('records a touch for every device-targeted command that carried a session, after it succeeds', async () => {
+			const { dependencies } = fixture();
+			const { port, touches } = agentsPort();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			});
+			// Simulator-targeted by UDID.
+			await handler(
+				{ kind: 'screen', target: { udid: UDID } },
+				{ ...context, agent: session }
+			);
+			// Connected-app target resolves to the Simulator the session reported.
+			await handler(
+				{ kind: 'screen', target: { deviceId: 'rndevtools-demo-ios' } },
+				{ ...context, agent: session }
+			);
+			// Fleet-wide commands and failed commands do not touch.
+			await handler(
+				{ kind: 'simulators', includeUnavailable: false },
+				{ ...context, agent: session }
+			);
+			await expect(
+				handler(
+					{
+						kind: 'screen',
+						target: { udid: '00000000-0000-4000-8000-000000000000' },
+					},
+					{ ...context, agent: session }
+				)
+			).rejects.toBeTruthy();
+			// No session, no touch.
+			await handler({ kind: 'screen', target: { udid: UDID } }, context);
+			expect(touches).toEqual([
+				{ agent: session, udid: UDID },
+				{ agent: session, udid: UDID },
+			]);
 		});
 	});
 

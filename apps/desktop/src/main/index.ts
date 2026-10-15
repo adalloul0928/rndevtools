@@ -15,6 +15,10 @@ import {
 	shell,
 	type WebContents,
 } from 'electron';
+import {
+	type AgentState,
+	agentOperationSchema,
+} from '../shared/agent-protocol';
 import type { BuildInsightsState } from '../shared/build-insights-protocol';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type { LaneState } from '../shared/lane-protocol';
@@ -71,6 +75,7 @@ import {
 import { ActionConfirmationStore } from './action-confirmation-store';
 import { AgentCliService } from './agent-cli-service';
 import { createAgentCommandRouter } from './agent-command-router';
+import { AgentService } from './agent-service';
 import { DesktopBroker } from './broker';
 import { createBuildInsightsIpcHandlers } from './build-insights-ipc';
 import { BuildInsightsService } from './build-insights-service';
@@ -155,6 +160,7 @@ let recipeService: RecipeService | undefined;
 let agentCliService: AgentCliService | undefined;
 let buildInsightsService: BuildInsightsService | undefined;
 let laneService: LaneService | undefined;
+let agentService: AgentService | undefined;
 let simulatorStreamService: SimulatorStreamService | undefined;
 let stagedCertificateStore: StagedCertificateStore | undefined;
 
@@ -291,6 +297,18 @@ function sendLaneState(webContents: WebContents, state: LaneState): void {
 
 function broadcastLaneState(state: LaneState): void {
 	for (const window of windows) sendLaneState(window.webContents, state);
+}
+
+function broadcastAgentState(state: AgentState): void {
+	for (const window of windows) {
+		const webContents = window.webContents;
+		if (webContents.isDestroyed()) continue;
+		try {
+			webContents.send(IPC_CHANNELS.agentStateChanged, state);
+		} catch {
+			// A renderer can disappear between the destroyed check and send.
+		}
+	}
 }
 
 function broadcastSimulatorStreamFrame(
@@ -1220,6 +1238,19 @@ function registerIpc(
 	);
 	ipcMain.handle(IPC_CHANNELS.getLaneState, laneHandlers.getState);
 	ipcMain.handle(IPC_CHANNELS.runLaneOperation, laneHandlers.runOperation);
+	ipcMain.handle(IPC_CHANNELS.getAgentState, (event) => {
+		assertTrustedRenderer(event);
+		if (!agentService) throw new Error('Agents are not available.');
+		return agentService.getState();
+	});
+	ipcMain.handle(
+		IPC_CHANNELS.runAgentOperation,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			if (!agentService) throw new Error('Agents are not available.');
+			return agentService.runOperation(agentOperationSchema.parse(value));
+		}
+	);
 	ipcMain.handle(
 		IPC_CHANNELS.setSimulatorStreamSubscriptions,
 		async (event, value: unknown) => {
@@ -1238,6 +1269,7 @@ function updateSimulatorPolling(): void {
 	);
 	simulatorService?.setPollingActive(visible);
 	slimmingService?.setPollingActive(visible);
+	agentService?.setPollingActive(visible);
 	// Live screens are the most expensive poller; they also stop when every
 	// window is merely unfocused, not just hidden.
 	const focused = [...windows].some(
@@ -1446,6 +1478,14 @@ if (!app.requestSingleInstanceLock()) {
 				slimming: slimmingService,
 				mutationCoordinator: simulatorMutationCoordinator,
 			});
+			agentService = new AgentService({
+				directory: path.join(app.getPath('userData'), 'agents'),
+				lanes: () =>
+					laneService?.getState().lanes.map((lane) => ({
+						simulatorUdid: lane.simulatorUdid,
+						appDirectory: lane.appPath ?? lane.worktreePath,
+					})) ?? [],
+			});
 			simulatorStreamService = new SimulatorStreamService({
 				frameDirectory: path.join(
 					app.getPath('temp'),
@@ -1464,6 +1504,7 @@ if (!app.requestSingleInstanceLock()) {
 					simulator: simulatorService,
 					slimming: slimmingService,
 					lanes: laneService,
+					agents: agentService,
 					nativePlan: runNativePlan,
 					recipes: {
 						list: () => recipeService?.getState().recipes ?? [],
@@ -1514,6 +1555,7 @@ if (!app.requestSingleInstanceLock()) {
 			recipeService.subscribe(broadcastRecipeState);
 			buildInsightsService.subscribe(broadcastBuildInsightsState);
 			laneService.subscribe(broadcastLaneState);
+			agentService.subscribe(broadcastAgentState);
 			simulatorStreamService.subscribeFrames(broadcastSimulatorStreamFrame);
 			simulatorStreamService.subscribeStatus(broadcastSimulatorStreamStatus);
 			await Promise.all([
@@ -1523,6 +1565,7 @@ if (!app.requestSingleInstanceLock()) {
 				recipeService.start(),
 				buildInsightsService.start(),
 				laneService.start(),
+				agentService.start(),
 				agentCliService.start(),
 			]);
 			if (shutdownStarted) return;
@@ -1563,6 +1606,7 @@ app.on('before-quit', (event) => {
 		recipeService?.stop(),
 		buildInsightsService?.stop(),
 		laneService?.stop(),
+		agentService?.stop(),
 		simulatorStreamService?.stop(),
 		agentCliService?.stop(),
 		certificateShutdown,

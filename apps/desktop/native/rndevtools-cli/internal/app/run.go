@@ -114,6 +114,11 @@ func Run(config Config) int {
 		ID:       requestID,
 		Command:  parsed.Command,
 	}
+	// Attribution rides on the envelope for every command, so the desktop can
+	// show which session is driving which Simulator without per-command flags.
+	if agent := command.AgentFromEnvironment(os.Getenv); agent != nil {
+		request.Agent = agent
+	}
 	if _, err := protocol.EncodeRequest(request); err != nil {
 		writeLocalError(
 			config.Stderr,

@@ -109,6 +109,14 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "url", path: []string{"url"}, kind: fieldString, usage: "Path or full URL to open through the lane scheme (launch)."},
 		{flagName: "max-characters", path: []string{"maxCharacters"}, kind: fieldInteger, usage: "Log tail size (log; 256..64000)."},
 	},
+	protocol.CommandAgents: {},
+	protocol.CommandClaim: {
+		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID to claim for this agent session."},
+		{flagName: "note", path: []string{"note"}, kind: fieldString, usage: "Why this session needs the device (shown in the desktop)."},
+	},
+	protocol.CommandRelease: {
+		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID to release."},
+	},
 	protocol.CommandNative: {
 		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "plan (fingerprint + cache + installed state, builds nothing) or install (put a cached binary on the Simulator)."},
 		{flagName: "worktree", path: []string{"worktreePath"}, kind: fieldString, usage: "Absolute path of the Expo app directory to fingerprint."},
@@ -119,7 +127,8 @@ var commandFields = map[protocol.Command][]fieldSpec{
 
 // Agent attribution. Claude Code and Codex export a session identifier into
 // every subprocess they spawn; the CLI forwards it so the desktop can show
-// which agent holds which lane. Only lane commands carry it today.
+// which agent holds which lane. Every request carries it on its envelope;
+// lane up/launch also embed it in the command so the lane records it.
 const (
 	envClaudeSession  = "CLAUDE_CODE_SESSION_ID"
 	envCodexThread    = "CODEX_THREAD_ID"

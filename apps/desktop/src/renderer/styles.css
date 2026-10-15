@@ -5696,3 +5696,142 @@ button:disabled {
 	justify-content: center;
 	gap: 7px;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Agents view: live coding-agent sessions and the Simulators they drive.   */
+/* ------------------------------------------------------------------------ */
+
+.agents-view {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 12px 14px 20px;
+	overflow: auto;
+}
+
+.agents-toolbar {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.agent-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+	gap: 10px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.agent-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	border: 1px solid rgb(255 255 255 / 8%);
+	border-radius: 10px;
+	background: #0a0a0a;
+}
+
+.agent-card-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.agent-card-title {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.agent-card-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 540;
+	color: #e3e3e3;
+}
+
+.agent-card-meta {
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	color: #8f8f8f;
+}
+
+.agent-card-cwd {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: 11px;
+	color: #b5b5b5;
+}
+
+.agent-devices {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 0;
+	padding: 8px 0 0;
+	border-top: 1px solid rgb(255 255 255 / 6%);
+	list-style: none;
+}
+
+.agent-device {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 8px;
+}
+
+.agent-device-name {
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	text-align: left;
+	font-size: 12px;
+	color: #e3e3e3;
+	cursor: pointer;
+}
+
+.agent-device-name:hover {
+	text-decoration: underline;
+}
+
+.agent-device-state {
+	color: #8f8f8f;
+}
+
+.agent-device-note {
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: #a1a1a1;
+}
+
+/* Fleet detail: attached agents */
+.sim-agent-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 0 0 10px;
+	padding: 0;
+	list-style: none;
+}
+
+.sim-agent-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
