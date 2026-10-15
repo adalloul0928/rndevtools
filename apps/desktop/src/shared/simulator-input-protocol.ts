@@ -97,6 +97,12 @@ export const simulatorInputResultSchema = z.strictObject({
 	/** HID messages delivered and acknowledged by the Simulator. */
 	messages: z.number().int().nonnegative(),
 	elapsedMilliseconds: z.number().int().nonnegative(),
+	/**
+	 * Which HID path carried the events. `indigo` is SimulatorKit's legacy client (through
+	 * CoreSimulator 1051 / Xcode 26); `dtuhid` is the XPC daemon Xcode 27 introduced. Optional
+	 * so a host built before this field still validates.
+	 */
+	transport: z.enum(['indigo', 'dtuhid']).optional(),
 });
 export type SimulatorInputResult = z.infer<typeof simulatorInputResultSchema>;
 

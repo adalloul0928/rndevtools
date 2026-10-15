@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	simulatorInputResultSchema,
 	simulatorInputSchema,
 	simulatorKeyFromEvent,
 } from './simulator-input-protocol';
@@ -91,5 +92,24 @@ describe('simulatorKeyFromEvent', () => {
 		});
 		expect(simulatorKeyFromEvent({ code: 'F5' })).toBeUndefined();
 		expect(simulatorKeyFromEvent({ code: 'IntlBackslash' })).toBeUndefined();
+	});
+});
+
+describe('simulatorInputResultSchema', () => {
+	it('reports the transport when the host names one and tolerates older hosts', () => {
+		const base = {
+			udid: UDID,
+			kind: 'tap',
+			messages: 2,
+			elapsedMilliseconds: 7,
+		};
+		expect(simulatorInputResultSchema.parse(base).transport).toBeUndefined();
+		expect(
+			simulatorInputResultSchema.parse({ ...base, transport: 'dtuhid' })
+				.transport
+		).toBe('dtuhid');
+		expect(() =>
+			simulatorInputResultSchema.parse({ ...base, transport: 'usb' })
+		).toThrow();
 	});
 });

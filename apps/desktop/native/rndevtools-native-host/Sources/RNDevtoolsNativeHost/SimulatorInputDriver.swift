@@ -30,7 +30,7 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     @objc var UDID: UUID { get }
     @objc var state: UInt64 { get }
   }
-  @objc private protocol HIDClientMessaging {
+  @objc protocol HIDClientMessaging {
     @objc(initWithDevice:error:)
     func initWithDevice(_ device: Any, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?) -> AnyObject?
     @objc(sendWithMessage:freeWhenDone:completionQueue:completion:)
@@ -39,23 +39,23 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
       completion: @escaping (Error?) -> Void)
   }
 
-  private typealias ButtonBuilder = @convention(c) (Int32, Int32, Int32) -> UnsafeMutableRawPointer
-  private typealias KeyboardBuilder = @convention(c) (Int32, Int32) -> UnsafeMutableRawPointer
-  private typealias MouseBuilder = @convention(c) (
+  typealias ButtonBuilder = @convention(c) (Int32, Int32, Int32) -> UnsafeMutableRawPointer
+  typealias KeyboardBuilder = @convention(c) (Int32, Int32) -> UnsafeMutableRawPointer
+  typealias MouseBuilder = @convention(c) (
     UnsafeMutablePointer<CGPoint>?, UnsafeMutablePointer<CGPoint>?, UInt32, UInt, CGSize, UInt32
   ) -> UnsafeMutableRawPointer
 
   /// SimDevice.state for a booted device (SimDeviceState enum: 3 = Booted).
   private static let bootedState: UInt64 = 3
   /// The digitizer HID service target the mouse/touch builder addresses.
-  private static let touchTarget: UInt32 = 0x32
+  static let touchTarget: UInt32 = 0x32
   /// `ButtonEventTargetHardware`: where home, lock, and volume go.
-  private static let hardwareTarget: Int32 = 0x33
-  private static let eventDown: Int32 = 1
-  private static let eventUp: Int32 = 2
-  private static let payloadStride = 0x90
-  private static let touchMessageSize = 0x20 + 0x90 + 0x90
-  private static let acknowledgementTimeout: DispatchTimeInterval = .seconds(5)
+  static let hardwareTarget: Int32 = 0x33
+  static let eventDown: Int32 = 1
+  static let eventUp: Int32 = 2
+  static let payloadStride = 0x90
+  static let touchMessageSize = 0x20 + 0x90 + 0x90
+  static let acknowledgementTimeout: DispatchTimeInterval = .seconds(5)
 
   private let developerDirectory: String
   private let queue = DispatchQueue(label: "dev.rndevtools.native-host.simulator-input")
@@ -72,68 +72,62 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     -> SimulatorInputResult
   {
     let started = DispatchTime.now()
-    let toolkit = try loadToolkit()
-    let device = try bootedDevice(udid: request.udid, toolkit: toolkit)
-    let client = try hidClient(for: device)
+    try loadCoreSimulator()
+    let device = try bootedDevice(udid: request.udid)
+    let transport = try openTransport(for: device)
     var delivered = 0
-    let deliver: (UnsafeMutableRawPointer) throws -> Void = { message in
+    try SimulatorInputSequencer.run(request, pause: { self.pause(milliseconds: $0) }) { event in
       try cancellation.check()
-      try self.deliver(message, through: client)
+      try transport.deliver(event)
       delivered += 1
     }
-
-    switch request {
-    case let .tap(_, point, hold):
-      try deliver(touchMessage(point, down: true, toolkit: toolkit))
-      pause(milliseconds: hold)
-      try deliver(touchMessage(point, down: false, toolkit: toolkit))
-    case let .swipe(_, from, to, duration, steps):
-      try deliver(touchMessage(from, down: true, toolkit: toolkit))
-      let interval = max(1, duration / steps)
-      for step in 1...steps {
-        let fraction = Double(step) / Double(steps)
-        let point = SimulatorInputRequest.Point(
-          x: from.x + (to.x - from.x) * fraction,
-          y: from.y + (to.y - from.y) * fraction)
-        pause(milliseconds: interval)
-        try deliver(touchMessage(point, down: true, toolkit: toolkit))
-      }
-      pause(milliseconds: 30)
-      try deliver(touchMessage(to, down: false, toolkit: toolkit))
-    case let .text(_, text):
-      for scalar in text.unicodeScalars {
-        guard let stroke = KeyboardLayout.stroke(for: scalar) else { continue }
-        try typeStroke(stroke, toolkit: toolkit, deliver: deliver)
-      }
-    case let .key(_, usage, modifiers):
-      try typeStroke(
-        KeyboardLayout.Stroke(usage: usage, modifiers: modifiers), toolkit: toolkit, deliver: deliver)
-    case let .button(_, button):
-      try deliver(
-        toolkit.messageForButton(button.indigoSource, SimulatorKitInputDriver.eventDown, SimulatorKitInputDriver.hardwareTarget))
-      pause(milliseconds: 60)
-      try deliver(
-        toolkit.messageForButton(button.indigoSource, SimulatorKitInputDriver.eventUp, SimulatorKitInputDriver.hardwareTarget))
-    }
+    try transport.finish()
     let elapsed = Int((DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000)
     return SimulatorInputResult(
       udid: request.udid, kind: SimulatorKitInputDriver.kindName(request), messages: delivered,
-      elapsedMilliseconds: elapsed)
+      elapsedMilliseconds: elapsed, transport: transport.kind)
+  }
+
+  /// Picks the transport the loaded CoreSimulator supports. The decision is made on the
+  /// framework version actually in process (`SimDevice`'s bundle), because that is what talks
+  /// to the guest; a `DEVELOPER_DIR` pointing at another Xcode does not change it. An explicit
+  /// `RNDEVTOOLS_SIMULATOR_INPUT_TRANSPORT=indigo|dtuhid` overrides the choice for diagnosis.
+  private func openTransport(for device: AnyObject) throws -> any SimulatorInputTransport {
+    let override = ProcessInfo.processInfo.environment["RNDEVTOOLS_SIMULATOR_INPUT_TRANSPORT"]
+      .flatMap(SimulatorInputTransportKind.init(rawValue:))
+    let selected =
+      override ?? SimulatorInputTransportKind.select(coreSimulatorVersion: SimulatorKitInputDriver.loadedCoreSimulatorVersion())
+    switch selected {
+    case .dtuhid:
+      return try DTUHIDTransport(device: device)
+    case .indigo:
+      return try IndigoTransport(
+        device: device, toolkit: loadToolkit(), queue: queue, pause: { [self] in pause(milliseconds: $0) })
+    }
+  }
+
+  /// `CFBundleVersion` of the CoreSimulator framework that vends `SimDevice`, e.g. `"1051.55"`.
+  static func loadedCoreSimulatorVersion() -> String? {
+    guard let deviceClass = NSClassFromString("SimDevice") else { return nil }
+    return Bundle(for: deviceClass).infoDictionary?["CFBundleVersion"] as? String
   }
 
   // MARK: - Toolkit loading
 
-  private struct Toolkit {
+  struct Toolkit {
     let messageForButton: ButtonBuilder
     let messageForKeyboard: KeyboardBuilder
     let messageForMouse: MouseBuilder
   }
 
-  private func loadToolkit() throws -> Toolkit {
+  private func loadCoreSimulator() throws {
     guard dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW) != nil
     else {
       throw unavailable("CoreSimulator.framework could not be loaded (\(dlErrorText())).")
     }
+  }
+
+  private func loadToolkit() throws -> Toolkit {
     let simulatorKitPath = "\(developerDirectory)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
     guard let handle = dlopen(simulatorKitPath, RTLD_NOW) else {
       throw unavailable("SimulatorKit.framework could not be loaded from \(developerDirectory) (\(dlErrorText())).")
@@ -150,7 +144,7 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
       messageForMouse: try symbol("IndigoHIDMessageForMouseNSEvent", as: MouseBuilder.self))
   }
 
-  private func bootedDevice(udid: String, toolkit: Toolkit) throws -> AnyObject {
+  private func bootedDevice(udid: String) throws -> AnyObject {
     guard let contextClass = NSClassFromString("SimServiceContext") else {
       throw unavailable("CoreSimulator has no SimServiceContext class.")
     }
@@ -159,11 +153,11 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
       let context = unsafeBitCast(contextClass, to: ServiceContextMessaging.Type.self)
         .shared(forDeveloperDir: developerDirectory, error: &error)
     else {
-      throw unavailable("CoreSimulator refused a service context: \(describe(error)).")
+      throw unavailable("CoreSimulator refused a service context: \(SimulatorKitInputDriver.describe(error)).")
     }
     guard let set = unsafeBitCast(context, to: ServiceContextMessaging.self).defaultDeviceSet(error: &error)
     else {
-      throw unavailable("CoreSimulator refused the default device set: \(describe(error)).")
+      throw unavailable("CoreSimulator refused the default device set: \(SimulatorKitInputDriver.describe(error)).")
     }
     let devices = unsafeBitCast(set, to: DeviceSetMessaging.self).devices
     guard
@@ -181,94 +175,9 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     return device
   }
 
-  private func hidClient(for device: AnyObject) throws -> AnyObject {
-    guard let clientClass = NSClassFromString("SimulatorKit.SimDeviceLegacyHIDClient") else {
-      throw unavailable("SimulatorKit has no SimDeviceLegacyHIDClient on this Xcode.")
-    }
-    guard let allocated = (clientClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
-    else {
-      throw unavailable("SimDeviceLegacyHIDClient could not be allocated.")
-    }
-    var error: AnyObject?
-    guard let client = unsafeBitCast(allocated, to: HIDClientMessaging.self).initWithDevice(device, error: &error)
-    else {
-      throw NativeHostError(
-        code: "simulator_input_failed",
-        message: "The Simulator refused a HID session: \(describe(error)).", retryable: true)
-    }
-    return client
-  }
-
-  // MARK: - Delivery
-
-  private func deliver(_ message: UnsafeMutableRawPointer, through client: AnyObject) throws {
-    let semaphore = DispatchSemaphore(value: 0)
-    var failure: Error?
-    unsafeBitCast(client, to: HIDClientMessaging.self).send(
-      withMessage: message, freeWhenDone: true, completionQueue: queue
-    ) { error in
-      failure = error
-      semaphore.signal()
-    }
-    guard semaphore.wait(timeout: .now() + SimulatorKitInputDriver.acknowledgementTimeout) == .success else {
-      throw NativeHostError(
-        code: "simulator_input_failed", message: "The Simulator did not acknowledge a HID message within 5s.",
-        retryable: true)
-    }
-    if let failure {
-      throw NativeHostError(
-        code: "simulator_input_failed", message: "The Simulator rejected a HID message: \(failure).",
-        retryable: true)
-    }
-  }
-
-  private func typeStroke(
-    _ stroke: KeyboardLayout.Stroke, toolkit: Toolkit, deliver: (UnsafeMutableRawPointer) throws -> Void
-  ) throws {
-    for modifier in stroke.modifiers {
-      try deliver(toolkit.messageForKeyboard(Int32(modifier.usage), SimulatorKitInputDriver.eventDown))
-    }
-    try deliver(toolkit.messageForKeyboard(Int32(stroke.usage), SimulatorKitInputDriver.eventDown))
-    pause(milliseconds: 12)
-    try deliver(toolkit.messageForKeyboard(Int32(stroke.usage), SimulatorKitInputDriver.eventUp))
-    for modifier in stroke.modifiers.reversed() {
-      try deliver(toolkit.messageForKeyboard(Int32(modifier.usage), SimulatorKitInputDriver.eventUp))
-    }
-    pause(milliseconds: 8)
-  }
-
-  /// A hand-enveloped single-touch Indigo message (eventType 2, 320 bytes). SimulatorKit only
-  /// ships a multi-touch builder, so its digitizer contact is copied into a single-touch
-  /// envelope and repeated once, marked as the second slot (field1=1, field2=2).
-  private func touchMessage(
-    _ point: SimulatorInputRequest.Point, down: Bool, toolkit: Toolkit
-  ) -> UnsafeMutableRawPointer {
-    var cgPoint = CGPoint(x: point.x, y: point.y)
-    let source = toolkit.messageForMouse(
-      &cgPoint, nil, SimulatorKitInputDriver.touchTarget,
-      UInt(down ? SimulatorKitInputDriver.eventDown : SimulatorKitInputDriver.eventUp),
-      CGSize(width: 1, height: 1), 0)
-    source.storeBytes(of: point.x, toByteOffset: 0x3C, as: Double.self)
-    source.storeBytes(of: point.y, toByteOffset: 0x44, as: Double.self)
-    let stride = SimulatorKitInputDriver.payloadStride
-    guard let message = calloc(1, SimulatorKitInputDriver.touchMessageSize) else {
-      fatalError("calloc failed for a 320-byte Indigo message")
-    }
-    message.storeBytes(of: UInt32(stride), toByteOffset: 0x18, as: UInt32.self)
-    message.storeBytes(of: UInt8(2), toByteOffset: 0x1C, as: UInt8.self)
-    message.storeBytes(of: UInt32(0x0B), toByteOffset: 0x20, as: UInt32.self)
-    message.storeBytes(of: mach_absolute_time(), toByteOffset: 0x24, as: UInt64.self)
-    memcpy(message.advanced(by: 0x30), source.advanced(by: 0x30), stride - 0x10)
-    free(source)
-    memcpy(message.advanced(by: 0x20 + stride), message.advanced(by: 0x20), stride)
-    message.storeBytes(of: UInt32(1), toByteOffset: 0x20 + stride + 0x10, as: UInt32.self)
-    message.storeBytes(of: UInt32(2), toByteOffset: 0x20 + stride + 0x14, as: UInt32.self)
-    return message
-  }
-
   // MARK: - Helpers
 
-  private func pause(milliseconds: Int) {
+  func pause(milliseconds: Int) {
     if milliseconds > 0 { usleep(useconds_t(min(milliseconds, 10_000) * 1_000)) }
   }
 
@@ -276,7 +185,7 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     NativeHostError(code: "simulator_input_unavailable", message: reason)
   }
 
-  private func describe(_ error: AnyObject?) -> String {
+  static func describe(_ error: AnyObject?) -> String {
     guard let error else { return "no error details" }
     return (error as? NSError)?.localizedDescription ?? String(describing: error)
   }

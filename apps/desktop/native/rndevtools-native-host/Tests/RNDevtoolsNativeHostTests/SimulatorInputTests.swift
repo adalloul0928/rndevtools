@@ -15,7 +15,8 @@ private final class RecordingInputDriver: SimulatorInputDriving, @unchecked Send
     try cancellation.check()
     requests.append(request)
     if let failure { throw failure }
-    return SimulatorInputResult(udid: request.udid, kind: "recorded", messages: 2, elapsedMilliseconds: 7)
+    return SimulatorInputResult(
+      udid: request.udid, kind: "recorded", messages: 2, elapsedMilliseconds: 7, transport: .indigo)
   }
 }
 

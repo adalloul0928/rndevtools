@@ -485,10 +485,26 @@ the active developer directory and resolves `SimServiceContext`,
 `SimDeviceLegacyHIDClient`, and the `IndigoHIDMessageFor*` builders by name);
 `simulator_input_failed` when a message is refused or unacknowledged within 5 s.
 
-Message layout follows the publicly documented Indigo wire format: buttons and
-keys come from SimulatorKit's own builders; a single-touch message is the
-320-byte envelope (`eventType` 2) around the digitizer contact SimulatorKit's
-multi-touch builder produces, repeated once as the second payload. On
-CoreSimulator ≥ 1155.4 Apple routes input through `dtuhidd` and the legacy
-client stops delivering touches; the host reports that as
-`simulator_input_failed` and a DTUHID transport would be the follow-up.
+The result also names the `transport` that carried the events. Two exist, and
+the host picks one from the CoreSimulator version actually loaded in process
+(the system framework's `CFBundleVersion`, not the Xcode the request named,
+because that framework is what talks to the guest):
+
+| CoreSimulator | Transport | Path |
+| --- | --- | --- |
+| < 1155.4 (Xcode 26 and earlier) | `indigo` | SimulatorKit's `SimDeviceLegacyHIDClient`. Buttons and keys come from the framework's `IndigoHIDMessageFor*` builders; a single touch is the documented 320-byte Indigo envelope (`eventType` 2) around the multi-touch builder's digitizer contact, repeated once as the second payload. Every message is acknowledged individually. |
+| ≥ 1155.4 (Xcode 27) | `dtuhid` | Apple injects `dtuhidd` into the guest and the legacy client stops delivering touches. The host looks the device's `com.apple.coredevice.feature.remote.hid.digitizer` service up in the Simulator's bootstrap namespace (`-[SimDevice lookup:error:]`), wraps the port with libxpc's `xpc_endpoint_create_mach_port_4sim`, marks the connection simulator-to-host with `xpc_connection_enable_sim2host_4sim` (without it the daemon sees the peer but no payload), and sends plain-XPC dictionaries: `{messageType, isBarrier, featureIdentifier, payload}` with `IndigoDigitizerEvent {pointOne{x,y}, eventType 0 start/1 position/2 end, edge, target}`, `IndigoKeyboardButtonEvent {usageCode, state 1 down/2 up}`, and `IndigoButtonEvent {usagePage 0x0C, usageCode, state}` (home 0x40, lock 0x30, Siri 0xCF, volume 0xE9/0xEA; Apple Pay is a double side press and has no usage). `dtuhidd` is demand-launched, so the host first sends a barrier-flagged no-op key-up, which the daemon answers, and retries up to five times four seconds apart before reporting `simulator_input_failed`. |
+
+Both transports deliver the same gesture sequence (`SimulatorInputSequencer`),
+so a tap, swipe, or typed string behaves identically on either Xcode. The
+environment variable `RNDEVTOOLS_SIMULATOR_INPUT_TRANSPORT=indigo|dtuhid`
+overrides the selection for diagnosis.
+
+Verification status: `indigo` is verified live on Xcode 26.6 (CoreSimulator
+1051.55). `dtuhid` is built from idb's published transport and verified as far
+as this toolchain allows: the service lookup reaches the guest, which reports
+that it does not vend the digitizer service on CoreSimulator 1051. To verify on
+Xcode 27, boot a device and run `rndevtools input --udid <UDID> --kind tap
+--x 0.39 --y 0.92` (Safari's icon on a default home screen); the result must
+say `"transport": "dtuhid"` and Safari must open. If `dtuhidd` answers the
+probe but nothing lands, the payload shape is the suspect, not the connection.

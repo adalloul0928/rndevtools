@@ -203,6 +203,8 @@ struct SimulatorInputResult: Encodable {
   let kind: String
   let messages: Int
   let elapsedMilliseconds: Int
+  /// Which HID path carried the events; lets a caller tell an Xcode 26 host from an Xcode 27 one.
+  let transport: SimulatorInputTransportKind
 }
 
 /// The HID delivery surface, so the host logic is testable without SimulatorKit.
