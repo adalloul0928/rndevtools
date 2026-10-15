@@ -56,8 +56,13 @@ func Run(config Config) int {
 		})
 		return ExitSuccess
 	}
-	if config.Arguments[0] == "mcp" {
+	switch config.Arguments[0] {
+	case "mcp":
 		return runMCP(config)
+	case "setup":
+		return runSetup(config)
+	case "hook":
+		return runHook(config)
 	}
 	requestID, err := newRequestID()
 	if err != nil {
@@ -151,10 +156,11 @@ func RootUsage() string {
 	for _, name := range protocol.Commands() {
 		fmt.Fprintf(&builder, "  %s\n", name)
 	}
-	builder.WriteString("  mcp\n")
+	builder.WriteString("  mcp\n  setup\n")
 	builder.WriteString("\nEach command accepts structured flags and an optional bounded JSON object on stdin.\n")
 	builder.WriteString("Output is one compact rndevtools/1 JSON response.\n")
 	builder.WriteString("`rndevtools mcp` serves the same commands to coding agents as an MCP server on stdio.\n")
+	builder.WriteString("`rndevtools setup` registers that server, the lanes skill, and a simctl guard with Claude Code, Codex, Cursor, and Kiro.\n")
 	return builder.String()
 }
 

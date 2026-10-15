@@ -1109,6 +1109,14 @@ export const simulatorOnboardingOperationSchema = z.discriminatedUnion('kind', [
 		actionId: identifierSchema,
 		kind: z.literal('agentCli.reveal'),
 	}),
+	z.strictObject({
+		actionId: identifierSchema,
+		/**
+		 * Run the verified CLI's `setup`: register the MCP server, install the
+		 * lanes skill, and add the simctl guard for the coding agents on this Mac.
+		 */
+		kind: z.literal('agentCli.setup'),
+	}),
 ]);
 export type SimulatorOnboardingOperation = z.infer<
 	typeof simulatorOnboardingOperationSchema
@@ -1120,11 +1128,14 @@ export const simulatorOnboardingReceiptSchema = z.strictObject({
 		'toolchain.selectXcode',
 		'privacy.openSettings',
 		'agentCli.reveal',
+		'agentCli.setup',
 	]),
 	completed: z.boolean(),
 	cancelled: z.boolean().optional(),
 	requiresRefresh: z.boolean().optional(),
 	error: shortTextSchema.optional(),
+	/** Human-readable outcome lines, e.g. one per file `agentCli.setup` touched. */
+	summary: z.array(shortTextSchema).max(32).optional(),
 });
 export type SimulatorOnboardingReceipt = z.infer<
 	typeof simulatorOnboardingReceiptSchema

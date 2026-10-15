@@ -75,6 +75,7 @@ import {
 } from '../shared/slimming-protocol';
 import { ActionConfirmationStore } from './action-confirmation-store';
 import { AgentCliService } from './agent-cli-service';
+import { runAgentCliSetup } from './agent-cli-setup';
 import { createAgentCommandRouter } from './agent-command-router';
 import { AgentService } from './agent-service';
 import { DesktopBroker } from './broker';
@@ -817,6 +818,16 @@ function registerIpc(
 				appVersion: app.getVersion(),
 			});
 			shell.showItemInFolder(cli.executablePath);
+		},
+		setupAgentCli: async () => {
+			// The verified CLI edits the operator's own agent configuration; the
+			// desktop only launches it and relays its report. Mutations stay in
+			// the Go code, which is tested against each file format.
+			const cli = await verifyAgentCli({
+				resourceDirectory: nativeResourceDirectory,
+				appVersion: app.getVersion(),
+			});
+			return runAgentCliSetup(cli.executablePath, app.getPath('home'));
 		},
 	});
 	ipcMain.handle(IPC_CHANNELS.getBootstrap, (event): DesktopBootstrap => {

@@ -16,7 +16,7 @@ import {
 	TerminalSquare,
 	Video,
 } from 'lucide-react';
-import { type ComponentType, useMemo } from 'react';
+import { type ComponentType, useMemo, useState } from 'react';
 import {
 	BridgeUnavailableNotice,
 	RefreshSimulatorsButton,
@@ -221,6 +221,20 @@ const CAPABILITIES: CapabilityDefinition[] = [
 export function SettingsPanel() {
 	const { isBridgeAvailable, runOnboardingOperation, state } =
 		useSimulatorRuntime();
+	const [agentSetup, setAgentSetup] = useState<{
+		busy: boolean;
+		lines: string[];
+	}>({ busy: false, lines: [] });
+	const runAgentSetup = async () => {
+		setAgentSetup({ busy: true, lines: [] });
+		const receipt = await runOnboardingOperation({ kind: 'agentCli.setup' });
+		setAgentSetup({
+			busy: false,
+			lines: receipt.completed
+				? (receipt.summary ?? ['Setup completed.'])
+				: [receipt.error ?? 'Setup failed.'],
+		});
+	};
 	const capabilities = useMemo(
 		() =>
 			CAPABILITIES.map((definition) => {
@@ -297,21 +311,42 @@ export function SettingsPanel() {
 								</header>
 								<p>
 									Packaged startup verifies the signed CLI before opening its
-									private socket. In development, Reveal CLI performs the same
-									manifest, hash, architecture, and signature checks against the
-									current local build. RN Devtools never modifies your shell
-									path.
+									private socket. Set up coding agents registers the CLI as an
+									MCP server with Claude Code, Codex, Cursor, and Kiro, installs
+									the lanes skill where each discovers skills, links the CLI
+									into <code className="sim-inline-code">~/.local/bin</code>,
+									and adds a Claude Code hook that steers raw{' '}
+									<code className="sim-inline-code">simctl</code> back here.
+									Existing configuration is preserved; nothing else on your
+									shell path changes.
 								</p>
-								<Button
-									isDisabled={!isBridgeAvailable}
-									size="sm"
-									variant="secondary"
-									onPress={() =>
-										void runOnboardingOperation({ kind: 'agentCli.reveal' })
-									}
-								>
-									Reveal verified CLI
-								</Button>
+								<div className="sim-settings-actions">
+									<Button
+										isDisabled={!isBridgeAvailable || agentSetup.busy}
+										size="sm"
+										variant="primary"
+										onPress={() => void runAgentSetup()}
+									>
+										{agentSetup.busy ? 'Setting up…' : 'Set up coding agents'}
+									</Button>
+									<Button
+										isDisabled={!isBridgeAvailable}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runOnboardingOperation({ kind: 'agentCli.reveal' })
+										}
+									>
+										Reveal verified CLI
+									</Button>
+								</div>
+								{agentSetup.lines.length > 0 ? (
+									<ul className="sim-settings-outcome">
+										{agentSetup.lines.map((line) => (
+											<li key={line}>{line}</li>
+										))}
+									</ul>
+								) : null}
 							</section>
 							<section className="sim-security-boundary">
 								<header>

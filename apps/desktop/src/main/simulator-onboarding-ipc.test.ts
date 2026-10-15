@@ -48,6 +48,7 @@ describe('Simulator onboarding IPC', () => {
 			activateXcodeDeveloperDirectory: activate,
 			openPrivacySettings: vi.fn(async () => undefined),
 			revealAgentCli: vi.fn(async () => undefined),
+			setupAgentCli: vi.fn(async () => []),
 		});
 		const receipt = await handlers.runOperation(event, {
 			actionId: 'choose-xcode',
@@ -72,12 +73,17 @@ describe('Simulator onboarding IPC', () => {
 		const assertTrustedRenderer = vi.fn();
 		const openPrivacySettings = vi.fn(async () => undefined);
 		const revealAgentCli = vi.fn(async () => undefined);
+		const setupAgentCli = vi.fn(async () => [
+			'Updated ~/.claude.json',
+			'Agents can reach RN Devtools now.',
+		]);
 		const handlers = createSimulatorOnboardingIpcHandlers({
 			assertTrustedRenderer,
 			selectXcodeApplication: vi.fn(async () => undefined),
 			activateXcodeDeveloperDirectory: vi.fn(async () => undefined),
 			openPrivacySettings,
 			revealAgentCli,
+			setupAgentCli,
 		});
 		await expect(
 			handlers.runOperation(event, {
@@ -92,9 +98,19 @@ describe('Simulator onboarding IPC', () => {
 				kind: 'agentCli.reveal',
 			})
 		).resolves.toMatchObject({ completed: true });
+		await expect(
+			handlers.runOperation(event, {
+				actionId: 'setup',
+				kind: 'agentCli.setup',
+			})
+		).resolves.toMatchObject({
+			completed: true,
+			summary: ['Updated ~/.claude.json', 'Agents can reach RN Devtools now.'],
+		});
 		expect(openPrivacySettings).toHaveBeenCalledWith('screen_recording');
 		expect(revealAgentCli).toHaveBeenCalledOnce();
-		expect(assertTrustedRenderer).toHaveBeenCalledTimes(2);
+		expect(setupAgentCli).toHaveBeenCalledOnce();
+		expect(assertTrustedRenderer).toHaveBeenCalledTimes(3);
 		await expect(
 			handlers.runOperation(event, {
 				actionId: 'unsafe',

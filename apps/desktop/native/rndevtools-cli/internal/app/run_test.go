@@ -180,3 +180,58 @@ func TestRunServesMCPOverStdio(t *testing.T) {
 		t.Fatal("mcp with flags should be a usage error")
 	}
 }
+
+func TestRunSetupDryRunAndHook(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	socketPath := appTestServer(t, func(id string) string {
+		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"healthy":true}}`
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := Run(Config{
+		Version:    "test",
+		Arguments:  []string{"setup", "--dry-run", "--agents", "claude", "--executable", "/opt/rndevtools"},
+		Stdin:      strings.NewReader(""),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		SocketPath: socketPath,
+	})
+	if exitCode != ExitSuccess {
+		t.Fatalf("exit = %d; stderr=%s", exitCode, stderr.String())
+	}
+	var report map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("report is not JSON: %s", stdout.String())
+	}
+	if report["dryRun"] != true || report["executable"] != "/opt/rndevtools" {
+		t.Fatalf("report: %v", report)
+	}
+	if report["doctor"].(map[string]any)["ok"] != true {
+		t.Fatalf("doctor should have reached the fixture socket: %v", report["doctor"])
+	}
+	if entries, _ := os.ReadDir(home); len(entries) != 0 {
+		t.Fatalf("dry run wrote into HOME: %v", entries)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = Run(Config{
+		Arguments: []string{"hook", "claude-pre-tool-use"},
+		Stdin:     strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44"}}`),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	})
+	if exitCode != 2 || !strings.Contains(stderr.String(), "rndevtools") {
+		t.Fatalf("hook exit %d stderr %q", exitCode, stderr.String())
+	}
+	exitCode = Run(Config{
+		Arguments: []string{"hook", "claude-pre-tool-use"},
+		Stdin:     strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl list"}}`),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	})
+	if exitCode != ExitSuccess {
+		t.Fatalf("read-only simctl must pass, exit %d", exitCode)
+	}
+}

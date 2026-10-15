@@ -99,6 +99,8 @@ type SimulatorOnboardingIpcDependencies = {
 		>['permission']
 	) => Promise<void>;
 	revealAgentCli: () => Promise<void>;
+	/** Runs `rndevtools setup` and returns its per-file outcome lines. */
+	setupAgentCli: () => Promise<string[]>;
 };
 
 function failed(
@@ -119,6 +121,7 @@ export function createSimulatorOnboardingIpcHandlers({
 	activateXcodeDeveloperDirectory,
 	openPrivacySettings,
 	revealAgentCli,
+	setupAgentCli,
 }: SimulatorOnboardingIpcDependencies) {
 	return {
 		runOperation: async (
@@ -146,6 +149,17 @@ export function createSimulatorOnboardingIpcHandlers({
 						kind: operation.kind,
 						completed: true,
 						requiresRefresh: true,
+					});
+				}
+				if (operation.kind === 'agentCli.setup') {
+					const summary = await setupAgentCli();
+					return simulatorOnboardingReceiptSchema.parse({
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						summary: summary
+							.slice(0, 32)
+							.map((line) => line.slice(0, 4 * 1024)),
 					});
 				}
 				if (operation.kind === 'privacy.openSettings') {

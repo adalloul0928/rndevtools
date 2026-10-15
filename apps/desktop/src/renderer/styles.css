@@ -5897,3 +5897,31 @@ button:disabled {
 	border-radius: 6px;
 	background: rgb(255 255 255 / 2%);
 }
+
+/* ------------------------------------------------------------------------ */
+/* Settings: coding-agent setup outcome                                      */
+/* ------------------------------------------------------------------------ */
+
+.sim-inline-code {
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: rgb(134 166 198 / 10%);
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+	color: #a9c1da;
+}
+
+.sim-settings-outcome {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	margin: 8px 0 0;
+	padding: 8px 10px;
+	border: 1px solid rgb(134 166 198 / 14%);
+	border-radius: 6px;
+	background: rgb(10 16 24 / 55%);
+	font-size: var(--font-size-caption);
+	line-height: 1.5;
+	color: #8fa6bf;
+	list-style: none;
+}

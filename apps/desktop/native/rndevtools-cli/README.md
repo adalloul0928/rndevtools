@@ -72,6 +72,28 @@ and the template `rndevtools://screen/{udid}` (a fresh JPEG). Attribution comes
 from `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`, which both agents pass to
 the servers they spawn, falling back to the MCP client's name.
 
+## Setup for coding agents
+
+`rndevtools setup` is the one-time step that makes agents on this Mac reach
+for RN Devtools instead of raw `simctl`. It is idempotent and additive:
+existing configuration is read, merged, and written back through a temporary
+file and rename; unknown keys are preserved; files setup did not create are
+never deleted. `--dry-run` prints the plan without changing anything, and the
+same action is available in the desktop app's Settings as "Set up coding
+agents".
+
+| Step | Where | Notes |
+| --- | --- | --- |
+| Symlink the verified CLI | `~/.local/bin/rndevtools` | Re-pointed when the app moves; a foreign file there is left alone and reported. `--no-link` skips it. |
+| Register the MCP server | Claude Code `~/.claude.json`, Codex `~/.codex/config.toml`, Cursor `~/.cursor/mcp.json`, Kiro `~/.kiro/settings/mcp.json` | Entry is `{command: <cli>, args: ["mcp"]}`. Claude and Codex are always configured; Cursor and Kiro only when their directory exists, or when named in `--agents`. Kiro gets the read-only tools in `autoApprove`; tools that drive a device still prompt. Codex's TOML is edited textually and setup owns only the `[mcp_servers.rndevtools]` table. |
+| Install the lanes skill | `~/.claude/skills`, `~/.agents/skills` (Codex), `~/.kiro/skills` | The skill is embedded in the binary, so the installed copy always matches the CLI. With `--project <dir>` it goes into that repository's `.claude/skills` and `.agents/skills` instead. |
+| Claude Code hook | `~/.claude/settings.json` → `hooks.PreToolUse` | `rndevtools hook claude-pre-tool-use` reads the Bash call and exits 2 (block, with the reason shown to the model) for `simctl boot`, `shutdown`, `erase`, `delete`, `openurl`, `install`, `uninstall`, `launch`, `terminate`, `io`, `privacy`, `push`, `keychain`, `status_bar`, `spawn`, `addmedia`, `clone`, and for hand-started Metro (`expo start`, `react-native start`). `simctl list` and other read-only verbs pass; anything unparseable passes, because a hook that fails closed would lock the model out of Bash. `--no-hook` skips it. Codex and Cursor have no hook mechanism, so for them the AGENTS.md block is the only guard. |
+| AGENTS.md block | `<project>/AGENTS.md` with `--project` | A short "iOS Simulators" section between `<!-- rndevtools:start -->` / `<!-- rndevtools:end -->` markers, replaced in place on rerun. The report also returns the block for manual installs. |
+
+Setup finishes with the `doctor` check, so a mis-registered path or a desktop
+that is not running shows up immediately rather than in the agent's first
+failed tool call.
+
 ## Lanes
 
 `lane` runs one git worktree on one Simulator with its own leased Metro port,
@@ -90,7 +112,7 @@ exactly one of `--lane-id` or `--worktree`. Lane creation fails rather than
 stealing a worktree, Simulator, or port another lane owns. The CLI attaches
 `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` (or `RNDEVTOOLS_AGENT_SESSION_ID`)
 to `up` and `launch` so the desktop can show which agent holds a lane. The
-agent skill in [`skills/rndevtools-lanes`](skills/rndevtools-lanes/SKILL.md)
+agent skill in [`internal/setup/skills/rndevtools-lanes`](internal/setup/skills/rndevtools-lanes/SKILL.md)
 teaches Claude Code and Codex the workflow; copy it into `.claude/skills` or
 `.codex/skills`.
 
