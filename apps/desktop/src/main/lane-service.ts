@@ -81,13 +81,6 @@ export type LaneSlimmingPort = {
 	subscribe: (listener: (state: SlimmingState) => void) => () => void;
 };
 
-/**
- * Out-of-schema options only the main process can set. `slimApproved` means a
- * person confirmed the slim in a native dialog this process showed; nothing
- * that arrives over IPC or the CLI socket can carry it.
- */
-export type LaneRunOptions = { slimApproved?: boolean };
-
 type LaneListener = (state: LaneState) => void;
 
 const TERMINAL_SLIMMING_STATUSES = new Set([
@@ -96,9 +89,6 @@ const TERMINAL_SLIMMING_STATUSES = new Set([
 	'needs-attention',
 	'cancelled',
 ]);
-const SLIM_APPROVAL_MESSAGE =
-	'Slimming needs operator approval. Open the lane in RN Devtools and approve it there; the mutation requires the signed desktop app.';
-
 function safeError(error: unknown): string {
 	return redactDiagnosticText(diagnosticErrorText(error)).slice(
 		0,
@@ -128,12 +118,12 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * that Metro.
  *
  * Slimming rides along but never bypasses its gates. A lane start may name a
- * SimSlim profile; the mutation only runs when this process was told the
- * operator approved it (`LaneRunOptions.slimApproved`), and even then the
- * SimSlim service re-checks the experimental setting, the device's
- * compatibility tuple, and the helper's signed-parent authorization. An
- * unattended `lane up --slim` parks the lane in `needs-approval` and starts
- * Metro anyway, so the agent is never blocked on a dialog it cannot see.
+ * SimSlim profile; the desktop applies it before Metro starts, and the SimSlim
+ * service checks the experimental setting, the device's compatibility tuple,
+ * who holds the device (the lane's agent is the requester), and the helper's
+ * signed-parent authorization. A refused slim is recorded as `skipped` with
+ * the reason and the lane starts anyway, so an agent is never blocked on a
+ * slim it cannot get.
  */
 export class LaneService {
 	readonly #store: LaneStore;
@@ -251,8 +241,7 @@ export class LaneService {
 
 	async runOperation(
 		value: LaneOperation,
-		signal: AbortSignal = new AbortController().signal,
-		options: LaneRunOptions = {}
+		signal: AbortSignal = new AbortController().signal
 	): Promise<LaneOperationReceipt> {
 		const operation = laneOperationSchema.parse(value);
 		const base = { actionId: operation.actionId, kind: operation.kind };
@@ -260,21 +249,7 @@ export class LaneService {
 			if (this.#stopped) throw new Error('Lanes are shutting down.');
 			switch (operation.kind) {
 				case 'lane.start': {
-					const lane = await this.startLane(operation, signal, options);
-					return laneOperationReceiptSchema.parse({
-						...base,
-						completed: true,
-						lane,
-						state: this.getState(),
-					});
-				}
-				case 'lane.slim': {
-					const lane = await this.resolveSlim(
-						operation.laneId,
-						operation.decision,
-						signal,
-						options
-					);
+					const lane = await this.startLane(operation, signal);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
@@ -355,8 +330,7 @@ export class LaneService {
 
 	async startLane(
 		input: Extract<LaneOperation, { kind: 'lane.start' }>,
-		signal: AbortSignal,
-		options: LaneRunOptions = {}
+		signal: AbortSignal
 	): Promise<Lane> {
 		const requestedPath = path.resolve(input.worktreePath);
 		const environment = this.#environments.find(
@@ -465,14 +439,12 @@ export class LaneService {
 		// parked in needs-approval and everything else proceeds.
 		let slim: LaneSlim | undefined;
 		if (slimRequest) {
-			slim = options.slimApproved
-				? await this.#applySlim(device.udid, slimRequest, signal)
-				: {
-						profileId: slimRequest,
-						status: 'needs-approval',
-						message: SLIM_APPROVAL_MESSAGE,
-						updatedAt: this.#now(),
-					};
+			slim = await this.#applySlim(
+				device.udid,
+				slimRequest,
+				input.agent,
+				signal
+			);
 		}
 
 		const metroPid = await this.#metro.start({
@@ -509,54 +481,6 @@ export class LaneService {
 
 		if (input.launch) {
 			lane = await this.launchLane(id, undefined, input.agent, signal);
-		}
-		return lane;
-	}
-
-	/**
-	 * Settles a lane parked in `needs-approval`. Approving runs the SimSlim
-	 * mutation now and relaunches the dev client if Metro is already up, since
-	 * applying a profile restarts services under the running app. Dismissing
-	 * records the operator's choice so the row stops asking.
-	 */
-	async resolveSlim(
-		laneId: string,
-		decision: 'approve' | 'dismiss',
-		signal: AbortSignal,
-		options: LaneRunOptions = {}
-	): Promise<Lane> {
-		let lane = this.#requireLane(laneId);
-		const pending = lane.slim;
-		if (pending?.status !== 'needs-approval') {
-			throw new Error('This lane has no slimming request waiting on approval.');
-		}
-		if (decision === 'dismiss') {
-			lane = {
-				...lane,
-				slim: {
-					profileId: pending.profileId,
-					status: 'skipped',
-					message: 'Dismissed by the operator.',
-					updatedAt: this.#now(),
-				},
-			};
-			await this.#store.upsert(lane);
-			this.#touch();
-			return lane;
-		}
-		if (!options.slimApproved) {
-			throw new Error(SLIM_APPROVAL_MESSAGE);
-		}
-		const slim = await this.#applySlim(
-			lane.simulatorUdid,
-			pending.profileId,
-			signal
-		);
-		lane = { ...lane, slim };
-		await this.#store.upsert(lane);
-		this.#touch();
-		if (slim.status === 'applied' && lane.metro === 'ready' && lane.scheme) {
-			lane = await this.launchLane(laneId, undefined, undefined, signal);
 		}
 		return lane;
 	}
@@ -874,6 +798,9 @@ export class LaneService {
 	async #applySlim(
 		udid: string,
 		profileId: string,
+		requester:
+			| { kind: 'claude' | 'codex' | 'other'; sessionId: string }
+			| undefined,
 		signal: AbortSignal
 	): Promise<LaneSlim> {
 		const slimming = this.#slimming;
@@ -896,6 +823,9 @@ export class LaneService {
 						profileId,
 						simulatorUdids: [udid],
 						confirmation: SLIMMING_CONFIRMATIONS.apply,
+						// The lane's agent is the requester, so a device another session
+						// holds is refused by the slimming service's ownership check.
+						...(requester ? { requester } : {}),
 					},
 					lease
 				);

@@ -111,12 +111,16 @@ relaunches. A lane for the same app on a *different* Simulator, or another
 app's lane on that Simulator, is a conflict; use `lane ls` to see which.
 
 Add `--slim <profileId>` (ids come from `rndevtools slimming --operation
-status`, e.g. `rndevtools-development`) to request a slimmer Simulator. The
-response's `lane.slim` tells you where it stands: `needs-approval` (waiting on
-the operator in the desktop app; the lane is fully usable meanwhile), `applied`
-(with the SimSlim `jobId`), `skipped` or `failed` (with the reason, e.g. the
-experimental setting is off or this is an unsigned build). An unknown profile id
-fails the whole `lane up` before anything boots.
+status`, e.g. `rndevtools-development`) to trim the Simulator's background
+services before Metro starts. The desktop applies it in the lane's own
+sequence (boot, slim, Metro, launch) when SimSlim is enabled in RN Devtools,
+the device's runtime/profile combination is verified or approved, and the
+device is free or yours. `lane.slim` in the result says `applied` (with the
+SimSlim `jobId`), `skipped` with the reason (SimSlim is off, the build is
+unsigned, the device is held by another session, the combination needs the
+user's one-time approval), or `failed`. An unknown profile id fails the whole
+`lane up` before anything boots. Slimming persists across reboots on iOS 26,
+so a device slimmed once stays slim for every later lane.
 
 If the dev client is not installed on that Simulator, `lane up` fails with
 `<bundle id> is not installed on this Simulator` and leaves Metro running.

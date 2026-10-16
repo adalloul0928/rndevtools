@@ -331,20 +331,20 @@ describe('LaneService', () => {
 		};
 	}
 
-	function startWithSlim(options?: { slimApproved?: boolean }) {
-		return service.runOperation(
-			{
-				actionId: `op-slim-${Math.random().toString(16).slice(2)}`,
-				kind: 'lane.start',
-				worktreePath: WORKTREE,
-				simulatorUdid: UDID,
-				environment: 'development',
-				launch: true,
-				slimProfileId: 'rndevtools-development',
-			},
-			undefined,
-			options
-		);
+	function startWithSlim(agent?: {
+		kind: 'claude' | 'codex' | 'other';
+		sessionId: string;
+	}) {
+		return service.runOperation({
+			actionId: `op-slim-${Math.random().toString(16).slice(2)}`,
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: true,
+			slimProfileId: 'rndevtools-development',
+			...(agent ? { agent } : {}),
+		});
 	}
 
 	afterEach(async () => {
@@ -863,18 +863,24 @@ describe('LaneService', () => {
 	});
 
 	describe('slimming on lane start', () => {
-		it('parks an unapproved slim request in needs-approval and still starts Metro and launches', async () => {
+		it('applies the profile during start, boot then slim then Metro, with the lane agent as requester', async () => {
 			healthyMetro();
-			const receipt = await startWithSlim();
+			const receipt = await startWithSlim({
+				kind: 'codex',
+				sessionId: 'thread-9',
+			});
 			expect(receipt.completed).toBe(true);
 			expect(receipt.lane?.slim).toMatchObject({
 				profileId: 'rndevtools-development',
-				status: 'needs-approval',
+				status: 'applied',
+				jobId: 'slimming-1',
 			});
-			expect(receipt.lane?.slim?.message).toMatch(/operator approval/i);
 			expect(receipt.lane?.metro).toBe('ready');
-			// The gate was never even asked: no SimSlim action ran.
-			expect(slimming.actions).toHaveLength(0);
+			expect(slimming.actions).toHaveLength(1);
+			expect(slimming.actions[0]?.action).toMatchObject({
+				kind: 'profile.apply',
+				requester: { kind: 'codex', sessionId: 'thread-9' },
+			});
 			expect(simulator.actions.map((action) => action.kind)).toEqual([
 				'device.boot',
 				'app.list',
@@ -882,9 +888,9 @@ describe('LaneService', () => {
 			]);
 		});
 
-		it('applies the profile under a mutation lease when main says the operator approved', async () => {
+		it('applies the profile under a per-device mutation lease; an operator start carries no requester', async () => {
 			healthyMetro();
-			const receipt = await startWithSlim({ slimApproved: true });
+			const receipt = await startWithSlim();
 			expect(receipt.completed).toBe(true);
 			expect(receipt.lane?.slim).toMatchObject({
 				profileId: 'rndevtools-development',
@@ -900,6 +906,7 @@ describe('LaneService', () => {
 				simulatorUdids: [UDID],
 				confirmation: 'APPLY_EXPERIMENTAL_PROFILE',
 			});
+			expect(first?.action).not.toHaveProperty('requester');
 			expect(first?.lease?.simulatorUdid).toBe(UDID);
 			// Order: boot, slim, then Metro + launch.
 			expect(simulator.actions.map((action) => action.kind)).toEqual([
@@ -913,7 +920,7 @@ describe('LaneService', () => {
 		it('records a rejection from the SimSlim gate as skipped and keeps the lane usable', async () => {
 			healthyMetro();
 			slimming.rejectWith = 'Experimental Simulator mutations are disabled.';
-			const receipt = await startWithSlim({ slimApproved: true });
+			const receipt = await startWithSlim();
 			expect(receipt.completed).toBe(true);
 			expect(receipt.lane?.slim).toMatchObject({
 				status: 'skipped',
@@ -925,7 +932,7 @@ describe('LaneService', () => {
 		it('records a failed SimSlim job as failed without aborting the lane', async () => {
 			healthyMetro();
 			slimming.failWith = 'native host mutation_authorization_required';
-			const receipt = await startWithSlim({ slimApproved: true });
+			const receipt = await startWithSlim();
 			expect(receipt.completed).toBe(true);
 			expect(receipt.lane?.slim).toMatchObject({
 				status: 'failed',
@@ -957,67 +964,6 @@ describe('LaneService', () => {
 			const receipt = await startWithSlim();
 			expect(receipt.completed).toBe(false);
 			expect(receipt.error).toMatch(/helper is unavailable/i);
-		});
-
-		it('approves later: runs the mutation and relaunches the dev client', async () => {
-			healthyMetro();
-			const started = await startWithSlim();
-			const laneId = started.lane?.id ?? '';
-			simulator.actions.length = 0;
-			// Approval without main's option is refused, so the IPC layer is the
-			// only path in.
-			const refused = await service.runOperation({
-				actionId: 'op-approve-no-option',
-				kind: 'lane.slim',
-				laneId,
-				decision: 'approve',
-			});
-			expect(refused.completed).toBe(false);
-			expect(refused.error).toMatch(/operator approval/i);
-			expect(slimming.actions).toHaveLength(0);
-
-			const approved = await service.runOperation(
-				{
-					actionId: 'op-approve',
-					kind: 'lane.slim',
-					laneId,
-					decision: 'approve',
-				},
-				undefined,
-				{ slimApproved: true }
-			);
-			expect(approved.completed).toBe(true);
-			expect(approved.lane?.slim).toMatchObject({ status: 'applied' });
-			expect(slimming.actions).toHaveLength(1);
-			expect(simulator.actions.map((action) => action.kind)).toEqual([
-				'app.list',
-				'url.open',
-			]);
-			expect(approved.lane?.lastLaunchedAt).toBe(now);
-		});
-
-		it('dismisses a pending request and refuses to decide twice', async () => {
-			healthyMetro();
-			const started = await startWithSlim();
-			const laneId = started.lane?.id ?? '';
-			const dismissed = await service.runOperation({
-				actionId: 'op-dismiss',
-				kind: 'lane.slim',
-				laneId,
-				decision: 'dismiss',
-			});
-			expect(dismissed.lane?.slim).toMatchObject({
-				status: 'skipped',
-				message: 'Dismissed by the operator.',
-			});
-			const again = await service.runOperation({
-				actionId: 'op-dismiss-again',
-				kind: 'lane.slim',
-				laneId,
-				decision: 'dismiss',
-			});
-			expect(again.completed).toBe(false);
-			expect(again.error).toMatch(/no slimming request waiting/);
 		});
 
 		it('reports plainly when the build has no slimming at all', async () => {

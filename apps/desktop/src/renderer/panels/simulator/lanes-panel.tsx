@@ -153,16 +153,6 @@ export function LanesPanel() {
 			{ kind: 'lane.stop', laneId: lane.id },
 			{ successMessage: `Lane ${lane.branch} stopped; its Simulator is free.` }
 		);
-	const decideSlim = (lane: Lane, decision: 'approve' | 'dismiss') =>
-		void lanes.runOperation(
-			{ kind: 'lane.slim', laneId: lane.id, decision },
-			decision === 'approve'
-				? {
-						pendingMessage: `Applying ${lane.slim?.profileId ?? 'the profile'} to ${deviceByUdid.get(lane.simulatorUdid.toUpperCase())?.name ?? 'the Simulator'}…`,
-						successMessage: 'Slimming finished; see the lane for the outcome.',
-					}
-				: { successMessage: 'Slimming request dismissed.' }
-		);
 	const readLog = async (lane: Lane) => {
 		const receipt = await lanes.runOperation({
 			kind: 'lane.log',
@@ -413,9 +403,6 @@ export function LanesPanel() {
 									simulator.setSelectedDeviceUdid(selectedLane.simulatorUdid);
 									window.location.hash = 'simulator/fleet';
 								}}
-								onSlimDecision={(decision) =>
-									decideSlim(selectedLane, decision)
-								}
 								onStop={() => stop(selectedLane)}
 							/>
 						) : (
@@ -710,7 +697,6 @@ function LaneDetail({
 	onCloseLog,
 	onStop,
 	onOpenSimulator,
-	onSlimDecision,
 }: {
 	lane: Lane;
 	device: SimulatorDevice | undefined;
@@ -721,7 +707,6 @@ function LaneDetail({
 	onCloseLog: () => void;
 	onStop: () => void;
 	onOpenSimulator: () => void;
-	onSlimDecision: (decision: 'approve' | 'dismiss') => void;
 }) {
 	const launchUrl = lane.scheme
 		? laneDevClientLaunchUrl(lane.scheme, lane.port)
@@ -783,37 +768,7 @@ function LaneDetail({
 					start it again.
 				</PanelNotice>
 			) : null}
-			{lane.slim?.status === 'needs-approval' ? (
-				<PanelNotice
-					title="Slimming is waiting for your approval."
-					tone="warning"
-				>
-					An agent (or the CLI) asked to apply{' '}
-					<code>{lane.slim.profileId}</code> to{' '}
-					{device?.name ?? 'this Simulator'}. Only you can approve a Simulator
-					mutation; the CLI cannot. Approving shows the SimSlim confirmation and
-					relaunches the dev client afterwards.
-					<div className="sim-action-row lane-slim-actions">
-						<Button
-							isDisabled={isBusy}
-							size="sm"
-							variant="primary"
-							onPress={() => onSlimDecision('approve')}
-						>
-							Approve and slim
-						</Button>
-						<Button
-							isDisabled={isBusy}
-							size="sm"
-							variant="ghost"
-							onPress={() => onSlimDecision('dismiss')}
-						>
-							Dismiss
-						</Button>
-					</div>
-				</PanelNotice>
-			) : null}
-			{lane.slim && lane.slim.status !== 'needs-approval' ? (
+			{lane.slim ? (
 				<PanelNotice
 					title={
 						lane.slim.status === 'applied'

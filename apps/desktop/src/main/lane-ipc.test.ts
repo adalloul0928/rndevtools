@@ -19,7 +19,7 @@ const pendingLane: Lane = {
 	startedAt: 1,
 	slim: {
 		profileId: 'rndevtools-development',
-		status: 'needs-approval',
+		status: 'applied',
 		updatedAt: 1,
 	},
 };
@@ -32,10 +32,7 @@ const state: LaneState = {
 	repositories: [],
 };
 
-function fixture(
-	selected: string | null = '/Users/dev/app',
-	approveSlim = true
-) {
+function fixture(selected: string | null = '/Users/dev/app') {
 	const service = {
 		getState: vi.fn(() => state),
 		runOperation: vi.fn(
@@ -50,23 +47,15 @@ function fixture(
 	};
 	const assertTrustedRenderer = vi.fn();
 	const selectRepository = vi.fn(async () => selected ?? undefined);
-	const confirmSlim = vi.fn(async () => approveSlim);
-	const findLane = vi.fn((laneId: string) =>
-		state.lanes.find((lane) => lane.id === laneId)
-	);
 	const handlers = createLaneIpcHandlers({
 		service,
 		assertTrustedRenderer,
 		selectRepository,
-		confirmSlim,
-		findLane,
 	});
 	return {
 		service,
 		assertTrustedRenderer,
 		selectRepository,
-		confirmSlim,
-		findLane,
 		handlers,
 	};
 }
@@ -139,116 +128,24 @@ describe('Lane IPC', () => {
 		expect(receipt.error).toMatch(/not inside a git repository/);
 	});
 
-	describe('slimming approval', () => {
-		it('asks the native dialog before a lane.start with a slim profile and forwards the answer', async () => {
-			const { service, confirmSlim, handlers } = fixture(
-				'/Users/dev/app',
-				true
-			);
-			await handlers.runOperation({} as never, {
-				actionId: 'op-slim-1',
-				kind: 'lane.start',
-				worktreePath: '/Users/dev/app-feature',
-				simulatorUdid: UDID,
-				slimProfileId: 'rndevtools-development',
-			});
-			expect(confirmSlim).toHaveBeenCalledWith(expect.anything(), {
-				profileId: 'rndevtools-development',
-				simulatorUdid: UDID,
-			});
-			expect(service.runOperation).toHaveBeenCalledWith(
-				expect.objectContaining({ kind: 'lane.start' }),
-				undefined,
-				{ slimApproved: true }
-			);
+	it('forwards a lane.start with a slim profile straight to the service: the desktop applies it, no dialog', async () => {
+		const { service, handlers } = fixture();
+		const operation = {
+			actionId: 'op-slim',
+			kind: 'lane.start',
+			worktreePath: '/Users/dev/app-feature',
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: true,
+			slimProfileId: 'rndevtools-development',
+		};
+		await handlers.runOperation({} as never, operation);
+		expect(service.runOperation).toHaveBeenCalledTimes(1);
+		expect(service.runOperation.mock.calls[0]?.[0]).toMatchObject({
+			kind: 'lane.start',
+			slimProfileId: 'rndevtools-development',
 		});
-
-		it('still starts the lane when the operator declines, without approval', async () => {
-			const { service, handlers } = fixture('/Users/dev/app', false);
-			await handlers.runOperation({} as never, {
-				actionId: 'op-slim-2',
-				kind: 'lane.start',
-				worktreePath: '/Users/dev/app-feature',
-				simulatorUdid: UDID,
-				slimProfileId: 'rndevtools-development',
-			});
-			expect(service.runOperation).toHaveBeenCalledWith(
-				expect.objectContaining({ kind: 'lane.start' }),
-				undefined,
-				{ slimApproved: false }
-			);
-		});
-
-		it('never shows a dialog for a lane.start without a slim profile', async () => {
-			const { service, confirmSlim, handlers } = fixture();
-			await handlers.runOperation({} as never, {
-				actionId: 'op-plain',
-				kind: 'lane.start',
-				worktreePath: '/Users/dev/app-feature',
-				simulatorUdid: UDID,
-			});
-			expect(confirmSlim).not.toHaveBeenCalled();
-			expect(service.runOperation).toHaveBeenCalledWith(
-				expect.objectContaining({ kind: 'lane.start' })
-			);
-		});
-
-		it('approves a pending lane.slim only after the dialog, using the lane on record', async () => {
-			const { service, confirmSlim, handlers } = fixture(
-				'/Users/dev/app',
-				true
-			);
-			await handlers.runOperation({} as never, {
-				actionId: 'op-approve',
-				kind: 'lane.slim',
-				laneId: pendingLane.id,
-				decision: 'approve',
-			});
-			expect(confirmSlim).toHaveBeenCalledWith(expect.anything(), {
-				laneId: pendingLane.id,
-				profileId: 'rndevtools-development',
-				simulatorUdid: UDID,
-			});
-			expect(service.runOperation).toHaveBeenCalledWith(
-				expect.objectContaining({ kind: 'lane.slim', decision: 'approve' }),
-				undefined,
-				{ slimApproved: true }
-			);
-		});
-
-		it('returns a typed cancellation when the approval dialog is declined', async () => {
-			const { service, handlers } = fixture('/Users/dev/app', false);
-			await expect(
-				handlers.runOperation({} as never, {
-					actionId: 'op-approve-declined',
-					kind: 'lane.slim',
-					laneId: pendingLane.id,
-					decision: 'approve',
-				})
-			).resolves.toMatchObject({ completed: false, cancelled: true });
-			expect(service.runOperation).not.toHaveBeenCalled();
-		});
-
-		it('refuses to approve a lane with nothing pending and passes dismissals straight through', async () => {
-			const { service, confirmSlim, handlers } = fixture();
-			const missing = await handlers.runOperation({} as never, {
-				actionId: 'op-approve-missing',
-				kind: 'lane.slim',
-				laneId: 'lane-99999999-2222-4333-8444-555555555555',
-				decision: 'approve',
-			});
-			expect(missing).toMatchObject({ completed: false });
-			expect(missing.error).toMatch(/no slimming request/);
-			await handlers.runOperation({} as never, {
-				actionId: 'op-dismiss',
-				kind: 'lane.slim',
-				laneId: pendingLane.id,
-				decision: 'dismiss',
-			});
-			expect(confirmSlim).not.toHaveBeenCalled();
-			expect(service.runOperation).toHaveBeenCalledWith(
-				expect.objectContaining({ kind: 'lane.slim', decision: 'dismiss' })
-			);
-		});
+		// Nothing out of schema rides along: there is no approval to assert.
+		expect(service.runOperation.mock.calls[0]).toHaveLength(1);
 	});
 });

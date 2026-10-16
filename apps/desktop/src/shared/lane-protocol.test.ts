@@ -139,15 +139,15 @@ describe('laneSlimSummary', () => {
 			label: 'slim: rndevtools-development',
 			tone: 'success',
 		});
-		expect(laneSlimSummary({ ...at, status: 'needs-approval' })).toEqual({
-			label: 'slim: approve in app',
+		expect(laneSlimSummary({ ...at, status: 'applying' })).toEqual({
+			label: 'slimming: rndevtools-development',
 			tone: 'warning',
 		});
 		expect(laneSlimSummary({ ...at, status: 'failed' })?.tone).toBe('danger');
 		expect(laneSlimSummary({ ...at, status: 'skipped' })?.tone).toBe('muted');
 	});
 
-	it('accepts lane.start with a slim profile and the lane.slim decision operation', () => {
+	it('accepts lane.start with a slim profile and has no separate approval operation', () => {
 		expect(
 			laneOperationSchema.parse({
 				actionId: 'op-1',
@@ -166,15 +166,17 @@ describe('laneSlimSummary', () => {
 				slimProfileId: '../escape',
 			})
 		).toThrow();
+		// Slimming is applied by the desktop during lane start, gated on the
+		// SimSlim setting, compatibility, and who holds the device; there is no
+		// approve/dismiss operation to carry over the wire.
 		expect(() =>
 			laneOperationSchema.parse({
 				actionId: 'op-2',
 				kind: 'lane.slim',
 				laneId: 'lane-11111111-2222-4333-8444-555555555555',
 				decision: 'approve',
-				slimApproved: true,
 			})
-		).toThrow(); // approval is not part of the wire schema
+		).toThrow();
 	});
 });
 

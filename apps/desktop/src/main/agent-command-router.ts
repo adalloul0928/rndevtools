@@ -1400,8 +1400,6 @@ function createRoutes({
 								...(command.agent ? { agent: command.agent } : {}),
 							},
 							context.signal
-							// No LaneRunOptions here, on purpose: the unattended CLI can
-							// request slimming but never approve it.
 						);
 						return laneReceiptResult(receipt);
 					}

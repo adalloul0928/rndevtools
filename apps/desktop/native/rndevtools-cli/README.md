@@ -40,9 +40,15 @@ Commands are `doctor`, `simulators`, `apps`, `screen`, `elements`, `act`,
 `wait`, `capture`, `record`, `network`, `recipe`, `jobs`, `slimming`, `lane`,
 `native`, `agents`, `claim`, `release`, and `input`. Run `rndevtools <command> --help` for structured flags. An optional JSON
 command object may be piped on standard input; flags may add different fields,
-but redefining a stdin field is rejected. `slimming` exposes only the read-only
-`status`, `preview`, `doctor`, and `verify` operations. `act` is limited to the
-desktop service's explicit unattended-action allowlist.
+but redefining a stdin field is rejected. `slimming` exposes the read-only
+`status`, `preview`, `doctor`, and `verify` operations and the mutating `apply`,
+`undo`, and `restore`; mutations run only while SimSlim is enabled in RN
+Devtools, only on Simulators the calling session holds or that nobody holds
+(`device_held` otherwise), and only on runtime/profile combinations SimSlim has
+verified or the user approved once in the app. `lane --operation up --slim
+<profile>` applies a profile in the lane's own boot→slim→Metro→launch sequence
+under the same gates. `act` is limited to the desktop service's explicit
+unattended-action allowlist.
 
 ## MCP server
 

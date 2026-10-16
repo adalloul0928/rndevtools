@@ -79,7 +79,8 @@ var toolMeta = map[protocol.Command]meta{
 			"before building. Calling up again for the same worktree and Simulator returns the existing lane and " +
 			"relaunches. \"down\" stops Metro and releases the port (lane-id). \"ls\" lists lanes. \"launch\" re-opens " +
 			"the dev client or a deep link (lane-id, url). \"log\" tails Metro (lane-id, max-characters). Optional " +
-			"slim requests a SimSlim profile; it reports needs-approval until an operator approves it in the app.",
+			"slim applies a SimSlim profile to the device before Metro starts (when SimSlim is enabled in RN Devtools " +
+			"and the device is free or yours); lane.slim in the result says applied, skipped (with why), or failed.",
 	},
 	protocol.CommandSimulators: {
 		title:       "List Simulators",
