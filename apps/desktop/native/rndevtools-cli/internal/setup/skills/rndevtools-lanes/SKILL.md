@@ -73,13 +73,14 @@ a private local socket.
   A hold whose session has exited is released by the desktop after 10 minutes;
   the session-end hook that `rndevtools setup` installs releases it at once.
   Run `release --all` yourself when you finish, so nobody waits those minutes.
-- **You can request slimming, not perform it.** `lane up --slim <profileId>`
-  asks the desktop to apply a SimSlim profile to the lane's Simulator. The CLI
-  has no way to approve a Simulator mutation, so the lane comes back with
-  `slim.status: "needs-approval"` and Metro still starts. A person approves it
-  from the lane in the desktop app (a native confirmation plus the signed
-  helper's own authorization); then the dev client is relaunched for you. Do not
-  wait on it, do not retry it, and never try to slim any other way.
+- **You may slim the devices you hold.** `rndevtools slimming --operation
+  apply|undo|restore --udids <UDID>[,...] [--profile-id <id>]` applies a SimSlim
+  profile, reverts the last managed change, or restores every managed service.
+  It works only while the user has enabled SimSlim in RN Devtools, only on
+  devices that are free or yours (`device_held` otherwise), and only on
+  runtime/profile combinations SimSlim has verified or the user approved once;
+  the error names which gate refused. Applying reboots the device, so prefer
+  `lane up --slim` for the device a lane is about to use.
 
 ## Start a worktree on a Simulator
 

@@ -13,11 +13,12 @@ import type {
 	SimulatorState,
 } from '../shared/simulator-protocol';
 import { simulatorStateSchema } from '../shared/simulator-protocol';
-import type {
-	SlimmingAction,
-	SlimmingState,
+import {
+	SLIMMING_CONFIRMATIONS,
+	type SlimmingAction,
+	type SlimmingState,
+	slimmingStateSchema,
 } from '../shared/slimming-protocol';
-import { slimmingStateSchema } from '../shared/slimming-protocol';
 import type { AgentCliError } from './agent-cli-service';
 import { createAgentCommandRouter } from './agent-command-router';
 import { NativeHostResponseError } from './native-host-client';
@@ -698,6 +699,117 @@ describe('agent command router', () => {
 		);
 		expect(result).toMatchObject({ job: { status: 'complete' } });
 		expect(boundSlimming.listeners.size).toBe(0);
+	});
+
+	it('routes slimming apply, undo, and restore with the confirmation literal and the requesting session', async () => {
+		const { dependencies, slimmingActions } = fixture();
+		const me = { kind: 'codex' as const, sessionId: 'thread-7' };
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			slimming: {
+				...dependencies.slimming,
+				runAction: (action: SlimmingAction) => {
+					slimmingActions.push(action);
+					return {
+						actionId: action.actionId,
+						accepted: false,
+						error: 'helper unavailable in this test',
+					};
+				},
+			},
+		});
+		for (const [operation, kind, confirmation] of [
+			['apply', 'profile.apply', SLIMMING_CONFIRMATIONS.apply],
+			['undo', 'profile.undo', SLIMMING_CONFIRMATIONS.undo],
+			['restore', 'profile.restore', SLIMMING_CONFIRMATIONS.restore],
+		] as const) {
+			await expect(
+				handler(
+					{
+						kind: 'slimming',
+						operation,
+						udids: [UDID.toLowerCase()],
+						...(operation === 'apply'
+							? { profileId: 'rndevtools-development' }
+							: {}),
+					},
+					{ ...context, agent: me }
+				)
+			).rejects.toMatchObject({ code: 'action_rejected' });
+			expect(slimmingActions.at(-1)).toMatchObject({
+				kind,
+				confirmation,
+				simulatorUdids: [UDID],
+				requester: me,
+				...(operation === 'apply'
+					? { profileId: 'rndevtools-development' }
+					: {}),
+			});
+		}
+		// Without a session, no requester rides along: the service treats the
+		// request as the operator's.
+		await expect(
+			handler({ kind: 'slimming', operation: 'undo', udids: [UDID] }, context)
+		).rejects.toMatchObject({ code: 'action_rejected' });
+		expect(slimmingActions.at(-1)).not.toHaveProperty('requester');
+	});
+
+	it('refuses slimming mutations on a device another session holds before reaching the service', async () => {
+		const { dependencies, slimmingActions } = fixture();
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			agents: {
+				getState: () => {
+					throw new Error('unused');
+				},
+				refresh: async () => {
+					throw new Error('unused');
+				},
+				runOperation: async () => {
+					throw new Error('unused');
+				},
+				touch: () => undefined,
+				access: (udid, requester) =>
+					requester
+						? {
+								allowed: false,
+								reason: `Simulator ${udid} is held by claude session owner through lane lane-1.`,
+								hold: {
+									simulatorUdid: udid,
+									via: 'lane',
+									laneId: 'lane-1',
+									holder: { kind: 'claude', sessionId: 'owner' },
+									holderLive: true,
+								},
+							}
+						: { allowed: true },
+			},
+		});
+		await expect(
+			handler(
+				{
+					kind: 'slimming',
+					operation: 'apply',
+					udids: [UDID],
+					profileId: 'rndevtools-development',
+				},
+				{ ...context, agent: { kind: 'codex', sessionId: 'stranger' } }
+			)
+		).rejects.toMatchObject({ code: 'device_held' });
+		expect(slimmingActions).toEqual([]);
+		// Read-only operations are never gated on ownership.
+		await expect(
+			handler(
+				{
+					kind: 'slimming',
+					operation: 'preview',
+					udids: [UDID],
+					profileId: 'rndevtools-development',
+				},
+				{ ...context, agent: { kind: 'codex', sessionId: 'stranger' } }
+			)
+		).rejects.toMatchObject({ code: 'action_rejected' });
+		expect(slimmingActions).toHaveLength(1);
 	});
 
 	it('reports the absent recipe provider with a typed recovery path', async () => {

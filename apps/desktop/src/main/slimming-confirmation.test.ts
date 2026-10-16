@@ -13,44 +13,50 @@ const UDIDS = Array.from(
 );
 
 describe('slimming confirmation copy', () => {
-	it('shows the exact operation, profile, and complete bounded target list', () => {
-		const target = slimmingConfirmationTargetSchema.parse({
-			actionId: 'apply',
-			kind: 'profile.apply',
-			profileId: 'rndevtools-development',
-			simulatorUdids: UDIDS,
-			confirmation: SLIMMING_CONFIRMATIONS.apply,
-		});
-		const copy = slimmingConfirmationCopy(target, 'App Development');
-		expect(copy?.detail).toContain('Operation: Apply experimental profile');
-		expect(copy?.detail).toContain(
-			'Profile: App Development (rndevtools-development)'
-		);
-		expect(copy?.detail).toContain('Targets (20):');
-		for (const udid of UDIDS) expect(copy?.detail).toContain(udid);
-		expect(copy?.detail.match(/[A-Fa-f0-9-]{36}/g)).toHaveLength(20);
+	it('no longer asks before apply, undo, or restore: ownership and the tuple acknowledgement gate those', () => {
+		for (const target of [
+			{
+				actionId: 'apply',
+				kind: 'profile.apply',
+				profileId: 'rndevtools-development',
+				simulatorUdids: UDIDS,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+			},
+			{
+				actionId: 'undo',
+				kind: 'profile.undo',
+				simulatorUdids: [UDIDS[0]],
+				confirmation: SLIMMING_CONFIRMATIONS.undo,
+			},
+			{
+				actionId: 'restore',
+				kind: 'profile.restore',
+				simulatorUdids: [UDIDS[0]],
+				confirmation: SLIMMING_CONFIRMATIONS.restore,
+			},
+		]) {
+			expect(
+				slimmingConfirmationCopy(
+					slimmingConfirmationTargetSchema.parse(target),
+					'App Development'
+				)
+			).toBeUndefined();
+		}
 	});
 
-	it('distinguishes restore-and-disable from a direct profile restore', () => {
-		const restore = slimmingConfirmationTargetSchema.parse({
-			actionId: 'restore',
-			kind: 'profile.restore',
-			simulatorUdids: [UDIDS[0]],
-			confirmation: SLIMMING_CONFIRMATIONS.restore,
-		});
+	it('still asks before restoring everything and disabling slimming, with the complete target list', () => {
 		const disable = slimmingConfirmationTargetSchema.parse({
 			actionId: 'disable',
 			enabled: false,
 			disposition: 'restore-and-verify',
-			simulatorUdids: [UDIDS[0]],
+			simulatorUdids: UDIDS,
 			confirmation: SLIMMING_CONFIRMATIONS.restore,
 		});
-		expect(slimmingConfirmationCopy(restore)?.detail).toContain(
-			'Operation: Restore all rndevtools-managed services'
-		);
-		expect(slimmingConfirmationCopy(disable)?.detail).toContain(
-			'then disable experimental slimming'
-		);
+		const copy = slimmingConfirmationCopy(disable);
+		expect(copy?.title).toBe('Restore managed services and disable slimming?');
+		expect(copy?.detail).toContain('then disable experimental slimming');
+		expect(copy?.detail).toContain('Targets (20):');
+		expect(copy?.detail.match(/[A-Fa-f0-9-]{36}/g)).toHaveLength(20);
 	});
 
 	it('binds a one-time approval to the exact profile and complete UDID list', () => {

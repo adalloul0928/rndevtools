@@ -95,9 +95,9 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "job-id", path: []string{"jobId"}, kind: fieldString, usage: "Job identifier."},
 	},
 	protocol.CommandSlimming: {
-		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "Read-only status, preview, doctor, or verify."},
+		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "status, preview, doctor, verify (read-only); apply, undo, restore (mutate the devices this session holds or that are free, while SimSlim is enabled in the desktop)."},
 		{flagName: "udids", path: []string{"udids"}, kind: fieldCSV, usage: "Comma-separated simulator UDIDs (max 20)."},
-		{flagName: "profile-id", path: []string{"profileId"}, kind: fieldString, usage: "Pinned profile identifier required only for preview and verify."},
+		{flagName: "profile-id", path: []string{"profileId"}, kind: fieldString, usage: "Profile identifier, required for preview, verify, and apply."},
 	},
 	protocol.CommandLane: {
 		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "up, down, ls, launch, or log."},

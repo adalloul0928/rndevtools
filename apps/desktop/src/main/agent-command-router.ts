@@ -34,11 +34,12 @@ import type {
 	SimulatorJob,
 	SimulatorState,
 } from '../shared/simulator-protocol';
-import type {
-	SlimmingAction,
-	SlimmingActionReceipt,
-	SlimmingJob,
-	SlimmingState,
+import {
+	SLIMMING_CONFIRMATIONS,
+	type SlimmingAction,
+	type SlimmingActionReceipt,
+	type SlimmingJob,
+	type SlimmingState,
 } from '../shared/slimming-protocol';
 import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
 import { NativeHostResponseError } from './native-host-client';
@@ -477,6 +478,74 @@ async function releaseEverything(
 		releasedClaims: released,
 		errors,
 	};
+}
+
+const MUTATING_SLIMMING_OPERATIONS = new Set(['apply', 'undo', 'restore']);
+
+/**
+ * Builds the slimming action for a CLI command. Mutations carry the exact
+ * confirmation literal the schema demands (the CLI is a trusted local peer
+ * acting for a named session; the confirmation protects against stray payloads,
+ * not against the agent) and the requesting session, so the service can check
+ * who holds each device.
+ */
+function slimmingActionFor(
+	command: Extract<AgentCliCommand, { kind: 'slimming' }>,
+	canonicalUdids: string[],
+	id: string,
+	agent: { kind: AgentKind; sessionId: string } | undefined
+): SlimmingAction {
+	const requester = agent ? { requester: agent } : {};
+	switch (command.operation) {
+		case 'doctor':
+			return {
+				actionId: id,
+				kind: 'doctor.run',
+				simulatorUdids: canonicalUdids,
+				requiredCapabilities: [...ALL_DOCTOR_CAPABILITIES],
+			};
+		case 'preview':
+		case 'verify':
+			return {
+				actionId: id,
+				kind:
+					command.operation === 'preview'
+						? 'profile.preview'
+						: 'profile.verify',
+				simulatorUdids: canonicalUdids,
+				profileId:
+					command.profileId ??
+					required('Slimming preview and verify require profileId.'),
+			};
+		case 'apply':
+			return {
+				actionId: id,
+				kind: 'profile.apply',
+				simulatorUdids: canonicalUdids,
+				profileId:
+					command.profileId ?? required('Slimming apply requires profileId.'),
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+				...requester,
+			};
+		case 'undo':
+			return {
+				actionId: id,
+				kind: 'profile.undo',
+				simulatorUdids: canonicalUdids,
+				confirmation: SLIMMING_CONFIRMATIONS.undo,
+				...requester,
+			};
+		case 'restore':
+			return {
+				actionId: id,
+				kind: 'profile.restore',
+				simulatorUdids: canonicalUdids,
+				confirmation: SLIMMING_CONFIRMATIONS.restore,
+				...requester,
+			};
+		default:
+			return required(`Unsupported slimming operation ${command.operation}.`);
+	}
 }
 
 function assertDeviceAccess(
@@ -1214,32 +1283,27 @@ function createRoutes({
 				if (command.operation === 'status') return await slimming.refresh();
 				if (!command.udids?.length) {
 					required(
-						'Slimming preview, doctor, and verify require one or more udids.'
+						'Slimming preview, doctor, verify, apply, undo, and restore require one or more udids.'
 					);
 				}
 				const simulatorInventory = await simulator.refresh();
 				const canonicalUdids = command.udids.map(
 					(udid) => simulatorByUdid(simulatorInventory, udid).udid
 				);
-				const action: SlimmingAction =
-					command.operation === 'doctor'
-						? {
-								actionId: actionId(context.requestId),
-								kind: 'doctor.run',
-								simulatorUdids: canonicalUdids,
-								requiredCapabilities: [...ALL_DOCTOR_CAPABILITIES],
-							}
-						: {
-								actionId: actionId(context.requestId),
-								kind:
-									command.operation === 'preview'
-										? 'profile.preview'
-										: 'profile.verify',
-								simulatorUdids: canonicalUdids,
-								profileId:
-									command.profileId ??
-									required('Slimming preview and verify require profileId.'),
-							};
+				const action: SlimmingAction = slimmingActionFor(
+					command,
+					canonicalUdids,
+					actionId(context.requestId),
+					context.agent
+				);
+				if (MUTATING_SLIMMING_OPERATIONS.has(command.operation)) {
+					// Ownership is also checked inside the slimming service; doing it
+					// here first gives the agent the typed device_held error with its
+					// recovery text instead of a generic action_rejected.
+					for (const udid of canonicalUdids) {
+						assertDeviceAccess(agents, udid, context.agent);
+					}
+				}
 				const job = ensureComplete(
 					await runSlimmingAction(slimming, action, context.signal)
 				);

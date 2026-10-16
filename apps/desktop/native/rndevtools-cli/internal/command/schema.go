@@ -251,8 +251,8 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
 			return err
 		}
-		if !oneOf(value.Operation, "status", "preview", "doctor", "verify") {
-			return errors.New("slimming operation must be status, preview, doctor, or verify")
+		if !oneOf(value.Operation, "status", "preview", "doctor", "verify", "apply", "undo", "restore") {
+			return errors.New("slimming operation must be status, preview, doctor, verify, apply, undo, or restore")
 		}
 		if err := validateUDIDs(value.UDIDs); err != nil {
 			return err
@@ -263,17 +263,17 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 				return errors.New("slimming status does not accept udids or profileId")
 			}
 			return nil
-		case "doctor":
+		case "doctor", "undo", "restore":
 			if len(value.UDIDs) == 0 {
-				return errors.New("slimming doctor requires udids")
+				return fmt.Errorf("slimming %s requires udids", value.Operation)
 			}
 			if value.ProfileID != nil {
-				return errors.New("slimming doctor inspects current state and does not accept profileId")
+				return fmt.Errorf("slimming %s does not accept profileId", value.Operation)
 			}
 			return nil
 		default:
 			if len(value.UDIDs) == 0 || value.ProfileID == nil {
-				return errors.New("slimming preview and verify require udids and profileId")
+				return errors.New("slimming preview, verify, and apply require udids and profileId")
 			}
 			return validateIdentifier(*value.ProfileID, "profileId")
 		}

@@ -172,26 +172,50 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 	z
 		.strictObject({
 			kind: z.literal('slimming'),
-			operation: z.enum(['status', 'preview', 'doctor', 'verify']),
+			/**
+			 * Read-only: `status`, `preview`, `doctor`, `verify`. Mutating: `apply`
+			 * (a profile), `undo` (the last managed mutation), `restore` (all
+			 * managed services). Mutations run only on devices the calling session
+			 * holds or that are free, only while SimSlim is enabled in the desktop,
+			 * and only on runtime/profile combinations the operator has approved or
+			 * SimSlim has verified.
+			 */
+			operation: z.enum([
+				'status',
+				'preview',
+				'doctor',
+				'verify',
+				'apply',
+				'undo',
+				'restore',
+			]),
 			udids: z.array(udidSchema).min(1).max(20).optional(),
 			profileId: identifierSchema.optional(),
 		})
 		.superRefine((value, context) => {
+			const needsProfile =
+				value.operation === 'preview' ||
+				value.operation === 'verify' ||
+				value.operation === 'apply';
+			const udidsOnly =
+				value.operation === 'doctor' ||
+				value.operation === 'undo' ||
+				value.operation === 'restore';
 			const valid =
 				(value.operation === 'status' &&
 					value.udids === undefined &&
 					value.profileId === undefined) ||
-				(value.operation === 'doctor' &&
+				(udidsOnly &&
 					value.udids !== undefined &&
 					value.profileId === undefined) ||
-				((value.operation === 'preview' || value.operation === 'verify') &&
+				(needsProfile &&
 					value.udids !== undefined &&
 					value.profileId !== undefined);
 			if (!valid) {
 				context.addIssue({
 					code: 'custom',
 					message:
-						'Status takes no target; doctor requires only udids; preview and verify require udids plus profileId.',
+						'Status takes no target; doctor, undo, and restore require only udids; preview, verify, and apply require udids plus profileId.',
 				});
 			}
 		}),
@@ -278,9 +302,10 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 			preferredPort: z.number().int().min(1_024).max(65_535).optional(),
 			launch: z.boolean().optional(),
 			/**
-			 * SimSlim profile to request for the lane's Simulator. The CLI cannot
-			 * approve a mutation, so the lane comes back `needs-approval` until an
-			 * operator approves it in the desktop app.
+			 * SimSlim profile to apply to the lane's Simulator before Metro starts.
+			 * The desktop applies it when SimSlim is enabled, the device's
+			 * compatibility tuple allows it, and the device is free or held by this
+			 * session; otherwise `lane.slim` records `skipped` with the reason.
 			 */
 			slimProfileId: identifierSchema.optional(),
 			laneId: laneIdSchema.optional(),

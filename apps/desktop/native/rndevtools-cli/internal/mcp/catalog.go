@@ -168,9 +168,14 @@ var toolMeta = map[protocol.Command]meta{
 		readOnly:    true,
 	},
 	protocol.CommandSlimming: {
-		title:       "Inspect Simulator slimming",
-		description: "Read-only view of SimSlim slimming: status, preview (profile-id), doctor, or verify for the given udids. Applying a profile is an operator action in the desktop app; agents can only request it through lane up's slim argument.",
-		readOnly:    true,
+		title: "Slim Simulators (SimSlim)",
+		description: "SimSlim trims a Simulator's background services so it boots faster and uses less memory; applying a profile reboots the device. " +
+			"operation status lists profiles and every device's state; preview (udids, profile-id) shows what a profile would change; " +
+			"doctor and verify check a device. apply (udids, profile-id) applies a profile, undo reverts the last managed change, " +
+			"restore puts all managed services back. Mutations work only on devices you hold or that are free (device_held otherwise), " +
+			"only while the user has enabled SimSlim in RN Devtools, and only on runtime/profile combinations SimSlim has verified or " +
+			"the user has approved once; the error says which. Prefer lane up with slim to slim the device a lane is about to use.",
+		readOnly: false,
 	},
 	protocol.CommandDoctor: {
 		title:       "Check RN Devtools health",
