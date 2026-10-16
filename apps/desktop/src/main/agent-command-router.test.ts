@@ -1037,6 +1037,7 @@ describe('agent command router', () => {
 				],
 				byDevice: {},
 				claims: [],
+				holds: {},
 				discovery: { claude: 'ok', codex: 'unavailable' },
 			};
 			const port = {
@@ -1199,6 +1200,7 @@ describe('agent command router', () => {
 						sessions: [],
 						byDevice: {},
 						claims: [],
+						holds: {},
 						discovery: { claude: 'ok', codex: 'ok' },
 					}),
 					refresh: async () => ({
@@ -1207,6 +1209,7 @@ describe('agent command router', () => {
 						sessions: [],
 						byDevice: {},
 						claims: [],
+						holds: {},
 						discovery: { claude: 'ok', codex: 'ok' },
 					}),
 					runOperation: async () => {
@@ -1348,6 +1351,135 @@ describe('agent command router', () => {
 				recovery: expect.stringContaining('Update RN Devtools'),
 			})
 		);
+	});
+
+	it('refuses lane up, lane down, and input on a device another agent holds', async () => {
+		const { dependencies } = fixture();
+		const owner = { kind: 'claude' as const, sessionId: 'owner-session' };
+		const stranger = { kind: 'codex' as const, sessionId: 'stranger-thread' };
+		const lane: Lane = {
+			id: 'lane-11111111-2222-4333-8444-555555555555',
+			worktreePath: '/Users/dev/app-feature',
+			branch: 'feature',
+			simulatorUdid: UDID,
+			environment: 'development',
+			port: 8_100,
+			metro: 'ready',
+			logPath: '/Users/dev/lane.log',
+			startedAt: now,
+			agent: { ...owner, lastSeenAt: now },
+		};
+		const state: LaneState = {
+			revision: 1,
+			updatedAt: now,
+			environments: [...DEFAULT_LANE_ENVIRONMENTS],
+			lanes: [lane],
+			worktrees: [],
+			repositories: [],
+		};
+		const operations: LaneOperation[] = [];
+		const inputs: unknown[] = [];
+		const access = (
+			udid: string,
+			requester?: { kind: string; sessionId: string }
+		) =>
+			!requester || requester.sessionId === owner.sessionId
+				? ({ allowed: true } as const)
+				: ({
+						allowed: false,
+						reason: `Simulator ${udid} is held by claude session owner-session through lane ${lane.id}.`,
+						hold: {
+							simulatorUdid: udid,
+							via: 'lane' as const,
+							laneId: lane.id,
+							holder: owner,
+							holderLive: true,
+						},
+					} as const);
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			lanes: {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async (operation: LaneOperation) => {
+					operations.push(operation);
+					return { ...operation, completed: true, lane, state };
+				},
+			},
+			simulatorInput: async (input) => {
+				inputs.push(input);
+				return {
+					udid: input.udid,
+					kind: input.kind,
+					messages: 2,
+					elapsedMilliseconds: 10,
+				};
+			},
+			agents: {
+				getState: () => {
+					throw new Error('unused');
+				},
+				refresh: async () => {
+					throw new Error('unused');
+				},
+				runOperation: async () => {
+					throw new Error('unused');
+				},
+				touch: () => undefined,
+				access,
+			},
+		});
+		const asStranger = { ...context, agent: stranger };
+		const asOwner = { ...context, agent: owner };
+
+		await expect(
+			handler(
+				{
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: '/Users/dev/app-other',
+					udid: UDID.toLowerCase(),
+				},
+				asStranger
+			)
+		).rejects.toMatchObject({
+			code: 'device_held',
+			retryable: true,
+			message: expect.stringContaining('owner-session'),
+		});
+		await expect(
+			handler({ kind: 'lane', operation: 'down', laneId: lane.id }, asStranger)
+		).rejects.toMatchObject({ code: 'device_held' });
+		await expect(
+			handler(
+				{
+					kind: 'input',
+					input: { kind: 'button', udid: UDID, button: 'home' },
+				},
+				asStranger
+			)
+		).rejects.toMatchObject({ code: 'device_held' });
+		expect(operations).toEqual([]);
+		expect(inputs).toEqual([]);
+
+		// The holder, and the operator (no agent on the request), get through.
+		await handler(
+			{ kind: 'lane', operation: 'down', laneId: lane.id },
+			asOwner
+		);
+		await handler(
+			{ kind: 'lane', operation: 'down', laneId: lane.id },
+			context
+		);
+		await handler(
+			{ kind: 'input', input: { kind: 'button', udid: UDID, button: 'home' } },
+			asOwner
+		);
+		expect(operations.map((operation) => operation.kind)).toEqual([
+			'lane.stop',
+			'lane.stop',
+		]);
+		expect(inputs).toHaveLength(1);
 	});
 
 	it('routes lane up/launch/down/log through the lane service and resolves worktree targets', async () => {

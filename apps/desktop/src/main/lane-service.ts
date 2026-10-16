@@ -4,11 +4,11 @@ import {
 	diagnosticErrorText,
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
+import type { DeviceHold } from '../shared/device-hold';
 import {
 	allocateLanePort,
 	DEFAULT_LANE_ENVIRONMENTS,
 	findLaneConflict,
-	LANE_AGENT_TOUCH_TTL_MS,
 	LANE_METRO_HEALTH_TIMEOUT_MS,
 	type Lane,
 	type LaneAgent,
@@ -140,6 +140,7 @@ export class LaneService {
 	readonly #simulator: LaneSimulatorPort;
 	readonly #slimming: LaneSlimmingPort | undefined;
 	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort | undefined;
+	readonly #holds: (() => ReadonlyMap<string, DeviceHold>) | undefined;
 	readonly #metro: MetroSupervisorPort;
 	readonly #worktrees: WorktreeInspectorPort;
 	readonly #environments: readonly LaneEnvironment[];
@@ -163,6 +164,7 @@ export class LaneService {
 		worktrees = worktreeInspector,
 		environments = DEFAULT_LANE_ENVIRONMENTS,
 		metroMaxWorkers = 2,
+		holds,
 		now = Date.now,
 	}: {
 		store: LaneStore;
@@ -174,6 +176,12 @@ export class LaneService {
 		worktrees?: WorktreeInspectorPort;
 		environments?: readonly LaneEnvironment[];
 		metroMaxWorkers?: number;
+		/**
+		 * Who holds each Simulator, from the agent service. When set, reconcile
+		 * releases a lane whose owning agent has been gone past the grace
+		 * period, so devices return to the pool without anyone's cooperation.
+		 */
+		holds?: () => ReadonlyMap<string, DeviceHold>;
 		now?: () => number;
 	}) {
 		this.#store = store;
@@ -184,6 +192,7 @@ export class LaneService {
 		this.#worktrees = worktrees;
 		this.#environments = environments;
 		this.#maxWorkers = metroMaxWorkers;
+		this.#holds = holds;
 		this.#now = now;
 		this.#updatedAt = now();
 	}
@@ -652,10 +661,31 @@ export class LaneService {
 		this.#touch();
 	}
 
-	/** Refreshes the Metro liveness of every lease and expires stale agents. */
+	/**
+	 * Refreshes the Metro liveness of every lane and releases abandoned ones.
+	 *
+	 * A lane's `agent` is the hold's owner and stays for the lane's lifetime;
+	 * whether that owner is still around is the agent service's call (its
+	 * session is alive or not), not a matter of recent CLI touches. When the
+	 * owner has been gone for the grace period the lane is torn down, Metro
+	 * stopped, and the device returns to the pool.
+	 */
 	async #reconcile(): Promise<void> {
 		let changed = false;
+		const holds = this.#holds?.();
+		const now = this.#now();
 		for (const lane of this.#store.lanes()) {
+			const hold = holds?.get(lane.simulatorUdid.toUpperCase());
+			if (
+				hold?.laneId === lane.id &&
+				!hold.holderLive &&
+				hold.releaseAt !== undefined &&
+				now >= hold.releaseAt
+			) {
+				await this.stopLane(lane.id).catch(() => undefined);
+				changed = true;
+				continue;
+			}
 			const status = this.#metroStatus(lane);
 			const liveStatus =
 				status === 'stopped'
@@ -663,18 +693,8 @@ export class LaneService {
 					: (await this.#metro.isHealthy(lane.port))
 						? 'ready'
 						: 'starting';
-			const agent =
-				lane.agent &&
-				this.#now() - lane.agent.lastSeenAt > LANE_AGENT_TOUCH_TTL_MS
-					? undefined
-					: lane.agent;
-			if (liveStatus !== lane.metro || agent !== lane.agent) {
-				const { agent: _agent, ...rest } = lane;
-				await this.#store.upsert({
-					...rest,
-					metro: liveStatus,
-					...(agent ? { agent } : {}),
-				});
+			if (liveStatus !== lane.metro) {
+				await this.#store.upsert({ ...lane, metro: liveStatus });
 				changed = true;
 			}
 		}

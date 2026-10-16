@@ -19,7 +19,6 @@ const MAX_ENVIRONMENTS = 16;
 const MAX_LOG_CHARACTERS = 64 * 1024;
 
 export const LANE_METRO_HEALTH_TIMEOUT_MS = 15_000;
-export const LANE_AGENT_TOUCH_TTL_MS = 30 * 60 * 1_000;
 
 const identifierSchema = z
 	.string()

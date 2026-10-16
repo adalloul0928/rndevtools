@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { deviceHoldSchema } from './device-hold';
 
 /**
  * Agents: which coding-agent session is driving which Simulator.
@@ -84,6 +85,12 @@ export const agentStateSchema = z.strictObject({
 	/** Attached agents per Simulator, strongest signal first. */
 	byDevice: z.record(udidSchema, z.array(deviceAgentSchema).max(32)),
 	claims: z.array(agentClaimSchema).max(MAX_DEVICES),
+	/**
+	 * The hold on every held Simulator: who has it, through a lane or a claim,
+	 * whether that holder is still alive, and when an abandoned hold releases.
+	 * Keyed by canonical UDID.
+	 */
+	holds: z.record(udidSchema, deviceHoldSchema).default({}),
 	discovery: z.strictObject({
 		claude: z.enum(['ok', 'unavailable']),
 		codex: z.enum(['ok', 'unavailable']),

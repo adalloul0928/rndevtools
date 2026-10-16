@@ -23,6 +23,7 @@ import {
 	SimulatorService,
 } from './simulator-service';
 import {
+	type DeviceAccessPort,
 	type SlimmingHelperProvider,
 	SlimmingService,
 } from './slimming-service';
@@ -437,7 +438,8 @@ function action(value: unknown): SlimmingAction {
 async function createService(
 	helper = new FakeHelper(),
 	persistenceDirectory?: string,
-	mutationCoordinator?: SimulatorMutationCoordinatorPort
+	mutationCoordinator?: SimulatorMutationCoordinatorPort,
+	deviceAccess?: DeviceAccessPort
 ) {
 	const directory =
 		persistenceDirectory ??
@@ -449,6 +451,7 @@ async function createService(
 		appVersion: '0.1.0',
 		helper,
 		...(mutationCoordinator ? { mutationCoordinator } : {}),
+		...(deviceAccess ? { deviceAccess } : {}),
 		pollIntervalMs: 60_000,
 	});
 	await service.start();
@@ -592,6 +595,90 @@ describe('slimming service', () => {
 			await service.stop();
 		}
 	});
+	it('refuses a mutation on a device another session holds, for agents and the panel alike', async () => {
+		const decisions: Array<[string, string | undefined]> = [];
+		const deviceAccess: DeviceAccessPort = (udid, requester) => {
+			decisions.push([udid, requester?.sessionId]);
+			if (requester?.sessionId === 'owner') return { allowed: true };
+			return {
+				allowed: false,
+				reason: `Simulator ${udid} is held by claude session owner through lane lane-1.`,
+				hold: {
+					simulatorUdid: udid,
+					via: 'lane',
+					laneId: 'lane-1',
+					holder: { kind: 'claude', sessionId: 'owner' },
+					holderLive: true,
+				},
+			};
+		};
+		const slimming = await createService(
+			new FakeHelper(),
+			undefined,
+			undefined,
+			deviceAccess
+		);
+		await enableAndAcknowledge(slimming.service, 'held');
+
+		const stranger = slimming.service.runAction(
+			action({
+				actionId: 'held-stranger',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+				requester: { kind: 'codex', sessionId: 'stranger' },
+			})
+		);
+		expect(stranger.accepted).toBe(false);
+		expect(stranger.error).toMatch(/held by claude session owner/);
+
+		const operator = slimming.service.runAction(
+			action({
+				actionId: 'held-operator',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+			})
+		);
+		expect(operator.accepted).toBe(false);
+
+		const owner = slimming.service.runAction(
+			action({
+				actionId: 'held-owner',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+				requester: { kind: 'claude', sessionId: 'owner' },
+			})
+		);
+		expect(owner.accepted).toBe(true);
+		expect((await waitForJob(slimming.service, owner.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		expect(decisions.map(([, who]) => who)).toEqual([
+			'stranger',
+			undefined,
+			'owner',
+		]);
+
+		// Read-only work never consults ownership.
+		const preview = slimming.service.runAction(
+			action({
+				actionId: 'held-preview',
+				kind: 'profile.preview',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				requester: { kind: 'codex', sessionId: 'stranger' },
+			})
+		);
+		expect(preview.accepted).toBe(true);
+		expect(decisions).toHaveLength(3);
+		await slimming.service.stop();
+	});
+
 	it('serializes direct Fleet actions behind a Slimming mutation on the same UDID', async () => {
 		const coordinator = new SimulatorMutationCoordinator();
 		const helper = new FakeHelper();

@@ -2,10 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEVICE_HOLD_GRACE_MS } from '../shared/device-hold';
 import { AgentService } from './agent-service';
 import { type CodexDatabase, discoverAgentSessions } from './agent-sessions';
 
 const A = 'AAAAAAAA-0000-4000-8000-000000000001';
+const B = 'AAAAAAAA-0000-4000-8000-000000000002';
 const now = 1_700_000_000_000;
 
 describe('discoverAgentSessions', () => {
@@ -193,7 +195,13 @@ describe('AgentService', () => {
 		service = new AgentService({
 			directory: root,
 			lanes: () => [
-				{ simulatorUdid: A, appDirectory: '/Users/dev/app-checkout' },
+				{
+					id: 'lane-checkout',
+					simulatorUdid: A,
+					appDirectory: '/Users/dev/app-checkout',
+					metro: 'ready',
+					startedAt: clock - 60_000,
+				},
 			],
 			discover: async () => ({ sessions, claude: 'ok', codex: 'unavailable' }),
 			pollIntervalMs: 60_000,
@@ -259,19 +267,61 @@ describe('AgentService', () => {
 		expect(released.claims).toEqual([]);
 	});
 
-	it('drops a claim once its session has been gone for the touch TTL, not before', async () => {
+	it('drops a claim once its session has been gone for the hold grace period, not before', async () => {
 		await service.runOperation({
 			kind: 'agent.claim',
-			simulatorUdid: A,
+			simulatorUdid: B,
 			agent: { kind: 'claude', sessionId: 'claude-1' },
 		});
 		sessions = [];
 		await service.refresh();
 		expect(service.getState().claims).toHaveLength(1);
-		expect(service.getState().byDevice[A]?.[0]).toMatchObject({ live: false });
-		clock += 30 * 60 * 1_000 + 1;
+		expect(service.getState().byDevice[B]?.[0]).toMatchObject({ live: false });
+		clock += DEVICE_HOLD_GRACE_MS - 1;
+		await service.refresh();
+		expect(service.getState().claims).toHaveLength(1);
+		clock += 1;
 		await service.refresh();
 		expect(service.getState().claims).toEqual([]);
+	});
+
+	it('answers who holds each device and who may touch it', async () => {
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: { kind: 'codex', sessionId: 'codex-9' },
+		});
+		// A is held through the fixture lane, which has no agent and so belongs to
+		// the operator; B through codex-9's claim.
+		const holds = service.holds();
+		expect(holds.get(A)).toMatchObject({
+			via: 'lane',
+			laneId: 'lane-checkout',
+			holderLive: true,
+		});
+		expect(holds.get(A)?.holder).toBeUndefined();
+		expect(holds.get(B)).toMatchObject({
+			via: 'claim',
+			holder: { kind: 'codex', sessionId: 'codex-9' },
+		});
+
+		const claude = { kind: 'claude' as const, sessionId: 'claude-1' };
+		const codex = { kind: 'codex' as const, sessionId: 'codex-9' };
+		expect(service.access(A, undefined).allowed).toBe(true);
+		expect(service.access(A, claude).allowed).toBe(false);
+		expect(service.access(B, codex).allowed).toBe(true);
+		expect(service.access(B, claude).allowed).toBe(false);
+		expect(
+			service.access('AAAAAAAA-0000-4000-8000-00000000000F', claude).allowed
+		).toBe(true);
+
+		// codex-9 was never a live session here, so its hold is abandoned from the
+		// first refresh and opens up after the grace period.
+		await service.refresh();
+		expect(service.holds().get(B)).toMatchObject({ holderLive: false });
+		expect(service.access(B, claude).allowed).toBe(false);
+		clock += DEVICE_HOLD_GRACE_MS;
+		expect(service.access(B, claude).allowed).toBe(true);
 	});
 
 	it('attributes a session to the lane whose app directory it works in', () => {

@@ -734,7 +734,7 @@ describe('LaneService', () => {
 		expect(log.log).toContain('Waiting on http://localhost:8100');
 	});
 
-	it('reconciles leases on restart: dead Metros become stopped, stale agents expire', async () => {
+	it('reconciles leases on restart: dead Metros become stopped, the owner stays recorded', async () => {
 		metro.healthyPorts.add(8_100);
 		const started = await service.runOperation({
 			actionId: 'op-1',
@@ -760,7 +760,9 @@ describe('LaneService', () => {
 		await reopened.start();
 		const state = reopened.getState();
 		expect(state.lanes[0]).toMatchObject({ id: lane.id, metro: 'stopped' });
-		expect(state.lanes[0]?.agent).toBeUndefined();
+		// The agent is the hold's owner; it is not forgotten just because it has
+		// been quiet. Whether it is still alive is the agent service's call.
+		expect(state.lanes[0]?.agent).toMatchObject({ sessionId: 'session-1' });
 		// A stopped lane frees its port for the next lease.
 		const next = await reopened.runOperation({
 			actionId: 'op-2',
@@ -772,6 +774,62 @@ describe('LaneService', () => {
 		});
 		expect(next.lane?.port).toBe(8_100);
 		await reopened.stop();
+	});
+
+	it('releases a lane whose owner has been gone past the grace period, and only then', async () => {
+		metro.healthyPorts.add(8_100);
+		let holderLive = true;
+		let releaseAt: number | undefined;
+		const withHolds = new LaneService({
+			store: new LaneStore(root),
+			simulator,
+			metro,
+			worktrees,
+			now: () => now,
+			holds: () =>
+				new Map(
+					withHolds.getState().lanes.map((lane) => [
+						lane.simulatorUdid.toUpperCase(),
+						{
+							simulatorUdid: lane.simulatorUdid.toUpperCase(),
+							via: 'lane' as const,
+							laneId: lane.id,
+							holder: { kind: 'claude' as const, sessionId: 'session-1' },
+							holderLive,
+							...(holderLive ? {} : { abandonedSince: now - 1, releaseAt }),
+						},
+					])
+				),
+		});
+		await withHolds.start();
+		const started = await withHolds.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+			agent: { kind: 'claude', sessionId: 'session-1' },
+		});
+		const lane = started.lane as Lane;
+
+		// Owner alive: nothing happens on reconcile.
+		await withHolds.runOperation({ actionId: 'op-r1', kind: 'lane.refresh' });
+		expect(withHolds.getState().lanes).toHaveLength(1);
+
+		// Owner gone but inside the grace period: still nothing.
+		holderLive = false;
+		releaseAt = now + 5 * 60_000;
+		await withHolds.runOperation({ actionId: 'op-r2', kind: 'lane.refresh' });
+		expect(withHolds.getState().lanes).toHaveLength(1);
+		expect(metro.stopped).toEqual([]);
+
+		// Grace elapsed: the lane is torn down and its Metro stopped.
+		now = releaseAt;
+		await withHolds.runOperation({ actionId: 'op-r3', kind: 'lane.refresh' });
+		expect(withHolds.getState().lanes).toEqual([]);
+		expect(metro.stopped).toEqual([{ pid: lane.metroPid, port: lane.port }]);
+		await withHolds.stop();
 	});
 
 	it('notifies subscribers with a validated state on every change', async () => {

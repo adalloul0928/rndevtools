@@ -15,6 +15,13 @@ import {
 	attributeAgents,
 } from '../shared/agent-protocol';
 import {
+	DEVICE_HOLD_GRACE_MS,
+	type DeviceHold,
+	type DeviceHolder,
+	decideDeviceAccess,
+	resolveDeviceHolds,
+} from '../shared/device-hold';
+import {
 	discoverAgentSessions,
 	type SessionDiscoveryResult,
 } from './agent-sessions';
@@ -77,8 +84,12 @@ class AgentClaimStore {
 }
 
 export type AgentLaneSource = () => readonly {
+	id: string;
 	simulatorUdid: string;
 	appDirectory: string;
+	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string } | undefined;
+	metro: 'starting' | 'ready' | 'stopped';
+	startedAt: number;
 }[];
 
 type AgentListener = (state: AgentState) => void;
@@ -87,7 +98,7 @@ type AgentListener = (state: AgentState) => void;
  * Discovers live sessions on a timer, keeps claims and touches, and derives
  * who is attached to which Simulator. A claim whose session is gone is kept
  * but reported `live: false` so a human can see what an agent left behind;
- * it is dropped once the session has been gone for the touch TTL.
+ * it is dropped once the session has been gone for the hold grace period.
  */
 export class AgentService {
 	readonly #store: AgentClaimStore;
@@ -146,6 +157,36 @@ export class AgentService {
 		this.#pollingActive = active;
 	}
 
+	/**
+	 * The hold on every Simulator, derived from lanes, claims, and which agent
+	 * sessions are alive right now. This is the one answer to "who has this
+	 * device"; the lane and slimming services both consult it.
+	 */
+	holds(): Map<string, DeviceHold> {
+		return resolveDeviceHolds({
+			lanes: this.#lanes().map((lane) => ({
+				id: lane.id,
+				simulatorUdid: lane.simulatorUdid,
+				metro: lane.metro,
+				startedAt: lane.startedAt,
+				...(lane.agent ? { agent: { ...lane.agent, lastSeenAt: 0 } } : {}),
+			})),
+			claims: this.#store.claims(),
+			liveSessionKeys: new Set(this.#sessions.map(agentSessionKey)),
+			missingSince: this.#missingSince,
+			now: this.#now(),
+		});
+	}
+
+	/** Whether `requester` (an agent, or the operator when undefined) may touch the device. */
+	access(simulatorUdid: string, requester: DeviceHolder | undefined) {
+		return decideDeviceAccess(
+			this.holds().get(simulatorUdid.toUpperCase()),
+			requester,
+			this.#now()
+		);
+	}
+
 	subscribe(listener: AgentListener): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
@@ -166,6 +207,7 @@ export class AgentService {
 			sessions: this.#sessions,
 			byDevice,
 			claims: this.#store.claims(),
+			holds: Object.fromEntries(this.holds()),
 			discovery: this.#discovery,
 		});
 	};
@@ -298,7 +340,9 @@ export class AgentService {
 			}
 			const since = this.#missingSince.get(key) ?? now;
 			this.#missingSince.set(key, since);
-			if (now - since > AGENT_TOUCH_TTL_MS) {
+			// A claim is a hold; it expires on the same clock as every other hold
+			// so a device never stays claimed after its lane would have released.
+			if (now - since >= DEVICE_HOLD_GRACE_MS) {
 				changed = true;
 				continue;
 			}

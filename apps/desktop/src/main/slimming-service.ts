@@ -3,6 +3,7 @@ import {
 	diagnosticErrorText,
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
+import type { DeviceAccessDecision } from '../shared/device-hold';
 import type {
 	SlimmingAcknowledgementReceipt,
 	SlimmingAcknowledgementRequest,
@@ -19,6 +20,7 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import {
+	type SlimmingRequester,
 	slimmingAcknowledgementRequestSchema,
 	slimmingActionSchema,
 	slimmingSettingRequestSchema,
@@ -44,6 +46,12 @@ import {
 	type PersistedSlimmingSetting,
 	SlimmingPersistence,
 } from './slimming-persistence';
+
+/** Answers whether `requester` (an agent, or the operator when undefined) may mutate the device. */
+export type DeviceAccessPort = (
+	simulatorUdid: string,
+	requester: SlimmingRequester | undefined
+) => DeviceAccessDecision;
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 const MAX_JOBS = 100;
@@ -285,6 +293,7 @@ export class SlimmingService {
 	readonly #now: () => number;
 	readonly #pollIntervalMs: number;
 	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort;
+	readonly #deviceAccess: DeviceAccessPort | undefined;
 	readonly #listeners = new Set<SlimmingListener>();
 	readonly #jobs: InternalJob[] = [];
 	readonly #tasks = new Set<Promise<void>>();
@@ -305,6 +314,7 @@ export class SlimmingService {
 		mutationUnavailableReason,
 		helper = new SimHelperClient({ resourceDirectory, appVersion }),
 		mutationCoordinator = new SimulatorMutationCoordinator(),
+		deviceAccess,
 		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 		now = Date.now,
 	}: {
@@ -314,11 +324,17 @@ export class SlimmingService {
 		mutationUnavailableReason?: string;
 		helper?: SlimmingHelperProvider;
 		mutationCoordinator?: SimulatorMutationCoordinatorPort;
+		/**
+		 * Who holds each device. When set, a mutation on a device another
+		 * session holds is refused for every caller, agent or GUI alike.
+		 */
+		deviceAccess?: DeviceAccessPort;
 		pollIntervalMs?: number;
 		now?: () => number;
 	}) {
 		this.#helper = helper;
 		this.#mutationCoordinator = mutationCoordinator;
+		this.#deviceAccess = deviceAccess;
 		this.#persistence = new SlimmingPersistence(persistenceDirectory);
 		this.#appVersion = appVersion;
 		this.#mutationUnavailableReason = mutationUnavailableReason;
@@ -754,6 +770,13 @@ export class SlimmingService {
 						action,
 						`${udid} requires the exact EXPERIMENTAL acknowledgement.`
 					);
+				}
+				// Slimming reboots the device. A device another session holds (its
+				// lane or claim) is refused whoever asks, so one agent's slim can
+				// never restart another agent's Simulator.
+				const access = this.#deviceAccess?.(udid, action.requester);
+				if (access && !access.allowed) {
+					return this.#reject(action, access.reason);
 				}
 			}
 		}

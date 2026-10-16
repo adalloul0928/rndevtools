@@ -37,7 +37,7 @@ setTimeout(() => { log({ event: 'timeout' }); app.exit(2); }, 6 * 60 * 60 * 1000
 		await lanes.start?.();
 		const agents = new mod.AgentService({
 			directory: path.join(root, 'agents'),
-			lanes: () => lanes.getState().lanes.map((lane) => ({ simulatorUdid: lane.simulatorUdid, appDirectory: lane.appPath ?? lane.worktreePath })),
+			lanes: () => lanes.getState().lanes.map((lane) => ({ id: lane.id, simulatorUdid: lane.simulatorUdid, appDirectory: lane.appPath ?? lane.worktreePath, agent: lane.agent, metro: lane.metro, startedAt: lane.startedAt })),
 		});
 		await agents.start();
 		const broker = { getState: () => ({ protocolVersion: 2, broker: { status: 'stopped' }, devices: [], sessions: [], diagnostics: [] }), dispatchAction: async () => ({ ok: false, error: 'n/a' }) };

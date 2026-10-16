@@ -9,6 +9,7 @@ import type {
 	AgentOperation,
 	AgentState,
 } from '../shared/agent-protocol';
+import type { DeviceAccessDecision } from '../shared/device-hold';
 import {
 	type LaneOperation,
 	type LaneOperationReceipt,
@@ -124,6 +125,14 @@ type AgentPort = {
 		agent: { kind: AgentKind; sessionId: string },
 		simulatorUdid: string
 	) => void;
+	/**
+	 * Whether `requester` may boot, drive, slim, or stop the device. A device is
+	 * free or held (by a lane or a claim); only the holder may touch a held one.
+	 */
+	access?: (
+		simulatorUdid: string,
+		requester: { kind: AgentKind; sessionId: string } | undefined
+	) => DeviceAccessDecision;
 };
 
 type AgentRecipePort = {
@@ -399,6 +408,28 @@ function ensureComplete<T extends { status: string; message: string }>(
 	});
 }
 
+/**
+ * Refuses an agent's request to touch a Simulator another holder has. The
+ * operator (no agent on the request) is never refused here; the lane and
+ * slimming services keep their own structural rules.
+ */
+function assertDeviceAccess(
+	agents: AgentPort | undefined,
+	simulatorUdid: string,
+	requester: { kind: AgentKind; sessionId: string } | undefined
+): void {
+	if (!agents?.access || !requester) return;
+	const decision = agents.access(simulatorUdid, requester);
+	if (decision.allowed) return;
+	throw new AgentCliError({
+		code: 'device_held',
+		message: decision.reason,
+		retryable: true,
+		recovery:
+			'Run simulators and agents to find a free device, or ask the user to release this one in RN Devtools.',
+	});
+}
+
 function captureForJob(
 	state: SimulatorState,
 	job: SimulatorJob
@@ -644,6 +675,7 @@ function createRoutes({
 							'Boot it (rndevtools lane up, or the desktop app) and retry.',
 					});
 				}
+				assertDeviceAccess(agents, target.udid, context.agent);
 				try {
 					return await simulatorInput(
 						{ ...command.input, udid: target.udid },
@@ -1205,6 +1237,11 @@ function createRoutes({
 						};
 					}
 					case 'up': {
+						const udid = command.udid ?? required('lane up requires udid.');
+						// A device another agent holds is refused before anything boots.
+						// The lane service's own one-lane-per-device rule still applies
+						// afterwards for operator-started lanes and races.
+						assertDeviceAccess(agents, udid, command.agent ?? context.agent);
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
@@ -1212,8 +1249,7 @@ function createRoutes({
 								worktreePath:
 									command.worktreePath ??
 									required('lane up requires worktreePath.'),
-								simulatorUdid:
-									command.udid ?? required('lane up requires udid.'),
+								simulatorUdid: udid,
 								environment: command.environment ?? 'development',
 								launch: command.launch ?? true,
 								...(command.preferredPort !== undefined
@@ -1246,6 +1282,7 @@ function createRoutes({
 					}
 					case 'down': {
 						const lane = laneForTarget(lanes.getState(), command);
+						assertDeviceAccess(agents, lane.simulatorUdid, context.agent);
 						const receipt = await lanes.runOperation(
 							{ actionId: operationId, kind: 'lane.stop', laneId: lane.id },
 							context.signal

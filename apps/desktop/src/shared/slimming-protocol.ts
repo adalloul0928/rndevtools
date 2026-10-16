@@ -296,10 +296,22 @@ export const slimmingStateSchema = z.strictObject({
 });
 export type SlimmingState = z.infer<typeof slimmingStateSchema>;
 
+/**
+ * The agent session asking for a mutation. Absent on actions the operator
+ * starts from the desktop. A held device may be mutated only by its holder,
+ * so the service needs to know who is asking.
+ */
+const slimmingRequesterSchema = z.strictObject({
+	kind: z.enum(['claude', 'codex', 'other']),
+	sessionId: identifierSchema,
+});
+export type SlimmingRequester = z.infer<typeof slimmingRequesterSchema>;
+
 const actionBase = {
 	actionId: identifierSchema,
 	simulatorUdids: simulatorUdidsSchema,
 	confirmationToken: confirmationTokenSchema.optional(),
+	requester: slimmingRequesterSchema.optional(),
 };
 const profileActionBase = {
 	...actionBase,

@@ -14,6 +14,7 @@ import type {
 	AgentState,
 	DeviceAgent,
 } from '../../shared/agent-protocol';
+import type { DeviceHold } from '../../shared/device-hold';
 
 type AgentRuntimeValue = {
 	state: AgentState;
@@ -24,6 +25,8 @@ type AgentRuntimeValue = {
 	runOperation: (operation: AgentOperation) => Promise<boolean>;
 	/** Agents attached to a Simulator, strongest signal first. */
 	agentsForSimulator: (udid: string) => readonly DeviceAgent[];
+	/** The hold on a Simulator, if any: who has it and whether they are still around. */
+	holdForSimulator: (udid: string) => DeviceHold | undefined;
 };
 
 const EMPTY_AGENT_STATE: AgentState = {
@@ -32,6 +35,7 @@ const EMPTY_AGENT_STATE: AgentState = {
 	sessions: [],
 	byDevice: {},
 	claims: [],
+	holds: {},
 	discovery: { claude: 'unavailable', codex: 'unavailable' },
 };
 const NO_AGENTS: readonly DeviceAgent[] = [];
@@ -123,6 +127,7 @@ export function AgentRuntimeProvider({ children }: { children: ReactNode }) {
 			runOperation,
 			agentsForSimulator: (udid) =>
 				state.byDevice[udid.toUpperCase()] ?? NO_AGENTS,
+			holdForSimulator: (udid) => state.holds[udid.toUpperCase()],
 		}),
 		[state, isLoading, bridge, error, refresh, runOperation]
 	);

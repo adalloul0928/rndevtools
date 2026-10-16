@@ -662,6 +662,44 @@ function StartLaneForm({
 	);
 }
 
+/**
+ * Whether the lane's owner is still around. A hold whose agent session has
+ * gone counts down to its automatic release; the lane stays usable until then
+ * and a person can stop it sooner from the panel.
+ */
+function LaneHoldNote({ udid }: { udid: string }) {
+	const { holdForSimulator } = useAgentRuntime();
+	const hold = holdForSimulator(udid);
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!hold || hold.holderLive) return;
+		const timer = setInterval(() => setNow(Date.now()), 15_000);
+		return () => clearInterval(timer);
+	}, [hold]);
+	if (!hold) return null;
+	if (hold.holderLive) {
+		return (
+			<span className="sim-inline-note">
+				Session active · holds this Simulator
+			</span>
+		);
+	}
+	const minutes = hold.releaseAt
+		? Math.max(0, Math.ceil((hold.releaseAt - now) / 60_000))
+		: undefined;
+	return (
+		<span className="sim-inline-note is-warning">
+			Session gone ·{' '}
+			{minutes === undefined
+				? 'releasing soon'
+				: minutes === 0
+					? 'releasing now'
+					: `releasing in ${minutes} min`}
+			; stop the lane to release it sooner
+		</span>
+	);
+}
+
 function LaneDetail({
 	lane,
 	device,
@@ -813,9 +851,7 @@ function LaneDetail({
 				{lane.agent ? (
 					<div className="lane-agent-card">
 						<AgentBadge agent={lane.agent} showSession />
-						<span className="sim-inline-note">
-							Last seen {new Date(lane.agent.lastSeenAt).toLocaleTimeString()}
-						</span>
+						<LaneHoldNote udid={lane.simulatorUdid} />
 					</div>
 				) : (
 					<p className="sim-section-empty">

@@ -1479,6 +1479,11 @@ if (!app.requestSingleInstanceLock()) {
 				appVersion: app.getVersion(),
 				helper: simHelperClient,
 				mutationCoordinator: simulatorMutationCoordinator,
+				// The agent service is constructed after this one; resolve it late so
+				// every mutation, from the panel or an agent, checks who holds the
+				// device at the moment it is enqueued.
+				deviceAccess: (simulatorUdid, requester) =>
+					agentService?.access(simulatorUdid, requester) ?? { allowed: true },
 			});
 			recipeService = new RecipeService({
 				store: new RecipeStore(path.join(app.getPath('userData'), 'recipes')),
@@ -1497,13 +1502,20 @@ if (!app.requestSingleInstanceLock()) {
 				simulator: simulatorService,
 				slimming: slimmingService,
 				mutationCoordinator: simulatorMutationCoordinator,
+				// The agent service is constructed next; it knows which sessions are
+				// alive, which is what decides whether a lane's owner is gone.
+				holds: () => agentService?.holds() ?? new Map(),
 			});
 			agentService = new AgentService({
 				directory: path.join(app.getPath('userData'), 'agents'),
 				lanes: () =>
 					laneService?.getState().lanes.map((lane) => ({
+						id: lane.id,
 						simulatorUdid: lane.simulatorUdid,
 						appDirectory: lane.appPath ?? lane.worktreePath,
+						agent: lane.agent,
+						metro: lane.metro,
+						startedAt: lane.startedAt,
 					})) ?? [],
 			});
 			simulatorStreamService = new SimulatorStreamService({
