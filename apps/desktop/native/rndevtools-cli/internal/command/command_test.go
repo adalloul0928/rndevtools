@@ -202,6 +202,17 @@ func TestLaneFlagsBuildOperationSpecificCommands(t *testing.T) {
 	}
 }
 
+func TestLaneUpNeedsOnlyAWorktree(t *testing.T) {
+	// Without a udid the desktop picks a free Simulator or parks a device
+	// request for the user; the CLI must not demand one up front.
+	if err := Validate(json.RawMessage(`{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app"}`), protocol.CommandLane); err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(json.RawMessage(`{"kind":"lane","operation":"up","udid":"`+testUDID+`"}`), protocol.CommandLane); err == nil {
+		t.Fatal("lane up without a worktree must be rejected")
+	}
+}
+
 func TestLaneAttributionComesFromAgentEnvironment(t *testing.T) {
 	env := map[string]string{"CLAUDE_CODE_SESSION_ID": "session-abc"}
 	lookup := func(key string) string { return env[key] }

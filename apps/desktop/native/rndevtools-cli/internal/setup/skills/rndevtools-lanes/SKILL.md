@@ -86,11 +86,22 @@ a private local socket.
 
 ```bash
 rndevtools doctor                                     # 1. desktop reachable?
-rndevtools simulators                                 # 2. pick an available UDID
-rndevtools lane --operation ls                        # 3. see existing lanes and worktrees
-rndevtools lane --operation up \
-  --worktree "$PWD" --udid <UDID> [--environment development]   # 4.
+rndevtools lane --operation ls                        # 2. see existing lanes and worktrees
+rndevtools lane --operation up --worktree "$PWD"      # 3. RN Devtools picks a free Simulator
 ```
+
+Leave `--udid` out unless the user named a device: the desktop picks a free
+iPhone (nobody's lane, nobody's claim), booted ones first, so you never race
+another session for it. To choose yourself, run `rndevtools simulators`, pick
+a device with no hold, and pass `--udid <UDID>`.
+
+When nothing is free the result has `completed: false`, no `lane`, and a
+`deviceRequest` with its `id` and the reason; RN Devtools asks the user to
+start your lane on an existing Simulator or a new clone (you cannot create
+Simulators). Tell the user, then poll `rndevtools lane --operation ls` every
+~10 s: the entry in `deviceRequests` with your `id` ends `fulfilled` with a
+`laneId`, or `dismissed`. Do not retry `lane up` in a loop; a retry replaces
+the request and resets the user's card.
 
 `--worktree` is wherever you are working: a checkout root, or the app's
 directory inside a monorepo checkout. The lane is keyed on the containing git
@@ -105,10 +116,11 @@ result includes `lane.id`, `lane.port`, `lane.simulatorUdid`, and `lane.metro`
 (`starting` | `ready` | `stopped`). Pass `--launch=false` to lease and start
 Metro without opening the app.
 
-Running `lane up` again for the same worktree and Simulator is safe: it
-returns the existing lane, restarts Metro on the lane's port if it died, and
-relaunches. A lane for the same app on a *different* Simulator, or another
-app's lane on that Simulator, is a conflict; use `lane ls` to see which.
+Running `lane up` again for the same worktree is safe: it returns the app's
+existing lane (on whatever Simulator it has, when you omit `--udid`), restarts
+Metro on the lane's port if it died, and relaunches. Naming a *different*
+Simulator for an app that already has a lane, or a Simulator that carries
+another app's lane, is a conflict; use `lane ls` to see which.
 
 Add `--slim <profileId>` (ids come from `rndevtools slimming --operation
 status`, e.g. `rndevtools-development`) to trim the Simulator's background

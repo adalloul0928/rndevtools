@@ -73,8 +73,9 @@ var toolMeta = map[protocol.Command]meta{
 			"Simulator with its own Metro port leased by RN Devtools, so parallel branches and agents never " +
 			"collide on port 8081 or a shared device. Use this whenever asked to run a branch, open the " +
 			"simulator, start the app for a worktree, or fix a Metro port clash. operation \"up\" needs the " +
-			"absolute worktree path and the Simulator udid (pick one from simulators; prefer a booted, unclaimed " +
-			"device). It boots the device, starts Metro, and opens the dev client; if the dev client is not " +
+			"absolute worktree path; udid is optional (omit it and RN Devtools picks a free iPhone, booted first; " +
+			"when none is free the result has completed=false and a deviceRequest the user settles in the app: poll " +
+			"ls until that request is fulfilled with a laneId). It boots the device, starts Metro, and opens the dev client; if the dev client is not " +
 			"installed the error says so and names the build command; call the native tool (operation plan) " +
 			"before building. Calling up again for the same worktree and Simulator returns the existing lane and " +
 			"relaunches. \"down\" stops Metro and releases the port (lane-id). \"ls\" lists lanes. \"launch\" re-opens " +

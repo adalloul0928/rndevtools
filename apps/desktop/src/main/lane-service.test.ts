@@ -29,8 +29,11 @@ import { SimulatorMutationCoordinator } from './simulator-mutation-coordinator';
 
 const UDID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
 const OTHER_UDID = 'FFFFFFFF-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+const CLONE_UDID = 'CCCCCCCC-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
 const REPO = '/Users/dev/app';
 const WORKTREE = '/Users/dev/app-feature-a';
+const OTHER_WORKTREE = '/Users/dev/app-feature-b';
+const THIRD_WORKTREE = '/Users/dev/app-feature-c';
 
 function simulatorState(
 	devices: Array<{ udid: string; state: 'booted' | 'shutdown' }>,
@@ -127,6 +130,26 @@ class FakeSimulator implements LaneSimulatorPort {
 					})),
 					[job]
 				);
+			} else if (action.kind === 'device.clone' && !failure) {
+				const source = this.state.devices.find(
+					(device) => device.udid === action.udid
+				);
+				this.state = {
+					...this.state,
+					jobs: [...this.state.jobs, job],
+					devices: [
+						...this.state.devices,
+						{
+							udid: CLONE_UDID,
+							name: action.name,
+							state: 'shutdown',
+							runtimeIdentifier:
+								source?.runtimeIdentifier ??
+								'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
+							isAvailable: true,
+						},
+					],
+				};
 			} else if (action.kind === 'app.list' && !failure) {
 				const installed = this.installedApps ?? ['com.example.app'];
 				this.state = {
@@ -275,6 +298,18 @@ class FakeWorktrees implements WorktreeInspectorPort {
 	worktrees: DiscoveredWorktree[] = [
 		{ path: REPO, branch: 'main', repositoryRoot: REPO, dirty: false },
 		{ path: WORKTREE, branch: 'feature/a', repositoryRoot: REPO, dirty: true },
+		{
+			path: OTHER_WORKTREE,
+			branch: 'feature-b',
+			repositoryRoot: REPO,
+			dirty: false,
+		},
+		{
+			path: THIRD_WORKTREE,
+			branch: 'feature-c',
+			repositoryRoot: REPO,
+			dirty: false,
+		},
 	];
 	identity: { scheme?: string; bundleIdentifier?: string } = {
 		scheme: 'exampleapp',
@@ -860,6 +895,240 @@ describe('LaneService', () => {
 		const state = await service.refresh();
 		expect(state.error).toMatch(/not a git repository/);
 		expect(state.repositories).toEqual([REPO]);
+	});
+
+	describe('picking a Simulator', () => {
+		function up(extra: Record<string, unknown> = {}) {
+			return service.runOperation({
+				actionId: `op-pick-${Math.random().toString(16).slice(2)}`,
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				environment: 'development',
+				launch: false,
+				...extra,
+			});
+		}
+
+		it('prefers a free booted device when no Simulator is named', async () => {
+			const receipt = await up();
+			expect(receipt.completed).toBe(true);
+			// OTHER_UDID is booted in the fixture, UDID is shut down.
+			expect(receipt.lane?.simulatorUdid).toBe(OTHER_UDID);
+			expect(receipt.deviceRequest).toBeUndefined();
+		});
+
+		it('skips devices other sessions hold and devices with lanes', async () => {
+			const held = new LaneService({
+				store: new LaneStore(root),
+				simulator,
+				metro,
+				worktrees,
+				now: () => now,
+				holds: () =>
+					new Map([
+						[
+							OTHER_UDID,
+							{
+								simulatorUdid: OTHER_UDID,
+								via: 'claim' as const,
+								holder: { kind: 'codex' as const, sessionId: 'elsewhere' },
+								holderLive: true,
+							},
+						],
+					]),
+			});
+			await held.start();
+			const receipt = await held.runOperation({
+				actionId: 'op-held',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				environment: 'development',
+				launch: false,
+			});
+			expect(receipt.lane?.simulatorUdid).toBe(UDID);
+			await held.stop();
+		});
+
+		it('returns to the existing lane for the app when no Simulator is named', async () => {
+			const first = await up();
+			const again = await up();
+			expect(again.lane?.id).toBe(first.lane?.id);
+			expect(service.getState().lanes).toHaveLength(1);
+		});
+
+		it('parks a device request when nothing is free, and the user settles it', async () => {
+			// Take both devices with lanes for other apps.
+			await up({ simulatorUdid: UDID });
+			await service.runOperation({
+				actionId: 'op-other-app',
+				kind: 'lane.start',
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				environment: 'development',
+				launch: false,
+			});
+			const receipt = await service.runOperation({
+				actionId: 'op-third',
+				kind: 'lane.start',
+				worktreePath: THIRD_WORKTREE,
+				environment: 'development',
+				launch: false,
+				slimProfileId: 'rndevtools-development',
+				agent: { kind: 'claude', sessionId: 'session-9' },
+			});
+			expect(receipt.completed).toBe(true);
+			expect(receipt.lane).toBeUndefined();
+			const request = receipt.deviceRequest;
+			expect(request).toMatchObject({
+				status: 'pending',
+				worktreePath: THIRD_WORKTREE,
+				branch: 'feature-c',
+				slimProfileId: 'rndevtools-development',
+				agent: { kind: 'claude', sessionId: 'session-9' },
+				launch: false,
+			});
+			expect(request?.message).toMatch(/2 by lanes, 0 claimed/);
+			expect(service.getState().deviceRequests).toHaveLength(1);
+			expect(metro.started).toHaveLength(2);
+
+			// A retry for the same app replaces the request rather than stacking.
+			const retry = await service.runOperation({
+				actionId: 'op-third-again',
+				kind: 'lane.start',
+				worktreePath: THIRD_WORKTREE,
+				environment: 'development',
+				launch: false,
+				slimProfileId: 'rndevtools-development',
+				agent: { kind: 'claude', sessionId: 'session-9' },
+			});
+			expect(service.getState().deviceRequests).toHaveLength(1);
+			expect(service.getState().deviceRequests[0]?.id).toBe(
+				retry.deviceRequest?.id
+			);
+			const requestId = retry.deviceRequest?.id ?? '';
+
+			// Cloning the chosen device starts the lane on the copy and keeps the
+			// original request's slim profile and agent.
+			const cloned = await service.runOperation({
+				actionId: 'op-clone',
+				kind: 'lane.provide-device',
+				requestId,
+				decision: 'clone',
+				simulatorUdid: OTHER_UDID,
+			});
+			expect(cloned.completed).toBe(true);
+			expect(simulator.actions.map((action) => action.kind)).toContain(
+				'device.clone'
+			);
+			const cloneAction = simulator.actions.find(
+				(action) => action.kind === 'device.clone'
+			);
+			expect(cloneAction).toMatchObject({
+				udid: OTHER_UDID,
+				name: 'Sim FFFF · feature-c',
+			});
+			expect(cloned.lane).toMatchObject({
+				simulatorUdid: CLONE_UDID,
+				worktreePath: THIRD_WORKTREE,
+			});
+			expect(service.getState().deviceRequests[0]).toMatchObject({
+				id: requestId,
+				status: 'fulfilled',
+				laneId: cloned.lane?.id,
+			});
+			// The parked slim request rode along: the clone was slimmed on start.
+			expect(slimming.actions).toHaveLength(1);
+			expect(slimming.actions[0]?.action).toMatchObject({
+				kind: 'profile.apply',
+				simulatorUdids: [CLONE_UDID],
+				requester: { kind: 'claude', sessionId: 'session-9' },
+			});
+		});
+
+		it('dismisses a request and refuses to settle it twice', async () => {
+			await up({ simulatorUdid: UDID });
+			await service.runOperation({
+				actionId: 'op-other-app',
+				kind: 'lane.start',
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				environment: 'development',
+				launch: false,
+			});
+			const parked = await service.runOperation({
+				actionId: 'op-third',
+				kind: 'lane.start',
+				worktreePath: THIRD_WORKTREE,
+				environment: 'development',
+				launch: false,
+			});
+			const requestId = parked.deviceRequest?.id ?? '';
+			const dismissed = await service.runOperation({
+				actionId: 'op-dismiss',
+				kind: 'lane.provide-device',
+				requestId,
+				decision: 'dismiss',
+			});
+			expect(dismissed.deviceRequest).toMatchObject({
+				status: 'dismissed',
+				message: 'Dismissed by the operator.',
+			});
+			const again = await service.runOperation({
+				actionId: 'op-dismiss-again',
+				kind: 'lane.provide-device',
+				requestId,
+				decision: 'use',
+				simulatorUdid: UDID,
+			});
+			expect(again.completed).toBe(false);
+			expect(again.error).toMatch(/is dismissed/);
+
+			// Settled requests are pruned after their TTL so the agent has time
+			// to read the outcome.
+			await service.runOperation({ actionId: 'op-r1', kind: 'lane.refresh' });
+			expect(service.getState().deviceRequests).toHaveLength(1);
+			now += 31 * 60_000;
+			await service.runOperation({ actionId: 'op-r2', kind: 'lane.refresh' });
+			expect(service.getState().deviceRequests).toEqual([]);
+		});
+
+		it('keeps a request pending with the reason when the chosen start fails', async () => {
+			await up({ simulatorUdid: UDID });
+			await service.runOperation({
+				actionId: 'op-other-app',
+				kind: 'lane.start',
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				environment: 'development',
+				launch: false,
+			});
+			const parked = await service.runOperation({
+				actionId: 'op-third',
+				kind: 'lane.start',
+				worktreePath: THIRD_WORKTREE,
+				environment: 'development',
+				launch: false,
+			});
+			const requestId = parked.deviceRequest?.id ?? '';
+			// Using a device that already has a lane is the conflict the panel
+			// labels; the service refuses it and the card stays up.
+			const failed = await service.runOperation({
+				actionId: 'op-use-taken',
+				kind: 'lane.provide-device',
+				requestId,
+				decision: 'use',
+				simulatorUdid: UDID,
+			});
+			expect(failed.completed).toBe(false);
+			expect(failed.error).toMatch(/already assigned to lane/);
+			expect(service.getState().deviceRequests[0]).toMatchObject({
+				id: requestId,
+				status: 'pending',
+			});
+			expect(service.getState().deviceRequests[0]?.message).toMatch(
+				/already assigned to lane/
+			);
+		});
 	});
 
 	describe('slimming on lane start', () => {

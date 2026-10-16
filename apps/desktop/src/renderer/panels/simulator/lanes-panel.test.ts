@@ -105,6 +105,7 @@ describe('laneSummaryCounts', () => {
 			],
 			worktrees: [worktree('/Users/dev/app-a'), worktree('/Users/dev/app-b')],
 			repositories: ['/Users/dev/app'],
+			deviceRequests: [],
 		});
 		expect(counts).toEqual({ lanes: 2, ready: 1, agents: 1, worktrees: 2 });
 	});

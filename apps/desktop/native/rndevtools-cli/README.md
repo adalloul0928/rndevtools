@@ -47,7 +47,10 @@ Devtools, only on Simulators the calling session holds or that nobody holds
 (`device_held` otherwise), and only on runtime/profile combinations SimSlim has
 verified or the user approved once in the app. `lane --operation up --slim
 <profile>` applies a profile in the lane's own boot→slim→Metro→launch sequence
-under the same gates. `act` is limited to the desktop service's explicit
+under the same gates. `lane --operation up` needs only `--worktree`: without
+`--udid` the desktop picks a free iPhone, and when none is free it returns a
+`deviceRequest` that the user settles in the Lanes panel (use an existing
+Simulator, clone one, or dismiss) while the agent polls `lane --operation ls`. `act` is limited to the desktop service's explicit
 unattended-action allowlist.
 
 ## MCP server

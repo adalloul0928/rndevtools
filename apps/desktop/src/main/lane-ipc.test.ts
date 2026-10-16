@@ -30,6 +30,7 @@ const state: LaneState = {
 	lanes: [pendingLane],
 	worktrees: [],
 	repositories: [],
+	deviceRequests: [],
 };
 
 function fixture(selected: string | null = '/Users/dev/app') {

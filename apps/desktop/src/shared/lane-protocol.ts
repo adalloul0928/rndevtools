@@ -16,6 +16,7 @@ const MAX_SHORT_TEXT_LENGTH = 4 * 1024;
 const MAX_LANES = 64;
 const MAX_WORKTREES = 128;
 const MAX_ENVIRONMENTS = 16;
+const MAX_DEVICE_REQUESTS = 16;
 const MAX_LOG_CHARACTERS = 64 * 1024;
 
 export const LANE_METRO_HEALTH_TIMEOUT_MS = 15_000;
@@ -158,6 +159,41 @@ const laneWorktreeSchema = z.strictObject({
 });
 export type LaneWorktree = z.infer<typeof laneWorktreeSchema>;
 
+/**
+ * What an agent asked for when it ran `lane up` without naming a Simulator,
+ * kept once no free device could be picked. Agents cannot create Simulators,
+ * so the request waits for the user: the Lanes panel offers to start the lane
+ * on an existing device or on a fresh clone, or to dismiss the request. The
+ * agent polls `lane ls` for this record; `fulfilled` names its lane.
+ */
+const laneDeviceRequestStatusSchema = z.enum([
+	'pending',
+	'starting',
+	'fulfilled',
+	'dismissed',
+]);
+
+const laneDeviceRequestSchema = z.strictObject({
+	id: identifierSchema,
+	status: laneDeviceRequestStatusSchema,
+	requestedAt: timestampSchema,
+	updatedAt: timestampSchema,
+	/** Why no device was picked, or why the last attempt did not start. */
+	message: shortTextSchema,
+	/** The checkout and app directory the lane will run, resolved up front. */
+	worktreePath: absolutePathSchema,
+	appPath: absolutePathSchema.optional(),
+	branch: branchSchema,
+	environment: laneEnvironmentIdSchema,
+	preferredPort: portSchema.optional(),
+	launch: z.boolean(),
+	slimProfileId: identifierSchema.optional(),
+	agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
+	/** The lane that satisfied the request, once it did. */
+	laneId: laneIdSchema.optional(),
+});
+export type LaneDeviceRequest = z.infer<typeof laneDeviceRequestSchema>;
+
 export const laneStateSchema = z.strictObject({
 	revision: z.number().int().nonnegative(),
 	updatedAt: timestampSchema,
@@ -166,6 +202,11 @@ export const laneStateSchema = z.strictObject({
 	worktrees: z.array(laneWorktreeSchema).max(MAX_WORKTREES),
 	/** Repository roots whose worktrees are listed above. */
 	repositories: z.array(absolutePathSchema).max(32),
+	/** Lane starts waiting on the user for a Simulator; see `laneDeviceRequestSchema`. */
+	deviceRequests: z
+		.array(laneDeviceRequestSchema)
+		.max(MAX_DEVICE_REQUESTS)
+		.default([]),
 	error: shortTextSchema.optional(),
 });
 export type LaneState = z.infer<typeof laneStateSchema>;
@@ -181,7 +222,12 @@ export const laneOperationSchema = z.discriminatedUnion('kind', [
 		 * becomes the lane's worktree and this directory its Expo app.
 		 */
 		worktreePath: absolutePathSchema,
-		simulatorUdid: laneUdidSchema,
+		/**
+		 * The Simulator to run on. When omitted the desktop picks a free iPhone
+		 * (nobody's lane, nobody's claim), booted ones first. When none is free
+		 * the start is parked as a device request for the user to settle.
+		 */
+		simulatorUdid: laneUdidSchema.optional(),
 		environment: laneEnvironmentIdSchema.default('development'),
 		preferredPort: portSchema.optional(),
 		/** Open the dev client against the leased Metro once it is healthy. */
@@ -193,6 +239,18 @@ export const laneOperationSchema = z.discriminatedUnion('kind', [
 		 */
 		slimProfileId: identifierSchema.optional(),
 		agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
+	}),
+	/**
+	 * Settles a device request from the Lanes panel: start the lane on an
+	 * existing Simulator (`use`), on a new clone of one (`clone`), or drop the
+	 * request (`dismiss`). `use` and `clone` name the device in `simulatorUdid`.
+	 */
+	z.strictObject({
+		...operationBase,
+		kind: z.literal('lane.provide-device'),
+		requestId: identifierSchema,
+		decision: z.enum(['use', 'clone', 'dismiss']),
+		simulatorUdid: laneUdidSchema.optional(),
 	}),
 	z.strictObject({
 		...operationBase,
@@ -239,6 +297,7 @@ export const laneOperationReceiptSchema = z.strictObject({
 	actionId: identifierSchema,
 	kind: z.enum([
 		'lane.start',
+		'lane.provide-device',
 		'lane.launch',
 		'lane.stop',
 		'lane.log',
@@ -250,6 +309,12 @@ export const laneOperationReceiptSchema = z.strictObject({
 	cancelled: z.boolean().optional(),
 	error: shortTextSchema.optional(),
 	lane: laneSchema.optional(),
+	/**
+	 * A `lane.start` that found no free Simulator completes without a lane and
+	 * with the request now waiting on the user; `lane.provide-device` returns
+	 * the settled request.
+	 */
+	deviceRequest: laneDeviceRequestSchema.optional(),
 	log: z.string().max(MAX_LOG_CHARACTERS).optional(),
 	state: laneStateSchema.optional(),
 });

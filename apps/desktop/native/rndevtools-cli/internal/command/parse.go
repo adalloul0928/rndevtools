@@ -102,7 +102,7 @@ var commandFields = map[protocol.Command][]fieldSpec{
 	protocol.CommandLane: {
 		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "up, down, ls, launch, or log."},
 		{flagName: "worktree", path: []string{"worktreePath"}, kind: fieldString, usage: "Absolute worktree path (up; or to address a lane)."},
-		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID the lane runs on (up)."},
+		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID the lane runs on (up). Omit it to let RN Devtools pick a free iPhone; when none is free the result carries a deviceRequest for the user to settle in the app."},
 		{flagName: "environment", path: []string{"environment"}, kind: fieldString, usage: "Lane environment id; selects the Metro port range (up)."},
 		{flagName: "preferred-port", path: []string{"preferredPort"}, kind: fieldInteger, usage: "Specific Metro port inside the environment range (up)."},
 		{flagName: "launch", path: []string{"launch"}, kind: fieldBoolean, usage: "Open the dev client once Metro is ready (up; default true)."},

@@ -50,6 +50,7 @@ const EMPTY_LANE_STATE: LaneState = {
 	lanes: [],
 	worktrees: [],
 	repositories: [],
+	deviceRequests: [],
 };
 
 const LaneRuntimeContext = createContext<LaneRuntimeValue | null>(null);

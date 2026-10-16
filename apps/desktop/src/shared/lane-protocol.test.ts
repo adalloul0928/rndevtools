@@ -166,6 +166,24 @@ describe('laneSlimSummary', () => {
 				slimProfileId: '../escape',
 			})
 		).toThrow();
+		// A start may leave the Simulator to the desktop.
+		expect(
+			laneOperationSchema.parse({
+				actionId: 'op-3',
+				kind: 'lane.start',
+				worktreePath: '/Users/dev/app',
+			})
+		).not.toHaveProperty('simulatorUdid');
+		// Settling a parked start names the request and, for use/clone, a device.
+		expect(
+			laneOperationSchema.parse({
+				actionId: 'op-4',
+				kind: 'lane.provide-device',
+				requestId: 'device-request-1',
+				decision: 'clone',
+				simulatorUdid: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+			})
+		).toMatchObject({ decision: 'clone' });
 		// Slimming is applied by the desktop during lane start, gated on the
 		// SimSlim setting, compatibility, and who holds the device; there is no
 		// approve/dismiss operation to carry over the wire.

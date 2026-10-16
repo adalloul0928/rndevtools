@@ -1372,15 +1372,22 @@ function createRoutes({
 							environments: state.environments,
 							lanes: state.lanes,
 							worktrees: state.worktrees,
+							deviceRequests: state.deviceRequests,
 							...(state.error ? { error: state.error } : {}),
 						};
 					}
 					case 'up': {
-						const udid = command.udid ?? required('lane up requires udid.');
-						// A device another agent holds is refused before anything boots.
-						// The lane service's own one-lane-per-device rule still applies
-						// afterwards for operator-started lanes and races.
-						assertDeviceAccess(agents, udid, command.agent ?? context.agent);
+						// A named device another agent holds is refused before anything
+						// boots. Without a udid the lane service picks a free device
+						// itself, so there is nothing to check here; the lane service's
+						// one-lane-per-device rule still applies for races.
+						if (command.udid) {
+							assertDeviceAccess(
+								agents,
+								command.udid,
+								command.agent ?? context.agent
+							);
+						}
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
@@ -1388,7 +1395,7 @@ function createRoutes({
 								worktreePath:
 									command.worktreePath ??
 									required('lane up requires worktreePath.'),
-								simulatorUdid: udid,
+								...(command.udid ? { simulatorUdid: command.udid } : {}),
 								environment: command.environment ?? 'development',
 								launch: command.launch ?? true,
 								...(command.preferredPort !== undefined
@@ -1401,6 +1408,12 @@ function createRoutes({
 							},
 							context.signal
 						);
+						if (receipt.completed && receipt.deviceRequest) {
+							return {
+								...laneReceiptResult(receipt),
+								next: `No free Simulator: ${receipt.deviceRequest.message} RN Devtools is asking the user to start this lane on an existing Simulator or a new clone. Poll lane --operation ls; the deviceRequests entry with id ${receipt.deviceRequest.id} reports fulfilled with a laneId, or dismissed.`,
+							};
+						}
 						return laneReceiptResult(receipt);
 					}
 					case 'launch': {

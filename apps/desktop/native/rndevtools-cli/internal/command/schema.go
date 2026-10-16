@@ -468,8 +468,8 @@ func validateLane(
 	targetsLane := (laneID != nil) != (worktreePath != nil)
 	switch operation {
 	case "up":
-		if worktreePath == nil || udid == nil {
-			return errors.New("lane up requires worktreePath and udid")
+		if worktreePath == nil {
+			return errors.New("lane up requires worktreePath")
 		}
 		if laneID != nil || url != nil || maxCharacters != nil {
 			return errors.New("lane up does not accept laneId, url, or maxCharacters")

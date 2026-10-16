@@ -230,8 +230,9 @@ const instructions = `RN Devtools controls the iOS Simulators on this Mac. Use t
 	`several agents share these Simulators and the desktop app owns their ports and claims. ` +
 	`A Simulator is free or held: held while a lane runs on it or a session claimed it, and only ` +
 	`the holder may boot, drive, slim, or stop it (anything else fails with device_held, naming ` +
-	`the holder). Start with lane (operation "up") for a worktree, or simulators and agents to find ` +
-	`a free device. When your task is done, call release with all=true so your devices go back ` +
+	`the holder). Start with lane (operation "up") for a worktree; leave udid out and the desktop picks a ` +
+	`free device, or parks a deviceRequest for the user when none is free (then poll lane ls). ` +
+	`When your task is done, call release with all=true so your devices go back ` +
 	`to the pool. Errors carry "recovery" text and native plan carries a "recommendation"; ` +
 	`follow them before improvising.`
 

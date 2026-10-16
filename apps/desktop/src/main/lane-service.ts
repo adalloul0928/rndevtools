@@ -4,7 +4,7 @@ import {
 	diagnosticErrorText,
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
-import type { DeviceHold } from '../shared/device-hold';
+import { type DeviceHold, freeDevices } from '../shared/device-hold';
 import {
 	allocateLanePort,
 	DEFAULT_LANE_ENVIRONMENTS,
@@ -12,6 +12,7 @@ import {
 	LANE_METRO_HEALTH_TIMEOUT_MS,
 	type Lane,
 	type LaneAgent,
+	type LaneDeviceRequest,
 	type LaneEnvironment,
 	type LaneOperation,
 	type LaneOperationReceipt,
@@ -28,6 +29,7 @@ import {
 import type {
 	SimulatorAction,
 	SimulatorActionReceipt,
+	SimulatorDevice,
 	SimulatorJob,
 	SimulatorState,
 } from '../shared/simulator-protocol';
@@ -54,6 +56,8 @@ const TERMINAL_SIMULATOR_STATUSES = new Set([
 ]);
 const HEALTH_POLL_INTERVAL_MS = 500;
 const RECONCILE_INTERVAL_MS = 5_000;
+/** How long a settled device request stays listed for the agent that made it. */
+const DEVICE_REQUEST_TTL_MS = 30 * 60_000;
 const MAX_ERROR_LENGTH = 4 * 1024;
 
 export type LaneSimulatorPort = {
@@ -83,6 +87,16 @@ export type LaneSlimmingPort = {
 
 type LaneListener = (state: LaneState) => void;
 
+type LaneStartInput = Extract<LaneOperation, { kind: 'lane.start' }>;
+
+/**
+ * A lane start either produces a lane or, when no Simulator was named and none
+ * is free, a device request the user settles from the Lanes panel.
+ */
+export type LaneStartOutcome =
+	| { lane: Lane; deviceRequest?: undefined }
+	| { lane?: undefined; deviceRequest: LaneDeviceRequest };
+
 const TERMINAL_SLIMMING_STATUSES = new Set([
 	'complete',
 	'failed',
@@ -94,6 +108,16 @@ function safeError(error: unknown): string {
 		0,
 		MAX_ERROR_LENGTH
 	);
+}
+
+function isPhone(device: SimulatorDevice): boolean {
+	return /iphone/i.test(device.deviceTypeIdentifier ?? device.name);
+}
+
+/** `com.apple.CoreSimulator.SimRuntime.iOS-26-0` reads as 26.00; unknown is 0. */
+function runtimeVersion(device: SimulatorDevice): number {
+	const match = /-(\d+)-(\d+)$/.exec(device.runtimeIdentifier);
+	return match ? Number(match[1]) + Number(match[2]) / 100 : 0;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -137,6 +161,7 @@ export class LaneService {
 	readonly #maxWorkers: number;
 	readonly #now: () => number;
 	readonly #listeners = new Set<LaneListener>();
+	readonly #deviceRequests = new Map<string, LaneDeviceRequest>();
 	#worktreeCache: LaneWorktree[] = [];
 	#revision = 0;
 	#updatedAt: number;
@@ -221,6 +246,7 @@ export class LaneService {
 					: {}),
 			})),
 			repositories: this.#store.repositories(),
+			deviceRequests: [...this.#deviceRequests.values()],
 			...(this.#error ? { error: this.#error } : {}),
 		});
 	};
@@ -249,11 +275,20 @@ export class LaneService {
 			if (this.#stopped) throw new Error('Lanes are shutting down.');
 			switch (operation.kind) {
 				case 'lane.start': {
-					const lane = await this.startLane(operation, signal);
+					const outcome = await this.startLane(operation, signal);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
-						lane,
+						...outcome,
+						state: this.getState(),
+					});
+				}
+				case 'lane.provide-device': {
+					const outcome = await this.provideDevice(operation, signal);
+					return laneOperationReceiptSchema.parse({
+						...base,
+						completed: true,
+						...outcome,
 						state: this.getState(),
 					});
 				}
@@ -329,9 +364,9 @@ export class LaneService {
 	}
 
 	async startLane(
-		input: Extract<LaneOperation, { kind: 'lane.start' }>,
+		input: LaneStartInput,
 		signal: AbortSignal
-	): Promise<Lane> {
+	): Promise<LaneStartOutcome> {
 		const requestedPath = path.resolve(input.worktreePath);
 		const environment = this.#environments.find(
 			(candidate) => candidate.id === input.environment
@@ -372,27 +407,47 @@ export class LaneService {
 			worktreePath,
 			...(appPath ? { appPath } : {}),
 		});
+		// Without a named Simulator, the app's existing lane on any device is the
+		// lane the agent means.
 		const existing = this.#store
 			.lanes()
 			.find(
 				(lane) =>
 					laneAppDirectory(lane) === candidateApp &&
-					lane.simulatorUdid.toUpperCase() === input.simulatorUdid.toUpperCase()
+					(input.simulatorUdid === undefined ||
+						lane.simulatorUdid.toUpperCase() ===
+							input.simulatorUdid.toUpperCase())
 			);
 		if (existing) {
-			return this.#resumeLane(existing, input, environment, signal);
+			return {
+				lane: await this.#resumeLane(existing, input, environment, signal),
+			};
+		}
+		await this.#store.addRepository(repositoryRoot);
+
+		const inventory = await this.#simulator.refresh();
+		const simulatorUdid =
+			input.simulatorUdid ?? this.#pickFreeDevice(inventory.devices);
+		if (!simulatorUdid) {
+			return {
+				deviceRequest: this.#parkDeviceRequest(input, {
+					worktreePath,
+					...(appPath ? { appPath } : {}),
+					branch: worktree.branch,
+					message: this.#noFreeDeviceReason(inventory.devices),
+				}),
+			};
 		}
 		const conflict = findLaneConflict(this.#store.lanes(), {
 			worktreePath,
 			...(appPath ? { appPath } : {}),
-			simulatorUdid: input.simulatorUdid,
+			simulatorUdid,
 		});
 		if (conflict) throw new Error(conflict);
-		await this.#store.addRepository(repositoryRoot);
 
-		const device = (await this.#simulator.refresh()).devices.find(
+		const device = inventory.devices.find(
 			(candidate) =>
-				candidate.udid.toUpperCase() === input.simulatorUdid.toUpperCase()
+				candidate.udid.toUpperCase() === simulatorUdid.toUpperCase()
 		);
 		if (!device?.isAvailable) {
 			throw new Error(
@@ -482,7 +537,234 @@ export class LaneService {
 		if (input.launch) {
 			lane = await this.launchLane(id, undefined, input.agent, signal);
 		}
-		return lane;
+		return { lane };
+	}
+
+	/**
+	 * The free Simulator a lane gets when the agent named none: nobody's lane,
+	 * nobody's live claim, available in the inventory. iPhones first (the dev
+	 * client is a phone app), booted before shut down so the lane starts fast,
+	 * then the newest runtime, then by name so the choice is stable.
+	 */
+	#pickFreeDevice(devices: readonly SimulatorDevice[]): string | undefined {
+		const laneUdids = new Set(
+			this.#store.lanes().map((lane) => lane.simulatorUdid.toUpperCase())
+		);
+		const holds = this.#holds?.() ?? new Map<string, DeviceHold>();
+		const candidates = devices.filter(
+			(device) =>
+				device.isAvailable && !laneUdids.has(device.udid.toUpperCase())
+		);
+		const free = new Set(
+			freeDevices(
+				candidates.map((device) => device.udid),
+				holds,
+				this.#now()
+			).map((udid) => udid.toUpperCase())
+		);
+		return candidates
+			.filter((device) => free.has(device.udid.toUpperCase()))
+			.sort(
+				(left, right) =>
+					Number(isPhone(right)) - Number(isPhone(left)) ||
+					Number(right.state === 'booted') - Number(left.state === 'booted') ||
+					runtimeVersion(right) - runtimeVersion(left) ||
+					left.name.localeCompare(right.name)
+			)[0]?.udid;
+	}
+
+	#noFreeDeviceReason(devices: readonly SimulatorDevice[]): string {
+		const available = devices.filter((device) => device.isAvailable);
+		if (available.length === 0) {
+			return 'No Simulator is available in the current inventory.';
+		}
+		const laneUdids = new Set(
+			this.#store.lanes().map((lane) => lane.simulatorUdid.toUpperCase())
+		);
+		const holds = this.#holds?.();
+		let byLanes = 0;
+		let bySessions = 0;
+		for (const device of available) {
+			const udid = device.udid.toUpperCase();
+			if (laneUdids.has(udid)) byLanes += 1;
+			else if (holds?.get(udid)) bySessions += 1;
+		}
+		return `All ${available.length} available Simulators are in use: ${byLanes} by lanes, ${bySessions} claimed by other sessions.`;
+	}
+
+	/**
+	 * Records a start that is waiting on a Simulator. One request per app
+	 * directory: a retry replaces its predecessor instead of stacking cards.
+	 */
+	#parkDeviceRequest(
+		input: LaneStartInput,
+		resolved: {
+			worktreePath: string;
+			appPath?: string;
+			branch: string;
+			message: string;
+		}
+	): LaneDeviceRequest {
+		const appDirectory = laneAppDirectory(resolved);
+		for (const [id, request] of this.#deviceRequests) {
+			if (
+				laneAppDirectory(request) === appDirectory &&
+				request.status !== 'starting'
+			) {
+				this.#deviceRequests.delete(id);
+			}
+		}
+		const now = this.#now();
+		const request: LaneDeviceRequest = {
+			id: `device-request-${randomUUID()}`,
+			status: 'pending',
+			requestedAt: now,
+			updatedAt: now,
+			message: resolved.message,
+			worktreePath: resolved.worktreePath,
+			...(resolved.appPath ? { appPath: resolved.appPath } : {}),
+			branch: resolved.branch,
+			environment: input.environment,
+			...(input.preferredPort !== undefined
+				? { preferredPort: input.preferredPort }
+				: {}),
+			launch: input.launch,
+			...(input.slimProfileId ? { slimProfileId: input.slimProfileId } : {}),
+			...(input.agent ? { agent: input.agent } : {}),
+		};
+		this.#deviceRequests.set(request.id, request);
+		this.#touch();
+		return request;
+	}
+
+	#updateDeviceRequest(
+		request: LaneDeviceRequest,
+		patch: Partial<Pick<LaneDeviceRequest, 'status' | 'message' | 'laneId'>>
+	): LaneDeviceRequest {
+		const next = { ...request, ...patch, updatedAt: this.#now() };
+		this.#deviceRequests.set(next.id, next);
+		this.#touch();
+		return next;
+	}
+
+	/**
+	 * Settles a device request from the Lanes panel. `use` starts the lane on
+	 * the chosen Simulator; `clone` first clones it (the signed helper's clone
+	 * path, the same one the Simulator panel uses) and starts on the copy. A
+	 * start that fails leaves the request pending with the reason, so the user
+	 * can pick again and the agent keeps seeing an open request.
+	 */
+	async provideDevice(
+		input: Extract<LaneOperation, { kind: 'lane.provide-device' }>,
+		signal: AbortSignal
+	): Promise<LaneStartOutcome> {
+		const request = this.#deviceRequests.get(input.requestId);
+		if (!request) {
+			throw new Error(`Device request ${input.requestId} does not exist.`);
+		}
+		if (request.status !== 'pending') {
+			throw new Error(
+				`Device request ${input.requestId} is ${request.status}.`
+			);
+		}
+		if (input.decision === 'dismiss') {
+			return {
+				deviceRequest: this.#updateDeviceRequest(request, {
+					status: 'dismissed',
+					message: 'Dismissed by the operator.',
+				}),
+			};
+		}
+		if (!input.simulatorUdid) {
+			throw new Error(
+				`Choosing to ${input.decision} a Simulator needs its UDID.`
+			);
+		}
+		let current = this.#updateDeviceRequest(request, {
+			status: 'starting',
+			message:
+				input.decision === 'clone'
+					? 'Cloning the Simulator…'
+					: 'Starting the lane…',
+		});
+		try {
+			const simulatorUdid =
+				input.decision === 'clone'
+					? await this.#cloneDevice(input.simulatorUdid, request.branch, signal)
+					: input.simulatorUdid;
+			const outcome = await this.startLane(
+				{
+					actionId: input.actionId,
+					kind: 'lane.start',
+					worktreePath: current.appPath ?? current.worktreePath,
+					simulatorUdid,
+					environment: current.environment,
+					launch: current.launch,
+					...(current.preferredPort !== undefined
+						? { preferredPort: current.preferredPort }
+						: {}),
+					...(current.slimProfileId
+						? { slimProfileId: current.slimProfileId }
+						: {}),
+					...(current.agent ? { agent: current.agent } : {}),
+				},
+				signal
+			);
+			if (!outcome.lane) {
+				throw new Error('The lane did not start on the chosen Simulator.');
+			}
+			current = this.#updateDeviceRequest(current, {
+				status: 'fulfilled',
+				message: `Started on ${simulatorUdid}.`,
+				laneId: outcome.lane.id,
+			});
+			return { lane: outcome.lane };
+		} catch (error) {
+			this.#updateDeviceRequest(current, {
+				status: 'pending',
+				message: safeError(error),
+			});
+			throw error;
+		}
+	}
+
+	/** Clones a Simulator for a lane and returns the copy's UDID. */
+	async #cloneDevice(
+		sourceUdid: string,
+		branch: string,
+		signal: AbortSignal
+	): Promise<string> {
+		const before = this.#simulator.getState().devices;
+		const source = before.find(
+			(device) => device.udid.toUpperCase() === sourceUdid.toUpperCase()
+		);
+		if (!source) {
+			throw new Error(
+				'The Simulator to clone is not in the current inventory.'
+			);
+		}
+		const taken = new Set(before.map((device) => device.name));
+		const base = `${source.name} · ${branch}`.slice(0, 100);
+		let name = base;
+		for (let n = 2; taken.has(name); n += 1) name = `${base} ${n}`;
+		await this.#runSimulatorAction(
+			{
+				actionId: `lane-clone-${randomUUID()}`,
+				kind: 'device.clone',
+				udid: source.udid,
+				name,
+			},
+			signal
+		);
+		const clone = (await this.#simulator.refresh()).devices.find(
+			(device) =>
+				device.name === name &&
+				!before.some((known) => known.udid === device.udid)
+		);
+		if (!clone) {
+			throw new Error(`The clone "${name}" did not appear in the inventory.`);
+		}
+		return clone.udid;
 	}
 
 	/**
@@ -598,6 +880,14 @@ export class LaneService {
 		let changed = false;
 		const holds = this.#holds?.();
 		const now = this.#now();
+		for (const [id, request] of this.#deviceRequests) {
+			const settled =
+				request.status === 'fulfilled' || request.status === 'dismissed';
+			if (settled && now - request.updatedAt >= DEVICE_REQUEST_TTL_MS) {
+				this.#deviceRequests.delete(id);
+				changed = true;
+			}
+		}
 		for (const lane of this.#store.lanes()) {
 			const hold = holds?.get(lane.simulatorUdid.toUpperCase());
 			if (

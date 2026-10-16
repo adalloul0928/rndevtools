@@ -3,6 +3,7 @@ import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	Bot,
 	ChevronDown,
+	Copy,
 	FolderGit2,
 	FolderPlus,
 	Play,
@@ -40,6 +41,7 @@ import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
 import type {
 	Lane,
+	LaneDeviceRequest,
 	LaneEnvironment,
 	LaneState,
 	LaneWorktree,
@@ -327,6 +329,42 @@ export function LanesPanel() {
 			) : (
 				<div className="sim-fleet-layout">
 					<div className="sim-list-pane panel-scroll">
+						{lanes.state.deviceRequests
+							.filter(
+								(request) =>
+									request.status === 'pending' || request.status === 'starting'
+							)
+							.map((request) => (
+								<DeviceRequestCard
+									key={request.id}
+									devices={simulator.state.devices}
+									isBusy={lanes.pendingOperation !== null}
+									lanes={lanes.state.lanes}
+									request={request}
+									onDecide={async (decision, simulatorUdid) => {
+										const receipt = await lanes.runOperation(
+											{
+												kind: 'lane.provide-device',
+												requestId: request.id,
+												decision,
+												...(simulatorUdid ? { simulatorUdid } : {}),
+											},
+											decision === 'dismiss'
+												? { successMessage: 'Device request dismissed.' }
+												: {
+														pendingMessage:
+															decision === 'clone'
+																? 'Cloning the Simulator, then booting and starting Metro…'
+																: 'Booting the Simulator and starting Metro…',
+														successMessage: `Lane ${request.branch} started.`,
+													}
+										);
+										if (receipt?.completed && receipt.lane) {
+											setSelectedLaneId(receipt.lane.id);
+										}
+									}}
+								/>
+							))}
 						{lanes.state.lanes.length === 0 ? (
 							<div className="lane-empty">
 								<Waypoints className="h-5 w-5" />
@@ -646,6 +684,136 @@ function StartLaneForm({
 				</InfoPopover>
 			</p>
 		</form>
+	);
+}
+
+/**
+ * An agent ran `lane up` without a Simulator and none was free. Agents cannot
+ * create Simulators, so the user settles it here: start the lane on an
+ * existing device (held ones are labelled, the choice is theirs), on a fresh
+ * clone of one, or drop the request. A failed attempt leaves the card up with
+ * the reason.
+ */
+function DeviceRequestCard({
+	request,
+	devices,
+	lanes,
+	isBusy,
+	onDecide,
+}: {
+	request: LaneDeviceRequest;
+	devices: readonly SimulatorDevice[];
+	lanes: readonly Lane[];
+	isBusy: boolean;
+	onDecide: (
+		decision: 'use' | 'clone' | 'dismiss',
+		simulatorUdid?: string
+	) => Promise<void>;
+}) {
+	const { holdForSimulator } = useAgentRuntime();
+	const options = useMemo(
+		() => laneDeviceOptions(devices, lanes),
+		[devices, lanes]
+	);
+	const [udid, setUdid] = useState(
+		() => options.find((option) => !option.disabledReason)?.device.udid ?? ''
+	);
+	useEffect(() => {
+		if (udid && !options.some((option) => option.device.udid === udid)) {
+			setUdid('');
+		}
+	}, [options, udid]);
+	const chosen = options.find((option) => option.device.udid === udid);
+	const starting = request.status === 'starting';
+	const hold = udid ? holdForSimulator(udid) : undefined;
+	const who =
+		request.agent === undefined
+			? 'An agent'
+			: `A ${request.agent.kind} session (${request.agent.sessionId})`;
+	return (
+		<PanelNotice
+			title={
+				starting
+					? `Starting ${request.branch}…`
+					: `${request.branch} needs a Simulator.`
+			}
+			tone={starting ? 'info' : 'warning'}
+		>
+			{who} asked to run <code>{request.branch}</code>
+			{request.slimProfileId ? (
+				<>
+					{' '}
+					slimmed with <code>{request.slimProfileId}</code>
+				</>
+			) : null}{' '}
+			and no free Simulator was left. {request.message}
+			{starting ? null : (
+				<div className="lane-device-request-controls">
+					<NativeSelect fullWidth>
+						<NativeSelect.Trigger
+							aria-label="Simulator for the lane"
+							disabled={isBusy || options.length === 0}
+							value={udid}
+							onChange={(event) => setUdid(event.currentTarget.value)}
+						>
+							<NativeSelect.Option value="">
+								Choose a Simulator
+							</NativeSelect.Option>
+							{options.map(({ device, disabledReason }) => {
+								const deviceHold = holdForSimulator(device.udid);
+								const note =
+									disabledReason ??
+									(deviceHold
+										? `held by ${deviceHold.holder?.kind ?? 'operator'}`
+										: 'free');
+								return (
+									<NativeSelect.Option key={device.udid} value={device.udid}>
+										{device.name} · {device.state} · {note}
+									</NativeSelect.Option>
+								);
+							})}
+							<NativeSelect.Indicator>
+								<ChevronDown className="h-3 w-3" />
+							</NativeSelect.Indicator>
+						</NativeSelect.Trigger>
+					</NativeSelect>
+					<div className="sim-action-row">
+						<Button
+							isDisabled={isBusy || !chosen || Boolean(chosen.disabledReason)}
+							size="sm"
+							variant="primary"
+							onPress={() => void onDecide('use', udid)}
+						>
+							<Play className="h-3.5 w-3.5" />
+							{hold ? 'Use it anyway' : 'Use this Simulator'}
+						</Button>
+						<Button
+							isDisabled={isBusy || !chosen}
+							size="sm"
+							variant="secondary"
+							onPress={() => void onDecide('clone', udid)}
+						>
+							<Copy className="h-3.5 w-3.5" />
+							Clone it for this lane
+						</Button>
+						<Button
+							isDisabled={isBusy}
+							size="sm"
+							variant="ghost"
+							onPress={() => void onDecide('dismiss')}
+						>
+							Dismiss
+						</Button>
+					</div>
+					{hold ? (
+						<span className="sim-inline-note is-warning">
+							Another session holds this Simulator; starting the lane here takes
+							it from them.
+						</span>
+					) : null}
+				</div>
+			)}
+		</PanelNotice>
 	);
 }
 

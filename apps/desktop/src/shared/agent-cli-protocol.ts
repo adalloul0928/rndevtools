@@ -294,6 +294,11 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 					message: 'worktreePath must be absolute.',
 				})
 				.optional(),
+			/**
+			 * The Simulator for `up`. Omit it to let the desktop pick a free iPhone
+			 * (booted first); when none is free, the result carries a
+			 * `deviceRequest` the user settles in RN Devtools.
+			 */
 			udid: udidSchema.optional(),
 			environment: z
 				.string()
@@ -322,7 +327,6 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 			const valid =
 				(value.operation === 'up' &&
 					value.worktreePath !== undefined &&
-					value.udid !== undefined &&
 					only([
 						'operation',
 						'worktreePath',

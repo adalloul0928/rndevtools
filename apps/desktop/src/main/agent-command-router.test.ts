@@ -1295,6 +1295,7 @@ describe('agent command router', () => {
 					],
 					worktrees: [],
 					repositories: [],
+					deviceRequests: [],
 				}),
 				refresh: async () => lanes.getState(),
 				runOperation: async (operation: LaneOperation) => {
@@ -1574,6 +1575,7 @@ describe('agent command router', () => {
 			lanes: [lane],
 			worktrees: [],
 			repositories: [],
+			deviceRequests: [],
 		};
 		const operations: LaneOperation[] = [];
 		const inputs: unknown[] = [];
@@ -1680,6 +1682,86 @@ describe('agent command router', () => {
 		expect(inputs).toHaveLength(1);
 	});
 
+	it('lets lane up omit the udid: the lane service picks a device, and a parked request comes back with next steps', async () => {
+		const { dependencies } = fixture();
+		const stranger = { kind: 'codex' as const, sessionId: 'stranger-thread' };
+		const deviceRequest = {
+			id: 'device-request-1',
+			status: 'pending' as const,
+			requestedAt: now,
+			updatedAt: now,
+			message:
+				'All 2 available Simulators are in use: 2 by lanes, 0 claimed by other sessions.',
+			worktreePath: '/Users/dev/app-feature',
+			branch: 'feature',
+			environment: 'development',
+			launch: true,
+			agent: stranger,
+		};
+		const state: LaneState = {
+			revision: 1,
+			updatedAt: now,
+			environments: [...DEFAULT_LANE_ENVIRONMENTS],
+			lanes: [],
+			worktrees: [],
+			repositories: [],
+			deviceRequests: [deviceRequest],
+		};
+		const operations: LaneOperation[] = [];
+		let accessChecks = 0;
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			agents: {
+				getState: () => {
+					throw new Error('unused');
+				},
+				refresh: async () => {
+					throw new Error('unused');
+				},
+				runOperation: async () => {
+					throw new Error('unused');
+				},
+				touch: () => undefined,
+				access: () => {
+					accessChecks += 1;
+					return { allowed: true };
+				},
+			},
+			lanes: {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async (operation: LaneOperation) => {
+					operations.push(operation);
+					return { ...operation, completed: true, deviceRequest, state };
+				},
+			},
+		});
+
+		const result = (await handler(
+			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app-feature' },
+			{ ...context, agent: stranger }
+		)) as { completed: boolean; deviceRequest?: unknown; next?: string };
+		// No device named, so nothing to check ownership against.
+		expect(accessChecks).toBe(0);
+		expect(operations[0]).toMatchObject({
+			kind: 'lane.start',
+			worktreePath: '/Users/dev/app-feature',
+		});
+		expect(operations[0]).not.toHaveProperty('simulatorUdid');
+		expect(result.completed).toBe(true);
+		expect(result.deviceRequest).toMatchObject({
+			id: 'device-request-1',
+			status: 'pending',
+		});
+		expect(result.next).toMatch(/Poll lane --operation ls/);
+		expect(result.next).toContain('device-request-1');
+
+		// `ls` carries the requests so the agent can follow the outcome.
+		await expect(
+			handler({ kind: 'lane', operation: 'ls' }, context)
+		).resolves.toMatchObject({ deviceRequests: [deviceRequest] });
+	});
+
 	it('routes lane up/launch/down/log through the lane service and resolves worktree targets', async () => {
 		const { dependencies } = fixture();
 		const lane: Lane = {
@@ -1702,6 +1784,7 @@ describe('agent command router', () => {
 			lanes: [],
 			worktrees: [],
 			repositories: [],
+			deviceRequests: [],
 		};
 		const operations: LaneOperation[] = [];
 		const runOptions: unknown[] = [];
@@ -1802,6 +1885,7 @@ describe('agent command router', () => {
 				lanes: [],
 				worktrees: [],
 				repositories: [],
+				deviceRequests: [],
 			}),
 			refresh: async () => ({
 				revision: 1,
@@ -1810,6 +1894,7 @@ describe('agent command router', () => {
 				lanes: [],
 				worktrees: [],
 				repositories: [],
+				deviceRequests: [],
 			}),
 			runOperation: async (operation: LaneOperation) => ({
 				actionId: operation.actionId,

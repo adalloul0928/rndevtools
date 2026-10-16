@@ -5308,6 +5308,13 @@ button:disabled {
 	color: #929292;
 }
 
+.lane-device-request-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-top: 12px;
+}
+
 .lane-empty {
 	display: flex;
 	height: 100%;
