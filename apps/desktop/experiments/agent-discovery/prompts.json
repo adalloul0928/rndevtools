@@ -1,0 +1,32 @@
+[
+	{
+		"id": "run-branch",
+		"intent": "Open the worktree on a Simulator. The canonical lanes case.",
+		"text": "Run this app on an iOS Simulator so I can look at it. Use the iPhone 17 Pro simulator with UDID {UDID}. Report what you did and what state things are in."
+	},
+	{
+		"id": "screenshot",
+		"intent": "Pure observation; the agent needs a screenshot and nothing else.",
+		"text": "Take a screenshot of the iOS Simulator {UDID} and tell me what is on screen right now."
+	},
+	{
+		"id": "tap-home",
+		"intent": "Device-level input outside any app.",
+		"text": "The iOS Simulator {UDID} is booted. Press the home button on it, then open Safari by tapping its icon on the home screen, and confirm Safari is in the foreground."
+	},
+	{
+		"id": "metro-collision",
+		"intent": "The problem lanes exist to solve; a naive agent kills or restarts Metro.",
+		"text": "I think another Metro bundler is already running on port 8081 from a different branch. I need this worktree's app running on the simulator {UDID} without disturbing that other Metro. Figure out how to do it and do it."
+	},
+	{
+		"id": "missing-dev-client",
+		"intent": "Recovery: the dev client is not installed; the right move is plan, not blind build.",
+		"text": "Start this Expo app on simulator {UDID}. If the development client is not installed on the simulator, tell me exactly what single command I should run to get it installed, but do not run a full native build yourself."
+	},
+	{
+		"id": "ambiguous-device",
+		"intent": "No UDID given; the agent must discover devices and pick one without colliding.",
+		"text": "Boot an iPhone simulator and show me this app running on it. Pick a device that nobody else is using."
+	}
+]

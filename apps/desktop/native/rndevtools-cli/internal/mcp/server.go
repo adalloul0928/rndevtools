@@ -229,8 +229,8 @@ const instructions = `RN Devtools controls the iOS Simulators on this Mac. Use t
 	`boot, shutdown, openurl, install, launch, or io directly, and do not start Metro by hand: ` +
 	`several agents share these Simulators and the desktop app owns their ports and claims. ` +
 	`Start with lane (operation "up") for a worktree, or simulators to see what exists. Before ` +
-	`driving a device another session may be using, check agents. Results carry "recovery" text ` +
-	`and the lane result carries "nextActions"; follow them before improvising.`
+	`driving a device another session may be using, check agents. Errors carry "recovery" text and ` +
+	`native plan carries a "recommendation"; follow them before improvising.`
 
 // Tool is one MCP tool entry.
 type Tool struct {

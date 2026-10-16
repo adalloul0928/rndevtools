@@ -76,8 +76,9 @@ var toolMeta = map[protocol.Command]meta{
 			"simulator, start the app for a worktree, or fix a Metro port clash. operation \"up\" needs the " +
 			"absolute worktree path and the Simulator udid (pick one from simulators; prefer a booted, unclaimed " +
 			"device). It boots the device, starts Metro, and opens the dev client; if the dev client is not " +
-			"installed the result says so and nextActions carries the exact build or install step (see the native " +
-			"tool). \"down\" stops Metro and releases the port (lane-id). \"ls\" lists lanes. \"launch\" re-opens " +
+			"installed the error says so and names the build command; call the native tool (operation plan) " +
+			"before building. Calling up again for the same worktree and Simulator returns the existing lane and " +
+			"relaunches. \"down\" stops Metro and releases the port (lane-id). \"ls\" lists lanes. \"launch\" re-opens " +
 			"the dev client or a deep link (lane-id, url). \"log\" tails Metro (lane-id, max-characters). Optional " +
 			"slim requests a SimSlim profile; it reports needs-approval until an operator approves it in the app.",
 	},
@@ -125,10 +126,11 @@ var toolMeta = map[protocol.Command]meta{
 		title: "Plan or install the native app build",
 		description: "operation \"plan\" fingerprints an Expo worktree's native code and reports whether a matching dev-client " +
 			"build is already installed on the Simulator, cached, or must be built, with the exact command in " +
-			"nextActions; it builds nothing and takes about two seconds. Call it when lane up reports the dev " +
+			"its recommendation (installed: / install: / build:); it builds nothing and takes about two seconds. Call it when lane up reports the dev " +
 			"client is missing, and before running expo run:ios yourself. operation \"install\" puts a cached " +
 			"build on the Simulator (udid). worktree is the absolute app directory; configuration Debug (default) " +
-			"or Release.",
+			"or Release. A first native build takes 5-15 minutes; tell the user it is running rather than waiting " +
+			"silently, and do not restart it. If the user asked you not to build, report the command instead.",
 		readOnly: false,
 	},
 	protocol.CommandAgents: {

@@ -1,13 +1,17 @@
 ---
 name: rndevtools-lanes
 description: >
-  Run React Native worktrees on their own iOS Simulators through RN Devtools
-  lanes. Use this skill whenever a coding agent needs to open a Simulator for a
-  git worktree or branch, start Metro without colliding with another agent's
-  port, launch the Expo dev client against that Metro, drive or inspect the app
-  that is running there, or clean up when the work is done — including requests
-  phrased as "run this branch", "open the simulator", "start the app for my
-  worktree", or "fix a Metro port collision".
+  Use RN Devtools for anything involving an iOS Simulator on this Mac: running
+  a React Native worktree or branch on its own Simulator (lanes with a leased
+  Metro port, so agents never collide on 8081 or a shared device), taking a
+  screenshot of a Simulator, tapping, swiping, or typing on it, pressing its
+  home or lock button, checking which Simulators exist and which other agents
+  hold them, launching or deep-linking the dev client, finding out whether the
+  native build is installed or cached, and cleaning up. Trigger on requests
+  like "run this branch", "open the simulator", "screenshot the simulator",
+  "tap X on the device", "start the app for my worktree", "pick a free
+  simulator", or "fix a Metro port collision". Never drive a Simulator with
+  xcrun simctl boot/shutdown/openurl/install/launch/io, idb, or axe directly.
 ---
 
 # RN Devtools lanes
@@ -94,6 +98,11 @@ result includes `lane.id`, `lane.port`, `lane.simulatorUdid`, and `lane.metro`
 (`starting` | `ready` | `stopped`). Pass `--launch=false` to lease and start
 Metro without opening the app.
 
+Running `lane up` again for the same worktree and Simulator is safe: it
+returns the existing lane, restarts Metro on the lane's port if it died, and
+relaunches. A lane for the same app on a *different* Simulator, or another
+app's lane on that Simulator, is a conflict; use `lane ls` to see which.
+
 Add `--slim <profileId>` (ids come from `rndevtools slimming --operation
 status`, e.g. `rndevtools-development`) to request a slimmer Simulator. The
 response's `lane.slim` tells you where it stands: `needs-approval` (waiting on
@@ -121,7 +130,7 @@ on:
 | --- | --- |
 | `installed:` | Nothing; launch the lane. |
 | `install:` | `rndevtools native --operation install --worktree "$PWD" --udid <UDID>` puts the cached binary on the Simulator in seconds. |
-| `build:` | Run the quoted `npx expo run:ios … --no-bundler` once. The build cache stores the result for every other worktree with the same fingerprint. |
+| `build:` | Run the quoted `npx expo run:ios … --no-bundler` once. The build cache stores the result for every other worktree with the same fingerprint. A first native build compiles CocoaPods and React Native and commonly takes 5–15 minutes; tell the user it is running rather than waiting silently, and do not restart it. If the user asked you not to build, report the exact command instead. |
 
 A JavaScript-only branch reports the same `fingerprintHash` as the branch it
 came from, so it is a cache hit, never a build. Then:
