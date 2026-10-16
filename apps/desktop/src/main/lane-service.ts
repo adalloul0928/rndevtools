@@ -18,6 +18,7 @@ import {
 	type LaneSlim,
 	type LaneState,
 	type LaneWorktree,
+	laneAppDirectory,
 	laneDeepLink,
 	laneDevClientLaunchUrl,
 	laneOperationReceiptSchema,
@@ -379,6 +380,25 @@ export class LaneService {
 		}
 		const worktreePath = worktree.path;
 		const appPath = requestedPath === worktreePath ? undefined : requestedPath;
+		// Starting the lane that already exists for this app on this Simulator is
+		// idempotent: agents retry `lane up` after an interruption, and a second
+		// attempt should land them in the lane rather than at a conflict they
+		// cannot resolve. A lane on another Simulator, or another app's lane on
+		// this Simulator, is still a conflict.
+		const candidateApp = laneAppDirectory({
+			worktreePath,
+			...(appPath ? { appPath } : {}),
+		});
+		const existing = this.#store
+			.lanes()
+			.find(
+				(lane) =>
+					laneAppDirectory(lane) === candidateApp &&
+					lane.simulatorUdid.toUpperCase() === input.simulatorUdid.toUpperCase()
+			);
+		if (existing) {
+			return this.#resumeLane(existing, input, environment, signal);
+		}
 		const conflict = findLaneConflict(this.#store.lanes(), {
 			worktreePath,
 			...(appPath ? { appPath } : {}),
@@ -528,6 +548,45 @@ export class LaneService {
 		this.#touch();
 		if (slim.status === 'applied' && lane.metro === 'ready' && lane.scheme) {
 			lane = await this.launchLane(laneId, undefined, undefined, signal);
+		}
+		return lane;
+	}
+
+	/**
+	 * Brings an existing lane back to running for a repeated `lane up`: if its
+	 * Metro is gone, start a fresh one on the lane's own port; then launch the
+	 * dev client when asked. The lane keeps its id, port, and log.
+	 */
+	async #resumeLane(
+		existing: Lane,
+		input: Extract<LaneOperation, { kind: 'lane.start' }>,
+		environment: LaneEnvironment,
+		signal: AbortSignal
+	): Promise<Lane> {
+		let lane = existing;
+		const metroAlive =
+			(await this.#metro.isHealthy(lane.port)) ||
+			(lane.metroPid !== undefined &&
+				this.#metro.isProcessRunning(lane.metroPid));
+		if (!metroAlive) {
+			const metroPid = await this.#metro.start({
+				worktreePath: laneAppDirectory(lane),
+				port: lane.port,
+				logPath: lane.logPath,
+				maxWorkers: this.#maxWorkers,
+				...(environment.metroEnv ? { metroEnv: environment.metroEnv } : {}),
+			});
+			lane = {
+				...lane,
+				metroPid,
+				metro: 'starting',
+				startedAt: this.#now(),
+			};
+			await this.#store.upsert(lane);
+			this.#touch();
+		}
+		if (input.launch) {
+			lane = await this.launchLane(lane.id, undefined, input.agent, signal);
 		}
 		return lane;
 	}

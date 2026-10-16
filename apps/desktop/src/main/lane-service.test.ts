@@ -422,6 +422,55 @@ describe('LaneService', () => {
 		]);
 	});
 
+	it('treats a repeated lane up for the same app and Simulator as a resume', async () => {
+		metro.healthyPorts.add(8_100);
+		const first = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		expect(first.completed).toBe(true);
+		const laneId = first.lane?.id;
+		expect(metro.started).toHaveLength(1);
+
+		// Metro still healthy: nothing restarts, the same lane comes back.
+		const again = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID.toLowerCase(),
+			environment: 'development',
+			launch: false,
+		});
+		expect(again.completed).toBe(true);
+		expect(again.lane?.id).toBe(laneId);
+		expect(metro.started).toHaveLength(1);
+		expect(service.getState().lanes).toHaveLength(1);
+
+		// Metro died: resume starts a new one on the lane's own port.
+		metro.healthyPorts.delete(8_100);
+		metro.deadPids.add(first.lane?.metroPid ?? -1);
+		const resumed = await service.runOperation({
+			actionId: 'op-3',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		expect(resumed.completed).toBe(true);
+		expect(resumed.lane?.id).toBe(laneId);
+		expect(metro.started).toHaveLength(2);
+		expect(metro.started[1]).toMatchObject({
+			port: 8_100,
+			worktreePath: WORKTREE,
+		});
+		expect(resumed.lane?.metroPid).not.toBe(first.lane?.metroPid);
+	});
+
 	it('refuses to steal a worktree, a simulator, or a leased port', async () => {
 		metro.healthyPorts.add(8_100);
 		metro.healthyPorts.add(8_101);
