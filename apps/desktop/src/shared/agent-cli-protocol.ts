@@ -244,7 +244,20 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 		udid: udidSchema,
 		note: z.string().max(4_096).optional(),
 	}),
-	z.strictObject({ kind: z.literal('release'), udid: udidSchema }),
+	z
+		.strictObject({
+			kind: z.literal('release'),
+			udid: udidSchema.optional(),
+			/**
+			 * Release everything this session holds: stop its lanes and drop its
+			 * claims. What a session-end hook calls so devices return to the pool
+			 * the moment an agent exits, rather than after the grace period.
+			 */
+			all: z.boolean().optional(),
+		})
+		.refine((value) => Boolean(value.udid) !== Boolean(value.all), {
+			message: 'release takes exactly one of udid or all.',
+		}),
 	z
 		.strictObject({
 			kind: z.literal('lane'),

@@ -55,18 +55,24 @@ a private local socket.
   `CODEX_THREAD_ID` on every request, so each Simulator you touch is shown with
   your session in the desktop's Agents view for 30 minutes. Other agents can
   export `RNDEVTOOLS_AGENT_SESSION_ID`.
-- **Check who else is on a device before you drive it.** `rndevtools agents`
-  lists live Claude Code and Codex sessions and the Simulators each is attached
-  to (`claim`, `touch`, or `lane`). Never drive a Simulator another live session
-  has **claimed**. Make your own ownership explicit for longer work:
+- **A Simulator is free or held.** It is held while a lane runs on it or a
+  session has claimed it, and only the holder may boot, drive, slim, or stop
+  it. The desktop enforces this: `lane up`, `lane down`, `input`, and slimming
+  on a device another session holds fail with `device_held`, naming the
+  holder. `rndevtools agents` lists every hold (`holds`: device, holder, via
+  `lane` or `claim`, whether the holder is still alive) and the live sessions,
+  so pick a device with no hold. Make your own hold explicit for work that is
+  not a lane:
 
   ```bash
   rndevtools claim --udid <UDID> --note "reviewing the checkout flow"
-  rndevtools release --udid <UDID>      # when you are done
+  rndevtools release --udid <UDID>      # that one device
+  rndevtools release --all              # everything this session holds: lanes stopped, claims dropped
   ```
 
-  Claims are a convention agents follow, not a lock; they expire once your
-  session has been gone for 30 minutes.
+  A hold whose session has exited is released by the desktop after 10 minutes;
+  the session-end hook that `rndevtools setup` installs releases it at once.
+  Run `release --all` yourself when you finish, so nobody waits those minutes.
 - **You can request slimming, not perform it.** `lane up --slim <profileId>`
   asks the desktop to apply a SimSlim profile to the lane's Simulator. The CLI
   has no way to approve a Simulator mutation, so the lane comes back with
@@ -196,7 +202,12 @@ what changed; the result only says the Simulator acknowledged the gesture.
 
 ```bash
 rndevtools lane --operation down --worktree "$PWD"     # or --lane-id <lane.id>
+rndevtools release --all                               # when the whole task is done
 ```
+
+`lane down` ends one lane and frees its Simulator and port. `release --all`
+ends every lane this session owns and drops its claims; it is what the
+session-end hook runs, so a clean exit releases everything even if you forget.
 
 ## Report
 

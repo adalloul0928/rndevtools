@@ -307,11 +307,27 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			Kind string  `json:"kind"`
 			UDID *string `json:"udid,omitempty"`
 			Note *string `json:"note,omitempty"`
+			All  *bool   `json:"all,omitempty"`
 		}
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
 			return err
 		}
+		if value.All != nil {
+			if expectedKind != protocol.CommandRelease {
+				return errors.New("claim does not accept all")
+			}
+			if value.UDID != nil {
+				return errors.New("release takes exactly one of udid or all")
+			}
+			if !*value.All {
+				return errors.New("all must be true when given")
+			}
+			return nil
+		}
 		if value.UDID == nil {
+			if expectedKind == protocol.CommandRelease {
+				return errors.New("release requires udid or all")
+			}
 			return fmt.Errorf("%s requires udid", expectedKind)
 		}
 		if err := validateUDID(*value.UDID); err != nil {

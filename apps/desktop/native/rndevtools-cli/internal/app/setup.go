@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adalloul0928/rndevtools-cli/internal/client"
+	"github.com/adalloul0928/rndevtools-cli/internal/command"
 	"github.com/adalloul0928/rndevtools-cli/internal/protocol"
 	"github.com/adalloul0928/rndevtools-cli/internal/setup"
 )
@@ -25,8 +27,11 @@ for Simulators instead of raw simctl:
     Codex (~/.codex/config.toml), Cursor (~/.cursor/mcp.json), and Kiro
     (~/.kiro/settings/mcp.json)
   * installs the rndevtools-lanes skill where each agent discovers skills
-  * adds a Claude Code PreToolUse hook that redirects simctl boot/shutdown/
-    openurl/install/launch/io and hand-started Metro to rndevtools
+  * adds hooks for Claude Code (~/.claude/settings.json) and Codex
+    (~/.codex/hooks.json): PreToolUse redirects simctl boot/shutdown/openurl/
+    install/launch/io and hand-started Metro to rndevtools; SessionEnd
+    releases the session's lanes and claims. Codex runs new hooks only after
+    you trust them once with /hooks
   * with --project, also installs the skill into that repository and adds an
     "iOS Simulators" block to its AGENTS.md
 
@@ -40,7 +45,7 @@ Flags:
                                      AGENTS.md block.
   --dry-run                          Print the plan; change nothing.
   --no-link                          Do not touch ~/.local/bin.
-  --no-hook                          Do not install the Claude Code hook.
+  --no-hook                          Do not install the agent hooks.
   --executable <path>                Register this binary instead of the
                                      running one (for packaged installs).
 `
@@ -108,11 +113,12 @@ func runSetup(config Config) int {
 	}
 	health := setupDoctor(config)
 	writeJSON(config.Stdout, map[string]any{
-		"dryRun":      *dryRun,
-		"executable":  report.Executable,
-		"changes":     report.Changes,
-		"agentsBlock": report.AgentsBlock,
-		"doctor":      health,
+		"dryRun":              *dryRun,
+		"executable":          report.Executable,
+		"changes":             report.Changes,
+		"agentsBlock":         report.AgentsBlock,
+		"codexHooksNeedTrust": report.CodexHooksNeedTrust,
+		"doctor":              health,
 	})
 	return ExitSuccess
 }
@@ -158,17 +164,96 @@ func setupDoctor(config Config) map[string]any {
 // agent hooks call. Decisions are communicated the way each agent expects:
 // Claude Code reads exit status 2 as "block" and shows stderr to the model.
 func runHook(config Config) int {
-	if len(config.Arguments) < 2 || config.Arguments[1] != "claude-pre-tool-use" {
-		fmt.Fprint(config.Stdout, "Usage: rndevtools hook claude-pre-tool-use\n\nReads a Claude Code PreToolUse payload on stdin and exits 2 when the Bash command should be redirected to rndevtools.\n")
-		if len(config.Arguments) >= 2 && (config.Arguments[1] == "--help" || config.Arguments[1] == "help") {
-			return ExitSuccess
+	event := ""
+	if len(config.Arguments) >= 2 {
+		event = config.Arguments[1]
+	}
+	switch event {
+	case "pre-tool-use", "claude-pre-tool-use":
+		// Claude Code and Codex send the same payload and read the same verdict.
+		decision := setup.EvaluateClaudePreToolUse(config.Stdin)
+		if decision.Block {
+			fmt.Fprintln(config.Stderr, decision.Reason)
+			return 2
 		}
+		return ExitSuccess
+	case "session-end":
+		return runSessionEndHook(config)
+	case "--help", "help":
+		fmt.Fprint(config.Stdout, hookUsage)
+		return ExitSuccess
+	default:
+		fmt.Fprint(config.Stdout, hookUsage)
 		return ExitUsage
 	}
-	decision := setup.EvaluateClaudePreToolUse(config.Stdin)
-	if decision.Block {
-		fmt.Fprintln(config.Stderr, decision.Reason)
-		return 2
+}
+
+const hookUsage = `Usage: rndevtools hook <event>
+
+Entry points for the agent hooks that setup installs. Each reads the agent's
+JSON payload on stdin.
+
+  pre-tool-use   Exit 2 (block, reason on stderr) when a Bash command drives a
+                 Simulator around RN Devtools: simctl boot/shutdown/openurl/
+                 install/launch/io and friends, or a hand-started Metro.
+  session-end    Release everything the ending session holds: stop its lanes,
+                 drop its claims. Devices return to the pool at once instead of
+                 after the grace period.
+`
+
+// runSessionEndHook releases the ending session's lanes and claims. The
+// session id comes from the payload (both agents send one); the environment
+// variables are a fallback. Nothing is fatal here: a hook that fails loudly on
+// exit helps nobody, so problems go to stderr and the exit status stays 0.
+func runSessionEndHook(config Config) int {
+	payload := setup.ReadSessionEnd(config.Stdin)
+	agent := command.AgentFromEnvironment(os.Getenv)
+	if payload.SessionID != "" {
+		kind := "other"
+		if agent != nil {
+			kind, _ = agent["kind"].(string)
+		} else if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "" || os.Getenv("CLAUDE_PROJECT_DIR") != "" {
+			kind = "claude"
+		} else if os.Getenv("CODEX_HOME") != "" || os.Getenv("CODEX_SANDBOX") != "" {
+			kind = "codex"
+		}
+		agent = map[string]any{"kind": kind, "sessionId": payload.SessionID}
+	}
+	if agent == nil {
+		fmt.Fprintln(config.Stderr, "rndevtools hook session-end: no session id in the payload or environment; nothing to release")
+		return ExitSuccess
+	}
+	socketPath := config.SocketPath
+	if socketPath == "" {
+		resolved, err := client.DefaultSocketPath()
+		if err != nil {
+			fmt.Fprintln(config.Stderr, "rndevtools hook session-end:", err)
+			return ExitSuccess
+		}
+		socketPath = resolved
+	}
+	// Two seconds leaves headroom inside Codex's three-second SessionEnd cap.
+	localClient, err := client.New(socketPath, 2*time.Second)
+	if err != nil {
+		fmt.Fprintln(config.Stderr, "rndevtools hook session-end:", err)
+		return ExitSuccess
+	}
+	requestID, err := newRequestID()
+	if err != nil {
+		return ExitSuccess
+	}
+	response, err := localClient.Do(context.Background(), protocol.Request{
+		Protocol: protocol.Name,
+		ID:       requestID,
+		Command:  json.RawMessage(`{"kind":"release","all":true}`),
+		Agent:    agent,
+	})
+	if err != nil {
+		// The desktop is not running: there is nothing holding a lane either.
+		return ExitSuccess
+	}
+	if !response.OK && response.Error != nil {
+		fmt.Fprintln(config.Stderr, "rndevtools hook session-end:", response.Error.Message)
 	}
 	return ExitSuccess
 }

@@ -34,6 +34,20 @@ describe('summarizeAgentCliSetup', () => {
 			'Skipped ~/.cursor/mcp.json: not valid JSON; fix it by hand, then rerun setup',
 			'Agents can reach RN Devtools now.',
 		]);
+		expect(
+			summarizeAgentCliSetup(
+				JSON.stringify({
+					executable: '/x',
+					changes: [],
+					doctor: { ok: true },
+					codexHooksNeedTrust: true,
+				}),
+				'/Users/me'
+			)
+		).toEqual([
+			'Codex runs new hooks only after you trust them: open Codex and run /hooks.',
+			'Agents can reach RN Devtools now.',
+		]);
 	});
 
 	it('explains an unreachable desktop and rejects an unexpected report', () => {

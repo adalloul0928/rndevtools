@@ -413,6 +413,72 @@ function ensureComplete<T extends { status: string; message: string }>(
  * operator (no agent on the request) is never refused here; the lane and
  * slimming services keep their own structural rules.
  */
+/**
+ * Stops every lane and drops every claim the calling session holds. Each
+ * failure is reported rather than aborting the rest, because a session-end
+ * hook has one shot and a half-released pool is better than none.
+ */
+async function releaseEverything(
+	agents: AgentPort,
+	lanes: LanePort | undefined,
+	context: Parameters<AgentCliHandler>[1]
+): Promise<unknown> {
+	const agent = context.agent;
+	if (!agent) {
+		throw new AgentCliError({
+			code: 'no_agent_session',
+			message: 'release --all needs an agent session to release on behalf of.',
+			retryable: false,
+			recovery:
+				'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
+		});
+	}
+	const key = `${agent.kind}:${agent.sessionId}`;
+	const stopped: string[] = [];
+	const released: string[] = [];
+	const errors: string[] = [];
+	for (const lane of lanes?.getState().lanes ?? []) {
+		if (!lane.agent || `${lane.agent.kind}:${lane.agent.sessionId}` !== key)
+			continue;
+		try {
+			await lanes?.runOperation(
+				{
+					actionId: actionId(context.requestId),
+					kind: 'lane.stop',
+					laneId: lane.id,
+				},
+				context.signal
+			);
+			stopped.push(lane.id);
+		} catch (error) {
+			errors.push(
+				`lane ${lane.id}: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+	}
+	for (const claim of agents.getState().claims) {
+		if (`${claim.kind}:${claim.sessionId}` !== key) continue;
+		try {
+			await agents.runOperation({
+				kind: 'agent.release',
+				simulatorUdid: claim.simulatorUdid,
+				agent,
+			});
+			released.push(claim.simulatorUdid);
+		} catch (error) {
+			errors.push(
+				`claim ${claim.simulatorUdid}: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+	}
+	return {
+		you: agent,
+		stoppedLanes: stopped,
+		releasedClaims: released,
+		errors,
+	};
+}
+
 function assertDeviceAccess(
 	agents: AgentPort | undefined,
 	simulatorUdid: string,
@@ -715,6 +781,9 @@ function createRoutes({
 						agents: attached,
 					})),
 					claims: state.claims,
+					// Which Simulators are held, by whom, and whether that holder is
+					// still alive: the direct answer to "which device may I take".
+					holds: Object.values(state.holds),
 					discovery: state.discovery,
 					...(context.agent ? { you: context.agent } : {}),
 				};
@@ -737,7 +806,13 @@ function createRoutes({
 							'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
 					});
 				}
-				const target = simulatorByUdid(await simulator.refresh(), command.udid);
+				if (command.kind === 'release' && command.all) {
+					return releaseEverything(agents, lanes, context);
+				}
+				const target = simulatorByUdid(
+					await simulator.refresh(),
+					command.udid ?? required('release requires udid or all.')
+				);
 				const state = await agents.runOperation(
 					command.kind === 'claim'
 						? {

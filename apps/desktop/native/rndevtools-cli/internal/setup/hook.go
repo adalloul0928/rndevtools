@@ -86,3 +86,19 @@ func EvaluateShellCommand(command string) HookDecision {
 	}
 	return HookDecision{}
 }
+
+// SessionEndPayload is what both agents send a SessionEnd hook on stdin. Only
+// the session id matters here: it names whose lanes and claims to release.
+type SessionEndPayload struct {
+	SessionID string `json:"session_id"`
+	Reason    string `json:"reason"`
+}
+
+// ReadSessionEnd parses a SessionEnd payload. Unparseable input yields an
+// empty id; the caller then falls back to the session variables in its
+// environment, and releases nothing if those are absent too.
+func ReadSessionEnd(input io.Reader) SessionEndPayload {
+	var payload SessionEndPayload
+	_ = json.NewDecoder(io.LimitReader(input, 1<<20)).Decode(&payload)
+	return payload
+}

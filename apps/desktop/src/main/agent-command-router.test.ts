@@ -23,6 +23,7 @@ import { createAgentCommandRouter } from './agent-command-router';
 import { NativeHostResponseError } from './native-host-client';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
+const OTHER_UDID = 'BBBBBBBB-0000-4000-8000-000000000002';
 const now = 1_800_000_000_000;
 
 function desktopState(): DesktopState {
@@ -1135,6 +1136,91 @@ describe('agent command router', () => {
 				simulatorUdid: UDID,
 				agent: session,
 			});
+		});
+
+		it('release --all stops the lanes and drops the claims of the calling session only', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
+			const other = { kind: 'codex' as const, sessionId: 'codex-2' };
+			port
+				.getState()
+				.claims.push(
+					{ simulatorUdid: UDID, ...me, claimedAt: now },
+					{ simulatorUdid: OTHER_UDID, ...other, claimedAt: now }
+				);
+			const laneOperations: LaneOperation[] = [];
+			const lanes = {
+				getState: () => ({
+					revision: 1,
+					updatedAt: now,
+					environments: [...DEFAULT_LANE_ENVIRONMENTS],
+					lanes: [
+						{
+							id: 'lane-11111111-2222-4333-8444-555555555555',
+							worktreePath: '/Users/dev/mine',
+							branch: 'mine',
+							simulatorUdid: UDID,
+							environment: 'development' as const,
+							port: 8_100,
+							metro: 'ready' as const,
+							logPath: '/Users/dev/mine.log',
+							startedAt: now,
+							agent: { ...me, lastSeenAt: now },
+						},
+						{
+							id: 'lane-22222222-2222-4333-8444-555555555555',
+							worktreePath: '/Users/dev/theirs',
+							branch: 'theirs',
+							simulatorUdid: OTHER_UDID,
+							environment: 'development' as const,
+							port: 8_101,
+							metro: 'ready' as const,
+							logPath: '/Users/dev/theirs.log',
+							startedAt: now,
+							agent: { ...other, lastSeenAt: now },
+						},
+					],
+					worktrees: [],
+					repositories: [],
+				}),
+				refresh: async () => lanes.getState(),
+				runOperation: async (operation: LaneOperation) => {
+					laneOperations.push(operation);
+					return { ...operation, completed: true, state: lanes.getState() };
+				},
+			};
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+				lanes,
+			});
+			const result = (await handler(
+				{ kind: 'release', all: true },
+				{ ...context, agent: me }
+			)) as {
+				stoppedLanes: string[];
+				releasedClaims: string[];
+				errors: string[];
+			};
+			expect(result).toEqual({
+				you: me,
+				stoppedLanes: ['lane-11111111-2222-4333-8444-555555555555'],
+				releasedClaims: [UDID],
+				errors: [],
+			});
+			expect(laneOperations).toEqual([
+				expect.objectContaining({
+					kind: 'lane.stop',
+					laneId: 'lane-11111111-2222-4333-8444-555555555555',
+				}),
+			]);
+			expect(operations).toEqual([
+				{ kind: 'agent.release', simulatorUdid: UDID, agent: me },
+			]);
+			await expect(
+				handler({ kind: 'release', all: true }, context)
+			).rejects.toMatchObject({ code: 'no_agent_session' });
 		});
 
 		it('records a touch for every device-targeted command that carried a session, after it succeeds', async () => {

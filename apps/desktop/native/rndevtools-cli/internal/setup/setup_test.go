@@ -61,6 +61,7 @@ func TestApplyInstallsEverythingAndIsIdempotent(t *testing.T) {
 		home[len(filepath.Dir(home))+1:] + "/.claude.json": "update",
 		".claude/settings.json":                            "update",
 		".codex/config.toml":                               "update",
+		".codex/hooks.json":                                "create",
 		"settings/mcp.json":                                "create",
 		"skills/rndevtools-lanes":                          "create",
 	} {
@@ -97,8 +98,29 @@ func TestApplyInstallsEverythingAndIsIdempotent(t *testing.T) {
 	if len(pre) != 1 || pre[0].(map[string]any)["matcher"] != "Bash" {
 		t.Fatalf("PreToolUse hook: %v", pre)
 	}
-	if !strings.Contains(pre[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string), "hook claude-pre-tool-use") {
+	if !strings.Contains(pre[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string), "hook pre-tool-use") {
 		t.Fatalf("hook command: %v", pre[0])
+	}
+	end := hooks["SessionEnd"].([]any)
+	if len(end) != 1 || !strings.Contains(end[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string), "hook session-end") {
+		t.Fatalf("SessionEnd hook: %v", end)
+	}
+	if end[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["timeout"] != float64(3) {
+		t.Fatalf("SessionEnd must fit Codex's 3 s cap: %v", end[0])
+	}
+
+	// Codex gets the same two hooks in its own file, and setup says they need trusting.
+	codexHooks := readJSON(t, filepath.Join(home, ".codex", "hooks.json"))["hooks"].(map[string]any)
+	if len(codexHooks["PreToolUse"].([]any)) != 1 || len(codexHooks["SessionEnd"].([]any)) != 1 {
+		t.Fatalf("codex hooks: %v", codexHooks)
+	}
+	if !first.CodexHooksNeedTrust {
+		t.Fatal("setup must report that Codex hooks need trusting")
+	}
+	for _, change := range first.Changes {
+		if strings.HasSuffix(change.Path, ".codex/hooks.json") && !strings.Contains(change.Detail, "/hooks") {
+			t.Fatalf("codex hook change must mention /hooks: %+v", change)
+		}
 	}
 
 	codex, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
@@ -139,6 +161,9 @@ func TestApplyInstallsEverythingAndIsIdempotent(t *testing.T) {
 		if change.Action != "unchanged" {
 			t.Fatalf("second apply changed %s (%s: %s)", change.Path, change.Action, change.Detail)
 		}
+	}
+	if second.CodexHooksNeedTrust {
+		t.Fatal("unchanged hooks need no new trust")
 	}
 }
 

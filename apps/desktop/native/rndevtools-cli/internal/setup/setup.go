@@ -76,6 +76,9 @@ type Report struct {
 	// AgentsBlock is the text to paste into a project's AGENTS.md or CLAUDE.md
 	// when setup did not write one.
 	AgentsBlock string `json:"agentsBlock"`
+	// CodexHooksNeedTrust is set when setup wrote or changed Codex hooks, which
+	// Codex will not run until the user reviews them with /hooks.
+	CodexHooksNeedTrust bool `json:"codexHooksNeedTrust,omitempty"`
 }
 
 // Plan computes the edits without writing anything.
@@ -124,13 +127,26 @@ func run(options Options, write bool) (Report, error) {
 				return report, err
 			}
 			if !options.SkipHook {
-				if err := record(installClaudeHook(filepath.Join(options.Home, ".claude", "settings.json"), options.Executable, write)); err != nil {
+				if err := record(installHooks(filepath.Join(options.Home, ".claude", "settings.json"), options.Executable, write)); err != nil {
 					return report, err
 				}
 			}
 		case AgentCodex:
 			if err := record(writeCodexServer(filepath.Join(options.Home, ".codex", "config.toml"), options.Executable, write)); err != nil {
 				return report, err
+			}
+			if !options.SkipHook {
+				// Codex requires the user to trust each new hook once via /hooks;
+				// the report's Detail says so because setup cannot do it for them.
+				change, err := installHooks(filepath.Join(options.Home, ".codex", "hooks.json"), options.Executable, write)
+				if err != nil {
+					return report, err
+				}
+				if change.Action == "create" || change.Action == "update" {
+					change.Detail += ". Codex runs new hooks only after you trust them: open Codex and run /hooks"
+					report.CodexHooksNeedTrust = true
+				}
+				report.Changes = append(report.Changes, change)
 			}
 		case AgentCursor:
 			if err := record(writeJSONServers(filepath.Join(options.Home, ".cursor", "mcp.json"), "mcpServers", options.Executable, nil, write)); err != nil {
@@ -320,18 +336,45 @@ func writeCodexServer(path string, executable string, write bool) (Change, error
 	return change, writeFileAtomically(path, []byte(next), 0o600)
 }
 
-// MARK: - Claude Code hook
+// MARK: - Agent hooks
 
-// hookCommand is the PreToolUse command. It reads the tool input from stdin,
-// and when the Bash command drives a Simulator through simctl it exits 2
-// with the rndevtools equivalent on stderr, which Claude Code feeds back to
-// the model as the reason the call was blocked. Listing and other read-only
-// simctl verbs pass.
-func hookCommand(executable string) string {
-	return executable + " hook claude-pre-tool-use"
+// Hook commands. Both Claude Code and Codex send the same JSON on stdin
+// (`tool_name`, `tool_input.command`, `session_id`) and read exit status 2
+// with stderr as "block", so one handler serves both.
+func preToolUseHookCommand(executable string) string {
+	return executable + " hook pre-tool-use"
 }
 
-func installClaudeHook(path string, executable string, write bool) (Change, error) {
+func sessionEndHookCommand(executable string) string {
+	return executable + " hook session-end"
+}
+
+// hookDocument returns the PreToolUse guard and SessionEnd release entries in
+// the shape both agents' hook files use.
+func hookDocument(executable string) (preToolUse map[string]any, sessionEnd map[string]any) {
+	preToolUse = map[string]any{
+		"matcher": "Bash",
+		"hooks": []any{map[string]any{
+			"type":    "command",
+			"command": preToolUseHookCommand(executable),
+			"timeout": 5,
+		}},
+	}
+	sessionEnd = map[string]any{
+		"hooks": []any{map[string]any{
+			"type":    "command",
+			"command": sessionEndHookCommand(executable),
+			// Codex caps SessionEnd at 3 s; the release is one socket round trip.
+			"timeout": 3,
+		}},
+	}
+	return preToolUse, sessionEnd
+}
+
+// installHooks merges the two rndevtools hooks into a hooks document
+// (Claude Code's ~/.claude/settings.json or Codex's ~/.codex/hooks.json),
+// replacing earlier rndevtools entries and leaving everything else alone.
+func installHooks(path string, executable string, write bool) (Change, error) {
 	change := Change{Path: path}
 	document := map[string]any{}
 	raw, err := os.ReadFile(path)
@@ -354,35 +397,34 @@ func installClaudeHook(path string, executable string, write bool) (Change, erro
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	entries, _ := hooks["PreToolUse"].([]any)
-	wanted := map[string]any{
-		"matcher": "Bash",
-		"hooks": []any{map[string]any{
-			"type":    "command",
-			"command": hookCommand(executable),
-			"timeout": 5,
-		}},
-	}
-	kept := make([]any, 0, len(entries)+1)
-	already := false
-	for _, entry := range entries {
-		if isRndevtoolsHook(entry) {
-			if jsonEqual(entry, wanted) {
-				already = true
-				kept = append(kept, entry)
+	preToolUse, sessionEnd := hookDocument(executable)
+	changed := false
+	for event, wanted := range map[string]map[string]any{"PreToolUse": preToolUse, "SessionEnd": sessionEnd} {
+		entries, _ := hooks[event].([]any)
+		kept := make([]any, 0, len(entries)+1)
+		already := false
+		for _, entry := range entries {
+			if isRndevtoolsHook(entry) {
+				if jsonEqual(entry, wanted) {
+					already = true
+					kept = append(kept, entry)
+				}
+				continue
 			}
-			continue
+			kept = append(kept, entry)
 		}
-		kept = append(kept, entry)
+		if !already {
+			kept = append(kept, wanted)
+			changed = true
+		}
+		hooks[event] = kept
 	}
-	if already {
+	if !changed {
 		change.Action = "unchanged"
-		change.Detail = "PreToolUse hook already installed"
+		change.Detail = "rndevtools hooks already installed"
 		return change, nil
 	}
-	change.Detail = "add a PreToolUse hook that redirects xcrun simctl boot/shutdown/openurl/install/launch/io to rndevtools"
-	kept = append(kept, wanted)
-	hooks["PreToolUse"] = kept
+	change.Detail = "add a PreToolUse hook that redirects simctl boot/shutdown/openurl/install/launch/io and hand-started Metro to rndevtools, and a SessionEnd hook that releases the session's lanes and claims"
 	document["hooks"] = hooks
 	if !write {
 		return change, nil
@@ -401,7 +443,8 @@ func isRndevtoolsHook(entry any) bool {
 	}
 	hooks, _ := object["hooks"].([]any)
 	for _, hook := range hooks {
-		if command, ok := hook.(map[string]any)["command"].(string); ok && strings.Contains(command, "hook claude-pre-tool-use") {
+		command, ok := hook.(map[string]any)["command"].(string)
+		if ok && (strings.Contains(command, " hook pre-tool-use") || strings.Contains(command, " hook session-end") || strings.Contains(command, " hook claude-pre-tool-use")) {
 			return true
 		}
 	}

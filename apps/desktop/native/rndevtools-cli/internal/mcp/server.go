@@ -228,9 +228,12 @@ const instructions = `RN Devtools controls the iOS Simulators on this Mac. Use t
 	`tapping or typing on the device, taking screenshots, and cleaning up. Do not run xcrun simctl ` +
 	`boot, shutdown, openurl, install, launch, or io directly, and do not start Metro by hand: ` +
 	`several agents share these Simulators and the desktop app owns their ports and claims. ` +
-	`Start with lane (operation "up") for a worktree, or simulators to see what exists. Before ` +
-	`driving a device another session may be using, check agents. Errors carry "recovery" text and ` +
-	`native plan carries a "recommendation"; follow them before improvising.`
+	`A Simulator is free or held: held while a lane runs on it or a session claimed it, and only ` +
+	`the holder may boot, drive, slim, or stop it (anything else fails with device_held, naming ` +
+	`the holder). Start with lane (operation "up") for a worktree, or simulators and agents to find ` +
+	`a free device. When your task is done, call release with all=true so your devices go back ` +
+	`to the pool. Errors carry "recovery" text and native plan carries a "recommendation"; ` +
+	`follow them before improvising.`
 
 // Tool is one MCP tool entry.
 type Tool struct {

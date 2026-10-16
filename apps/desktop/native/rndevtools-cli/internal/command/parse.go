@@ -118,6 +118,7 @@ var commandFields = map[protocol.Command][]fieldSpec{
 	},
 	protocol.CommandRelease: {
 		{flagName: "udid", path: []string{"udid"}, kind: fieldString, usage: "Simulator UDID to release."},
+		{flagName: "all", path: []string{"all"}, kind: fieldBoolean, usage: "Release everything this session holds: stop its lanes and drop its claims (what the session-end hook runs)."},
 	},
 	protocol.CommandInput: {
 		{flagName: "udid", path: []string{"input", "udid"}, kind: fieldString, usage: "Booted Simulator UDID to drive."},

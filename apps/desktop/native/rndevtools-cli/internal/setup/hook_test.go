@@ -59,3 +59,13 @@ func TestHookReadsClaudePayloadAndFailsOpen(t *testing.T) {
 		}
 	}
 }
+
+func TestReadSessionEnd(t *testing.T) {
+	payload := ReadSessionEnd(strings.NewReader(`{"session_id":"thr_123","transcript_path":"/x","cwd":"/w","hook_event_name":"SessionEnd","reason":"other"}`))
+	if payload.SessionID != "thr_123" || payload.Reason != "other" {
+		t.Fatalf("payload %+v", payload)
+	}
+	if ReadSessionEnd(strings.NewReader("garbage")).SessionID != "" {
+		t.Fatal("unparseable input must yield an empty session id")
+	}
+}

@@ -52,7 +52,6 @@ var requiredFields = map[protocol.Command][]string{
 	protocol.CommandSlimming: {"operation"},
 	protocol.CommandNative:   {"operation", "worktree"},
 	protocol.CommandClaim:    {"udid"},
-	protocol.CommandRelease:  {"udid"},
 	protocol.CommandAct:      {"tool", "action-command"},
 	protocol.CommandWait:     {"condition"},
 }
@@ -144,7 +143,7 @@ var toolMeta = map[protocol.Command]meta{
 	},
 	protocol.CommandRelease: {
 		title:       "Release a claimed Simulator",
-		description: "Release a Simulator this session claimed.",
+		description: "Release a Simulator this session claimed (udid), or with all=true release everything this session holds: stop its lanes and drop its claims. Call it with all=true when you are done, so the devices go back to the pool at once.",
 	},
 	protocol.CommandApps: {
 		title:       "List apps on a Simulator",

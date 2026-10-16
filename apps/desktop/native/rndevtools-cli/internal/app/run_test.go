@@ -207,6 +207,9 @@ func TestRunSetupDryRunAndHook(t *testing.T) {
 	if report["dryRun"] != true || report["executable"] != "/opt/rndevtools" {
 		t.Fatalf("report: %v", report)
 	}
+	if _, present := report["codexHooksNeedTrust"]; !present {
+		t.Fatal("report must carry codexHooksNeedTrust so the desktop can show the /hooks step")
+	}
 	if report["doctor"].(map[string]any)["ok"] != true {
 		t.Fatalf("doctor should have reached the fixture socket: %v", report["doctor"])
 	}
@@ -234,4 +237,84 @@ func TestRunSetupDryRunAndHook(t *testing.T) {
 	if exitCode != ExitSuccess {
 		t.Fatalf("read-only simctl must pass, exit %d", exitCode)
 	}
+}
+
+func TestSessionEndHookReleasesEverythingForThePayloadSession(t *testing.T) {
+	var seen protocol.Request
+	socketPath := appTestServerCapturing(t, &seen, func(id string) string {
+		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"stoppedLanes":["lane-1"],"releasedClaims":[],"errors":[]}}`
+	})
+	var stdout, stderr bytes.Buffer
+	exitCode := Run(Config{
+		Arguments:  []string{"hook", "session-end"},
+		Stdin:      strings.NewReader(`{"session_id":"thr_abc","cwd":"/w","hook_event_name":"SessionEnd","reason":"other"}`),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		SocketPath: socketPath,
+	})
+	if exitCode != ExitSuccess {
+		t.Fatalf("exit %d stderr %s", exitCode, stderr.String())
+	}
+	if string(seen.Command) != `{"kind":"release","all":true}` {
+		t.Fatalf("command sent: %s", seen.Command)
+	}
+	if seen.Agent["sessionId"] != "thr_abc" {
+		t.Fatalf("the payload's session id must attribute the release: %v", seen.Agent)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("hooks must not write to stdout: %q", stdout.String())
+	}
+
+	// No payload, no environment: nothing to release, still exit 0.
+	stderr.Reset()
+	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, SocketPath: socketPath}) != ExitSuccess {
+		t.Fatal("session-end must never fail the agent's exit")
+	}
+	if !strings.Contains(stderr.String(), "nothing to release") {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+	// Desktop not running: silent success.
+	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(`{"session_id":"thr_x"}`), Stdout: &stdout, Stderr: &stderr, SocketPath: filepath.Join(t.TempDir(), "missing.sock")}) != ExitSuccess {
+		t.Fatal("session-end must succeed when the desktop is down")
+	}
+}
+
+// appTestServerCapturing is appTestServer that also records the request it saw.
+func appTestServerCapturing(t *testing.T, captured *protocol.Request, response func(string) string) string {
+	t.Helper()
+	directory, err := os.MkdirTemp("", "pd-app-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(directory) })
+	socketPath := filepath.Join(directory, "rndevtools.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		line, err := bufio.NewReader(connection).ReadString('\n')
+		if err != nil {
+			return
+		}
+		var request protocol.Request
+		if json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &request) != nil {
+			return
+		}
+		*captured = request
+		_, _ = connection.Write([]byte(response(request.ID) + "\n"))
+	}()
+	t.Cleanup(func() { <-done })
+	return socketPath
 }

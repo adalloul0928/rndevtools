@@ -18,6 +18,7 @@ const setupReportSchema = z.looseObject({
 		ok: z.boolean(),
 		message: z.string().optional(),
 	}),
+	codexHooksNeedTrust: z.boolean().optional(),
 });
 
 /**
@@ -52,6 +53,11 @@ export function summarizeAgentCliSetup(stdout: string, home: string): string[] {
 			? `${verb} ${shortPath}: ${change.detail}`
 			: `${verb} ${shortPath}`;
 	});
+	if (report.codexHooksNeedTrust) {
+		lines.push(
+			'Codex runs new hooks only after you trust them: open Codex and run /hooks.'
+		);
+	}
 	lines.push(
 		report.doctor.ok
 			? 'Agents can reach RN Devtools now.'
