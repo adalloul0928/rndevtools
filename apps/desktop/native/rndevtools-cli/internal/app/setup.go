@@ -26,14 +26,18 @@ for Simulators instead of raw simctl:
   * registers the MCP server (rndevtools mcp) with Claude Code (~/.claude.json),
     Codex (~/.codex/config.toml), Cursor (~/.cursor/mcp.json), and Kiro
     (~/.kiro/settings/mcp.json)
-  * installs the rndevtools-lanes skill where each agent discovers skills
+  * installs the rndevtools-lanes and rndevtools-supabase skills where each
+    agent discovers skills
   * adds hooks for Claude Code (~/.claude/settings.json) and Codex
     (~/.codex/hooks.json): PreToolUse redirects simctl boot/shutdown/openurl/
-    install/launch/io and hand-started Metro to rndevtools; SessionEnd
-    releases the session's lanes and claims. Codex runs new hooks only after
-    you trust them once with /hooks
-  * with --project, also installs the skill into that repository and adds an
-    "iOS Simulators" block to its AGENTS.md
+    install/launch/io and hand-started Metro to rndevtools and, while local
+    Supabase is turned on in RN Devtools, keeps hand-run supabase commands
+    native and off other agents' stacks; SessionEnd releases the session's
+    lanes, claims, and stacks. Codex runs new hooks only after you trust them
+    once with /hooks
+  * with --project, also installs the skills into that repository and adds an
+    "iOS Simulators" block to its AGENTS.md, plus a "Local Supabase"
+    paragraph when the project has supabase/config.toml
 
 Everything is idempotent and additive; unknown configuration is preserved.
 Finishes with the doctor check so a mis-registered path shows up now.
@@ -41,7 +45,7 @@ Finishes with the doctor check so a mis-registered path shows up now.
 Flags:
   --agents claude,codex,cursor,kiro  Agents to configure (default: Claude and
                                      Codex, plus Cursor/Kiro when installed).
-  --project <dir>                    Repository to receive the skill and the
+  --project <dir>                    Repository to receive the skills and the
                                      AGENTS.md block.
   --dry-run                          Print the plan; change nothing.
   --no-link                          Do not touch ~/.local/bin.
@@ -196,10 +200,41 @@ JSON payload on stdin.
   pre-tool-use   Exit 2 (block, reason on stderr) when a Bash command drives a
                  Simulator around RN Devtools: simctl boot/shutdown/openurl/
                  install/launch/io and friends, or a hand-started Metro.
+                 While local Supabase is turned on in RN Devtools (steering.json
+                 in the agent socket directory says so), it also blocks
+                 commands that reach other agents' stacks (stop --all, a stop
+                 by id or of another worktree, stack destroy, pkill postgres,
+                 status --env into a .env file), keeps hand-started stacks
+                 native (start without --runtime native, db start), and in a
+                 worktree RN Devtools runs, redirects start and stop to
+                 rndevtools supabase. Anything it cannot read runs.
   session-end    Release everything the ending session holds: stop its lanes,
-                 drop its claims. Devices return to the pool at once instead of
-                 after the grace period.
+                 drop its claims, release its stacks. Devices return to the
+                 pool at once instead of after the grace period.
 `
+
+// maxSessionCwdLength matches the desktop's absolute-path bound.
+const maxSessionCwdLength = 1024
+
+// sessionEndReleaseCommand is release --all, plus the ending session's working
+// directory when the payload carries an absolute one. The desktop uses it to
+// release what the session holds under an MCP identity shared with other
+// sessions (Codex over MCP), matching those holds by directory.
+func sessionEndReleaseCommand(cwd string) json.RawMessage {
+	command := struct {
+		Kind       string `json:"kind"`
+		All        bool   `json:"all"`
+		SessionCwd string `json:"sessionCwd,omitempty"`
+	}{Kind: "release", All: true}
+	if filepath.IsAbs(cwd) && len(cwd) <= maxSessionCwdLength && !strings.ContainsRune(cwd, 0) {
+		command.SessionCwd = filepath.Clean(cwd)
+	}
+	encoded, err := json.Marshal(command)
+	if err != nil {
+		return json.RawMessage(`{"kind":"release","all":true}`)
+	}
+	return encoded
+}
 
 // runSessionEndHook releases the ending session's lanes and claims. The
 // session id comes from the payload (both agents send one); the environment
@@ -207,14 +242,15 @@ JSON payload on stdin.
 // exit helps nobody, so problems go to stderr and the exit status stays 0.
 func runSessionEndHook(config Config) int {
 	payload := setup.ReadSessionEnd(config.Stdin)
-	agent := command.AgentFromEnvironment(os.Getenv)
+	getenv := config.lookup()
+	agent := command.AgentFromEnvironment(getenv)
 	if payload.SessionID != "" {
 		kind := "other"
 		if agent != nil {
 			kind, _ = agent["kind"].(string)
-		} else if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "" || os.Getenv("CLAUDE_PROJECT_DIR") != "" {
+		} else if getenv("CLAUDE_CODE_ENTRYPOINT") != "" || getenv("CLAUDE_PROJECT_DIR") != "" {
 			kind = "claude"
-		} else if os.Getenv("CODEX_HOME") != "" || os.Getenv("CODEX_SANDBOX") != "" {
+		} else if getenv("CODEX_HOME") != "" || getenv("CODEX_SANDBOX") != "" {
 			kind = "codex"
 		}
 		agent = map[string]any{"kind": kind, "sessionId": payload.SessionID}
@@ -245,7 +281,7 @@ func runSessionEndHook(config Config) int {
 	response, err := localClient.Do(context.Background(), protocol.Request{
 		Protocol: protocol.Name,
 		ID:       requestID,
-		Command:  json.RawMessage(`{"kind":"release","all":true}`),
+		Command:  sessionEndReleaseCommand(payload.Cwd),
 		Agent:    agent,
 	})
 	if err != nil {

@@ -222,19 +222,26 @@ func (server *Server) initialize(params json.RawMessage) (any, *rpcError) {
 // instructions is what the client shows its model about this server as a
 // whole. It carries the rules a tool description cannot: when to reach for
 // these tools at all, and what never to do instead.
-const instructions = `RN Devtools controls the iOS Simulators on this Mac. Use these tools for anything ` +
-	`involving a Simulator: booting one for a git worktree or branch, starting Metro without ` +
-	`colliding with another agent, launching the dev client, reading or driving the running app, ` +
-	`tapping or typing on the device, taking screenshots, and cleaning up. Do not run xcrun simctl ` +
-	`boot, shutdown, openurl, install, launch, or io directly, and do not start Metro by hand: ` +
-	`several agents share these Simulators and the desktop app owns their ports and claims. ` +
-	`A Simulator is free or held: held while a lane runs on it or a session claimed it, and only ` +
-	`the holder may boot, drive, slim, or stop it (anything else fails with device_held, naming ` +
-	`the holder). Start with lane (operation "up") for a worktree; leave udid out and the desktop picks a ` +
-	`free device, or parks a deviceRequest for the user when none is free (then poll lane ls). ` +
-	`When your task is done, call release with all=true so your devices go back ` +
-	`to the pool. Errors carry "recovery" text and native plan carries a "recommendation"; ` +
-	`follow them before improvising.`
+const instructions = `RN Devtools controls the iOS Simulators on this Mac and, when the user has ` +
+	`turned it on, each git worktree's local Supabase. Use these tools for anything involving a ` +
+	`Simulator: booting one for a git worktree or branch, starting Metro without colliding with ` +
+	`another agent, launching the dev client, reading or driving the running app, tapping or typing ` +
+	`on the device, taking screenshots, and cleaning up. Do not run xcrun simctl boot, shutdown, ` +
+	`openurl, install, launch, or io directly, and do not start Metro by hand: several agents share ` +
+	`these Simulators and the desktop app owns their ports and claims. A Simulator is free or held: ` +
+	`held while a lane runs on it or a session claimed it, and only the holder may boot, drive, ` +
+	`slim, or stop it (anything else fails with device_held, naming the holder). Start with lane ` +
+	`(operation "up") for a worktree; leave udid out and the desktop picks a free device, or parks a ` +
+	`deviceRequest for the user when none is free (then poll lane ls). For a worktree with ` +
+	`supabase/config.toml, get its own database with supabase (operation "up") or lane up, which ` +
+	`connects the app automatically; if RN Devtools says it is not managing that worktree, start ` +
+	`it yourself from the worktree with supabase start --runtime native (never without --runtime ` +
+	`native). Use the worktree's own supabase CLI with --local for migrations, resets, and types; ` +
+	`never start or stop a stack RN Devtools manages by hand, and never run supabase stop --all, ` +
+	`stack destroy, or kill postgres, which hit other agents' stacks. When your task is done, call ` +
+	`release with all=true so your devices go back to the pool and your stacks stop (data kept). ` +
+	`Errors carry "recovery" text and native plan carries a "recommendation"; follow them before ` +
+	`improvising.`
 
 // Tool is one MCP tool entry.
 type Tool struct {

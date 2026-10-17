@@ -36,6 +36,17 @@ type Config struct {
 	Stdout         io.Writer
 	Stderr         io.Writer
 	SocketPath     string
+	// Lookup reads environment variables; nil means os.Getenv. Tests inject it
+	// so a developer's own agent session variables cannot leak into them.
+	Lookup func(string) string
+}
+
+// lookup returns the environment reader this run uses.
+func (c Config) lookup() func(string) string {
+	if c.Lookup != nil {
+		return c.Lookup
+	}
+	return os.Getenv
 }
 
 func Run(config Config) int {
@@ -82,12 +93,13 @@ func Run(config Config) int {
 		)
 		return ExitUsage
 	}
+	getenv := config.lookup()
 	parsed, err := command.ParseWithEnvironment(
 		kind,
 		config.Arguments[1:],
 		config.Stdin,
 		config.StdinAvailable,
-		os.Getenv,
+		getenv,
 	)
 	if errors.Is(err, command.ErrHelp) {
 		fmt.Fprint(config.Stdout, command.Usage(kind))
@@ -125,7 +137,7 @@ func Run(config Config) int {
 	}
 	// Attribution rides on the envelope for every command, so the desktop can
 	// show which session is driving which Simulator without per-command flags.
-	if agent := command.AgentFromEnvironment(os.Getenv); agent != nil {
+	if agent := command.AgentFromEnvironment(getenv); agent != nil {
 		request.Agent = agent
 	}
 	if _, err := protocol.EncodeRequest(request); err != nil {
@@ -160,7 +172,7 @@ func RootUsage() string {
 	builder.WriteString("\nEach command accepts structured flags and an optional bounded JSON object on stdin.\n")
 	builder.WriteString("Output is one compact rndevtools/1 JSON response.\n")
 	builder.WriteString("`rndevtools mcp` serves the same commands to coding agents as an MCP server on stdio.\n")
-	builder.WriteString("`rndevtools setup` registers that server, the lanes skill, and a simctl guard with Claude Code, Codex, Cursor, and Kiro.\n")
+	builder.WriteString("`rndevtools setup` registers that server, the lanes and Supabase skills, and the agent hooks with Claude Code, Codex, Cursor, and Kiro.\n")
 	return builder.String()
 }
 

@@ -182,6 +182,54 @@ func TestClientReportsStaleSocketAndTimeout(t *testing.T) {
 	assertClientError(t, err, ErrorTimeout)
 }
 
+func TestReachableProbesWithoutSending(t *testing.T) {
+	received := make(chan []byte, 1)
+	socketPath, serverErrors := testServer(t, func(connection net.Conn) error {
+		defer connection.Close()
+		data, err := io.ReadAll(connection)
+		received <- data
+		return err
+	})
+	if !Reachable(socketPath, time.Second) {
+		t.Fatal("a listening private socket must be reachable")
+	}
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+	if data := <-received; len(data) != 0 {
+		t.Fatalf("the probe must send nothing, sent %q", data)
+	}
+
+	// A socket file a crash left behind, a public socket, and no socket at
+	// all are all unreachable.
+	directory := shortTempDir(t)
+	stalePath := filepath.Join(directory, "stale.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: stalePath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(stalePath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if Reachable(stalePath, 200*time.Millisecond) {
+		t.Fatal("a stale socket must not be reachable")
+	}
+	public, _ := testServer(t, func(connection net.Conn) error { return connection.Close() })
+	if err := os.Chmod(public, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if Reachable(public, 200*time.Millisecond) {
+		t.Fatal("a socket with group or other permissions must not be probed")
+	}
+	if Reachable(filepath.Join(directory, "missing.sock"), 200*time.Millisecond) || Reachable("relative.sock", time.Second) {
+		t.Fatal("missing or relative sockets are unreachable")
+	}
+}
+
 func testServer(t *testing.T, handler func(net.Conn) error) (string, <-chan error) {
 	t.Helper()
 	socketPath := filepath.Join(shortTempDir(t), "rndevtools.sock")

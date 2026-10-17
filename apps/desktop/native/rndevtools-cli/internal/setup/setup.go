@@ -1,7 +1,9 @@
 // Package setup installs rndevtools into the coding agents on this Mac: the
-// CLI on PATH, the MCP server in each agent's configuration, the lanes skill
-// where each agent discovers skills, a Claude Code hook that steers raw
-// `simctl` back to rndevtools, and a block for a project's AGENTS.md.
+// CLI on PATH, the MCP server in each agent's configuration, the lanes and
+// local Supabase skills where each agent discovers skills, hooks that steer
+// raw `simctl`, hand-started Metro, and (while local Supabase is on)
+// hand-run stack commands back to rndevtools, and a block for a project's
+// AGENTS.md.
 //
 // Everything is idempotent and additive. Existing configuration is read,
 // merged, and written back through a temporary file and rename; unknown keys
@@ -23,11 +25,28 @@ import (
 	"strings"
 )
 
-//go:embed skills/rndevtools-lanes/SKILL.md
+//go:embed skills/*/SKILL.md
 var skillFiles embed.FS
 
-// SkillName is the directory name the skill installs under.
+// SkillName is the directory name the lanes skill installs under.
 const SkillName = "rndevtools-lanes"
+
+// skillNames lists the embedded skills by directory name, sorted, so the
+// installed copies always match this build.
+func skillNames() []string {
+	entries, err := fs.ReadDir(skillFiles, "skills")
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
 
 // Agent identifies one coding agent whose configuration setup edits.
 type Agent string
@@ -106,7 +125,7 @@ func run(options Options, write bool) (Report, error) {
 	if len(agents) == 0 {
 		agents = detectAgents(options.Home)
 	}
-	report := Report{Executable: options.Executable, AgentsBlock: AgentsBlock()}
+	report := Report{Executable: options.Executable, AgentsBlock: AgentsBlock(options.Project)}
 	record := func(change Change, err error) error {
 		if err != nil {
 			return err
@@ -162,12 +181,14 @@ func run(options Options, write bool) (Report, error) {
 		}
 	}
 	for _, directory := range skillDirectories(options, agents) {
-		if err := record(installSkill(directory, write)); err != nil {
-			return report, err
+		for _, name := range skillNames() {
+			if err := record(installSkill(directory, name, write)); err != nil {
+				return report, err
+			}
 		}
 	}
 	if options.Project != "" {
-		if err := record(installAgentsBlock(filepath.Join(options.Project, "AGENTS.md"), write)); err != nil {
+		if err := record(installAgentsBlock(options.Project, write)); err != nil {
 			return report, err
 		}
 	}
@@ -302,11 +323,16 @@ func jsonEqual(a any, b any) bool {
 
 var codexServerBlock = regexp.MustCompile(`(?ms)^\[mcp_servers\.rndevtools(?:\.[A-Za-z0-9_]+)?\]\n(?:[^\[\n][^\n]*\n|\n)*`)
 
+// codexToolTimeoutSeconds raises Codex's per-call MCP timeout (60 s by
+// default) to the CLI's lane budget, so a cold lane up or Supabase start over
+// MCP is not cut off while the desktop is still working.
+const codexToolTimeoutSeconds = 240
+
 // writeCodexServer edits ~/.codex/config.toml textually: it owns only the
 // `[mcp_servers.rndevtools]` table and leaves every other byte alone.
 func writeCodexServer(path string, executable string, write bool) (Change, error) {
 	change := Change{Path: path}
-	block := fmt.Sprintf("[mcp_servers.rndevtools]\ncommand = %q\nargs = [\"mcp\"]\n", executable)
+	block := fmt.Sprintf("[mcp_servers.rndevtools]\ncommand = %q\nargs = [\"mcp\"]\ntool_timeout_sec = %d\n", executable, codexToolTimeoutSeconds)
 	raw, err := os.ReadFile(path)
 	var content string
 	switch {
@@ -424,7 +450,7 @@ func installHooks(path string, executable string, write bool) (Change, error) {
 		change.Detail = "rndevtools hooks already installed"
 		return change, nil
 	}
-	change.Detail = "add a PreToolUse hook that redirects simctl boot/shutdown/openurl/install/launch/io and hand-started Metro to rndevtools, and a SessionEnd hook that releases the session's lanes and claims"
+	change.Detail = "add a PreToolUse hook that redirects simctl boot/shutdown/openurl/install/launch/io and hand-started Metro to rndevtools and, while local Supabase is turned on in RN Devtools, keeps hand-run supabase commands native and off other agents' stacks, and a SessionEnd hook that releases the session's lanes, claims, and stacks"
 	document["hooks"] = hooks
 	if !write {
 		return change, nil
@@ -489,10 +515,10 @@ func unique(values []string) []string {
 	return out
 }
 
-func installSkill(skillsDirectory string, write bool) (Change, error) {
-	target := filepath.Join(skillsDirectory, SkillName)
+func installSkill(skillsDirectory string, name string, write bool) (Change, error) {
+	target := filepath.Join(skillsDirectory, name)
 	change := Change{Path: target}
-	content, err := skillFiles.ReadFile("skills/rndevtools-lanes/SKILL.md")
+	content, err := skillFiles.ReadFile("skills/" + name + "/SKILL.md")
 	if err != nil {
 		return change, err
 	}
@@ -507,7 +533,7 @@ func installSkill(skillsDirectory string, write bool) (Change, error) {
 		change.Detail = "refresh SKILL.md to this build's version"
 	case errors.Is(err, fs.ErrNotExist):
 		change.Action = "create"
-		change.Detail = "install the rndevtools-lanes skill"
+		change.Detail = "install the " + name + " skill"
 	default:
 		return change, err
 	}
@@ -527,11 +553,14 @@ const (
 	agentsBlockEnd   = "<!-- rndevtools:end -->"
 )
 
-// AgentsBlock is the project-instruction text. It is short on purpose: the
-// MCP tool descriptions and the skill carry the detail; this only has to make
-// an agent reach for them.
-func AgentsBlock() string {
-	return agentsBlockStart + `
+// AgentsBlock is the project-instruction text for project ("" for none). It
+// is short on purpose: the MCP tool descriptions and the skills carry the
+// detail; this only has to make an agent reach for them. A project with
+// supabase/config.toml also gets the Local Supabase paragraph, worded for
+// when RN Devtools is not managing a worktree, since agents must then start
+// their own stack the safe way.
+func AgentsBlock(project string) string {
+	block := agentsBlockStart + `
 ## iOS Simulators
 
 Simulators on this Mac are managed by RN Devtools. Use the ` + "`rndevtools`" + ` MCP
@@ -540,14 +569,48 @@ this worktree on its own Simulator with its own Metro port; ` + "`input`" + ` an
 ` + "`capture`" + ` drive and observe the device. Never run ` + "`xcrun simctl boot`" + `,
 ` + "`shutdown`" + `, ` + "`openurl`" + `, ` + "`install`" + `, ` + "`launch`" + `, or start Metro by hand: other
 agents share these devices and the desktop app owns their ports and claims.
-` + agentsBlockEnd + "\n"
+`
+	if project != "" && isRegularFile(filepath.Join(project, "supabase", "config.toml")) {
+		block += `
+## Local Supabase
+
+Each worktree gets its own local Supabase stack (native runtime, loopback
+only). When RN Devtools manages this worktree, use the ` + "`rndevtools`" + ` ` + "`supabase`" + `
+tool (operation up) or ` + "`lane up`" + `, which connects the app; otherwise start it
+yourself from the worktree with ` + "`" + projectRunner(project) + ` start --runtime native` + "`" + `
+(never without ` + "`--runtime native`" + `). Use ` + "`supabase … --local`" + ` for migrations,
+` + "`db reset`" + `, and ` + "`gen types`" + `, against your local stack rather than a hosted
+project unless the user asks. Never run ` + "`supabase stop --all`" + `,
+` + "`supabase stack destroy`" + `, or ` + "`pkill postgres`" + `, and never write
+` + "`supabase status --env`" + ` into a .env file.
+`
+	}
+	return block + agentsBlockEnd + "\n"
+}
+
+// projectRunner is how the project runs its own pinned supabase CLI, from
+// the lockfile its package manager wrote; npx when there is none.
+func projectRunner(project string) string {
+	for _, candidate := range []struct{ lockfile, runner string }{
+		{"pnpm-lock.yaml", "pnpm exec supabase"},
+		{"yarn.lock", "yarn supabase"},
+		{"bun.lock", "bunx supabase"},
+		{"bun.lockb", "bunx supabase"},
+		{"package-lock.json", "npx supabase"},
+	} {
+		if isRegularFile(filepath.Join(project, candidate.lockfile)) {
+			return candidate.runner
+		}
+	}
+	return "npx supabase"
 }
 
 var agentsBlockPattern = regexp.MustCompile(`(?s)` + regexp.QuoteMeta(agentsBlockStart) + `.*?` + regexp.QuoteMeta(agentsBlockEnd) + `\n?`)
 
-func installAgentsBlock(path string, write bool) (Change, error) {
+func installAgentsBlock(project string, write bool) (Change, error) {
+	path := filepath.Join(project, "AGENTS.md")
 	change := Change{Path: path}
-	block := AgentsBlock()
+	block := AgentsBlock(project)
 	raw, err := os.ReadFile(path)
 	var content string
 	switch {

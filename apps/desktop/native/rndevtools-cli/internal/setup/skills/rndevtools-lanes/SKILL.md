@@ -46,6 +46,12 @@ a private local socket.
 - **Never pick ports by hand.** The desktop leases ports from the environment's
   range (`development` 8100–8199 by default). Do not start `expo start` or
   `react-native start` yourself inside a worktree that has a lane.
+- **Never start Supabase by hand for a lane.** When the user has turned on
+  local Supabase in RN Devtools and the worktree's `supabase/config.toml`
+  sets `[experimental] stack = true`, `lane up` starts the worktree's own
+  stack and hands Metro its URL and publishable key. Do not run
+  `supabase start` or `stop` yourself, and never write keys into `.env`
+  files. The `rndevtools-supabase` skill covers database work.
 - **Always address Simulators by exact UDID.** Never use `booted`; with several
   Simulators running, `simctl` picks one at random. The UDID you get back from
   `lane up` is the one to pass to every later `rndevtools` call.
@@ -133,6 +139,15 @@ unsigned, the device is held by another session, the combination needs the
 user's one-time approval), or `failed`. An unknown profile id fails the whole
 `lane up` before anything boots. Slimming persists across reboots on iOS 26,
 so a device slimmed once stays slim for every later lane.
+
+`--backend auto|off|required` decides this worktree's local Supabase.
+`auto`, the default for the `development` environment, starts the worktree's
+own stack when RN Devtools manages its Supabase project, and never fails the
+lane; `required` fails the lane when the stack cannot start; `off` skips it.
+`lane.backend` in the result says `ready`, `starting` (with a `jobId`; the app
+launches once the stack is ready), `skipped`, `shadowed` (the app's own `.env`
+files override the injected URL), `refused`, or `failed`, with the reason.
+Create your git branch before `lane up`: each branch gets its own database.
 
 If the dev client is not installed on that Simulator, `lane up` fails with
 `<bundle id> is not installed on this Simulator` and leaves Metro running.
@@ -223,12 +238,14 @@ rndevtools release --all                               # when the whole task is 
 ```
 
 `lane down` ends one lane and frees its Simulator and port. `release --all`
-ends every lane this session owns and drops its claims; it is what the
+ends every lane this session owns, drops its claims, and releases its local
+Supabase stacks (they stop in the background, data kept); it is what the
 session-end hook runs, so a clean exit releases everything even if you forget.
 
 ## Report
 
 State the lane id, worktree and branch, Simulator name and UDID, environment,
-Metro port and health, and whether the Simulator was slim. A healthy Metro or a
+Metro port and health, whether the Simulator was slim, and `lane.backend`'s
+status when the worktree uses local Supabase. A healthy Metro or a
 successful launch is not proof a feature works; include UI evidence from
 `screen`, `elements`, or `capture`.

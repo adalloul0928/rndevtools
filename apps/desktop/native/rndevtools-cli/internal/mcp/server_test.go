@@ -104,6 +104,10 @@ func TestInitializeAndListTools(t *testing.T) {
 		if tool["description"] == "" || tool["title"] == "" {
 			t.Fatalf("tool %v lacks description or title", tool["name"])
 		}
+		// Some clients cut descriptions at 2048 characters.
+		if length := len([]rune(tool["description"].(string))); length > 2048 {
+			t.Fatalf("tool %v description has %d characters", tool["name"], length)
+		}
 		if _, ok := tool["annotations"].(map[string]any)["readOnlyHint"]; !ok {
 			t.Fatalf("tool %v lacks annotations", tool["name"])
 		}
@@ -233,8 +237,8 @@ func TestResources(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"rndevtools://screen/`+strings.ToLower(udid)+`"}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"rndevtools://screen/booted"}}`,
 	)
-	if len(responses[0]["result"].(map[string]any)["resources"].([]any)) != 3 {
-		t.Fatal("expected three static resources")
+	if len(responses[0]["result"].(map[string]any)["resources"].([]any)) != 4 {
+		t.Fatal("expected four static resources")
 	}
 	if len(responses[1]["result"].(map[string]any)["resourceTemplates"].([]any)) != 1 {
 		t.Fatal("expected the screen template")
@@ -259,6 +263,74 @@ func TestResources(t *testing.T) {
 	}
 	if responses[4]["error"] == nil {
 		t.Fatal("non-UDID screen resource must be rejected")
+	}
+}
+
+func TestSupabaseToolFollowsLaneAndSpeaksTheWireContract(t *testing.T) {
+	tools := Tools()
+	if len(tools) < 2 || tools[0].Name != "lane" || tools[1].Name != "supabase" {
+		t.Fatalf("supabase must be listed right after lane: %v, %v", tools[0].Name, tools[1].Name)
+	}
+	supabase := tools[1]
+	if supabase.Annotations["readOnlyHint"] != false || supabase.Annotations["destructiveHint"] != false {
+		t.Fatalf("supabase annotations: %v", supabase.Annotations)
+	}
+	if required, _ := supabase.InputSchema["required"].([]string); len(required) != 1 || required[0] != "operation" {
+		t.Fatalf("supabase required fields: %v", supabase.InputSchema["required"])
+	}
+	properties := supabase.InputSchema["properties"].(map[string]any)
+	for _, name := range []string{"operation", "worktree", "stack-id", "wait-ms", "seed", "service", "tail", "since", "note"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("supabase tool lacks %s", name)
+		}
+	}
+	if properties["service"].(map[string]any)["type"] != "array" {
+		t.Fatalf("service must be an array: %v", properties["service"])
+	}
+	for _, phrase := range []string{"supabase/config.toml", "--runtime native", "never run supabase start, stop, stack, or local", "lane up", "jobId"} {
+		if !strings.Contains(supabase.Description, phrase) {
+			t.Fatalf("supabase description lacks %q", phrase)
+		}
+	}
+	if !strings.Contains(tools[0].Description, "backend") {
+		t.Fatal("the lane description must explain backend")
+	}
+	if _, ok := tools[0].InputSchema["properties"].(map[string]any)["backend"]; !ok {
+		t.Fatal("lane up must take backend")
+	}
+	for _, phrase := range []string{"Supabase", "supabase start --runtime native", "stop --all", "release with all=true"} {
+		if !strings.Contains(instructions, phrase) {
+			t.Fatalf("instructions lack %q", phrase)
+		}
+	}
+
+	server, calls := newTestServer(t, func(r protocol.Request) (protocol.Response, error) {
+		return okResponse(r, `{"operation":"ls","stacks":[]}`)
+	}, nil, map[string]string{"CLAUDE_CODE_SESSION_ID": "sess-1"})
+	responses := exchange(t, server,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"supabase","arguments":{"operation":"up","worktree":"/Users/dev/app","wait-ms":5000}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"rndevtools://supabase"}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"supabase","arguments":{"operation":"ls","worktree":"/Users/dev/app"}}}`,
+	)
+	if len(*calls) != 2 {
+		t.Fatalf("%d socket calls; the invalid ls must not reach the socket", len(*calls))
+	}
+	up := (*calls)[0]
+	if string(up.request.Command) != `{"kind":"supabase","operation":"up","waitMs":5000,"worktreePath":"/Users/dev/app"}` {
+		t.Fatalf("up command: %s", up.request.Command)
+	}
+	if up.request.Agent["sessionId"] != "sess-1" || up.timeout != 20*time.Second {
+		t.Fatalf("up attribution %v, timeout %v", up.request.Agent, up.timeout)
+	}
+	if string((*calls)[1].request.Command) != `{"kind":"supabase","operation":"ls"}` {
+		t.Fatalf("the supabase resource must run ls: %s", (*calls)[1].request.Command)
+	}
+	contents := responses[1]["result"].(map[string]any)["contents"].([]any)[0].(map[string]any)
+	if contents["uri"] != "rndevtools://supabase" || contents["mimeType"] != "application/json" {
+		t.Fatalf("supabase resource: %v", contents)
+	}
+	if responses[2]["result"].(map[string]any)["isError"] != true {
+		t.Fatalf("ls with a worktree must be a tool error: %v", responses[2])
 	}
 }
 

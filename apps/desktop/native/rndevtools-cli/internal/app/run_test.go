@@ -244,6 +244,8 @@ func TestSessionEndHookReleasesEverythingForThePayloadSession(t *testing.T) {
 	socketPath := appTestServerCapturing(t, &seen, func(id string) string {
 		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"stoppedLanes":["lane-1"],"releasedClaims":[],"errors":[]}}`
 	})
+	// No agent variables: the developer's own session must not leak in.
+	noEnvironment := func(string) string { return "" }
 	var stdout, stderr bytes.Buffer
 	exitCode := Run(Config{
 		Arguments:  []string{"hook", "session-end"},
@@ -251,11 +253,12 @@ func TestSessionEndHookReleasesEverythingForThePayloadSession(t *testing.T) {
 		Stdout:     &stdout,
 		Stderr:     &stderr,
 		SocketPath: socketPath,
+		Lookup:     noEnvironment,
 	})
 	if exitCode != ExitSuccess {
 		t.Fatalf("exit %d stderr %s", exitCode, stderr.String())
 	}
-	if string(seen.Command) != `{"kind":"release","all":true}` {
+	if string(seen.Command) != `{"kind":"release","all":true,"sessionCwd":"/w"}` {
 		t.Fatalf("command sent: %s", seen.Command)
 	}
 	if seen.Agent["sessionId"] != "thr_abc" {
@@ -267,14 +270,14 @@ func TestSessionEndHookReleasesEverythingForThePayloadSession(t *testing.T) {
 
 	// No payload, no environment: nothing to release, still exit 0.
 	stderr.Reset()
-	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, SocketPath: socketPath}) != ExitSuccess {
+	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, SocketPath: socketPath, Lookup: noEnvironment}) != ExitSuccess {
 		t.Fatal("session-end must never fail the agent's exit")
 	}
 	if !strings.Contains(stderr.String(), "nothing to release") {
 		t.Fatalf("stderr %q", stderr.String())
 	}
 	// Desktop not running: silent success.
-	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(`{"session_id":"thr_x"}`), Stdout: &stdout, Stderr: &stderr, SocketPath: filepath.Join(t.TempDir(), "missing.sock")}) != ExitSuccess {
+	if Run(Config{Arguments: []string{"hook", "session-end"}, Stdin: strings.NewReader(`{"session_id":"thr_x"}`), Stdout: &stdout, Stderr: &stderr, SocketPath: filepath.Join(t.TempDir(), "missing.sock"), Lookup: noEnvironment}) != ExitSuccess {
 		t.Fatal("session-end must succeed when the desktop is down")
 	}
 }
@@ -317,4 +320,91 @@ func appTestServerCapturing(t *testing.T, captured *protocol.Request, response f
 	}()
 	t.Cleanup(func() { <-done })
 	return socketPath
+}
+
+func TestSupabaseCommandsCarryTheAgentOnTheEnvelopeOnly(t *testing.T) {
+	var seen protocol.Request
+	socketPath := appTestServerCapturing(t, &seen, func(id string) string {
+		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":false,"error":{"code":"supabase_disabled","message":"Local Supabase is off.","retryable":false,"recovery":"RN Devtools is not managing this worktree. Start it yourself from the worktree with ` + "`supabase start --runtime native`" + ` (never without --runtime native)."}}`
+	})
+	lookup := func(name string) string {
+		if name == "CLAUDE_CODE_SESSION_ID" {
+			return "sess-9"
+		}
+		return ""
+	}
+	var stdout, stderr bytes.Buffer
+	exitCode := Run(Config{
+		Arguments:  []string{"supabase", "--operation", "up", "--worktree", "/Users/example/app", "--wait-ms", "1000"},
+		Stdin:      strings.NewReader(""),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		SocketPath: socketPath,
+		Lookup:     lookup,
+	})
+	if exitCode != ExitRejected {
+		t.Fatalf("a typed refusal exits %d, got %d; stderr %s", ExitRejected, exitCode, stderr.String())
+	}
+	if string(seen.Command) != `{"kind":"supabase","operation":"up","waitMs":1000,"worktreePath":"/Users/example/app"}` {
+		t.Fatalf("command sent: %s", seen.Command)
+	}
+	if seen.Agent["kind"] != "claude" || seen.Agent["sessionId"] != "sess-9" {
+		t.Fatalf("the envelope must attribute the call: %v", seen.Agent)
+	}
+	if !strings.Contains(stdout.String(), `"code":"supabase_disabled"`) || !strings.Contains(stdout.String(), "--runtime native") {
+		t.Fatalf("the refusal and its recovery reach stdout: %s", stdout.String())
+	}
+
+	// Invalid combinations never reach the socket.
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(Config{Arguments: []string{"supabase", "--operation", "ls", "--stack-id", "0123abcd"}, Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, SocketPath: filepath.Join(t.TempDir(), "missing.sock"), Lookup: lookup}); code != ExitUsage {
+		t.Fatalf("ls with a target exits %d", code)
+	}
+	if !strings.Contains(stderr.String(), "rndevtools supabase --help") {
+		t.Fatalf("stderr %s", stderr.String())
+	}
+	var usage bytes.Buffer
+	if Run(Config{Arguments: []string{"supabase", "--help"}, Stdout: &usage, Stderr: &stderr}) != ExitSuccess {
+		t.Fatal("supabase --help should succeed")
+	}
+	for _, flag := range []string{"--operation", "--worktree", "--stack-id", "--wait-ms", "--seed", "--service", "--tail", "--since", "--note"} {
+		if !strings.Contains(usage.String(), "  "+flag+" ") {
+			t.Fatalf("usage lacks %s:\n%s", flag, usage.String())
+		}
+	}
+	if !strings.Contains(RootUsage(), "  supabase\n") {
+		t.Fatal("root usage must list supabase")
+	}
+}
+
+func TestHookUsageDescribesTheSupabaseRules(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if Run(Config{Arguments: []string{"hook", "--help"}, Stdout: &stdout, Stderr: &stderr}) != ExitSuccess {
+		t.Fatal("hook --help should succeed")
+	}
+	for _, phrase := range []string{"local Supabase is turned on", "steering.json", "--runtime native", "release its stacks"} {
+		if !strings.Contains(stdout.String(), phrase) {
+			t.Fatalf("hook usage lacks %q:\n%s", phrase, stdout.String())
+		}
+	}
+}
+
+func TestSessionEndReleaseCommandForwardsOnlyAnAbsoluteCwd(t *testing.T) {
+	cases := []struct {
+		cwd  string
+		want string
+	}{
+		{"/Users/example/app", `{"kind":"release","all":true,"sessionCwd":"/Users/example/app"}`},
+		{"/Users/example/app/../app/", `{"kind":"release","all":true,"sessionCwd":"/Users/example/app"}`},
+		{"", `{"kind":"release","all":true}`},
+		{"relative/dir", `{"kind":"release","all":true}`},
+		{"/" + strings.Repeat("a", maxSessionCwdLength), `{"kind":"release","all":true}`},
+		{"/bad\x00path", `{"kind":"release","all":true}`},
+	}
+	for _, testCase := range cases {
+		if got := string(sessionEndReleaseCommand(testCase.cwd)); got != testCase.want {
+			t.Errorf("sessionEndReleaseCommand(%q) = %s, want %s", testCase.cwd, got, testCase.want)
+		}
+	}
 }

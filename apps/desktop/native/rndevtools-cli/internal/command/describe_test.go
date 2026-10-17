@@ -113,6 +113,52 @@ func TestBuildAttachesAgentToLaneUp(t *testing.T) {
 	}
 }
 
+func TestBuildSupabaseFromToolArguments(t *testing.T) {
+	fields, _ := Describe(protocol.CommandSupabase)
+	types := map[string]string{}
+	for _, field := range fields {
+		types[field.Name] = field.Type
+	}
+	if types["service"] != "array" || types["wait-ms"] != "integer" || types["seed"] != "boolean" || types["worktree"] != "string" {
+		t.Fatalf("supabase field types: %v", types)
+	}
+	up, err := Build(protocol.CommandSupabase, map[string]any{"operation": "up", "worktree": "/Users/dev/app", "wait-ms": float64(10_000)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up.Timeout != 25*time.Second || !strings.Contains(string(up.Command), `"waitMs":10000`) {
+		t.Fatalf("up: %s timeout %v", up.Command, up.Timeout)
+	}
+	// One service may arrive as a plain string; it means a list of one.
+	for _, services := range []any{[]any{"auth", "gateway"}, "auth,gateway"} {
+		logs, err := Build(protocol.CommandSupabase, map[string]any{"operation": "log", "stack-id": "0123abcd", "service": services}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(logs.Command), `"services":["auth","gateway"]`) || logs.Timeout != 45*time.Second {
+			t.Fatalf("log: %s timeout %v", logs.Command, logs.Timeout)
+		}
+	}
+	for _, bad := range []map[string]any{
+		{"operation": "log", "stack-id": "0123abcd", "service": []any{}},
+		{"operation": "log", "stack-id": "0123abcd", "service": []any{"auth", 3}},
+		{"operation": "log", "stack-id": "0123abcd", "service": ""},
+		{"operation": "up", "worktree": "/Users/dev/app", "wait-ms": 1.5},
+		{"operation": "up", "worktree": "/Users/dev/app", "backend": "auto"},
+	} {
+		if _, err := Build(protocol.CommandSupabase, bad, nil); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+	reset, err := Build(protocol.CommandSupabase, map[string]any{"operation": "reset", "worktree": "/Users/dev/app", "seed": false}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.Timeout != 75*time.Second || !strings.Contains(string(reset.Command), `"seed":false`) {
+		t.Fatalf("reset: %s timeout %v", reset.Command, reset.Timeout)
+	}
+}
+
 func mustJSON(value any) []byte {
 	encoded, _ := json.Marshal(value)
 	return encoded

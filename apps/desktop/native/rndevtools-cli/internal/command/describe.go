@@ -43,7 +43,7 @@ func Describe(kind protocol.Command) ([]Field, bool) {
 			field.Type = "number"
 		case fieldBoolean:
 			field.Type = "boolean"
-		case fieldCSV:
+		case fieldCSV, fieldList:
 			field.Type = "array"
 			field.Items = "string"
 		case fieldObject:
@@ -164,6 +164,12 @@ func coerceArgument(kind fieldKind, raw any) (any, error) {
 			return nil, fmt.Errorf("must not be empty")
 		}
 		return parts, nil
+	case fieldList:
+		// A model may name one value as a plain string; it means a list of one.
+		if single, ok := raw.(string); ok {
+			return parseOptionValue(fieldList, single)
+		}
+		return coerceArgument(fieldCSV, raw)
 	case fieldObject:
 		object, ok := raw.(map[string]any)
 		if !ok {
@@ -176,7 +182,8 @@ func coerceArgument(kind fieldKind, raw any) (any, error) {
 
 // attachAgent embeds the owning agent session into lane up/launch commands when
 // the caller did not already provide one. Every request also carries the agent
-// on its envelope; this copy is what the lane itself records.
+// on its envelope; this copy is what the lane itself records. Supabase holds
+// come from the envelope alone: its command carries no agent field.
 func attachAgent(kind protocol.Command, command map[string]any, lookup func(string) string) {
 	if kind != protocol.CommandLane {
 		return
@@ -189,32 +196,83 @@ func attachAgent(kind protocol.Command, command map[string]any, lookup func(stri
 	}
 }
 
+// LongOperationTimeout is the socket deadline for lane and native calls.
+// Booting a Simulator and waiting for Metro, or fingerprinting a worktree with
+// Expo's tooling, can exceed the default deadline. Setup gives Codex the same
+// per-call MCP timeout so the client does not give up before the CLI does.
+const LongOperationTimeout = 240 * time.Second
+
+// Supabase socket deadlines. Each sits a few seconds past the desktop's own
+// budget for the call, so its answer (a result, a jobId, or a typed timeout)
+// arrives before the CLI gives up: up waits for the stack at most wait-ms,
+// a reset re-runs the migrations and seed, and the rest answer from state.
+const (
+	supabaseDefaultWait  = 30 * time.Second
+	supabaseUpHeadroom   = 15 * time.Second
+	supabaseResetTimeout = 75 * time.Second
+	supabaseQuickTimeout = 45 * time.Second
+)
+
+// waitDefaultMilliseconds is the desktop's wait when timeoutMs is absent.
+const waitDefaultMilliseconds = 30_000
+
 // deriveTimeout gives the long-running commands (lane, native, wait) the
-// socket headroom they need unless the caller set one explicitly.
+// socket headroom they need, and Supabase calls their own deadlines, unless
+// the caller set one explicitly.
 func deriveTimeout(kind protocol.Command, command map[string]any, timeout time.Duration, explicit bool) time.Duration {
 	if explicit {
 		return timeout
 	}
 	switch kind {
 	case protocol.CommandLane, protocol.CommandNative:
-		// Booting a Simulator and waiting for Metro, or fingerprinting a
-		// worktree with Expo's tooling, can exceed the default deadline.
-		if derived := 240 * time.Second; derived > timeout {
-			return derived
+		if LongOperationTimeout > timeout {
+			return LongOperationTimeout
 		}
 	case protocol.CommandWait:
-		waitMilliseconds := 30_000
-		if value, ok := command["timeoutMs"]; ok {
-			switch typed := value.(type) {
-			case int:
-				waitMilliseconds = typed
-			case float64:
-				waitMilliseconds = int(typed)
-			}
-		}
+		waitMilliseconds := integerField(command, "timeoutMs", waitDefaultMilliseconds)
 		if derived := time.Duration(waitMilliseconds+10_000) * time.Millisecond; derived > timeout {
 			return derived
 		}
+	case protocol.CommandSupabase:
+		operation, _ := command["operation"].(string)
+		switch operation {
+		case "up":
+			wait := integerField(command, "waitMs", int(supabaseDefaultWait/time.Millisecond))
+			return time.Duration(wait)*time.Millisecond + supabaseUpHeadroom
+		case "reset":
+			return supabaseResetTimeout
+		default:
+			return supabaseQuickTimeout
+		}
 	}
 	return timeout
+}
+
+// integerField reads a millisecond count the way it can arrive: int from a
+// flag, float64 from a tool call, json.Number from stdin. A missing,
+// negative, or out-of-range value yields the fallback; validation reports
+// the bad value itself.
+func integerField(command map[string]any, key string, fallback int) int {
+	var value int64
+	switch typed := command[key].(type) {
+	case int:
+		value = int64(typed)
+	case float64:
+		if typed != float64(int64(typed)) {
+			return fallback
+		}
+		value = int64(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return fallback
+		}
+		value = parsed
+	default:
+		return fallback
+	}
+	if value < 0 || value > int64(client.MaximumTimeout/time.Millisecond) {
+		return fallback
+	}
+	return int(value)
 }

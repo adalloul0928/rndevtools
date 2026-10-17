@@ -127,8 +127,8 @@ func TestApplyInstallsEverythingAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(string(codex), "model = \"gpt-5\"") || !strings.Contains(string(codex), "[mcp_servers.other.env]\nX = \"1\"") {
 		t.Fatalf("codex config lost content:\n%s", codex)
 	}
-	if !strings.Contains(string(codex), "[mcp_servers.rndevtools]\ncommand = \""+executable+"\"\nargs = [\"mcp\"]\n") {
-		t.Fatalf("codex config lacks rndevtools block:\n%s", codex)
+	if !strings.Contains(string(codex), "[mcp_servers.rndevtools]\ncommand = \""+executable+"\"\nargs = [\"mcp\"]\ntool_timeout_sec = 240\n") {
+		t.Fatalf("codex config lacks rndevtools block with the raised tool timeout:\n%s", codex)
 	}
 
 	kiro := readJSON(t, filepath.Join(home, ".kiro", "settings", "mcp.json"))
@@ -147,9 +147,16 @@ func TestApplyInstallsEverythingAndIsIdempotent(t *testing.T) {
 		t.Fatalf("symlink: %q %v", link, err)
 	}
 	for _, directory := range []string{".claude", ".agents", ".kiro"} {
-		skill, err := os.ReadFile(filepath.Join(home, directory, "skills", SkillName, "SKILL.md"))
-		if err != nil || !strings.Contains(string(skill), "name: rndevtools-lanes") {
-			t.Fatalf("%s skill: %v", directory, err)
+		for _, name := range []string{SkillName, "rndevtools-supabase"} {
+			skill, err := os.ReadFile(filepath.Join(home, directory, "skills", name, "SKILL.md"))
+			if err != nil || !strings.Contains(string(skill), "name: "+name+"\n") {
+				t.Fatalf("%s %s skill: %v", directory, name, err)
+			}
+		}
+	}
+	for _, change := range first.Changes {
+		if strings.HasSuffix(change.Path, filepath.Join(".claude", "settings.json")) && !strings.Contains(change.Detail, "local Supabase") {
+			t.Fatalf("the hook change must say what the Supabase rules do: %+v", change)
 		}
 	}
 
@@ -247,6 +254,18 @@ func TestCodexBlockIsReplacedInPlace(t *testing.T) {
 	if !strings.Contains(text, "[other]\nkeep = true") || strings.Count(text, "[mcp_servers.rndevtools]") != 1 {
 		t.Fatalf("unexpected codex config:\n%s", text)
 	}
+	if strings.Count(text, "tool_timeout_sec = 240") != 1 {
+		t.Fatalf("an upgraded block must carry the raised tool timeout once:\n%s", text)
+	}
+	// A block written before the timeout existed counts as stale and is
+	// upgraded; a current one is left alone.
+	again, err := Apply(Options{Home: home, Executable: "/fresh/rndevtools", Agents: []Agent{AgentCodex}, SkipLink: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Changes[0].Action != "unchanged" {
+		t.Fatalf("a current block must be unchanged: %+v", again.Changes[0])
+	}
 }
 
 func TestProjectModeInstallsSkillAndAgentsBlock(t *testing.T) {
@@ -282,6 +301,105 @@ func TestProjectModeInstallsSkillAndAgentsBlock(t *testing.T) {
 	agents, _ = os.ReadFile(filepath.Join(project, "AGENTS.md"))
 	if strings.Count(string(agents), "rndevtools:start") != 1 || strings.Contains(string(agents), "NEVER EVER") {
 		t.Fatalf("block not replaced in place:\n%s", agents)
+	}
+}
+
+func TestEveryEmbeddedSkillIsInstalled(t *testing.T) {
+	names := skillNames()
+	if len(names) != 2 || names[0] != "rndevtools-lanes" || names[1] != "rndevtools-supabase" {
+		t.Fatalf("embedded skills: %v", names)
+	}
+	for _, name := range names {
+		content, err := skillFiles.ReadFile("skills/" + name + "/SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(content)
+		if !strings.HasPrefix(text, "---\nname: "+name+"\ndescription: >\n") {
+			t.Fatalf("%s: front matter must name the skill and describe it", name)
+		}
+	}
+	supabase, _ := skillFiles.ReadFile("skills/rndevtools-supabase/SKILL.md")
+	for _, phrase := range []string{
+		"Supabase", "local database", "Postgres", "migration", "seed", "reset", "Studio", "logs",
+		`rndevtools supabase --operation up --worktree "$PWD"`, "lane up", "--local",
+		"--runtime native", "release --all", "Create or switch to your git branch first",
+		"Never start or stop Supabase by hand while RN Devtools manages",
+	} {
+		if !strings.Contains(string(supabase), phrase) {
+			t.Fatalf("the Supabase skill lacks %q", phrase)
+		}
+	}
+	lanes, _ := skillFiles.ReadFile("skills/rndevtools-lanes/SKILL.md")
+	for _, phrase := range []string{"--backend auto|off|required", "Never start Supabase by hand for a lane"} {
+		if !strings.Contains(string(lanes), phrase) {
+			t.Fatalf("the lanes skill lacks %q", phrase)
+		}
+	}
+
+	home := t.TempDir()
+	report, err := Apply(Options{Home: home, Executable: "/x/rndevtools", Agents: []Agent{AgentCodex}, SkipLink: true, SkipHook: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := 0
+	for _, change := range report.Changes {
+		if strings.Contains(change.Path, filepath.Join(".agents", "skills")) {
+			installed++
+			if change.Action != "create" || !strings.Contains(change.Detail, filepath.Base(change.Path)) {
+				t.Fatalf("skill change: %+v", change)
+			}
+		}
+	}
+	if installed != len(names) {
+		t.Fatalf("%d of %d skills installed", installed, len(names))
+	}
+}
+
+func TestAgentsBlockAddsLocalSupabaseOnlyForSupabaseProjects(t *testing.T) {
+	home := t.TempDir()
+	plain := filepath.Join(home, "plain")
+	write(t, filepath.Join(plain, "AGENTS.md"), "# Plain\n")
+	if _, err := Apply(Options{Home: home, Executable: "/x/rndevtools", Project: plain, Agents: []Agent{AgentClaude}, SkipLink: true, SkipHook: true}); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := os.ReadFile(filepath.Join(plain, "AGENTS.md"))
+	if strings.Contains(string(text), "Local Supabase") || !strings.Contains(string(text), "## iOS Simulators") {
+		t.Fatalf("a project without supabase/config.toml gets the Simulator block only:\n%s", text)
+	}
+	if strings.Contains(AgentsBlock(""), "Local Supabase") {
+		t.Fatal("the block for manual installs has no project, so no Supabase paragraph")
+	}
+
+	for lockfile, runner := range map[string]string{
+		"pnpm-lock.yaml":    "pnpm exec supabase",
+		"yarn.lock":         "yarn supabase",
+		"bun.lock":          "bunx supabase",
+		"package-lock.json": "npx supabase",
+		"":                  "npx supabase",
+	} {
+		project := filepath.Join(home, "app-"+strings.ReplaceAll(lockfile, ".", "-"))
+		write(t, filepath.Join(project, "supabase", "config.toml"), "[experimental]\nstack = true\n")
+		if lockfile != "" {
+			write(t, filepath.Join(project, lockfile), "")
+		}
+		report, err := Apply(Options{Home: home, Executable: "/x/rndevtools", Project: project, Agents: []Agent{AgentClaude}, SkipLink: true, SkipHook: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		agents, _ := os.ReadFile(filepath.Join(project, "AGENTS.md"))
+		block := string(agents)
+		for _, phrase := range []string{"## iOS Simulators", "## Local Supabase", "`" + runner + " start --runtime native`", "`supabase stop --all`", "`supabase status --env`", "`lane up`"} {
+			if !strings.Contains(block, phrase) {
+				t.Fatalf("%s: AGENTS.md lacks %q:\n%s", lockfile, phrase, block)
+			}
+		}
+		if report.AgentsBlock != block {
+			t.Fatalf("%s: the report must carry the block it wrote", lockfile)
+		}
+		if strings.Count(block, "<!-- rndevtools:start -->") != 1 || !strings.HasSuffix(block, "<!-- rndevtools:end -->\n") {
+			t.Fatalf("%s: the paragraph belongs inside the markers:\n%s", lockfile, block)
+		}
 	}
 }
 

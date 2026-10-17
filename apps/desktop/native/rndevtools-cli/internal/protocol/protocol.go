@@ -32,6 +32,7 @@ const (
 	CommandJobs       Command = "jobs"
 	CommandSlimming   Command = "slimming"
 	CommandLane       Command = "lane"
+	CommandSupabase   Command = "supabase"
 	CommandNative     Command = "native"
 	CommandAgents     Command = "agents"
 	CommandClaim      Command = "claim"
@@ -54,6 +55,7 @@ var validCommands = map[Command]struct{}{
 	CommandJobs:       {},
 	CommandSlimming:   {},
 	CommandLane:       {},
+	CommandSupabase:   {},
 	CommandNative:     {},
 	CommandAgents:     {},
 	CommandClaim:      {},
@@ -101,6 +103,7 @@ func Commands() []Command {
 		CommandJobs,
 		CommandSlimming,
 		CommandLane,
+		CommandSupabase,
 		CommandNative,
 		CommandAgents,
 		CommandClaim,

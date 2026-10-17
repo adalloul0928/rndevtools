@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"strings"
 )
 
 // HookDecision is what a PreToolUse hook tells Claude Code.
@@ -45,29 +44,85 @@ var (
 	metroPattern  = regexp.MustCompile(`(?:^|[\s;&|(])(?:npx\s+|yarn\s+|pnpm\s+(?:exec\s+)?|bunx?\s+)?(?:expo\s+start|react-native\s+start)\b`)
 )
 
+// shellCall is one Bash tool call as the steering rules see it.
+type shellCall struct {
+	command string
+	// cwd is the session's working directory from the payload, "" when it
+	// has none. The simctl and Metro rules do not need it; the Supabase rules
+	// start from it to place each command in a worktree.
+	cwd string
+}
+
 // EvaluateClaudePreToolUse reads Claude Code's PreToolUse JSON and decides
 // whether the Bash command should run. Any input that is not a Bash call, or
 // that cannot be parsed, is allowed: a hook that fails must fail open, since
 // exit status 2 on a parse error would lock the model out of Bash entirely.
 func EvaluateClaudePreToolUse(input io.Reader) HookDecision {
+	call, ok := readPreToolUse(input)
+	if !ok {
+		return HookDecision{}
+	}
+	return evaluateShellCall(call)
+}
+
+// readPreToolUse parses a PreToolUse payload; ok is false unless it is a
+// Bash call. Claude Code and Codex send the same shape.
+func readPreToolUse(input io.Reader) (shellCall, bool) {
 	var payload struct {
 		ToolName  string `json:"tool_name"`
+		Cwd       string `json:"cwd"`
 		ToolInput struct {
 			Command string `json:"command"`
 		} `json:"tool_input"`
 	}
 	if err := json.NewDecoder(io.LimitReader(input, 1<<20)).Decode(&payload); err != nil {
-		return HookDecision{}
+		return shellCall{}, false
 	}
 	if payload.ToolName != "Bash" {
-		return HookDecision{}
+		return shellCall{}, false
 	}
-	return EvaluateShellCommand(payload.ToolInput.Command)
+	return shellCall{command: payload.ToolInput.Command, cwd: payload.Cwd}, true
 }
 
 // EvaluateShellCommand applies the steering rules to one shell command line.
 func EvaluateShellCommand(command string) HookDecision {
-	for _, match := range simctlPattern.FindAllStringSubmatch(command, -1) {
+	return evaluateShellCall(shellCall{command: command})
+}
+
+func evaluateShellCall(call shellCall) HookDecision {
+	return evaluateShellCallWith(call, defaultSupabaseEnvironment())
+}
+
+// evaluateShellCallWith judges each command of the line on its own, so a
+// harmless first command cannot carry a steered one past the rules: first the
+// Simulator and Metro rules, then the Supabase rules, which read steering.json
+// only when the line runs supabase or kills processes.
+func evaluateShellCallWith(call shellCall, environment supabaseEnvironment) (decision HookDecision) {
+	defer func() {
+		// A rule that breaks fails open, like a payload the hook cannot read:
+		// exit status 2 from a crash would lock the model out of Bash.
+		if recover() != nil {
+			decision = HookDecision{}
+		}
+	}()
+	line := parseShellLine(call.command)
+	for _, segment := range line.segments {
+		// RN Devtools' own CLI may mention Metro or simctl in its arguments (a
+		// claim note, a deep link) without running them. Only that command is
+		// exempt; substitutions inside it are segments of their own.
+		if segment.program() == "rndevtools" {
+			continue
+		}
+		if decision := evaluateSegment(segment.text); decision.Block {
+			return decision
+		}
+	}
+	rules := supabaseRules{environment: environment}
+	return rules.judge(line, call.cwd)
+}
+
+func evaluateSegment(text string) HookDecision {
+	for _, match := range simctlPattern.FindAllStringSubmatch(text, -1) {
 		verb := match[1]
 		if replacement, steered := steeredVerbs[verb]; steered {
 			return HookDecision{
@@ -78,7 +133,7 @@ func EvaluateShellCommand(command string) HookDecision {
 			}
 		}
 	}
-	if metroPattern.MatchString(command) && !strings.Contains(command, "rndevtools") {
+	if metroPattern.MatchString(text) {
 		return HookDecision{
 			Block:  true,
 			Reason: "Blocked starting Metro by hand: port 8081 is shared with other agents. Use the rndevtools `lane` tool (operation up, with this worktree's absolute path) and RN Devtools will start Metro on a leased port and open the dev client against it.",
@@ -87,11 +142,14 @@ func EvaluateShellCommand(command string) HookDecision {
 	return HookDecision{}
 }
 
-// SessionEndPayload is what both agents send a SessionEnd hook on stdin. Only
-// the session id matters here: it names whose lanes and claims to release.
+// SessionEndPayload is what both agents send a SessionEnd hook on stdin. The
+// session id names whose lanes and claims to release; cwd, the session's
+// working directory, lets the desktop also release what that session holds
+// under an MCP identity it shares with other sessions.
 type SessionEndPayload struct {
 	SessionID string `json:"session_id"`
 	Reason    string `json:"reason"`
+	Cwd       string `json:"cwd"`
 }
 
 // ReadSessionEnd parses a SessionEnd payload. Unparseable input yields an

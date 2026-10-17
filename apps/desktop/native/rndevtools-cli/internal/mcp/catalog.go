@@ -17,6 +17,7 @@ import (
 // first come first, because clients that truncate show the head of the list.
 var toolOrder = []protocol.Command{
 	protocol.CommandLane,
+	protocol.CommandSupabase,
 	protocol.CommandSimulators,
 	protocol.CommandCapture,
 	protocol.CommandInput,
@@ -42,6 +43,7 @@ var toolOrder = []protocol.Command{
 // incomplete call before a round trip.
 var requiredFields = map[protocol.Command][]string{
 	protocol.CommandLane:     {"operation"},
+	protocol.CommandSupabase: {"operation"},
 	protocol.CommandApps:     {"udid"},
 	protocol.CommandCapture:  {"udid"},
 	protocol.CommandInput:    {"udid", "kind"},
@@ -81,7 +83,34 @@ var toolMeta = map[protocol.Command]meta{
 			"relaunches. \"down\" stops Metro and releases the port (lane-id). \"ls\" lists lanes. \"launch\" re-opens " +
 			"the dev client or a deep link (lane-id, url). \"log\" tails Metro (lane-id, max-characters). Optional " +
 			"slim applies a SimSlim profile to the device before Metro starts (when SimSlim is enabled in RN Devtools " +
-			"and the device is free or yours); lane.slim in the result says applied, skipped (with why), or failed.",
+			"and the device is free or yours); lane.slim in the result says applied, skipped (with why), or failed. " +
+			"Optional backend (auto, off, required): with auto, the development default, lane up also starts this " +
+			"worktree's local Supabase and passes its URL and publishable key to Metro, so never start Supabase by hand " +
+			"for a lane; lane.backend reports ready, starting (jobId; the app launches when it is ready), skipped, " +
+			"shadowed (the app's own .env files override the injected URL), refused, or failed, with the reason.",
+	},
+	protocol.CommandSupabase: {
+		title: "Run this worktree's local Supabase",
+		description: "Give a git worktree its own local Supabase (Postgres, REST, Auth, Storage, Realtime, Functions) on " +
+			"127.0.0.1, run by RN Devtools so parallel agents never share a database or collide on ports. Use it " +
+			"when the worktree has supabase/config.toml and you need its database, migrations, seed, a reset, logs, " +
+			"or URLs. operation \"up\" (worktree: absolute path) creates or resumes the stack on the native runtime " +
+			"and returns its status, API and database ports, the CLI to run from the worktree (cli.run, e.g. pnpm " +
+			"exec supabase), and next steps; a lane on the worktree gets Metro restarted with the stack's URL and " +
+			"publishable key. A first start downloads services once: if the result has a jobId, call wait " +
+			"(condition job). lane up already does this for its worktree; call up yourself only for database work " +
+			"without a lane, after creating your git branch (each branch gets its own database). \"down\" releases " +
+			"your hold (the stack stops once unused, data kept); \"ls\" lists every stack with lanes and holders; " +
+			"\"status\" shows services; \"env\" returns the URLs and the publishable and anon keys (never secret keys " +
+			"or the database URL; never write keys into .env files). \"reset\" drops the data and re-runs migrations " +
+			"and seed (seed false skips it); \"log\" reads service logs; \"destroy\" only asks the user to delete a " +
+			"database, and resetting a stack another session holds becomes a request too. Run database commands " +
+			"with the worktree's own CLI and --local (migration up --local, db reset --local, gen types typescript " +
+			"--local), and while RN Devtools manages the worktree never run supabase start, stop, stack, or local " +
+			"commands by hand. If this tool answers supabase_disabled, supabase_unsupported, or cli_unverified, RN " +
+			"Devtools is not managing the worktree: start it yourself from the worktree with the project's CLI and " +
+			"start --runtime native (never without it). Never run supabase stop --all or stack destroy, and never " +
+			"kill postgres.",
 	},
 	protocol.CommandSimulators: {
 		title:       "List Simulators",
@@ -205,6 +234,12 @@ func staticResources() []map[string]any {
 			"mimeType":    "application/json",
 		},
 		{
+			"uri":         "rndevtools://supabase",
+			"name":        "Local Supabase stacks",
+			"description": "Every worktree's local Supabase stack on this Mac: branch, status, ports, lanes, and holders (JSON; no URLs or keys).",
+			"mimeType":    "application/json",
+		},
+		{
 			"uri":         "rndevtools://agents",
 			"name":        "Agent sessions",
 			"description": "Coding-agent sessions and the Simulators they hold (JSON).",
@@ -241,6 +276,8 @@ func (server *Server) readResource(ctx context.Context, params json.RawMessage) 
 		return server.jsonResource(ctx, request.URI, protocol.CommandSimulators, map[string]any{})
 	case path == "lanes":
 		return server.jsonResource(ctx, request.URI, protocol.CommandLane, map[string]any{"operation": "ls"})
+	case path == "supabase":
+		return server.jsonResource(ctx, request.URI, protocol.CommandSupabase, map[string]any{"operation": "ls"})
 	case path == "agents":
 		return server.jsonResource(ctx, request.URI, protocol.CommandAgents, map[string]any{})
 	case strings.HasPrefix(path, "screen/"):

@@ -23,6 +23,26 @@ func TestEncodeRequestUsesFrozenEnvelope(t *testing.T) {
 	}
 }
 
+func TestSupabaseIsACommandListedAfterLane(t *testing.T) {
+	if command, err := ParseCommand("supabase"); err != nil || command != CommandSupabase {
+		t.Fatalf("ParseCommand(supabase) = %q, %v", command, err)
+	}
+	commands := Commands()
+	for index, command := range commands {
+		if command == CommandLane {
+			if index+1 >= len(commands) || commands[index+1] != CommandSupabase {
+				t.Fatalf("supabase must follow lane: %v", commands)
+			}
+		}
+	}
+	if len(commands) != len(validCommands) {
+		t.Fatalf("Commands() lists %d of %d commands", len(commands), len(validCommands))
+	}
+	if _, err := EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"supabase","operation":"ls"}`)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEncodeRequestRejectsUnknownCommandAndOversize(t *testing.T) {
 	for name, request := range map[string]Request{
 		"unknown": {

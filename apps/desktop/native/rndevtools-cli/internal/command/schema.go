@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/adalloul0928/rndevtools-cli/internal/protocol"
@@ -291,12 +292,28 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			URL           *string            `json:"url,omitempty"`
 			MaxCharacters *int               `json:"maxCharacters,omitempty"`
 			Agent         *map[string]string `json:"agent,omitempty"`
+			// Backend is the worktree's local Supabase policy for up.
+			Backend *string `json:"backend,omitempty"`
 		}
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
 			return err
 		}
+		if value.Backend != nil {
+			if value.Operation != "up" {
+				return errors.New("only lane up accepts backend")
+			}
+			if !oneOf(*value.Backend, "auto", "off", "required") {
+				return errors.New("backend must be auto, off, or required")
+			}
+		}
 		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
 			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+	case protocol.CommandSupabase:
+		var value supabaseCommand
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		return value.validate()
 	case protocol.CommandAgents:
 		var value struct {
 			Kind string `json:"kind"`
@@ -308,9 +325,24 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			UDID *string `json:"udid,omitempty"`
 			Note *string `json:"note,omitempty"`
 			All  *bool   `json:"all,omitempty"`
+			// SessionCwd is the ending session's working directory, which the
+			// session-end hook sends with all so the desktop can release
+			// worktree holds recorded under a shared MCP identity.
+			SessionCwd *string `json:"sessionCwd,omitempty"`
 		}
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
 			return err
+		}
+		if value.SessionCwd != nil {
+			if expectedKind != protocol.CommandRelease {
+				return errors.New("claim does not accept sessionCwd")
+			}
+			if value.All == nil {
+				return errors.New("sessionCwd is accepted only with all")
+			}
+			if !validAbsolutePath(*value.SessionCwd) {
+				return errors.New("sessionCwd must be an absolute path")
+			}
 		}
 		if value.All != nil {
 			if expectedKind != protocol.CommandRelease {
@@ -387,7 +419,7 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 		if !oneOf(value.Operation, "plan", "install") {
 			return errors.New("native operation must be plan or install")
 		}
-		if value.WorktreePath == nil || !strings.HasPrefix(*value.WorktreePath, "/") || len(*value.WorktreePath) < 2 || len(*value.WorktreePath) > 1024 || strings.ContainsRune(*value.WorktreePath, 0) {
+		if value.WorktreePath == nil || !validAbsolutePath(*value.WorktreePath) {
 			return errors.New("native requires an absolute worktreePath")
 		}
 		if value.UDID != nil {
@@ -423,10 +455,8 @@ func validateLane(
 	if !oneOf(operation, "up", "down", "ls", "launch", "log") {
 		return errors.New("lane operation must be up, down, ls, launch, or log")
 	}
-	if worktreePath != nil {
-		if !strings.HasPrefix(*worktreePath, "/") || len(*worktreePath) < 2 || len(*worktreePath) > 1024 || strings.ContainsRune(*worktreePath, 0) {
-			return errors.New("worktreePath must be an absolute path")
-		}
+	if worktreePath != nil && !validAbsolutePath(*worktreePath) {
+		return errors.New("worktreePath must be an absolute path")
 	}
 	if udid != nil {
 		if err := validateUDID(*udid); err != nil {
@@ -694,6 +724,12 @@ func (condition WaitCondition) validate() error {
 	}
 }
 
+// validAbsolutePath is the path shape the desktop accepts for worktrees and
+// working directories: absolute, 2..1024 bytes, no NUL.
+func validAbsolutePath(value string) bool {
+	return strings.HasPrefix(value, "/") && len(value) >= 2 && len(value) <= 1024 && !strings.ContainsRune(value, 0)
+}
+
 func validateUDID(value string) error {
 	if !udidPattern.MatchString(value) {
 		return errors.New("udid is invalid")
@@ -745,4 +781,170 @@ func oneOf(value string, allowed ...string) bool {
 		}
 	}
 	return false
+}
+
+// supabaseCommand is `rndevtools supabase` on the wire, mirroring the
+// desktop's agent CLI schema field for field: one operation, the worktree or
+// stack it acts on, and that operation's own options. The agent's identity
+// rides on the request envelope only, never in the command.
+type supabaseCommand struct {
+	Kind         string    `json:"kind"`
+	Operation    string    `json:"operation"`
+	WorktreePath *string   `json:"worktreePath,omitempty"`
+	StackID      *string   `json:"stackId,omitempty"`
+	WaitMS       *int      `json:"waitMs,omitempty"`
+	Seed         *bool     `json:"seed,omitempty"`
+	Services     *[]string `json:"services,omitempty"`
+	Tail         *int      `json:"tail,omitempty"`
+	Since        *string   `json:"since,omitempty"`
+	Note         *string   `json:"note,omitempty"`
+}
+
+const (
+	supabaseMaxWaitMS      = 45_000
+	supabaseMaxLogServices = 16
+	supabaseMaxTail        = 1_000
+	supabaseMaxSinceLength = 64
+	supabaseMaxNoteLength  = 240
+)
+
+var (
+	supabaseStackIDPattern  = regexp.MustCompile(`^[0-9a-f]{8,64}$`)
+	supabaseInstancePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	supabaseDurationPattern = regexp.MustCompile(`^(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h|d)){1,6}$`)
+	supabaseInstantPattern  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$`)
+	// supabaseLogServices are the service kinds a log read may name, plus the
+	// API gateway; instance ids (lowercase UUIDs) are accepted too.
+	supabaseLogServices = map[string]struct{}{
+		"database": {}, "rest": {}, "auth": {}, "realtime": {}, "storage": {},
+		"imgproxy": {}, "functions": {}, "studio": {}, "pgmeta": {}, "mail": {},
+		"analytics": {}, "pooler": {}, "gateway": {},
+	}
+)
+
+// validate applies the desktop's per-operation rules: ls takes no target,
+// every other operation exactly one of worktreePath or stackId, and each
+// option belongs to the one operation that reads it.
+func (value supabaseCommand) validate() error {
+	operation := value.Operation
+	if !oneOf(operation, "up", "down", "ls", "status", "env", "reset", "log", "destroy") {
+		return errors.New("supabase operation must be up, down, ls, status, env, reset, log, or destroy")
+	}
+	if value.WorktreePath != nil && !validControlFreePath(*value.WorktreePath) {
+		return errors.New("worktreePath must be an absolute path")
+	}
+	if value.StackID != nil && !supabaseStackIDPattern.MatchString(*value.StackID) {
+		return errors.New("stackId must be 8 to 64 lowercase hex characters")
+	}
+	if operation == "ls" {
+		if value.WorktreePath != nil || value.StackID != nil {
+			return errors.New("supabase ls lists every stack and takes no worktreePath or stackId")
+		}
+	} else if (value.WorktreePath == nil) == (value.StackID == nil) {
+		return fmt.Errorf("supabase %s takes exactly one of worktreePath or stackId", operation)
+	}
+	if value.WaitMS != nil {
+		if operation != "up" {
+			return errors.New("only supabase up accepts waitMs")
+		}
+		if *value.WaitMS < 0 || *value.WaitMS > supabaseMaxWaitMS {
+			return fmt.Errorf("waitMs must be between 0 and %d", supabaseMaxWaitMS)
+		}
+	}
+	if value.Seed != nil && operation != "reset" {
+		return errors.New("only supabase reset accepts seed")
+	}
+	if (value.Services != nil || value.Tail != nil || value.Since != nil) && operation != "log" {
+		return errors.New("only supabase log accepts services, tail, and since")
+	}
+	if value.Services != nil {
+		if err := validateLogServices(*value.Services); err != nil {
+			return err
+		}
+	}
+	if value.Tail != nil && (*value.Tail < 1 || *value.Tail > supabaseMaxTail) {
+		return fmt.Errorf("tail must be between 1 and %d", supabaseMaxTail)
+	}
+	if value.Since != nil && !validLogSince(*value.Since) {
+		return errors.New("since must be start, a duration such as 10m, or an ISO-8601 time")
+	}
+	if value.Note != nil {
+		if operation != "destroy" && operation != "reset" {
+			return errors.New("only supabase destroy and reset accept note")
+		}
+		if utf16Length(*value.Note) > supabaseMaxNoteLength {
+			return fmt.Errorf("note must be at most %d characters", supabaseMaxNoteLength)
+		}
+	}
+	return nil
+}
+
+func validateLogServices(services []string) error {
+	if len(services) == 0 || len(services) > supabaseMaxLogServices {
+		return fmt.Errorf("services must name between 1 and %d services", supabaseMaxLogServices)
+	}
+	seen := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		if _, known := supabaseLogServices[service]; !known && !supabaseInstancePattern.MatchString(service) {
+			return fmt.Errorf("unknown log service %q: name a service kind, gateway, or an instance id", service)
+		}
+		if _, duplicate := seen[service]; duplicate {
+			return fmt.Errorf("log service %q is named twice", service)
+		}
+		seen[service] = struct{}{}
+	}
+	return nil
+}
+
+// validLogSince accepts what the desktop does: `start`, a CLI duration, or
+// an ISO-8601 time that names a real instant.
+func validLogSince(value string) bool {
+	if len(value) > supabaseMaxSinceLength {
+		return false
+	}
+	if value == "start" || supabaseDurationPattern.MatchString(value) {
+		return true
+	}
+	if !supabaseInstantPattern.MatchString(value) {
+		return false
+	}
+	// time.Parse takes a +24:00 offset that the desktop's parser refuses.
+	if offset := value[len(value)-6:]; offset[0] == '+' || offset[0] == '-' {
+		if offset[1:3] > "23" || offset[4:6] > "59" {
+			return false
+		}
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04Z07:00"} {
+		if _, err := time.Parse(layout, value); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// validControlFreePath is validAbsolutePath without control characters,
+// the stricter path shape the desktop's Supabase schemas accept.
+func validControlFreePath(value string) bool {
+	if !validAbsolutePath(value) {
+		return false
+	}
+	for _, character := range value {
+		if character <= 0x1f || (character >= 0x7f && character <= 0x9f) {
+			return false
+		}
+	}
+	return true
+}
+
+// utf16Length is a string's length as the desktop's validators count it,
+// in UTF-16 code units.
+func utf16Length(value string) int {
+	length := 0
+	for _, character := range value {
+		length++
+		if character > 0xffff {
+			length++
+		}
+	}
+	return length
 }

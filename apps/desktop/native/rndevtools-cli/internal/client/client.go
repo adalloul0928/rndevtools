@@ -147,6 +147,24 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 	return response, nil
 }
 
+// Reachable reports whether the desktop answers on socketPath within timeout:
+// the socket passes the same ownership and permission checks a request
+// needs, and a connection opens. Nothing is sent, and the desktop drops the
+// empty connection. The steering hook uses it to tell a running desktop from
+// the files a crashed one left behind.
+func Reachable(socketPath string, timeout time.Duration) bool {
+	localClient, err := New(socketPath, timeout)
+	if err != nil || localClient.validateSocket() != nil {
+		return false
+	}
+	connection, err := net.DialTimeout("unix", localClient.socketPath, timeout)
+	if err != nil {
+		return false
+	}
+	_ = connection.Close()
+	return true
+}
+
 func (c *Client) validateSocket() error {
 	directoryMetadata, err := os.Lstat(filepath.Dir(c.socketPath))
 	if err != nil {
