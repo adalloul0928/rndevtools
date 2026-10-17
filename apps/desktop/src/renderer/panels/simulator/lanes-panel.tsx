@@ -4,20 +4,23 @@ import {
 	Bot,
 	ChevronDown,
 	Copy,
+	DatabaseZap,
 	FolderGit2,
 	FolderPlus,
 	Play,
 	RefreshCw,
+	RotateCcw,
 	ScrollText,
 	Square,
 	Waypoints,
 	X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ControllableScreen } from '@/components/controllable-screen';
 import { VisibleDeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
+	AgentGlyph,
 	LaneChip,
 	LaneSlimBadge,
 	WorktreeLabel,
@@ -26,8 +29,11 @@ import {
 	SimulatorMetric,
 	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
+import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	ConfirmAction,
+	CopyButton,
+	DisabledReason,
 	Disclosure,
 	InfoPopover,
 	KeyValue,
@@ -35,15 +41,40 @@ import {
 	StatusPill,
 } from '@/components/ui';
 import { shortPath } from '@/simulator/fleet-model';
+import {
+	type LaneBackendChoice,
+	laneBackendSelect,
+	laneBackendStack,
+	laneBackendView,
+	laneChipFor,
+	laneRestartMetroAvailability,
+	laneStartPendingMessage,
+	laneStopBackend,
+	laneWorktreeBackend,
+	laneWorktreeOptionSuffix,
+	supabaseChipsVisible,
+} from '@/simulator/supabase-cross-panel';
+import {
+	supabaseStackDeadlines,
+	supabaseStateClock,
+} from '@/simulator/supabase-model';
 import { useAgentRuntime } from '@/state/agent-runtime';
-import { useLaneRuntime } from '@/state/lane-runtime';
+import { resolveLaneFocus, useLaneRuntime } from '@/state/lane-runtime';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
+import {
+	useSupabaseActions,
+	useSupabaseNavigation,
+	useSupabaseNow,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
+import { holdCountdownLabel } from '../../../shared/device-hold';
 import type {
 	Lane,
 	LaneDeviceRequest,
 	LaneEnvironment,
 	LaneState,
+	LaneView,
 	LaneWorktree,
 } from '../../../shared/lane-protocol';
 import {
@@ -52,7 +83,17 @@ import {
 } from '../../../shared/lane-protocol';
 import type { SimulatorDevice } from '../../../shared/simulator-protocol';
 import type { SlimmingProfile } from '../../../shared/slimming-protocol';
+import {
+	isSupabaseControlEnabled,
+	type SupabaseState,
+	supabaseStackTitle,
+} from '../../../shared/supabase-protocol';
 import { AgentsView } from './agents-view';
+
+/** The DOM id of a lane row, so a deep link can scroll it into view. */
+function laneRowId(laneId: string): string {
+	return `lane-row-${laneId}`;
+}
 
 /**
  * Picks the worktree to preselect: the first one without a lane, so a second
@@ -113,9 +154,16 @@ export function LanesPanel() {
 	const slimming = useSlimmingRuntime();
 	const lanes = useLaneRuntime();
 	const simulator = useSimulatorRuntime();
+	const { state: supabase } = useSupabaseState();
+	const chipsVisible = supabaseChipsVisible(supabase);
 	const [selectedLaneId, setSelectedLaneId] = useState<string>('');
 	const [showStart, setShowStart] = useState(false);
 	const [view, setView] = useState<'lanes' | 'agents'>('lanes');
+	const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(
+		null
+	);
+	// Set by a deep link; the lane detail takes focus once, then clears it.
+	const [focusDetail, setFocusDetail] = useState(false);
 	const agents = useAgentRuntime();
 	const liveAgentCount = agents.state.sessions.length;
 	const [log, setLog] = useState<{ laneId: string; text: string } | null>(null);
@@ -127,6 +175,28 @@ export function LanesPanel() {
 			setSelectedLaneId(lanes.state.lanes[0]?.id ?? '');
 		}
 	}, [lanes.state.lanes, selectedLaneId]);
+
+	// Another panel asked for a lane or an Agents card (lanes.focusLane).
+	const { focus, focusHandled, isLoading } = lanes;
+	useEffect(() => {
+		if (!focus) return;
+		const decision = resolveLaneFocus(focus, lanes.state.lanes, isLoading);
+		if (decision.kind === 'wait') return;
+		setView(decision.view);
+		if (decision.view === 'agents') {
+			setFocusedSessionKey(decision.sessionKey ?? null);
+		} else if (decision.laneId !== undefined) {
+			setSelectedLaneId(decision.laneId);
+			setFocusDetail(true);
+		}
+		focusHandled(focus.nonce);
+	}, [focus, focusHandled, isLoading, lanes.state.lanes]);
+	useEffect(() => {
+		if (!focusDetail) return;
+		document
+			.getElementById(laneRowId(selectedLaneId))
+			?.scrollIntoView({ block: 'nearest' });
+	}, [focusDetail, selectedLaneId]);
 
 	const selectedLane = lanes.state.lanes.find(
 		(lane) => lane.id === selectedLaneId
@@ -297,17 +367,19 @@ export function LanesPanel() {
 									: 'Enable experimental mutations in the SimSlim panel first.'))
 							: 'The SimSlim helper is not available.'
 					}
+					supabase={supabase}
 					worktrees={lanes.state.worktrees}
 					onAddRepository={() =>
 						void lanes.runOperation({ kind: 'lane.add-repository' })
 					}
-					onStart={async (input) => {
+					onStart={async (input, { startsBackend }) => {
 						const receipt = await lanes.runOperation(
 							{ kind: 'lane.start', ...input },
 							{
-								pendingMessage: input.slimProfileId
-									? 'Booting, slimming, and starting Metro…'
-									: 'Booting the Simulator and starting Metro…',
+								pendingMessage: laneStartPendingMessage({
+									slim: Boolean(input.slimProfileId),
+									backend: startsBackend,
+								}),
 								successMessage: 'Lane started.',
 							}
 						);
@@ -321,6 +393,8 @@ export function LanesPanel() {
 			{view === 'agents' ? (
 				<AgentsView
 					devices={simulator.state.devices}
+					focusSessionKey={focusedSessionKey}
+					onFocusHandled={() => setFocusedSessionKey(null)}
 					onSelectSimulator={(udid) => {
 						simulator.setSelectedDeviceUdid(udid);
 						window.location.hash = 'simulator/fleet';
@@ -388,6 +462,7 @@ export function LanesPanel() {
 												type="button"
 												className={`lane-row ${selected ? 'is-selected' : ''}`}
 												aria-pressed={selected}
+												id={laneRowId(lane.id)}
 												onClick={() => setSelectedLaneId(lane.id)}
 											>
 												<VisibleDeviceScreen
@@ -411,10 +486,16 @@ export function LanesPanel() {
 															{device?.name ?? lane.simulatorUdid}
 															{device ? ` · ${device.state}` : ''}
 														</span>
-														{lane.agent ? (
-															<AgentBadge agent={lane.agent} />
-														) : null}
-														<LaneSlimBadge lane={lane} />
+														<span className="lane-row-badges">
+															{lane.agent ? (
+																<AgentBadge agent={lane.agent} />
+															) : null}
+															<LaneSlimBadge lane={lane} />
+															<SupabaseChip
+																featureEnabled={chipsVisible}
+																summary={lane.backend}
+															/>
+														</span>
 													</div>
 												</div>
 											</button>
@@ -431,10 +512,12 @@ export function LanesPanel() {
 								device={deviceByUdid.get(
 									selectedLane.simulatorUdid.toUpperCase()
 								)}
+								focusHeading={focusDetail}
 								isBusy={lanes.pendingOperation !== null}
 								lane={selectedLane}
 								log={log?.laneId === selectedLane.id ? log.text : undefined}
 								onCloseLog={() => setLog(null)}
+								onHeadingFocused={() => setFocusDetail(false)}
 								onLaunch={() => launch(selectedLane)}
 								onLog={() => void readLog(selectedLane)}
 								onOpenSimulator={() => {
@@ -473,6 +556,7 @@ function StartLaneForm({
 	lanes,
 	slimProfiles,
 	slimUnavailableReason,
+	supabase,
 	isBusy,
 	onStart,
 	onAddRepository,
@@ -484,14 +568,20 @@ function StartLaneForm({
 	slimProfiles: readonly SlimmingProfile[];
 	/** Why the slim select is disabled, when it is. */
 	slimUnavailableReason: string | undefined;
+	/** Local Supabase, for the Backend select and the worktree suffixes. */
+	supabase: SupabaseState;
 	isBusy: boolean;
-	onStart: (input: {
-		worktreePath: string;
-		simulatorUdid: string;
-		environment: string;
-		launch: boolean;
-		slimProfileId?: string;
-	}) => Promise<void>;
+	onStart: (
+		input: {
+			worktreePath: string;
+			simulatorUdid: string;
+			environment: string;
+			launch: boolean;
+			slimProfileId?: string;
+			backend?: 'auto' | 'off' | 'required';
+		},
+		meta: { startsBackend: boolean }
+	) => Promise<void>;
 	onAddRepository: () => void;
 }) {
 	const [worktreePath, setWorktreePath] = useState(() =>
@@ -502,6 +592,9 @@ function StartLaneForm({
 		environments[0]?.id ?? 'development'
 	);
 	const [slimProfileId, setSlimProfileId] = useState('');
+	const [backendChoice, setBackendChoice] =
+		useState<LaneBackendChoice>('default');
+	const backendHintId = useId();
 	const options = useMemo(
 		() => laneDeviceOptions(devices, lanes),
 		[devices, lanes]
@@ -512,6 +605,28 @@ function StartLaneForm({
 	const worktree = worktrees.find(
 		(candidate) => candidate.path === worktreePath
 	);
+	const showBackend = isSupabaseControlEnabled('lane-backend');
+	const suffixes = useMemo(
+		() =>
+			new Map(
+				worktrees.map((candidate) => [
+					candidate.path,
+					laneWorktreeOptionSuffix(
+						laneWorktreeBackend(candidate, supabase),
+						supabase
+					),
+				])
+			),
+		[supabase, worktrees]
+	);
+	const backend = laneBackendSelect({
+		info: worktree
+			? laneWorktreeBackend(worktree, supabase)
+			: { unknown: true },
+		environmentId,
+		choice: backendChoice,
+		state: supabase,
+	});
 
 	useEffect(() => {
 		if (!worktrees.some((candidate) => candidate.path === worktreePath)) {
@@ -538,13 +653,22 @@ function StartLaneForm({
 			onSubmit={(event) => {
 				event.preventDefault();
 				if (!canStart) return;
-				void onStart({
-					worktreePath,
-					simulatorUdid: udid,
-					environment: environmentId,
-					launch: true,
-					...(slimProfileId && !slimUnavailableReason ? { slimProfileId } : {}),
-				});
+				void onStart(
+					{
+						worktreePath,
+						simulatorUdid: udid,
+						environment: environmentId,
+						launch: true,
+						...(slimProfileId && !slimUnavailableReason
+							? { slimProfileId }
+							: {}),
+						// Only a choice other than the environment's default travels.
+						...(showBackend && backend.backend !== undefined
+							? { backend: backend.backend }
+							: {}),
+					},
+					{ startsBackend: showBackend && backend.starts }
+				);
 			}}
 		>
 			<div className="lane-start-fields">
@@ -570,6 +694,7 @@ function StartLaneForm({
 									{candidate.branch} · {shortPath(candidate.path)}
 									{candidate.dirty ? ' · dirty' : ''}
 									{candidate.laneId ? ' · has lane' : ''}
+									{suffixes.get(candidate.path) ?? ''}
 								</NativeSelect.Option>
 							))}
 							<NativeSelect.Indicator>
@@ -647,6 +772,34 @@ function StartLaneForm({
 						</NativeSelect.Trigger>
 					</NativeSelect>
 				</div>
+				{showBackend ? (
+					<div className="sim-toolbar-field">
+						<span>Backend</span>
+						<NativeSelect fullWidth={false}>
+							<NativeSelect.Trigger
+								aria-describedby={backendHintId}
+								aria-label="Lane backend"
+								disabled={!backend.availability.allowed}
+								value={backend.value}
+								onChange={(event) => {
+									const next = backend.options.find(
+										(option) => option.value === event.currentTarget.value
+									);
+									if (next) setBackendChoice(next.value);
+								}}
+							>
+								{backend.options.map((option) => (
+									<NativeSelect.Option key={option.value} value={option.value}>
+										{option.label}
+									</NativeSelect.Option>
+								))}
+								<NativeSelect.Indicator>
+									<ChevronDown className="h-3 w-3" />
+								</NativeSelect.Indicator>
+							</NativeSelect.Trigger>
+						</NativeSelect>
+					</div>
+				) : null}
 				<Button
 					isDisabled={!canStart}
 					size="sm"
@@ -660,6 +813,18 @@ function StartLaneForm({
 					<FolderPlus className="h-3.5 w-3.5" /> Track repository
 				</Button>
 			</div>
+			{showBackend ? (
+				backend.availability.allowed ? (
+					<p className="sim-field-help lane-backend-hint" id={backendHintId}>
+						<DatabaseZap aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+						<span>{backend.hint}</span>
+					</p>
+				) : (
+					<div>
+						<DisabledReason id={backendHintId}>{backend.hint}</DisabledReason>
+					</div>
+				)
+			) : null}
 			<p className="sim-inline-note lane-start-hint">
 				{environment ? (
 					<>
@@ -826,11 +991,18 @@ function LaneHoldNote({ udid }: { udid: string }) {
 	const { holdForSimulator } = useAgentRuntime();
 	const hold = holdForSimulator(udid);
 	const [now, setNow] = useState(() => Date.now());
+	const counting = hold !== undefined && !hold.holderLive;
+	const releaseAt = hold?.releaseAt;
+	// The last two minutes tick every second, like every other hold clock.
+	const cadence =
+		releaseAt !== undefined && releaseAt - now > 0 && releaseAt - now < 120_000
+			? 1_000
+			: 15_000;
 	useEffect(() => {
-		if (!hold || hold.holderLive) return;
-		const timer = setInterval(() => setNow(Date.now()), 15_000);
+		if (!counting) return;
+		const timer = setInterval(() => setNow(Date.now()), cadence);
 		return () => clearInterval(timer);
-	}, [hold]);
+	}, [cadence, counting]);
 	if (!hold) return null;
 	if (hold.holderLive) {
 		return (
@@ -839,52 +1011,244 @@ function LaneHoldNote({ udid }: { udid: string }) {
 			</span>
 		);
 	}
-	const minutes = hold.releaseAt
-		? Math.max(0, Math.ceil((hold.releaseAt - now) / 60_000))
-		: undefined;
+	const countdown = holdCountdownLabel(
+		{ live: false, releaseAt: hold.releaseAt, holder: hold.via },
+		now
+	);
 	return (
 		<span className="sim-inline-note is-warning">
-			Session gone ·{' '}
-			{minutes === undefined
-				? 'releasing soon'
-				: minutes === 0
-					? 'releasing now'
-					: `releasing in ${minutes} min`}
-			; stop the lane to release it sooner
+			Session {countdown.text}; stop the lane to release it sooner
 		</span>
+	);
+}
+
+/**
+ * The lane's Simulator last ran against another local stack. supabase-js
+ * keys its session by the first host label, so every local stack shares
+ * sb-127-auth-token and a signed-in session can carry over.
+ */
+function LaneCarryOverNotice({ lane }: { lane: LaneView }) {
+	const { state } = useSupabaseState();
+	if (
+		!supabaseChipsVisible(state) ||
+		lane.backend?.warnings.includes('previous-session-on-simulator') !== true
+	) {
+		return null;
+	}
+	return (
+		<PanelNotice title="A signed-in session may carry over." tone="warning">
+			This Simulator last ran against another local stack, and supabase-js keeps
+			its session as <code>sb-127-auth-token</code> for every local stack. Sign
+			out in the app if requests fail with auth errors.
+		</PanelNotice>
+	);
+}
+
+/**
+ * The lane detail's Backend section: the chip, what the stack is doing and
+ * why, the API URL (loopback and public, so it is copied here), the names
+ * Metro got, who holds the stack, and the three actions.
+ */
+function LaneBackendSection({
+	lane,
+	laneBusy,
+}: {
+	lane: LaneView;
+	laneBusy: boolean;
+}) {
+	const { state, isBridgeAvailable } = useSupabaseState();
+	const { run, isPending, isStackPending } = useSupabaseActions();
+	const { openInSupabase } = useSupabaseNavigation();
+	const restartReasonId = useId();
+	const stopReasonId = useId();
+	const stack = laneBackendStack(lane, state);
+	const now = supabaseStateClock(
+		state,
+		useSupabaseNow({ deadlines: stack ? supabaseStackDeadlines(stack) : [] })
+	);
+	const view = laneBackendView(lane, state, now);
+	if (!view) return null;
+	const restart =
+		view.needsMetroRestart && isSupabaseControlEnabled('restart-metro')
+			? laneRestartMetroAvailability(lane, {
+					bridgeAvailable: isBridgeAvailable,
+					state,
+					pending: laneBusy || isPending(`lane:${lane.id}`),
+				})
+			: undefined;
+	const stop = laneStopBackend(view.stack, state, {
+		bridgeAvailable: isBridgeAvailable,
+		pending: view.stack ? isStackPending(view.stack.id) : false,
+	});
+	const title = view.stack ? supabaseStackTitle(view.stack) : lane.branch;
+	const stopNow = () => {
+		if (stop) void run(stop.operation);
+	};
+	return (
+		<Disclosure
+			defaultOpen
+			meta={laneChipFor(lane, state)?.label}
+			title="Backend"
+		>
+			<div className="lane-backend">
+				<div className="sim-lane-summary">
+					<SupabaseChip summary={lane.backend} />
+					<span className={`lane-backend-status is-${view.status.tone}`}>
+						{view.status.text}
+					</span>
+				</div>
+				{view.reason ? <p className="sim-field-help">{view.reason}</p> : null}
+				{view.apiUrl ? (
+					<p className="lane-backend-api">
+						<span>API</span>
+						<code className="lane-backend-api-url">{view.apiUrl}</code>
+						<CopyButton label="Copy API URL" value={view.apiUrl} />
+					</p>
+				) : null}
+				<p className="sim-field-help">
+					{view.appEnvNames.length > 0
+						? `Injected names only: ${view.appEnvNames.join(', ')}`
+						: 'Metro got no Supabase variables for this lane.'}
+				</p>
+				{view.holder ? (
+					<p className="sim-field-help lane-backend-holder">
+						{view.holder.agent ? (
+							<AgentGlyph kind={view.holder.agent.kind} />
+						) : null}
+						<span>{view.holder.text}</span>
+					</p>
+				) : null}
+				{view.others.length > 0 ? (
+					<p className="sim-field-help">
+						Also held by {view.others.join(', ')}
+					</p>
+				) : null}
+				{view.notes.map((note) => (
+					<p className="sim-field-help lane-backend-note" key={note}>
+						{note}
+					</p>
+				))}
+				<div className="sim-action-row">
+					<Button
+						aria-label={`Open the backend of ${lane.branch} in Supabase`}
+						size="sm"
+						variant="secondary"
+						onPress={() =>
+							openInSupabase(
+								view.stack
+									? { stackId: view.stack.id }
+									: { view: 'repositories' }
+							)
+						}
+					>
+						<DatabaseZap className="h-3.5 w-3.5" /> Open in Supabase
+					</Button>
+					{restart ? (
+						<>
+							<Button
+								{...(restart.allowed
+									? {}
+									: { 'aria-describedby': restartReasonId })}
+								isDisabled={!restart.allowed}
+								size="sm"
+								variant="ghost"
+								onPress={() =>
+									void run({ kind: 'restart-metro', laneId: lane.id })
+								}
+							>
+								<RotateCcw className="h-3.5 w-3.5" /> Restart Metro to attach
+							</Button>
+							{restart.allowed ? null : (
+								<DisabledReason id={restartReasonId}>
+									{restart.reason}
+								</DisabledReason>
+							)}
+						</>
+					) : null}
+					{stop ? (
+						stop.confirmation.kind === 'inline' ? (
+							<ConfirmAction
+								ariaLabel={`Stop the backend of ${lane.branch}`}
+								confirmLabel="Stop backend"
+								description={`${stop.confirmation.agents.join(', ')} ${stop.confirmation.agents.length === 1 ? 'uses' : 'use'} ${title}'s database. Stopping keeps its data and ports; the app has no database until it starts again.`}
+								{...(stop.availability.allowed
+									? {}
+									: { disabledReason: stop.availability.reason })}
+								title={`Stop ${title}'s database?`}
+								tone="warning"
+								triggerIcon={<Square className="h-3.5 w-3.5" />}
+								triggerLabel={stop.label}
+								onConfirm={stopNow}
+							/>
+						) : (
+							<>
+								<Button
+									{...(stop.availability.allowed
+										? {}
+										: { 'aria-describedby': stopReasonId })}
+									aria-label={`Stop the backend of ${lane.branch}`}
+									isDisabled={!stop.availability.allowed}
+									size="sm"
+									variant="ghost"
+									onPress={stopNow}
+								>
+									<Square className="h-3.5 w-3.5" /> {stop.label}
+								</Button>
+								{stop.availability.allowed ? null : (
+									<DisabledReason id={stopReasonId}>
+										{stop.availability.reason}
+									</DisabledReason>
+								)}
+							</>
+						)
+					) : null}
+				</div>
+			</div>
+		</Disclosure>
 	);
 }
 
 function LaneDetail({
 	lane,
 	device,
+	focusHeading,
 	isBusy,
 	log,
 	onLaunch,
 	onLog,
 	onCloseLog,
+	onHeadingFocused,
 	onStop,
 	onOpenSimulator,
 }: {
-	lane: Lane;
+	lane: LaneView;
 	device: SimulatorDevice | undefined;
+	/** A deep link landed here: focus the heading once, then report it. */
+	focusHeading: boolean;
 	isBusy: boolean;
 	log: string | undefined;
 	onLaunch: () => void;
 	onLog: () => void;
 	onCloseLog: () => void;
+	onHeadingFocused: () => void;
 	onStop: () => void;
 	onOpenSimulator: () => void;
 }) {
 	const launchUrl = lane.scheme
 		? laneDevClientLaunchUrl(lane.scheme, lane.port)
 		: undefined;
+	const headingRef = useRef<HTMLHeadingElement>(null);
+	useEffect(() => {
+		if (!focusHeading) return;
+		headingRef.current?.focus();
+		onHeadingFocused();
+	}, [focusHeading, onHeadingFocused]);
 	return (
 		<div className="sim-target-detail">
 			<div className="sim-detail-heading">
 				<div>
 					<p className="sim-eyebrow">Lane</p>
-					<h2>
+					<h2 ref={headingRef} tabIndex={-1}>
 						<code>{lane.branch}</code>
 					</h2>
 					<span title={lane.appPath ?? lane.worktreePath}>
@@ -936,6 +1300,7 @@ function LaneDetail({
 					start it again.
 				</PanelNotice>
 			) : null}
+			<LaneCarryOverNotice lane={lane} />
 			{lane.slim ? (
 				<PanelNotice
 					title={
@@ -984,6 +1349,7 @@ function LaneDetail({
 					</p>
 				)}
 			</section>
+			<LaneBackendSection lane={lane} laneBusy={isBusy} />
 			<Disclosure defaultOpen title="Lane details">
 				<dl>
 					<KeyValue label="Lane id" mono value={lane.id} />

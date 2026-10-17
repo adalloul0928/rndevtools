@@ -124,6 +124,19 @@ import {
 	slimmingSettingRequestSchema,
 	slimmingStateSchema,
 } from '../shared/slimming-protocol';
+import {
+	type SupabaseBridge,
+	type SupabaseConfirmationResult,
+	type SupabaseInterest,
+	type SupabaseOperation,
+	type SupabaseOperationReceipt,
+	type SupabaseState,
+	supabaseConfirmationResultSchema,
+	supabaseInterestSchema,
+	supabaseOperationReceiptSchema,
+	supabaseOperationSchema,
+	supabaseStateSchema,
+} from '../shared/supabase-protocol';
 
 const bridge: DesktopBridge &
 	SimulatorBridge &
@@ -133,7 +146,8 @@ const bridge: DesktopBridge &
 	LaneBridge &
 	AgentBridge &
 	SimulatorInputBridge &
-	SimulatorStreamBridge = {
+	SimulatorStreamBridge &
+	SupabaseBridge = {
 	getBootstrap: async () =>
 		desktopBootstrapSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getBootstrap)
@@ -530,6 +544,48 @@ const bridge: DesktopBridge &
 		ipcRenderer.on(IPC_CHANNELS.simulatorStreamStatus, wrapped);
 		return () =>
 			ipcRenderer.removeListener(IPC_CHANNELS.simulatorStreamStatus, wrapped);
+	},
+	getSupabaseState: async () =>
+		supabaseStateSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.getSupabaseState)
+		) as SupabaseState,
+	subscribeSupabaseState: (listener: (state: SupabaseState) => void) => {
+		if (typeof listener !== 'function') {
+			throw new TypeError('Supabase state listener must be a function.');
+		}
+		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
+			const parsed = supabaseStateSchema.safeParse(state);
+			if (!parsed.success) return;
+			try {
+				listener(parsed.data);
+			} catch {
+				// A renderer callback must not break the isolated IPC event handler.
+			}
+		};
+		ipcRenderer.on(IPC_CHANNELS.supabaseStateChanged, wrapped);
+		return () =>
+			ipcRenderer.removeListener(IPC_CHANNELS.supabaseStateChanged, wrapped);
+	},
+	runSupabaseOperation: async (operation: SupabaseOperation) => {
+		const validated = supabaseOperationSchema.parse(operation);
+		return supabaseOperationReceiptSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.runSupabaseOperation, validated)
+		) as SupabaseOperationReceipt;
+	},
+	requestSupabaseConfirmation: async (operation: SupabaseOperation) => {
+		const validated = supabaseOperationSchema.parse(operation);
+		return supabaseConfirmationResultSchema.parse(
+			await ipcRenderer.invoke(
+				IPC_CHANNELS.requestSupabaseConfirmation,
+				validated
+			)
+		) as SupabaseConfirmationResult;
+	},
+	setSupabaseInterest: (interest: SupabaseInterest) => {
+		ipcRenderer.send(
+			IPC_CHANNELS.setSupabaseInterest,
+			supabaseInterestSchema.parse(interest)
+		);
 	},
 };
 

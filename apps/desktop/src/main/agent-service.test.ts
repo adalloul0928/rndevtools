@@ -2,9 +2,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AgentSession } from '../shared/agent-protocol';
 import { DEVICE_HOLD_GRACE_MS } from '../shared/device-hold';
+import type { Lane } from '../shared/lane-protocol';
 import { AgentService } from './agent-service';
 import { type CodexDatabase, discoverAgentSessions } from './agent-sessions';
+import type { MetroLaunchInput, MetroSupervisorPort } from './lane-metro';
+import { LaneService, type LaneSimulatorPort } from './lane-service';
+import { LaneStore } from './lane-store';
+import type { WorktreeInspectorPort } from './lane-worktree';
 
 const A = 'AAAAAAAA-0000-4000-8000-000000000001';
 const B = 'AAAAAAAA-0000-4000-8000-000000000002';
@@ -178,11 +184,13 @@ describe('AgentService', () => {
 	let root: string;
 	let clock: number;
 	let sessions: Awaited<ReturnType<typeof discoverAgentSessions>>['sessions'];
+	let codexDiscovery: 'ok' | 'unavailable';
 	let service: AgentService;
 
 	beforeEach(async () => {
 		root = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-agent-service-'));
 		clock = now;
+		codexDiscovery = 'unavailable';
 		sessions = [
 			{
 				kind: 'claude',
@@ -203,7 +211,11 @@ describe('AgentService', () => {
 					startedAt: clock - 60_000,
 				},
 			],
-			discover: async () => ({ sessions, claude: 'ok', codex: 'unavailable' }),
+			discover: async () => ({
+				sessions,
+				claude: 'ok',
+				codex: codexDiscovery,
+			}),
 			pollIntervalMs: 60_000,
 			now: () => clock,
 		});
@@ -315,13 +327,55 @@ describe('AgentService', () => {
 			service.access('AAAAAAAA-0000-4000-8000-00000000000F', claude).allowed
 		).toBe(true);
 
-		// codex-9 was never a live session here, so its hold is abandoned from the
-		// first refresh and opens up after the grace period.
+		// codex-9 is not a live session, but Codex discovery is unavailable in
+		// this fixture: its sessions cannot be seen, so the hold is unknown rather
+		// than abandoned and its clock does not start.
 		await service.refresh();
 		expect(service.holds().get(B)).toMatchObject({ holderLive: false });
+		clock += DEVICE_HOLD_GRACE_MS;
+		await service.refresh();
+		expect(service.access(B, claude).allowed).toBe(false);
+		expect(service.getState().claims).toHaveLength(1);
+
+		// Once Codex can be seen and codex-9 is still missing, the clock starts
+		// and the hold opens up after the grace period.
+		codexDiscovery = 'ok';
+		await service.refresh();
 		expect(service.access(B, claude).allowed).toBe(false);
 		clock += DEVICE_HOLD_GRACE_MS;
 		expect(service.access(B, claude).allowed).toBe(true);
+	});
+
+	it('keeps clocks for holders other resources name, and answers their liveness', async () => {
+		const holder = { kind: 'claude' as const, sessionId: 'claude-2' };
+		let named = [{ holder, directory: '/Users/dev/app-checkout' }];
+		const withHolders = new AgentService({
+			directory: path.join(root, 'with-holders'),
+			lanes: () => [],
+			holders: () => named,
+			discover: async () => ({ sessions, claude: 'ok', codex: 'ok' }),
+			now: () => clock,
+		});
+		await withHolders.start();
+		const since = clock;
+		clock += 60_000;
+		await withHolders.refresh();
+		expect(withHolders.holderLiveness(holder)).toEqual({
+			live: false,
+			abandonedSince: since,
+			releaseAt: since + DEVICE_HOLD_GRACE_MS,
+		});
+		expect(
+			withHolders.holderLiveness({ kind: 'claude', sessionId: 'claude-1' })
+		).toEqual({ live: true });
+
+		// Once nothing names the holder, its clock is dropped.
+		named = [];
+		await withHolders.refresh();
+		expect(withHolders.holderLiveness(holder)).toMatchObject({
+			abandonedSince: clock,
+		});
+		await withHolders.stop();
 	});
 
 	it('attributes a session to the lane whose app directory it works in', () => {
@@ -351,5 +405,308 @@ describe('AgentService', () => {
 		await failing.start();
 		expect(failing.getState().discovery.error).toBe('registry unreadable');
 		await failing.stop();
+	});
+});
+
+/**
+ * The lane service's reconcile is what tears an abandoned lane down, and it
+ * asks the agent service who holds each device, wired as index.ts wires them.
+ * Lanes are seeded straight into the store: these tests are about the hold
+ * clocks and the reconcile, not about starting lanes.
+ */
+describe('AgentService holds through the lane reconcile', () => {
+	const APP = '/Users/dev/app-checkout';
+	const OTHER_APP = '/Users/dev/app-onboarding';
+	const LANE_A = 'lane-11111111-2222-4333-8444-555555555555';
+	const LANE_B = 'lane-22222222-2222-4333-8444-555555555555';
+	const synthetic = {
+		kind: 'codex' as const,
+		sessionId: 'mcp-codex-mcp-client',
+	};
+
+	class FakeMetro implements MetroSupervisorPort {
+		readonly stopped: Array<{ pid: number; port: number }> = [];
+		isPortFree = async () => true;
+		start = async (_input: MetroLaunchInput) => 1;
+		isHealthy = async () => true;
+		isProcessRunning = () => true;
+		stop = async (pid: number, port: number) => {
+			this.stopped.push({ pid, port });
+		};
+		readLogTail = async () => '';
+	}
+
+	function unused(): never {
+		throw new Error('The reconcile path never drives the Simulator.');
+	}
+	const simulator: LaneSimulatorPort = {
+		getState: unused,
+		refresh: unused,
+		runAction: unused,
+		cancelJob: unused,
+		subscribe: unused,
+	};
+	const worktrees: WorktreeInspectorPort = {
+		repositoryRoot: async () => '/Users/dev/app',
+		listWorktrees: async () => [],
+		readExpoIdentity: async () => ({}),
+	};
+
+	let root: string;
+	let clock: number;
+	let sessions: AgentSession[];
+	let discovery: { claude: 'ok' | 'unavailable'; codex: 'ok' | 'unavailable' };
+	let metro: FakeMetro;
+	let lanes: LaneService;
+	let agents: AgentService;
+
+	function lane(
+		id: string,
+		simulatorUdid: string,
+		appDirectory: string,
+		agent: { kind: 'claude' | 'codex' | 'other'; sessionId: string },
+		port = 8_100
+	): Lane {
+		return {
+			id,
+			worktreePath: appDirectory,
+			branch: 'feature',
+			simulatorUdid,
+			environment: 'development',
+			port,
+			metroPid: port - 4_000,
+			metro: 'ready',
+			logPath: path.join(root, 'lanes', 'logs', `${id}.log`),
+			startedAt: now,
+			agent: { ...agent, lastSeenAt: now },
+		};
+	}
+
+	function session(
+		kind: 'claude' | 'codex',
+		sessionId: string,
+		cwd: string
+	): AgentSession {
+		return { kind, sessionId, title: sessionId, cwd };
+	}
+
+	async function start(seed: readonly Lane[]): Promise<void> {
+		const store = new LaneStore(path.join(root, 'lanes'));
+		await store.start();
+		for (const entry of seed) await store.upsert(entry);
+		metro = new FakeMetro();
+		lanes = new LaneService({
+			store,
+			simulator,
+			metro,
+			worktrees,
+			holds: () => agents.holds(),
+			now: () => clock,
+		});
+		agents = new AgentService({
+			directory: path.join(root, 'agents'),
+			lanes: () =>
+				lanes.getState().lanes.map((entry) => ({
+					id: entry.id,
+					simulatorUdid: entry.simulatorUdid,
+					appDirectory: entry.appPath ?? entry.worktreePath,
+					agent: entry.agent,
+					metro: entry.metro,
+					startedAt: entry.startedAt,
+				})),
+			discover: async () => ({ sessions, ...discovery }),
+			pollIntervalMs: 60_000,
+			now: () => clock,
+		});
+		await lanes.start();
+		await agents.start();
+	}
+
+	/** One agent poll, then one lane reconcile, at the current clock. */
+	async function tick(): Promise<void> {
+		await agents.refresh();
+		await lanes.runOperation({
+			actionId: `reconcile-${clock}`,
+			kind: 'lane.refresh',
+		});
+	}
+
+	function laneIds(): string[] {
+		return lanes.getState().lanes.map((entry) => entry.id);
+	}
+
+	beforeEach(async () => {
+		root = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-agent-holds-'));
+		clock = now;
+		sessions = [];
+		discovery = { claude: 'ok', codex: 'ok' };
+	});
+	afterEach(async () => {
+		await agents?.stop();
+		await lanes?.stop();
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it('releases a lane-only holder once it has been gone for the grace period', async () => {
+		sessions = [session('claude', 'claude-1', APP)];
+		await start([
+			lane(LANE_A, A, APP, { kind: 'claude', sessionId: 'claude-1' }),
+		]);
+		await tick();
+		expect(agents.holds().get(A)).toMatchObject({ holderLive: true });
+
+		// The session exits; the next poll starts the holder's clock.
+		sessions = [];
+		await tick();
+		const missingAt = clock;
+		clock += 60_000;
+		expect(agents.holds().get(A)).toMatchObject({
+			holderLive: false,
+			abandonedSince: missingAt,
+			releaseAt: missingAt + DEVICE_HOLD_GRACE_MS,
+		});
+
+		clock = missingAt + DEVICE_HOLD_GRACE_MS - 1;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A]);
+		expect(metro.stopped).toEqual([]);
+
+		clock += 1;
+		await tick();
+		expect(laneIds()).toEqual([]);
+		expect(metro.stopped).toEqual([{ pid: 4_100, port: 8_100 }]);
+	});
+
+	it('keeps a synthetic MCP holder live only on the lanes a session of its kind works in', async () => {
+		sessions = [session('codex', 'thread-1', `${APP}/src`)];
+		await start([
+			lane(LANE_A, A, APP, synthetic),
+			lane(LANE_B, B, OTHER_APP, synthetic, 8_101),
+		]);
+		await tick();
+		expect(agents.holds().get(A)).toMatchObject({
+			holder: synthetic,
+			holderLive: true,
+		});
+		// The id is shared, but nobody works in the other app: its clock runs.
+		expect(agents.holds().get(B)).toMatchObject({
+			holderLive: false,
+			abandonedSince: now,
+		});
+
+		clock += DEVICE_HOLD_GRACE_MS;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A]);
+
+		// Once the Codex thread works elsewhere, the remaining lane follows.
+		sessions = [session('codex', 'thread-1', '/Users/dev/elsewhere')];
+		await tick();
+		clock += DEVICE_HOLD_GRACE_MS;
+		await tick();
+		expect(laneIds()).toEqual([]);
+	});
+
+	it('pauses the clocks of an agent kind while its discovery is unavailable', async () => {
+		await start([
+			lane(LANE_A, A, APP, { kind: 'codex', sessionId: 'thread-1' }),
+		]);
+		await tick();
+		const missingAt = clock;
+
+		// Four minutes in, Codex can no longer be seen: the clock pauses with six
+		// minutes of grace left, however long the outage lasts.
+		clock = missingAt + 4 * 60_000;
+		discovery = { claude: 'ok', codex: 'unavailable' };
+		await tick();
+		clock += 3 * DEVICE_HOLD_GRACE_MS;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A]);
+		expect(agents.holds().get(A)).toMatchObject({
+			holderLive: false,
+			releaseAt: clock + 6 * 60_000,
+		});
+
+		// Codex is visible again and the thread is still gone: the clock resumes.
+		discovery = { claude: 'ok', codex: 'ok' };
+		await tick();
+		clock += 6 * 60_000 - 1;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A]);
+		clock += 1;
+		await tick();
+		expect(laneIds()).toEqual([]);
+	});
+
+	it('starts no clock for a holder whose kind cannot be seen at all', async () => {
+		discovery = { claude: 'ok', codex: 'unavailable' };
+		await start([
+			lane(LANE_A, A, APP, { kind: 'codex', sessionId: 'thread-1' }),
+			// No discovery exists for `other` sessions, so they are never known gone.
+			lane(
+				LANE_B,
+				B,
+				OTHER_APP,
+				{ kind: 'other', sessionId: 'harness-1' },
+				8_101
+			),
+		]);
+		await tick();
+		clock += 3 * DEVICE_HOLD_GRACE_MS;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A, LANE_B]);
+
+		discovery = { claude: 'ok', codex: 'ok' };
+		await tick();
+		expect(agents.holds().get(A)).toMatchObject({
+			abandonedSince: clock,
+			releaseAt: clock + DEVICE_HOLD_GRACE_MS,
+		});
+	});
+
+	it('drops the clock of a holder nothing names any more', async () => {
+		const holder = { kind: 'claude' as const, sessionId: 'claude-1' };
+		await start([lane(LANE_A, A, APP, holder)]);
+		await tick();
+		await lanes.runOperation({
+			actionId: 'stop-a',
+			kind: 'lane.stop',
+			laneId: LANE_A,
+		});
+		clock += 5 * 60_000;
+		await tick();
+
+		// A new hold by the same session starts a fresh clock instead of
+		// inheriting the five minutes the old lane had used up.
+		await agents.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: holder,
+		});
+		await tick();
+		expect(agents.holds().get(B)).toMatchObject({
+			via: 'claim',
+			holderLive: false,
+			abandonedSince: clock,
+		});
+	});
+
+	it('lets a session of a synthetic holder’s kind that works inside the lane use its device', async () => {
+		sessions = [
+			session('codex', 'thread-1', `${APP}/src`),
+			session('codex', 'thread-2', OTHER_APP),
+			session('claude', 'claude-1', APP),
+		];
+		await start([lane(LANE_A, A, APP, synthetic)]);
+		await tick();
+		expect(agents.access(A, synthetic).allowed).toBe(true);
+		expect(
+			agents.access(A, { kind: 'codex', sessionId: 'thread-1' }).allowed
+		).toBe(true);
+		expect(
+			agents.access(A, { kind: 'codex', sessionId: 'thread-2' }).allowed
+		).toBe(false);
+		expect(
+			agents.access(A, { kind: 'claude', sessionId: 'claude-1' }).allowed
+		).toBe(false);
 	});
 });

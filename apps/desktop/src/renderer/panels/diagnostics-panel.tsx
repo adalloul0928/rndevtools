@@ -3,12 +3,14 @@ import {
 	Activity,
 	CircleAlert,
 	Cpu,
+	DatabaseZap,
 	Laptop2,
 	Radio,
 	ShieldCheck,
 	TerminalSquare,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
+import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	CopyButton,
 	EmptyPanel,
@@ -20,11 +22,13 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
+import { type AppTraffic, useAppTraffic } from '@/lib/app-traffic';
 import {
 	boundedTextExport,
 	formatClock,
 	formatRelativeTime,
 } from '@/lib/format';
+import { appTrafficHealth } from '@/simulator/app-traffic-model';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { DiagnosticEntry } from '../../shared/protocol';
 
@@ -37,17 +41,25 @@ export function levelTone(level: DiagnosticEntry['level']) {
 	return 'default' as const;
 }
 
-type HealthTone = 'brand' | 'warning' | 'danger';
+type HealthTone = 'brand' | 'warning' | 'danger' | 'default';
 
 /**
  * Health-card tone. Blue is reserved for neutral information elsewhere, so the
  * cards use the brand green for a healthy/positive reading, amber for a pending
- * or attention state, and red for a hard failure. Pure for unit testing.
+ * or attention state, red for a hard failure, and the default grey for a
+ * reading with no verdict. Pure for unit testing.
  */
 export function brokerTone(status: string | undefined): HealthTone {
 	if (status === 'listening') return 'brand';
 	if (status === 'error') return 'danger';
 	return 'warning';
+}
+
+/** An app-traffic verdict as a card tone: only "uses this stack" is green. */
+export function trafficHealthTone(
+	tone: 'success' | 'warning' | 'danger' | 'default'
+): HealthTone {
+	return tone === 'success' ? 'brand' : tone;
 }
 
 export function DiagnosticsPanel() {
@@ -76,6 +88,7 @@ export function DiagnosticsPanel() {
 	const filtered = matching.slice(0, MAX_RENDERED_DIAGNOSTICS);
 	const broker = state?.broker;
 	const latestSample = selectedDevice?.tools.performance.samples.at(-1);
+	const traffic = useAppTraffic();
 	const exportText = useMemo(
 		() =>
 			boundedTextExport(
@@ -126,7 +139,9 @@ export function DiagnosticsPanel() {
 				</PanelNotice>
 			) : null}
 			<div className="panel-scroll p-5">
-				<div className="mb-4 grid grid-cols-4 gap-3 max-[1180px]:grid-cols-2">
+				<div
+					className={`mb-4 grid gap-3 ${traffic.enabled ? 'grid-cols-5 max-[1180px]:grid-cols-3' : 'grid-cols-4 max-[1180px]:grid-cols-2'}`}
+				>
 					<HealthCard
 						icon={<Radio className="h-4 w-4" />}
 						label="Broker"
@@ -187,6 +202,7 @@ export function DiagnosticsPanel() {
 						}
 						tone={brokerTone(broker?.status)}
 					/>
+					{traffic.enabled ? <LocalSupabaseCard traffic={traffic} /> : null}
 				</div>
 
 				<div className="mb-4 grid grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)] gap-4 max-[1080px]:grid-cols-1">
@@ -294,23 +310,52 @@ export function DiagnosticsPanel() {
 	);
 }
 
+/**
+ * The connected app's backend: the verdict over its captured traffic, its
+ * lane's stack, and the lane's chip. Never green without evidence.
+ */
+function LocalSupabaseCard({ traffic }: { traffic: AppTraffic }) {
+	const health = appTrafficHealth(traffic);
+	return (
+		<HealthCard
+			capitalize={false}
+			detail={health.detail}
+			footer={
+				traffic.lane?.backend ? (
+					<SupabaseChip summary={traffic.lane.backend} />
+				) : undefined
+			}
+			icon={<DatabaseZap className="h-4 w-4" />}
+			label="Local Supabase"
+			tone={trafficHealthTone(health.tone)}
+			value={health.value}
+		/>
+	);
+}
+
 function HealthCard({
 	icon,
 	label,
 	value,
 	detail,
 	tone,
+	capitalize = true,
+	footer,
 }: {
-	icon: React.ReactNode;
+	icon: ReactNode;
 	label: string;
 	value: string;
 	detail: string;
 	tone: HealthTone;
+	/** Readings that are sentences, such as a traffic verdict, keep their case. */
+	capitalize?: boolean;
+	footer?: ReactNode;
 }) {
 	const color = {
 		brand: 'border-(--brand-border) bg-(--brand-soft) text-(--brand)',
 		warning: 'border-amber-400/15 bg-amber-400/[0.055] text-amber-300',
 		danger: 'border-red-400/15 bg-red-400/[0.055] text-red-300',
+		default: 'border-white/10 bg-white/[0.04] text-(--muted)',
 	}[tone];
 	return (
 		<Card
@@ -322,7 +367,10 @@ function HealthCard({
 					<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 						{label}
 					</p>
-					<p className="mb-0 mt-2 truncate text-sm font-semibold capitalize text-(--foreground)">
+					<p
+						className={`mb-0 mt-2 truncate text-sm font-semibold text-(--foreground) ${capitalize ? 'capitalize' : ''}`}
+						title={value}
+					>
 						{value}
 					</p>
 				</div>
@@ -332,7 +380,10 @@ function HealthCard({
 					{icon}
 				</span>
 			</div>
-			<p className="mb-0 mt-3 truncate text-xs text-(--text-3)">{detail}</p>
+			<p className="mb-0 mt-3 truncate text-xs text-(--text-3)" title={detail}>
+				{detail}
+			</p>
+			{footer ? <div className="mt-2 flex">{footer}</div> : null}
 		</Card>
 	);
 }

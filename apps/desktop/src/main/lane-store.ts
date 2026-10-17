@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import {
+	chmod,
+	lstat,
+	mkdir,
+	opendir,
+	readFile,
+	rename,
+	unlink,
+	writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { type Lane, laneSchema } from '../shared/lane-protocol';
@@ -10,6 +19,12 @@ const storedLanesSchema = z.strictObject({
 	repositories: z.array(z.string().min(2).max(1_024)).max(32),
 });
 type StoredLanes = z.infer<typeof storedLanesSchema>;
+
+/** The only file names log pruning may delete: what `logPathFor` creates. */
+const LANE_LOG_NAME =
+	/^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.log$/i;
+/** How many directory entries one pruning pass looks at. */
+const MAX_LOG_PRUNE_ENTRIES = 2_048;
 
 /**
  * Durable lane leases. Metro processes are detached and outlive the desktop
@@ -47,15 +62,62 @@ export class LaneStore {
 			const raw = await readFile(this.#file, 'utf8');
 			const parsed = storedLanesSchema.safeParse(JSON.parse(raw));
 			if (parsed.success) this.#data = parsed.data;
+			// Valid JSON this build cannot read, such as a newer build's lane, is
+			// set aside like a corrupt file: starting empty and writing over it
+			// would orphan the detached Metros it describes.
+			else await this.#quarantine();
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
 				// A corrupt file must not block the app; it is rebuilt from live
 				// state and the old copy is kept for inspection.
-				await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`).catch(
-					() => undefined
-				);
+				await this.#quarantine();
 			}
 		}
+	}
+
+	/**
+	 * Deletes the Metro logs of lanes that no longer exist once they have sat
+	 * unwritten for `maxAgeMs`, and returns how many went. Only regular
+	 * `lane-<uuid>.log` files directly in the logs directory are candidates,
+	 * never a stored lane's own log, and one pass looks at a bounded number of
+	 * entries. A start still in flight writes its log as Metro runs, so a log
+	 * that young is never old enough to go.
+	 */
+	async pruneLogs(maxAgeMs: number, now = Date.now()): Promise<number> {
+		const directory = path.join(this.#root, 'logs');
+		const current = new Set(
+			this.#data.lanes.flatMap((lane) => [
+				`${lane.id}.log`,
+				path.basename(lane.logPath),
+			])
+		);
+		let removed = 0;
+		let seen = 0;
+		try {
+			for await (const entry of await opendir(directory)) {
+				seen += 1;
+				if (seen > MAX_LOG_PRUNE_ENTRIES) break;
+				if (
+					!entry.isFile() ||
+					!LANE_LOG_NAME.test(entry.name) ||
+					current.has(entry.name)
+				) {
+					continue;
+				}
+				const file = path.join(directory, entry.name);
+				try {
+					const info = await lstat(file);
+					if (!info.isFile() || now - info.mtimeMs < maxAgeMs) continue;
+					await unlink(file);
+					removed += 1;
+				} catch {
+					// Already gone; nothing to delete.
+				}
+			}
+		} catch {
+			// No logs directory, so nothing to prune.
+		}
+		return removed;
 	}
 
 	lanes(): Lane[] {
@@ -112,6 +174,12 @@ export class LaneStore {
 		if (this.#data.repositories.length === before) return false;
 		await this.#persist();
 		return true;
+	}
+
+	async #quarantine(): Promise<void> {
+		await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`).catch(
+			() => undefined
+		);
 	}
 
 	#persist(): Promise<void> {

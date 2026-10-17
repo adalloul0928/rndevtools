@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { boundedTextExport } from './format';
+import { formatSupabaseSize } from '../../shared/supabase-protocol';
+import {
+	boundedTextExport,
+	formatAgo,
+	formatSize,
+	formatUntil,
+} from './format';
 
 describe('boundedTextExport', () => {
 	it('joins entries without changing an export inside the limit', () => {
@@ -14,5 +20,97 @@ describe('boundedTextExport', () => {
 		expect(result.truncated).toBe(true);
 		expect(result.text).toHaveLength(64);
 		expect(result.text).toContain('[Export truncated');
+	});
+});
+
+describe('formatUntil', () => {
+	const now = Date.UTC(2026, 9, 17, 14, 3, 5);
+	const SECOND = 1_000;
+	const MINUTE = 60 * SECOND;
+	const HOUR = 60 * MINUTE;
+	const DAY = 24 * HOUR;
+
+	it('reads seconds, minutes, hours and days the way countdowns do', () => {
+		expect(formatUntil(now + 45 * SECOND, now)).toBe('in 45 s');
+		expect(formatUntil(now + 7 * MINUTE, now)).toBe('in 7 min');
+		expect(formatUntil(now + 3 * HOUR, now)).toBe('in 3 h');
+		expect(formatUntil(now + 3 * DAY, now)).toBe('in 3 days');
+	});
+
+	it('rounds up, so a clock never reads as done early', () => {
+		expect(formatUntil(now + 200, now)).toBe('in 1 s');
+		expect(formatUntil(now + 6 * MINUTE + 1, now)).toBe('in 7 min');
+	});
+
+	it('shows a date a week or more out', () => {
+		const target = now + 14 * DAY;
+		const expected = new Intl.DateTimeFormat(undefined, {
+			month: 'short',
+			day: 'numeric',
+		}).format(target);
+		expect(formatUntil(target, now)).toBe(expected);
+		const nextYear = now + 120 * DAY;
+		expect(formatUntil(nextYear, now)).toBe(
+			new Intl.DateTimeFormat(undefined, {
+				month: 'short',
+				day: 'numeric',
+				year: 'numeric',
+			}).format(nextYear)
+		);
+	});
+
+	it('reads a passed time as now and an invalid one as a dash', () => {
+		expect(formatUntil(now, now)).toBe('now');
+		expect(formatUntil(now - MINUTE, now)).toBe('now');
+		expect(formatUntil(Number.NaN, now)).toBe('—');
+	});
+});
+
+describe('formatAgo', () => {
+	const now = Date.UTC(2026, 9, 17, 14, 3, 5);
+
+	it('rounds down in spaced units', () => {
+		expect(formatAgo(now - 2_000, now)).toBe('just now');
+		expect(formatAgo(now - 45_000, now)).toBe('45 s ago');
+		expect(formatAgo(now - 4 * 60_000 - 59_000, now)).toBe('4 min ago');
+		expect(formatAgo(now - 3 * 3_600_000, now)).toBe('3 h ago');
+		expect(formatAgo(now - 16 * 86_400_000, now)).toBe('16 days ago');
+	});
+
+	it('never reads a future time as ago, and dashes an invalid one', () => {
+		expect(formatAgo(now + 60_000, now)).toBe('just now');
+		expect(formatAgo(Number.NaN, now)).toBe('—');
+	});
+});
+
+describe('formatSize', () => {
+	const MB = 1_024 * 1_024;
+
+	it('formats B, KB, MB and GB', () => {
+		expect(formatSize(512)).toBe('512 B');
+		expect(formatSize(48 * 1_024)).toBe('48 KB');
+		expect(formatSize(2.1 * MB)).toBe('2.1 MB');
+		expect(formatSize(71 * MB)).toBe('71 MB');
+		expect(formatSize(1.7 * 1_024 * MB)).toBe('1.7 GB');
+	});
+
+	it('shows a dash when the size is unknown', () => {
+		expect(formatSize(undefined)).toBe('—');
+		expect(formatSize(Number.NaN)).toBe('—');
+		expect(formatSize(-1)).toBe('—');
+	});
+
+	it('reads the same as the sizes main writes into its messages', () => {
+		for (const bytes of [
+			0,
+			900,
+			12_345,
+			64 * MB,
+			9.5 * MB,
+			179 * MB,
+			3.2 * 1_024 * MB,
+		]) {
+			expect(formatSize(bytes)).toBe(formatSupabaseSize(bytes));
+		}
 	});
 });

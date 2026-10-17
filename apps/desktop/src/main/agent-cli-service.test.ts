@@ -2,12 +2,14 @@ import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	type AgentCliResponse,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
 import { AgentCliError, AgentCliService } from './agent-cli-service';
+
+const LANE_ID = 'lane-11111111-2222-4333-8444-555555555555';
 
 const temporaryDirectories: string[] = [];
 const services: AgentCliService[] = [];
@@ -151,6 +153,164 @@ describe('agent CLI service', () => {
 			error: { code: 'multiple_requests', retryable: false },
 		});
 		expect(calls).toBe(0);
+	});
+
+	it('tells an agent whose tools are out of date how to recover from an unknown command', async () => {
+		const { socketPath } = await fixture();
+		const response = await request(socketPath, {
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+			id: 'request-stale',
+			command: { kind: 'backend', operation: 'up' },
+		});
+		expect(response).toMatchObject({
+			ok: false,
+			error: {
+				code: 'invalid_request',
+				retryable: false,
+				recovery:
+					'Update RN Devtools, or restart the agent session to reload the rndevtools tools.',
+			},
+		});
+	});
+
+	it('gives lane up, lane launch, and native 230 s, and every other command 60 s', async () => {
+		let handlerMs = 0;
+		let started: () => void = () => undefined;
+		const { socketPath } = await fixture(async (command, context) => {
+			started();
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(resolve, handlerMs);
+				context.signal.addEventListener(
+					'abort',
+					() => {
+						clearTimeout(timer);
+						reject(
+							new AgentCliError({
+								code: 'cancelled',
+								message: 'The agent request was cancelled.',
+							})
+						);
+					},
+					{ once: true }
+				);
+			});
+			return { kind: command.kind };
+		});
+		// Only the handler budget is faked; the socket itself stays real.
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const run = async (command: unknown, durationMs: number) => {
+				handlerMs = durationMs;
+				const handlerStarted = new Promise<void>((resolve) => {
+					started = resolve;
+				});
+				const response = request(socketPath, {
+					protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+					id: 'request-slow',
+					command,
+				});
+				await handlerStarted;
+				await vi.advanceTimersByTimeAsync(durationMs);
+				return await response;
+			};
+			const laneUp = {
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app',
+			};
+			for (const command of [
+				laneUp,
+				{ kind: 'lane', operation: 'launch', laneId: LANE_ID },
+				{ kind: 'native', operation: 'plan', worktreePath: '/Users/dev/app' },
+			]) {
+				expect(await run(command, 90_000)).toMatchObject({ ok: true });
+			}
+			expect(await run(laneUp, 229_000)).toMatchObject({ ok: true });
+			expect(await run(laneUp, 231_000)).toMatchObject({
+				ok: false,
+				error: { code: 'cancelled' },
+			});
+			for (const command of [
+				{ kind: 'doctor' },
+				{ kind: 'lane', operation: 'down', laneId: LANE_ID },
+			]) {
+				expect(await run(command, 61_000)).toMatchObject({
+					ok: false,
+					error: { code: 'cancelled' },
+				});
+				expect(await run(command, 59_000)).toMatchObject({ ok: true });
+			}
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('gives supabase up its wait plus 10 s, reads 30 s, destroy and down 40 s, and reset 60 s', async () => {
+		let handlerMs = 0;
+		let started: () => void = () => undefined;
+		const { socketPath } = await fixture(async (command, context) => {
+			started();
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(resolve, handlerMs);
+				context.signal.addEventListener(
+					'abort',
+					() => {
+						clearTimeout(timer);
+						reject(
+							new AgentCliError({
+								code: 'cancelled',
+								message: 'The agent request was cancelled.',
+							})
+						);
+					},
+					{ once: true }
+				);
+			});
+			return { kind: command.kind };
+		});
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const run = async (command: unknown, durationMs: number) => {
+				handlerMs = durationMs;
+				const handlerStarted = new Promise<void>((resolve) => {
+					started = resolve;
+				});
+				const response = request(socketPath, {
+					protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+					id: 'request-supabase',
+					command,
+				});
+				await handlerStarted;
+				await vi.advanceTimersByTimeAsync(durationMs);
+				return await response;
+			};
+			const worktreePath = '/Users/dev/example-app';
+			const budgets: Array<[Record<string, unknown>, number]> = [
+				[{ operation: 'up', worktreePath }, 40_000],
+				[{ operation: 'up', worktreePath, waitMs: 45_000 }, 55_000],
+				[{ operation: 'up', worktreePath, waitMs: 0 }, 10_000],
+				[{ operation: 'ls' }, 30_000],
+				[{ operation: 'status', worktreePath }, 30_000],
+				[{ operation: 'env', worktreePath }, 30_000],
+				[{ operation: 'log', worktreePath, tail: 50 }, 30_000],
+				[{ operation: 'reset', worktreePath }, 60_000],
+				// Inside the Go CLI's 45 s deadline for both.
+				[{ operation: 'destroy', worktreePath }, 40_000],
+				[{ operation: 'down', worktreePath }, 40_000],
+			];
+			for (const [fields, budgetMs] of budgets) {
+				const command = { kind: 'supabase', ...fields };
+				expect(await run(command, budgetMs - 1_000)).toMatchObject({
+					ok: true,
+				});
+				expect(await run(command, budgetMs + 1_000)).toMatchObject({
+					ok: false,
+					error: { code: 'cancelled' },
+				});
+			}
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('returns bounded typed handler errors without leaking query values', async () => {

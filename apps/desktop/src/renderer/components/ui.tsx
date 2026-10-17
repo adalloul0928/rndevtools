@@ -14,11 +14,17 @@ import {
 	Search,
 	X,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
-import { statusToneClassName } from '@/components/status-ui';
+import {
+	type ComponentType,
+	type ReactNode,
+	useEffect,
+	useId,
+	useState,
+} from 'react';
+import { StatusPill, statusToneClassName } from '@/components/status-ui';
 import { copyText } from '@/lib/format';
 
-export { StatusPill } from '@/components/status-ui';
+export { StatusPill };
 
 export function InfoPopover({
 	label,
@@ -47,20 +53,48 @@ export function InfoPopover({
 	);
 }
 
+/**
+ * A native details/summary section. Uncontrolled by default (`defaultOpen`);
+ * pass `open` with `onToggle` to keep the open state elsewhere, such as per
+ * stack in a provider. Keyboard behaviour stays the browser's either way.
+ */
 export function Disclosure({
 	title,
 	children,
 	defaultOpen = false,
+	open,
+	onToggle,
+	meta,
 }: {
-	title: string;
+	title: ReactNode;
 	children: ReactNode;
 	defaultOpen?: boolean;
+	/** Controlled open state; pair it with `onToggle`. */
+	open?: boolean;
+	onToggle?: (open: boolean) => void;
+	/** Trailing summary text, such as when the section was last read. */
+	meta?: ReactNode;
 }) {
+	const controlled = open !== undefined;
 	return (
-		<details className="panel-disclosure" open={defaultOpen || undefined}>
+		<details
+			className="panel-disclosure"
+			open={controlled ? open : defaultOpen || undefined}
+			onToggle={
+				onToggle
+					? (event) => {
+							const next = event.currentTarget.open;
+							// Setting `open` from props fires toggle too; only report
+							// what the person changed.
+							if (!controlled || next !== open) onToggle(next);
+						}
+					: undefined
+			}
+		>
 			<summary>
 				<ChevronRight aria-hidden="true" className="h-4 w-4" />
-				{title}
+				<span className="panel-disclosure-title">{title}</span>
+				{meta ? <span className="panel-disclosure-meta">{meta}</span> : null}
 			</summary>
 			<div className="panel-disclosure-content">{children}</div>
 		</details>
@@ -136,17 +170,20 @@ export function SearchControl({
 	placeholder = 'Search',
 	ariaLabel = 'Search',
 	className = '',
+	widthClassName = 'w-[260px]',
 }: {
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;
 	ariaLabel?: string;
 	className?: string;
+	/** Tailwind width classes, e.g. a narrower field below 1080 px. */
+	widthClassName?: string;
 }) {
 	return (
 		<SearchField
 			aria-label={ariaLabel}
-			className={`w-[260px] ${className}`}
+			className={`${widthClassName} ${className}`}
 			value={value}
 			onChange={onChange}
 		>
@@ -301,6 +338,9 @@ export function ConfirmAction({
 	triggerVariant = 'ghost',
 	triggerIcon,
 	isDisabled = false,
+	describedBy,
+	disabledReason,
+	ariaLabel,
 }: {
 	triggerLabel: string;
 	title: string;
@@ -311,19 +351,50 @@ export function ConfirmAction({
 	triggerVariant?: 'ghost' | 'secondary' | 'primary' | 'danger';
 	triggerIcon?: ReactNode;
 	isDisabled?: boolean;
+	/**
+	 * The id of visible text that explains the trigger, such as a
+	 * DisabledReason rendered under the action row. Kept on both branches.
+	 */
+	describedBy?: string;
+	/**
+	 * Disables the trigger and shows why, as visible text right after it.
+	 * The reason is never left to a tooltip.
+	 */
+	disabledReason?: string;
+	/** Names the trigger when its label alone is ambiguous, e.g. `Stop feat-x`. */
+	ariaLabel?: string;
 }) {
+	const reasonId = useId();
 	const Icon = tone === 'danger' ? CircleX : AlertTriangle;
-	if (isDisabled) {
+	const disabled = isDisabled || disabledReason !== undefined;
+	if (disabled) {
+		const describedByIds =
+			[describedBy, disabledReason === undefined ? undefined : reasonId]
+				.filter((id): id is string => id !== undefined)
+				.join(' ') || undefined;
 		return (
-			<Button isDisabled size="sm" variant={triggerVariant}>
-				{triggerIcon}
-				{triggerLabel}
-			</Button>
+			<>
+				<Button
+					{...(describedByIds ? { 'aria-describedby': describedByIds } : {})}
+					{...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
+					isDisabled
+					size="sm"
+					variant={triggerVariant}
+				>
+					{triggerIcon}
+					{triggerLabel}
+				</Button>
+				{disabledReason === undefined ? null : (
+					<DisabledReason id={reasonId}>{disabledReason}</DisabledReason>
+				)}
+			</>
 		);
 	}
 	return (
 		<AlertDialog>
 			<AlertDialog.Trigger
+				{...(describedBy ? { 'aria-describedby': describedBy } : {})}
+				{...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
 				className={`button button--sm button--${triggerVariant}`}
 			>
 				{triggerIcon}
@@ -359,6 +430,185 @@ export function ConfirmAction({
 				</AlertDialog.Container>
 			</AlertDialog.Backdrop>
 		</AlertDialog>
+	);
+}
+
+/**
+ * The one status dot. It never carries meaning alone: a word always sits
+ * beside it, so the dot is hidden from assistive technology.
+ */
+export function StatusDot({
+	tone = 'default',
+	hollow = false,
+	className = '',
+}: {
+	tone?: 'default' | 'success' | 'info' | 'warning' | 'danger';
+	/** An outline only, for something that does not exist yet. */
+	hollow?: boolean;
+	className?: string;
+}) {
+	return (
+		<span
+			aria-hidden="true"
+			className={`status-dot is-${tone} ${hollow ? 'is-hollow' : ''} ${className}`}
+		/>
+	);
+}
+
+/**
+ * Why a control is disabled, as visible text. Give the control
+ * `aria-describedby={id}` so the reason is read with it.
+ */
+export function DisabledReason({
+	id,
+	children,
+}: {
+	id: string;
+	children: ReactNode;
+}) {
+	return (
+		<span className="disabled-reason" id={id}>
+			<Info
+				aria-hidden="true"
+				className="disabled-reason-icon h-3 w-3 shrink-0"
+			/>
+			<span>{children}</span>
+		</span>
+	);
+}
+
+/**
+ * A block-layout card for something waiting on a decision, such as an agent's
+ * request. Unlike PanelNotice, whose body is an inline span, it holds facts,
+ * a quoted note and a row of actions.
+ * @public
+ */
+export function RequestCard({
+	tone = 'warning',
+	title,
+	meta,
+	children,
+	actions,
+}: {
+	tone?: 'warning' | 'danger' | 'default';
+	title: ReactNode;
+	/** Trailing header text, such as the request's age. */
+	meta?: ReactNode;
+	children?: ReactNode;
+	actions?: ReactNode;
+}) {
+	const Icon =
+		tone === 'danger' ? CircleX : tone === 'warning' ? AlertTriangle : Info;
+	return (
+		<article className={`request-card is-${tone}`}>
+			<header className="request-card-header">
+				<Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+				<strong className="request-card-title">{title}</strong>
+				{meta ? <span className="request-card-meta">{meta}</span> : null}
+			</header>
+			{children ? <div className="request-card-body">{children}</div> : null}
+			{actions ? <div className="request-card-actions">{actions}</div> : null}
+		</article>
+	);
+}
+
+export type ReadinessStatus =
+	| 'ready'
+	| 'needs-fix'
+	| 'check'
+	| 'optional'
+	| 'checking';
+
+const READINESS_PILLS: Readonly<
+	Record<
+		ReadinessStatus,
+		{ label: string; tone: 'success' | 'warning' | 'default' }
+	>
+> = {
+	ready: { label: 'Ready', tone: 'success' },
+	'needs-fix': { label: 'Needs fix', tone: 'warning' },
+	check: { label: 'Check', tone: 'warning' },
+	optional: { label: 'Optional', tone: 'default' },
+	checking: { label: 'Checking', tone: 'default' },
+};
+
+/**
+ * One readiness check: an icon, a label with an optional About popover and
+ * tag, a summary or next step, file and line facts, a copy-only fix, and a
+ * status pill with actions. Simulator capabilities, repository checks and
+ * the global Local Supabase row all use it.
+ */
+export function ReadinessRow({
+	icon: Icon,
+	label,
+	status,
+	statusLabel,
+	tag,
+	info,
+	detail,
+	lines,
+	fix,
+	actions,
+}: {
+	icon: ComponentType<{ className?: string }>;
+	label: string;
+	status: ReadinessStatus;
+	/** Replaces the pill's word, e.g. `Needs setup` or `On · 3 running`. */
+	statusLabel?: string;
+	/** A small tag beside the label, such as Required or Optional. */
+	tag?: string;
+	/** The About popover's body; without it there is no popover. */
+	info?: ReactNode;
+	/** The line under the label: a summary or the next step. */
+	detail?: ReactNode;
+	/** File and line facts, such as a pinned port in a config file. */
+	lines?: readonly { file: string; line: number; text: string }[];
+	/** Copy-only: RN Devtools never edits repository files. */
+	fix?: { text: string; snippet?: string | undefined };
+	actions?: ReactNode;
+}) {
+	const pill = READINESS_PILLS[status];
+	return (
+		<div className="sim-capability-row" data-status={status}>
+			<span className="sim-capability-icon">
+				<Icon className="h-4 w-4" />
+			</span>
+			<div className="sim-capability-copy">
+				<div>
+					<strong>{label}</strong>
+					{info ? <InfoPopover label={label}>{info}</InfoPopover> : null}
+					{tag ? <span>{tag}</span> : null}
+				</div>
+				{detail ? <p className="sim-capability-next-step">{detail}</p> : null}
+				{lines && lines.length > 0 ? (
+					<ul className="readiness-lines">
+						{lines.map((line, index) => (
+							<li key={`${line.file}:${line.line}:${index}`}>
+								<code className="readiness-line-file">
+									{line.file}:{line.line}
+								</code>
+								<span className="readiness-line-text">{line.text}</span>
+							</li>
+						))}
+					</ul>
+				) : null}
+				{fix ? (
+					<div className="readiness-fix">
+						<p className="readiness-fix-text">{fix.text}</p>
+						{fix.snippet ? (
+							<div className="readiness-snippet">
+								<pre>{fix.snippet}</pre>
+								<CopyButton label="Copy snippet" value={fix.snippet} />
+							</div>
+						) : null}
+					</div>
+				) : null}
+			</div>
+			<div className="sim-capability-action">
+				<StatusPill tone={pill.tone}>{statusLabel ?? pill.label}</StatusPill>
+				{actions}
+			</div>
+		</div>
 	);
 }
 

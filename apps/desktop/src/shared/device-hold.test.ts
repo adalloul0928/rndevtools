@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
 	DEVICE_HOLD_GRACE_MS,
 	decideDeviceAccess,
+	formatHoldDuration,
 	freeDevices,
+	type HoldCountdownInput,
+	type HoldCountdownOptions,
+	holdCountdownLabel,
+	holderClockKey,
+	isPathInside,
+	isSyntheticHolder,
 	resolveDeviceHolds,
+	resolveHolderLiveness,
 } from './device-hold';
 
 const A = 'AAAAAAAA-0000-4000-8000-000000000001';
@@ -13,7 +21,10 @@ const now = 1_700_000_000_000;
 const claude = { kind: 'claude', sessionId: 's1' } as const;
 const codex = { kind: 'codex', sessionId: 't1' } as const;
 
-function lane(udid: string, agent?: typeof claude | typeof codex) {
+function lane(
+	udid: string,
+	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string }
+) {
 	return {
 		id: `lane-${udid.slice(-1)}`,
 		simulatorUdid: udid.toLowerCase(),
@@ -157,5 +168,295 @@ describe('freeDevices', () => {
 			now,
 		});
 		expect(freeDevices([A, B, C], holds, now)).toEqual([A, C]);
+	});
+});
+
+describe('resolveHolderLiveness', () => {
+	const app = '/Users/dev/app-checkout';
+	const synthetic = {
+		kind: 'codex',
+		sessionId: 'mcp-codex-mcp-client',
+	} as const;
+	const inputs = {
+		liveSessionKeys: new Set(['claude:s1']),
+		liveSessions: [
+			{ kind: 'codex' as const, cwd: `${app}/src/` },
+			{ kind: 'claude' as const, cwd: '/Users/dev/app-onboarding' },
+		],
+		missingSince: new Map<string, number>(),
+		now,
+	};
+
+	it('treats the operator and live sessions as live, and runs a clock for the rest', () => {
+		expect(resolveHolderLiveness(undefined, inputs)).toEqual({ live: true });
+		expect(resolveHolderLiveness(claude, inputs)).toEqual({ live: true });
+		const since = now - 60_000;
+		expect(
+			resolveHolderLiveness(codex, {
+				...inputs,
+				missingSince: new Map([['codex:t1', since]]),
+			})
+		).toEqual({
+			live: false,
+			abandonedSince: since,
+			releaseAt: since + DEVICE_HOLD_GRACE_MS,
+		});
+		// No clock yet: missing from now, so the release never comes closer.
+		expect(resolveHolderLiveness(codex, inputs)).toEqual({
+			live: false,
+			abandonedSince: now,
+			releaseAt: now + DEVICE_HOLD_GRACE_MS,
+		});
+	});
+
+	it('keeps a synthetic holder live only while a session of its kind works inside the directory', () => {
+		expect(isSyntheticHolder(synthetic)).toBe(true);
+		expect(isSyntheticHolder(codex)).toBe(false);
+		expect(resolveHolderLiveness(synthetic, inputs, app)).toEqual({
+			live: true,
+		});
+		// A sibling directory, another kind's session, or no directory at all.
+		expect(
+			resolveHolderLiveness(synthetic, inputs, '/Users/dev/app-check').live
+		).toBe(false);
+		expect(
+			resolveHolderLiveness(
+				{ kind: 'claude', sessionId: 'mcp-claude-code' },
+				inputs,
+				app
+			).live
+		).toBe(false);
+		expect(resolveHolderLiveness(synthetic, inputs).live).toBe(false);
+	});
+
+	it('gives a synthetic holder one clock per directory and a session one clock overall', () => {
+		expect(holderClockKey(synthetic, app)).not.toBe(
+			holderClockKey(synthetic, '/Users/dev/app-onboarding')
+		);
+		expect(holderClockKey(synthetic, `${app}/`)).toBe(
+			holderClockKey(synthetic, app)
+		);
+		expect(holderClockKey(codex, app)).toBe(holderClockKey(codex));
+		const since = now - 2 * 60_000;
+		expect(
+			resolveHolderLiveness(
+				synthetic,
+				{
+					...inputs,
+					missingSince: new Map([
+						[holderClockKey(synthetic, '/Users/dev/other'), since],
+					]),
+				},
+				'/Users/dev/other'
+			)
+		).toMatchObject({ abandonedSince: since });
+	});
+
+	it('matches paths by whole segments', () => {
+		expect(isPathInside('/Users/dev/app', '/Users/dev/app/')).toBe(true);
+		expect(isPathInside('/Users/dev/app/src', '/Users/dev/app')).toBe(true);
+		expect(isPathInside('/Users/dev/app-2', '/Users/dev/app')).toBe(false);
+		expect(isPathInside('/Users/dev', '/Users/dev/app')).toBe(false);
+	});
+
+	it('judges synthetic lane holders against the lane app directory', () => {
+		const holds = resolveDeviceHolds({
+			...inputs,
+			lanes: [
+				{ ...lane(A, synthetic), appDirectory: app },
+				{ ...lane(B, synthetic), appDirectory: '/Users/dev/app-onboarding' },
+			],
+			claims: [{ simulatorUdid: C, ...synthetic }],
+		});
+		expect(holds.get(A)).toMatchObject({ holder: synthetic, holderLive: true });
+		expect(holds.get(B)).toMatchObject({ holderLive: false });
+		// A claim has no directory, so a synthetic claim is never live by cwd.
+		expect(holds.get(C)).toMatchObject({ via: 'claim', holderLive: false });
+	});
+});
+
+describe('decideDeviceAccess for synthetic holders', () => {
+	const app = '/Users/dev/app-checkout';
+	const synthetic = {
+		kind: 'codex',
+		sessionId: 'mcp-codex-mcp-client',
+	} as const;
+	const hold = resolveDeviceHolds({
+		lanes: [{ ...lane(A, synthetic), appDirectory: app }],
+		claims: [],
+		liveSessionKeys: new Set(),
+		liveSessions: [{ kind: 'codex', cwd: app }],
+		missingSince: new Map(),
+		now,
+	}).get(A);
+
+	it('lets the shared id through, and a session of its kind working inside the lane', () => {
+		expect(decideDeviceAccess(hold, synthetic, now)).toEqual({ allowed: true });
+		expect(
+			decideDeviceAccess(hold, codex, now, {
+				directory: app,
+				requesterCwd: `${app}/src`,
+			})
+		).toEqual({ allowed: true });
+	});
+
+	it('refuses sessions working elsewhere, other kinds, and unknown working directories', () => {
+		for (const [requester, scope] of [
+			[codex, { directory: app, requesterCwd: '/Users/dev/app-onboarding' }],
+			[codex, { directory: app }],
+			[codex, undefined],
+			[claude, { directory: app, requesterCwd: app }],
+			[
+				{ kind: 'codex', sessionId: 'mcp-other-client' },
+				{ directory: app, requesterCwd: app },
+			],
+		] as const) {
+			const decision = decideDeviceAccess(hold, requester, now, scope);
+			expect(decision.allowed).toBe(false);
+			if (!decision.allowed) {
+				expect(decision.reason).toContain('codex session mcp-codex-mcp-client');
+			}
+		}
+	});
+
+	it('never lets a synthetic requester through a real session’s hold', () => {
+		const real = resolveDeviceHolds({
+			lanes: [{ ...lane(A, codex), appDirectory: app }],
+			claims: [],
+			liveSessionKeys: new Set(['codex:t1']),
+			missingSince: new Map(),
+			now,
+		}).get(A);
+		expect(
+			decideDeviceAccess(real, synthetic, now, {
+				directory: app,
+				requesterCwd: app,
+			}).allowed
+		).toBe(false);
+	});
+});
+
+describe('formatHoldDuration', () => {
+	it.each([
+		[0, '1 s'],
+		[400, '1 s'],
+		[45_000, '45 s'],
+		[59_001, '1 min'],
+		[60_000, '1 min'],
+		[7 * 60_000 - 1, '7 min'],
+		[59 * 60_000 + 30_000, '1 h'],
+		[3 * 3_600_000, '3 h'],
+		[47 * 3_600_000, '47 h'],
+		[48 * 3_600_000, '2 days'],
+		[86_400_000 * 3 - 1, '3 days'],
+		[-5_000, '1 s'],
+		[Number.NaN, '1 s'],
+	])('formats %d ms as %s', (ms, text) => {
+		expect(formatHoldDuration(ms)).toBe(text);
+	});
+});
+
+describe('holdCountdownLabel', () => {
+	const cases: readonly [
+		string,
+		HoldCountdownInput,
+		HoldCountdownOptions,
+		ReturnType<typeof holdCountdownLabel>,
+	][] = [
+		[
+			'a live session',
+			{ live: true, holder: 'session' },
+			{},
+			{ text: 'live', tone: 'success' },
+		],
+		[
+			'a live synthetic holder',
+			{ live: true, holder: 'lane', synthetic: true },
+			{},
+			{ text: 'by worktree', tone: 'success' },
+		],
+		[
+			'a live worktree hold',
+			{ live: true, holder: 'worktree' },
+			{ verb: 'stops' },
+			{ text: 'by worktree', tone: 'success' },
+		],
+		[
+			'the operator',
+			{ live: true, holder: 'operator' },
+			{ clocksPaused: true },
+			{ text: 'operator', tone: 'default' },
+		],
+		[
+			'an abandoned stack hold',
+			{ live: false, holder: 'session', releaseAt: now + 7 * 60_000 },
+			{ verb: 'stops' },
+			{
+				text: 'gone · stops in 7 min',
+				tone: 'warning',
+				remainingMs: 7 * 60_000,
+			},
+		],
+		[
+			'an abandoned device hold',
+			{ live: false, holder: 'lane', releaseAt: now + 45_000 },
+			{},
+			{
+				text: 'gone · releases in 45 s',
+				tone: 'warning',
+				remainingMs: 45_000,
+			},
+		],
+		[
+			'a hold whose clock ran out',
+			{ live: false, releaseAt: now - 1 },
+			{ verb: 'stops' },
+			{ text: 'gone · stopping now', tone: 'warning', remainingMs: 0 },
+		],
+		[
+			'a device hold whose clock ran out',
+			{ live: false, releaseAt: now },
+			{},
+			{ text: 'gone · releasing now', tone: 'warning', remainingMs: 0 },
+		],
+		[
+			'a gone holder with no clock yet',
+			{ live: false, holder: 'claim' },
+			{},
+			{ text: 'gone', tone: 'warning' },
+		],
+		[
+			'a gone holder while clocks are paused',
+			{ live: false, holder: 'session', releaseAt: now + 60_000 },
+			{ clocksPaused: true, verb: 'stops' },
+			{ text: 'clocks paused', tone: 'info' },
+		],
+	];
+
+	it.each(cases)('labels %s', (_name, hold, options, expected) => {
+		expect(holdCountdownLabel(hold, now, options)).toEqual(expected);
+	});
+
+	it('reads a resolved device hold directly', () => {
+		const since = now - 3 * 60_000;
+		const hold = resolveDeviceHolds({
+			lanes: [lane(A, claude)],
+			claims: [],
+			liveSessionKeys: new Set(),
+			missingSince: new Map([['claude:s1', since]]),
+			now,
+		}).get(A);
+		expect(hold).toBeDefined();
+		if (!hold) return;
+		expect(
+			holdCountdownLabel(
+				{
+					live: hold.holderLive,
+					releaseAt: hold.releaseAt,
+					holder: hold.via,
+				},
+				now
+			).text
+		).toBe('gone · releases in 7 min');
 	});
 });

@@ -28,8 +28,15 @@ const state: LaneState = {
 	updatedAt: 1,
 	environments: [...DEFAULT_LANE_ENVIRONMENTS],
 	lanes: [pendingLane],
-	worktrees: [],
-	repositories: [],
+	worktrees: [
+		{
+			path: '/Users/dev/app-feature',
+			branch: 'feature',
+			repositoryRoot: '/Users/dev/app',
+			dirty: false,
+		},
+	],
+	repositories: ['/Users/dev/app'],
 	deviceRequests: [],
 };
 
@@ -148,5 +155,100 @@ describe('Lane IPC', () => {
 		});
 		// Nothing out of schema rides along: there is no approval to assert.
 		expect(service.runOperation.mock.calls[0]).toHaveLength(1);
+	});
+
+	it("passes the start form's backend choice through, and refuses one that is not a policy", async () => {
+		const { service, handlers } = fixture();
+		await handlers.runOperation({} as never, {
+			actionId: 'op-backend',
+			kind: 'lane.start',
+			worktreePath: '/Users/dev/app-feature',
+			simulatorUdid: UDID,
+			backend: 'required',
+		});
+		expect(service.runOperation).toHaveBeenCalledTimes(1);
+		expect(service.runOperation.mock.calls[0]?.[0]).toMatchObject({
+			kind: 'lane.start',
+			backend: 'required',
+		});
+		await expect(
+			handlers.runOperation({} as never, {
+				actionId: 'op-docker',
+				kind: 'lane.start',
+				worktreePath: '/Users/dev/app-feature',
+				simulatorUdid: UDID,
+				backend: 'docker',
+			})
+		).rejects.toThrow();
+		expect(service.runOperation).toHaveBeenCalledTimes(1);
+	});
+
+	it("returns each lane's backend summary with the state", () => {
+		const backend = {
+			policy: 'auto' as const,
+			status: 'ready' as const,
+			apiUrl: 'http://127.0.0.1:21734',
+			appEnvNames: ['EXPO_PUBLIC_SUPABASE_URL'],
+			warnings: [],
+		};
+		const withBackend: LaneState = {
+			...state,
+			lanes: [{ ...pendingLane, backend }],
+		};
+		const handlers = createLaneIpcHandlers({
+			service: {
+				getState: () => withBackend,
+				runOperation: vi.fn(),
+				addRepository: vi.fn(),
+			},
+			assertTrustedRenderer: vi.fn(),
+			selectRepository: vi.fn(),
+		});
+		expect(handlers.getState({} as never).lanes[0]?.backend).toEqual(backend);
+	});
+
+	it('refuses a lane.start for a path main has not discovered', async () => {
+		const { service, handlers } = fixture();
+		for (const worktreePath of [
+			'/Users/dev/elsewhere',
+			// Inside a discovered worktree is still not a discovered worktree.
+			'/Users/dev/app-feature/examples/demo',
+			'/Users/dev/app-feature/../app-other',
+		]) {
+			const receipt = await handlers.runOperation({} as never, {
+				actionId: 'op-unknown',
+				kind: 'lane.start',
+				worktreePath,
+				simulatorUdid: UDID,
+			});
+			expect(receipt).toMatchObject({
+				actionId: 'op-unknown',
+				kind: 'lane.start',
+				completed: false,
+			});
+			expect(receipt.error).toMatch(/not a worktree RN Devtools discovered/);
+		}
+		expect(service.runOperation).not.toHaveBeenCalled();
+	});
+
+	it('forwards a lane.start for a discovered worktree or a registered repository', async () => {
+		const { service, handlers } = fixture();
+		for (const worktreePath of ['/Users/dev/app-feature', '/Users/dev/app']) {
+			await handlers.runOperation({} as never, {
+				actionId: 'op-known',
+				kind: 'lane.start',
+				worktreePath,
+				simulatorUdid: UDID,
+			});
+		}
+		expect(service.runOperation).toHaveBeenCalledTimes(2);
+		expect(service.runOperation).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ worktreePath: '/Users/dev/app-feature' })
+		);
+		expect(service.runOperation).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ worktreePath: '/Users/dev/app' })
+		);
 	});
 });

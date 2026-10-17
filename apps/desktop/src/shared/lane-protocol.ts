@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+	laneBackendSummarySchema,
+	laneWorktreeSupabaseSchema,
+} from './supabase-protocol';
 
 /**
  * Lanes: one git worktree, running on one Simulator, served by one Metro on a
@@ -9,6 +13,10 @@ import { z } from 'zod';
  * The protocol is deliberately small. A lane never carries product identity:
  * the bundle identifier and URL scheme are read from the worktree's own Expo
  * config at start time and only echoed back for display.
+ *
+ * A lane may also get its worktree's own local backend. What main knows about
+ * it travels on the wire only (`LaneView.backend`, receipts); lanes.json
+ * stores `laneSchema`, which has no such field.
  */
 
 const MAX_PATH_LENGTH = 1024;
@@ -55,6 +63,13 @@ const laneEnvironmentIdSchema = z
 	.string()
 	.regex(/^[a-z][a-z0-9-]{0,31}$/, 'Environment ids are lowercase slugs.');
 
+/**
+ * Names Metro's environment may carry from outside the desktop's own: an
+ * environment's metroEnv, or a lane's laneEnv (see lane-metro.ts).
+ */
+export const METRO_ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
+export const MAX_METRO_ENV_VALUE_LENGTH = 1_024;
+
 const laneEnvironmentSchema = z
 	.strictObject({
 		id: laneEnvironmentIdSchema,
@@ -62,7 +77,10 @@ const laneEnvironmentSchema = z
 		portRange: z.tuple([portSchema, portSchema]),
 		/** Extra environment variables for Metro, selected in JavaScript only. */
 		metroEnv: z
-			.record(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/), z.string().max(1_024))
+			.record(
+				z.string().regex(METRO_ENV_NAME),
+				z.string().max(MAX_METRO_ENV_VALUE_LENGTH)
+			)
 			.optional(),
 	})
 	.refine((value) => value.portRange[0] <= value.portRange[1], {
@@ -82,6 +100,15 @@ export const DEFAULT_LANE_ENVIRONMENTS: readonly LaneEnvironment[] = [
 ];
 
 const laneAgentKindSchema = z.enum(['claude', 'codex', 'other']);
+
+/**
+ * Whether a lane start asks for its worktree's local backend. `auto` attaches
+ * it when it can and never fails the lane over it; `required` fails the start
+ * before Metro spawns when the backend cannot serve the lane; `off` leaves
+ * the backend alone. A start that names none gets its environment's default.
+ */
+const laneBackendPolicySchema = z.enum(['auto', 'off', 'required']);
+export type LaneBackendPolicy = z.infer<typeof laneBackendPolicySchema>;
 
 export const laneAgentSchema = z.strictObject({
 	kind: laneAgentKindSchema,
@@ -150,12 +177,25 @@ export const laneSchema = z.strictObject({
 });
 export type Lane = z.infer<typeof laneSchema>;
 
+/**
+ * A lane as main reports it: the stored lane plus, while main knows it, its
+ * local backend (names, never values). Wire-only: lanes.json validates with
+ * the strict `laneSchema`, which refuses a `backend` field, and a desktop
+ * restart forgets the summary until the next lane up asks again.
+ */
+const laneViewSchema = laneSchema.extend({
+	backend: laneBackendSummarySchema.optional(),
+});
+export type LaneView = z.infer<typeof laneViewSchema>;
+
 const laneWorktreeSchema = z.strictObject({
 	path: absolutePathSchema,
 	branch: branchSchema,
 	repositoryRoot: absolutePathSchema,
 	dirty: z.boolean(),
 	laneId: laneIdSchema.optional(),
+	/** Its Supabase project while local Supabase is on; never stored. */
+	supabase: laneWorktreeSupabaseSchema.optional(),
 });
 export type LaneWorktree = z.infer<typeof laneWorktreeSchema>;
 
@@ -188,6 +228,8 @@ const laneDeviceRequestSchema = z.strictObject({
 	preferredPort: portSchema.optional(),
 	launch: z.boolean(),
 	slimProfileId: identifierSchema.optional(),
+	/** The backend policy the start asked for, kept for when it runs. */
+	backend: laneBackendPolicySchema.optional(),
 	agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
 	/** The lane that satisfied the request, once it did. */
 	laneId: laneIdSchema.optional(),
@@ -198,7 +240,7 @@ export const laneStateSchema = z.strictObject({
 	revision: z.number().int().nonnegative(),
 	updatedAt: timestampSchema,
 	environments: z.array(laneEnvironmentSchema).min(1).max(MAX_ENVIRONMENTS),
-	lanes: z.array(laneSchema).max(MAX_LANES),
+	lanes: z.array(laneViewSchema).max(MAX_LANES),
 	worktrees: z.array(laneWorktreeSchema).max(MAX_WORKTREES),
 	/** Repository roots whose worktrees are listed above. */
 	repositories: z.array(absolutePathSchema).max(32),
@@ -238,6 +280,12 @@ export const laneOperationSchema = z.discriminatedUnion('kind', [
 		 * trimmed. See `laneSlimSchema` for the gates that still apply.
 		 */
 		slimProfileId: identifierSchema.optional(),
+		/**
+		 * Whether to ensure the worktree's local backend while the Simulator
+		 * boots and hand Metro its public values; see `LaneBackendPolicy`.
+		 * Omitted means the environment's default from the desktop's policy.
+		 */
+		backend: laneBackendPolicySchema.optional(),
 		agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
 	}),
 	/**
@@ -308,7 +356,12 @@ export const laneOperationReceiptSchema = z.strictObject({
 	completed: z.boolean(),
 	cancelled: z.boolean().optional(),
 	error: shortTextSchema.optional(),
-	lane: laneSchema.optional(),
+	lane: laneViewSchema.optional(),
+	/**
+	 * The lane's local backend after a `lane.start` or `lane.provide-device`,
+	 * also when a `required` start failed over it (`completed: false`).
+	 */
+	backend: laneBackendSummarySchema.optional(),
 	/**
 	 * A `lane.start` that found no free Simulator completes without a lane and
 	 * with the request now waiting on the user; `lane.provide-device` returns
@@ -402,20 +455,39 @@ export function laneHealth(lane: Pick<Lane, 'metro'>): LaneHealth {
 }
 
 /**
+ * What a lane start has taken before its lane exists: its app directory from
+ * the first moment, then its Simulator and its port as each is chosen. Main
+ * keeps these in memory only, and concurrent starts check them alongside the
+ * stored lanes, so two starts cannot both choose one device or one port.
+ */
+export type LaneReservation = {
+	appDirectory: string;
+	simulatorUdid?: string;
+	port?: number;
+};
+
+/**
  * Picks the next free port in an environment's range, skipping ports already
  * leased by a lane whose Metro is still alive. `isPortFree` is injected so the
  * bind probe stays in the main process and this stays unit-testable.
+ *
+ * `claim` takes the chosen port for an in-flight start, or returns false when
+ * another start (or a lane stored meanwhile) holds it. It runs right after
+ * the bind probe with no await in between, so two starts whose probes both
+ * passed still leave with different ports.
  */
 export async function allocateLanePort({
 	environment,
 	lanes,
 	isPortFree,
 	preferredPort,
+	claim = () => true,
 }: {
 	environment: LaneEnvironment;
 	lanes: readonly Pick<Lane, 'port' | 'metro'>[];
 	isPortFree: (port: number) => Promise<boolean>;
 	preferredPort?: number;
+	claim?: (port: number) => boolean;
 }): Promise<number> {
 	const [start, end] = environment.portRange;
 	const leased = new Set(
@@ -427,14 +499,18 @@ export async function allocateLanePort({
 				`Preferred port ${preferredPort} is outside ${environment.id}'s range ${start}-${end}.`
 			);
 		}
-		if (leased.has(preferredPort) || !(await isPortFree(preferredPort))) {
+		if (
+			leased.has(preferredPort) ||
+			!(await isPortFree(preferredPort)) ||
+			!claim(preferredPort)
+		) {
 			throw new Error(`Metro port ${preferredPort} is already in use.`);
 		}
 		return preferredPort;
 	}
 	for (let port = start; port <= end; port += 1) {
 		if (leased.has(port)) continue;
-		if (await isPortFree(port)) return port;
+		if ((await isPortFree(port)) && claim(port)) return port;
 	}
 	throw new Error(
 		`No free Metro port remains in ${environment.id}'s range ${start}-${end}.`
@@ -452,10 +528,12 @@ export function laneAppDirectory(
  * Lane creation fails instead of stealing. An app directory, a Simulator, or
  * a port that another live lane owns is an error, never a takeover. Two apps
  * in one monorepo worktree may each have a lane; one app may not have two.
+ * What other in-flight starts have reserved counts the same as a lane.
  */
 export function findLaneConflict(
 	lanes: readonly Lane[],
-	candidate: Pick<Lane, 'worktreePath' | 'appPath' | 'simulatorUdid'>
+	candidate: Pick<Lane, 'worktreePath' | 'appPath' | 'simulatorUdid'>,
+	reservations: readonly LaneReservation[] = []
 ): string | undefined {
 	const udid = candidate.simulatorUdid.toUpperCase();
 	const app = laneAppDirectory(candidate);
@@ -465,6 +543,14 @@ export function findLaneConflict(
 		}
 		if (lane.simulatorUdid.toUpperCase() === udid) {
 			return `Simulator ${candidate.simulatorUdid} is already assigned to lane ${lane.id}.`;
+		}
+	}
+	for (const reservation of reservations) {
+		if (reservation.appDirectory === app) {
+			return `${app} already has a lane starting.`;
+		}
+		if (reservation.simulatorUdid?.toUpperCase() === udid) {
+			return `Simulator ${candidate.simulatorUdid} is already assigned to a lane starting for ${reservation.appDirectory}.`;
 		}
 	}
 	return undefined;

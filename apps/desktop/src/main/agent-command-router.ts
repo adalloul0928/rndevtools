@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { posix } from 'node:path';
 import {
 	type AgentCliCommand,
 	type AgentCliTarget,
+	type AgentReleaseAllResult,
 	isSafeAgentConnectedAction,
 } from '../shared/agent-cli-protocol';
 import type {
@@ -9,7 +11,11 @@ import type {
 	AgentOperation,
 	AgentState,
 } from '../shared/agent-protocol';
-import type { DeviceAccessDecision } from '../shared/device-hold';
+import {
+	type DeviceAccessDecision,
+	isPathInside,
+	isSyntheticHolder,
+} from '../shared/device-hold';
 import {
 	type LaneOperation,
 	type LaneOperationReceipt,
@@ -41,9 +47,30 @@ import {
 	type SlimmingJob,
 	type SlimmingState,
 } from '../shared/slimming-protocol';
+import {
+	isSupabaseJobId,
+	SUPABASE_AGENT_ERROR_CODES,
+	type SupabaseAgentErrorCode,
+	type SupabaseAgentOperation,
+	type SupabaseAgentResult,
+	type SupabaseDoctorInfo,
+	type SupabaseJob,
+	type SupabaseLogRecord,
+	type SupabaseState,
+	supabaseAgentOperationFromCommand,
+	supabaseAgentRecovery,
+	supabaseAgentResultSchema,
+	supabaseBranchLabel,
+	supabaseDoctorInfoSchema,
+} from '../shared/supabase-protocol';
 import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
 import { NativeHostResponseError } from './native-host-client';
 import type { NativePlanResult } from './native-plan';
+import { sanitizeSupabaseText } from './supabase/cli-redact';
+import type {
+	SupabaseReleaseResult,
+	SupabaseServiceApi,
+} from './supabase/service-ports';
 
 const TERMINAL_JOB_STATUSES = new Set([
 	'complete',
@@ -52,6 +79,15 @@ const TERMINAL_JOB_STATUSES = new Set([
 	'cancelled',
 ]);
 const CONNECTED_WAIT_SLICE_MS = 5_000;
+/**
+ * How long `release --all` waits for its lane stops and for the Supabase
+ * service to drop the session's stack holds. The session-end hook's client
+ * gives up after 2 s, so stops still running then continue on their own and
+ * are reported as pending.
+ */
+const RELEASE_STOP_BUDGET_MS = 1_500;
+/** The contract's bound on one log line, kept after redacting it again. */
+const MAX_SUPABASE_LOG_LINE = 2_000;
 const ALL_DOCTOR_CAPABILITIES = [
 	'push-notifications',
 	'storekit',
@@ -144,6 +180,21 @@ type AgentRecipePort = {
 	status: (runId?: string) => Promise<unknown> | unknown;
 };
 
+/**
+ * What the router asks of the Supabase service: agent operations, the
+ * session release, jobs for `wait` and `jobs`, and state for the feature
+ * gate, `agents` and `doctor`.
+ */
+export type AgentSupabasePort = Pick<
+	SupabaseServiceApi,
+	| 'getState'
+	| 'runAgentOperation'
+	| 'releaseHolder'
+	| 'job'
+	| 'waitForJob'
+	| 'doctor'
+>;
+
 export type AgentCommandRouterDependencies = {
 	broker: BrokerPort;
 	simulator: SimulatorPort;
@@ -153,6 +204,8 @@ export type AgentCommandRouterDependencies = {
 	agents?: AgentPort;
 	nativePlan?: NativePlanPort;
 	simulatorInput?: SimulatorInputPort;
+	/** Absent in tests that skip it, and in builds without local Supabase. */
+	supabase?: AgentSupabasePort;
 };
 
 function unavailable(message: string, recovery?: string): never {
@@ -409,21 +462,187 @@ function ensureComplete<T extends { status: string; message: string }>(
 	});
 }
 
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+type SessionIdentity = { kind: AgentKind; sessionId: string };
+
 /**
- * Refuses an agent's request to touch a Simulator another holder has. The
- * operator (no agent on the request) is never refused here; the lane and
- * slimming services keep their own structural rules.
+ * Which holds `release --all` may drop for `agent`. A session's own holds
+ * match by id. A shared MCP identity (`mcp-*`) says nothing about which of
+ * its sessions is asking, so its holds match only when `sessionCwd`, where
+ * the ending session worked, lies inside the held directory. That holds
+ * whether the caller is the shared id itself or, from the session-end hook,
+ * the session's own id.
  */
+function releaseMatcher(agent: SessionIdentity, sessionCwd?: string) {
+	const cwd = sessionCwd === undefined ? undefined : posix.resolve(sessionCwd);
+	return (
+		holder: SessionIdentity | undefined,
+		directory: string | undefined
+	): boolean => {
+		if (!holder) return false;
+		if (!isSyntheticHolder(holder)) {
+			return holder.kind === agent.kind && holder.sessionId === agent.sessionId;
+		}
+		return (
+			holder.kind === agent.kind &&
+			cwd !== undefined &&
+			directory !== undefined &&
+			isPathInside(cwd, directory)
+		);
+	};
+}
+
 /**
- * Stops every lane and drops every claim the calling session holds. Each
- * failure is reported rather than aborting the rest, because a session-end
- * hook has one shot and a half-released pool is better than none.
+ * Stops lanes together, detached from the request: the session-end client
+ * hangs up after 2 s, and a stop it abandons must still finish. Stops not
+ * settled by `deadline` are reported as pending and keep running.
+ */
+async function stopLanesWithin(
+	lanes: LanePort,
+	laneIds: readonly string[],
+	requestId: string,
+	deadline: number
+): Promise<{ stopped: string[]; pending: string[]; errors: string[] }> {
+	const detached = new AbortController().signal;
+	const failures = new Map<string, string | undefined>();
+	const stops = laneIds.map(async (laneId) => {
+		try {
+			const receipt = await lanes.runOperation(
+				{ actionId: actionId(requestId), kind: 'lane.stop', laneId },
+				detached
+			);
+			failures.set(
+				laneId,
+				receipt.completed
+					? undefined
+					: (receipt.error ??
+							(receipt.cancelled
+								? 'The lane stop was cancelled.'
+								: 'The lane stop did not complete.'))
+			);
+		} catch (error) {
+			failures.set(laneId, errorText(error));
+		}
+	});
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		await Promise.race([
+			Promise.all(stops),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+	const result = {
+		stopped: [] as string[],
+		pending: [] as string[],
+		errors: [] as string[],
+	};
+	for (const laneId of laneIds) {
+		if (!failures.has(laneId)) result.pending.push(laneId);
+		else {
+			const failure = failures.get(laneId);
+			if (failure === undefined) result.stopped.push(laneId);
+			else result.errors.push(`lane ${laneId}: ${failure}`);
+		}
+	}
+	return result;
+}
+
+/** How a piece of work ended by a deadline; undefined while it still runs. */
+type Settled<T> = { value: T } | { error: unknown } | undefined;
+
+/** Waits for `work` until `deadline`, never rejecting. */
+async function settleBy<T>(
+	work: Promise<T>,
+	deadline: number
+): Promise<Settled<T>> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			work.then(
+				(value) => ({ value }),
+				(error: unknown) => ({ error })
+			),
+			new Promise<undefined>((resolve) => {
+				timer = setTimeout(
+					() => resolve(undefined),
+					Math.max(0, deadline - Date.now())
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
+ * Drops the caller's holds on local Supabase stacks. The service releases
+ * them in memory and only queues the stops of stacks nobody holds any more,
+ * so the call is quick; it starts before the claims and lanes and is waited
+ * for only up to the release deadline.
+ */
+async function releaseStacks(
+	supabase: AgentSupabasePort,
+	holder: SessionIdentity,
+	sessionCwd: string | undefined
+): Promise<SupabaseReleaseResult> {
+	return await supabase.releaseHolder({
+		holder,
+		...(sessionCwd === undefined ? {} : { sessionCwd }),
+	});
+}
+
+function stackReleaseOutcome(settled: Settled<SupabaseReleaseResult>): {
+	releasedStacks: string[];
+	pendingStops: string[];
+	errors: string[];
+} {
+	if (settled === undefined) {
+		return {
+			releasedStacks: [],
+			pendingStops: [],
+			errors: [
+				'supabase: dropping the stack holds took longer than 1.5 s and continues in the background.',
+			],
+		};
+	}
+	if ('error' in settled) {
+		return {
+			releasedStacks: [],
+			pendingStops: [],
+			errors: [
+				`supabase: ${sanitizeSupabaseText(errorText(settled.error), { maxChars: 512 })}`,
+			],
+		};
+	}
+	return {
+		releasedStacks: [...settled.value.releasedStackIds],
+		pendingStops: [...settled.value.pendingStops],
+		errors: [],
+	};
+}
+
+/**
+ * Drops every claim, stops every lane and drops every Supabase stack hold
+ * the calling session has, within the session-end hook's 2 s. The stack
+ * release starts first and claims go next: both are quick, and claims return
+ * devices to the pool at once. Each failure is reported rather than aborting
+ * the rest, because a session-end hook has one shot and a half-released pool
+ * is better than none.
  */
 async function releaseEverything(
 	agents: AgentPort,
 	lanes: LanePort | undefined,
-	context: Parameters<AgentCliHandler>[1]
-): Promise<unknown> {
+	supabase: AgentSupabasePort | undefined,
+	context: Parameters<AgentCliHandler>[1],
+	sessionCwd: string | undefined
+): Promise<AgentReleaseAllResult> {
 	const agent = context.agent;
 	if (!agent) {
 		throw new AgentCliError({
@@ -434,49 +653,81 @@ async function releaseEverything(
 				'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
 		});
 	}
-	const key = `${agent.kind}:${agent.sessionId}`;
-	const stopped: string[] = [];
+	const deadline = Date.now() + RELEASE_STOP_BUDGET_MS;
+	// A shared MCP identity names no one session, so without the directory it
+	// worked in nothing of it is released, stack holds included.
+	const unscoped = isSyntheticHolder(agent) && sessionCwd === undefined;
+	const stacks =
+		supabase && !unscoped
+			? settleBy(
+					releaseStacks(
+						supabase,
+						agent,
+						sessionCwd === undefined ? undefined : posix.resolve(sessionCwd)
+					),
+					deadline
+				)
+			: undefined;
+	const callerHolds = releaseMatcher(agent, sessionCwd);
+	const laneList = lanes?.getState().lanes ?? [];
 	const released: string[] = [];
 	const errors: string[] = [];
-	for (const lane of lanes?.getState().lanes ?? []) {
-		if (!lane.agent || `${lane.agent.kind}:${lane.agent.sessionId}` !== key)
-			continue;
-		try {
-			await lanes?.runOperation(
-				{
-					actionId: actionId(context.requestId),
-					kind: 'lane.stop',
-					laneId: lane.id,
-				},
-				context.signal
-			);
-			stopped.push(lane.id);
-		} catch (error) {
-			errors.push(
-				`lane ${lane.id}: ${error instanceof Error ? error.message : String(error)}`
-			);
-		}
-	}
+
 	for (const claim of agents.getState().claims) {
-		if (`${claim.kind}:${claim.sessionId}` !== key) continue;
+		const holder = { kind: claim.kind, sessionId: claim.sessionId };
+		// A claim has no directory of its own; a shared identity's claim takes
+		// the directory of its lane on the same device, when it runs one.
+		const lane = laneList.find(
+			(candidate) =>
+				candidate.simulatorUdid.toUpperCase() ===
+					claim.simulatorUdid.toUpperCase() &&
+				candidate.agent?.kind === claim.kind &&
+				candidate.agent.sessionId === claim.sessionId
+		);
+		if (!callerHolds(holder, lane ? laneAppDirectory(lane) : undefined)) {
+			continue;
+		}
 		try {
 			await agents.runOperation({
 				kind: 'agent.release',
 				simulatorUdid: claim.simulatorUdid,
-				agent,
+				agent: holder,
 			});
 			released.push(claim.simulatorUdid);
 		} catch (error) {
-			errors.push(
-				`claim ${claim.simulatorUdid}: ${error instanceof Error ? error.message : String(error)}`
-			);
+			errors.push(`claim ${claim.simulatorUdid}: ${errorText(error)}`);
 		}
 	}
+
+	const laneIds = laneList
+		.filter((lane) => callerHolds(lane.agent, laneAppDirectory(lane)))
+		.map((lane) => lane.id);
+	const outcome =
+		lanes && laneIds.length > 0
+			? await stopLanesWithin(lanes, laneIds, context.requestId, deadline)
+			: { stopped: [], pending: [], errors: [] };
+	const stackOutcome = stacks
+		? stackReleaseOutcome(await stacks)
+		: { releasedStacks: [], pendingStops: [], errors: [] };
 	return {
 		you: agent,
-		stoppedLanes: stopped,
+		stoppedLanes: outcome.stopped,
+		pendingLanes: outcome.pending,
 		releasedClaims: released,
-		errors,
+		...(supabase
+			? {
+					releasedStacks: stackOutcome.releasedStacks,
+					pendingStops: stackOutcome.pendingStops,
+				}
+			: {}),
+		errors: [...errors, ...outcome.errors, ...stackOutcome.errors],
+		...(unscoped
+			? {
+					next: supabase
+						? `${agent.kind}:${agent.sessionId} is shared by every ${agent.kind} session connected over MCP, so release --all drops its lanes, claims, and Supabase stack holds only with sessionCwd, the directory you work in. Pass sessionCwd with all, or stop each of your lanes with lane --operation down, release each claim with release --udid, and drop each stack with supabase --operation down.`
+						: `${agent.kind}:${agent.sessionId} is shared by every ${agent.kind} session connected over MCP, so release --all drops its lanes and claims only with sessionCwd, the directory you work in. Pass sessionCwd with all, or stop each of your lanes with lane --operation down and release each claim with release --udid.`,
+				}
+			: {}),
 	};
 }
 
@@ -548,6 +799,11 @@ function slimmingActionFor(
 	}
 }
 
+/**
+ * Refuses an agent's request to touch a Simulator another holder has. The
+ * operator (no agent on the request) is never refused here; the lane and
+ * slimming services keep their own structural rules.
+ */
 function assertDeviceAccess(
 	agents: AgentPort | undefined,
 	simulatorUdid: string,
@@ -757,6 +1013,342 @@ function touchedSimulators(
 	}
 }
 
+function supabaseUnavailable(): never {
+	return unavailable(
+		'Local Supabase is not available in this desktop session.',
+		'Update RN Devtools and retry.'
+	);
+}
+
+/**
+ * What an agent does while local Supabase is off: ask the user, or start its
+ * own stack with the repository's CLI, and then only on the native runtime.
+ */
+function supabaseOffRecovery(runner?: string): string {
+	const start =
+		runner === undefined
+			? "the repository's own Supabase CLI, through its package manager: `supabase start --runtime native`"
+			: `\`${runner} start --runtime native\``;
+	return `Ask the user to turn on local Supabase in RN Devtools › Supabase, then call supabase again. If you must have a database before then, start it yourself from the worktree with ${start} (never without --runtime native).`;
+}
+
+/**
+ * Refuses before the service runs anything when RN Devtools cannot manage
+ * local Supabase on this Mac, or the user has it off. A settings file the
+ * desktop could not read counts as off.
+ */
+function assertSupabaseManaged(
+	state: Pick<SupabaseState, 'availability' | 'feature'>
+): void {
+	if (!state.availability.platform.supported) {
+		throw new AgentCliError({
+			code: 'supabase_unsupported',
+			message:
+				state.availability.platform.reasonText ??
+				'RN Devtools cannot run local Supabase on this Mac.',
+			retryable: false,
+			recovery: supabaseAgentRecovery('supabase_unsupported'),
+		});
+	}
+	if (!state.feature.enabled || state.feature.policyHealth === 'quarantined') {
+		throw new AgentCliError({
+			code: 'supabase_disabled',
+			message:
+				state.feature.policyHealth === 'quarantined'
+					? 'RN Devtools could not read its local Supabase settings, so local Supabase is off.'
+					: 'Local Supabase is off in RN Devtools, so it is not managing this worktree.',
+			retryable: false,
+			recovery: supabaseOffRecovery(),
+		});
+	}
+}
+
+const SUPABASE_AGENT_CODES: ReadonlySet<string> = new Set(
+	SUPABASE_AGENT_ERROR_CODES
+);
+/** Failures an agent can clear itself: by waiting, releasing, or calling up again. */
+const RETRYABLE_SUPABASE_CODES: ReadonlySet<SupabaseAgentErrorCode> = new Set([
+	'supabase_capacity',
+	'cli_mismatch',
+	'job_lost',
+	'branch_moved',
+	'git_busy',
+	'supabase_failed',
+]);
+/** The renderer-facing codes whose agent meaning is unambiguous. */
+const SUPABASE_AGENT_CODE_BY_VIEW_CODE: Readonly<
+	Record<string, SupabaseAgentErrorCode>
+> = {
+	feature_off: 'supabase_disabled',
+	platform_unsupported: 'supabase_unsupported',
+	unknown_target: 'not_found',
+	capacity: 'supabase_capacity',
+};
+/** A worktree runner such as `pnpm exec supabase`, safe inside backticks. */
+const SUPABASE_RUNNER = /^[A-Za-z0-9./][A-Za-z0-9 ._/@:-]{0,63}$/;
+
+function isSupabaseAgentErrorCode(
+	code: string
+): code is SupabaseAgentErrorCode {
+	return SUPABASE_AGENT_CODES.has(code);
+}
+
+/** An own string property of a thrown value, read without running getters. */
+function ownString(value: unknown, key: string): string | undefined {
+	if (value === null || typeof value !== 'object') return undefined;
+	try {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		return descriptor &&
+			'value' in descriptor &&
+			typeof descriptor.value === 'string'
+			? descriptor.value
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Turns a failed agent operation into a typed error whose recovery names the
+ * next call. The service throws AgentCliError, or any error whose `code` is
+ * one of SUPABASE_AGENT_ERROR_CODES (an own `runner` string names the
+ * worktree's CLI). Renderer-shaped failures map onto the agent codes, and
+ * their operator-facing recovery copy is replaced. Local Supabase being off
+ * always reads the same way.
+ */
+function supabaseAgentFailure(
+	error: unknown,
+	signal: AbortSignal
+): AgentCliError {
+	const reportedRunner = ownString(error, 'runner');
+	const runner =
+		reportedRunner !== undefined && SUPABASE_RUNNER.test(reportedRunner)
+			? reportedRunner
+			: undefined;
+	if (error instanceof AgentCliError) {
+		const code = error.code;
+		if (code === 'supabase_disabled') {
+			return new AgentCliError({
+				code,
+				message: error.message,
+				retryable: false,
+				recovery: supabaseOffRecovery(runner),
+			});
+		}
+		if (error.recovery !== undefined || !isSupabaseAgentErrorCode(code)) {
+			return error;
+		}
+		return new AgentCliError({
+			code,
+			message: error.message,
+			retryable: error.retryable,
+			recovery: supabaseAgentRecovery(code, runner),
+		});
+	}
+	if (signal.aborted) return abortError();
+	const reportedCode = ownString(error, 'code');
+	const agentCode =
+		reportedCode !== undefined && isSupabaseAgentErrorCode(reportedCode)
+			? reportedCode
+			: undefined;
+	const code =
+		agentCode ??
+		(reportedCode === undefined
+			? undefined
+			: SUPABASE_AGENT_CODE_BY_VIEW_CODE[reportedCode]) ??
+		'supabase_failed';
+	const message = ownString(error, 'message');
+	const recovery =
+		agentCode === undefined ? undefined : ownString(error, 'recovery');
+	return new AgentCliError({
+		code,
+		message: message
+			? sanitizeSupabaseText(message, { maxChars: 1_024 })
+			: 'The local Supabase request failed.',
+		retryable: RETRYABLE_SUPABASE_CODES.has(code),
+		recovery:
+			code === 'supabase_disabled'
+				? supabaseOffRecovery(runner)
+				: (recovery ?? supabaseAgentRecovery(code, runner)),
+	});
+}
+
+/**
+ * Key material that may cross the socket only as an `env` result's public
+ * values: Supabase API keys, JWTs, and passwords in URLs.
+ */
+const SUPABASE_KEY_MATERIAL =
+	/sb_(?:secret|publishable)_|(?<![\w-])eyJ[\w-]{2,}\.[\w-]*|\/\/[^\s:/?#@"]*:(?!\[REDACTED\]@)[^\s/?#"]*@/;
+
+function withheldSupabaseResult(): AgentCliError {
+	return new AgentCliError({
+		code: 'supabase_failed',
+		message:
+			'RN Devtools withheld a local Supabase result that did not fit the agent contract.',
+		retryable: true,
+		recovery: supabaseAgentRecovery('supabase_failed'),
+	});
+}
+
+function redactedLogRecord(record: SupabaseLogRecord): SupabaseLogRecord {
+	return record.type === 'entry'
+		? {
+				...record,
+				line: sanitizeSupabaseText(record.line, {
+					maxChars: MAX_SUPABASE_LOG_LINE,
+				}),
+			}
+		: record;
+}
+
+/**
+ * Checks what the service answered before it crosses the socket: the strict
+ * agent result for the operation asked, service log lines redacted once more
+ * (they can carry query strings and SQL), and no key material outside `env`.
+ */
+function checkedSupabaseResult(
+	operation: SupabaseAgentOperation,
+	result: unknown
+): SupabaseAgentResult {
+	const parsed = supabaseAgentResultSchema.safeParse(result);
+	if (!parsed.success || parsed.data.operation !== operation.operation) {
+		throw withheldSupabaseResult();
+	}
+	const checked: SupabaseAgentResult =
+		parsed.data.operation === 'log'
+			? {
+					...parsed.data,
+					records: parsed.data.records.map(redactedLogRecord),
+				}
+			: parsed.data;
+	if (
+		checked.operation !== 'env' &&
+		SUPABASE_KEY_MATERIAL.test(JSON.stringify(checked))
+	) {
+		throw withheldSupabaseResult();
+	}
+	return checked;
+}
+
+/**
+ * Where the calling session works, when discovery has seen it. A shared MCP
+ * identity stands for several sessions, so it has no one directory.
+ */
+function sessionCwdOf(
+	agents: AgentPort | undefined,
+	holder: SessionIdentity | undefined
+): string | undefined {
+	if (!agents || !holder || isSyntheticHolder(holder)) return undefined;
+	const session = agents
+		.getState()
+		.sessions.find(
+			(candidate) =>
+				candidate.kind === holder.kind &&
+				candidate.sessionId === holder.sessionId
+		);
+	return session?.cwd?.startsWith('/') ? session.cwd : undefined;
+}
+
+/** A Supabase job the service still follows; otherwise `job_lost`. */
+function followedSupabaseJob(
+	job: SupabaseJob | undefined,
+	jobId: string
+): SupabaseJob {
+	if (job && job.status !== 'lost') return job;
+	throw new AgentCliError({
+		code: 'job_lost',
+		message: job
+			? `RN Devtools lost track of Supabase job ${jobId}, for example across a restart.`
+			: `RN Devtools has no record of Supabase job ${jobId}.`,
+		retryable: true,
+		recovery: supabaseAgentRecovery('job_lost'),
+	});
+}
+
+/**
+ * Every agent session's hold on a local Supabase stack, shaped like the
+ * Simulator holds beside it: through a lane, a session's own `supabase up`,
+ * or the worktree a shared MCP identity's sessions work in.
+ */
+function supabaseHolds(state: Pick<SupabaseState, 'stacks'>) {
+	return state.stacks.flatMap((stack) => {
+		const branch = supabaseBranchLabel(stack.branchContext);
+		return stack.holds.flatMap((hold) =>
+			hold.holder === 'operator' || !hold.agent
+				? []
+				: [
+						{
+							stackId: stack.id,
+							...(branch === undefined ? {} : { branch }),
+							via: hold.holder,
+							...(hold.holder === 'lane' ? { laneId: hold.laneId } : {}),
+							holder: {
+								kind: hold.agent.kind,
+								sessionId: hold.agent.sessionId,
+							},
+							holderLive: hold.live,
+							...(hold.abandonedSince === undefined
+								? {}
+								: { abandonedSince: hold.abandonedSince }),
+							...(hold.releaseAt === undefined
+								? {}
+								: { releaseAt: hold.releaseAt }),
+						},
+					]
+		);
+	});
+}
+
+/** Doctor's Supabase section; a failure to read it never fails doctor. */
+function supabaseDoctor(
+	supabase: AgentSupabasePort
+): SupabaseDoctorInfo | { capability: 'unavailable'; error: string } {
+	try {
+		return supabaseDoctorInfoSchema.parse(supabase.doctor());
+	} catch {
+		return {
+			capability: 'unavailable',
+			error: 'RN Devtools could not read its local Supabase state.',
+		};
+	}
+}
+
+/**
+ * What lane up says about the worktree's local Supabase: the job to follow
+ * while it is still starting, and why a lane that required it failed.
+ */
+function laneUpResult(receipt: LaneOperationReceipt) {
+	const backend = receipt.backend;
+	if (
+		!receipt.completed &&
+		!receipt.cancelled &&
+		backend?.policy === 'required'
+	) {
+		throw new AgentCliError({
+			code: 'lane_failed',
+			message:
+				receipt.error ??
+				backend.reasonText ??
+				"The lane requires this worktree's local Supabase, which did not start.",
+			retryable: true,
+			recovery:
+				'Call supabase --operation up for this worktree to see why its stack cannot start, or run lane up with backend auto to start the lane without it.',
+		});
+	}
+	const result = laneReceiptResult(receipt);
+	if (backend?.status !== 'starting' || backend.jobId === undefined) {
+		return result;
+	}
+	const launch =
+		backend.launch === 'deferred'
+			? '; the dev client launches once it is ready'
+			: '';
+	return {
+		...result,
+		next: `This worktree's local Supabase is still starting${launch}. Follow it with wait --condition job --job-id ${backend.jobId}.`,
+	};
+}
+
 export function createAgentCommandRouter(
 	dependencies: AgentCommandRouterDependencies
 ): AgentCliHandler {
@@ -785,9 +1377,36 @@ function createRoutes({
 	agents,
 	nativePlan,
 	simulatorInput,
+	supabase,
 }: AgentCommandRouterDependencies): AgentCliHandler {
 	return async (command, context) => {
 		switch (command.kind) {
+			case 'supabase': {
+				if (!supabase) supabaseUnavailable();
+				const mapped = supabaseAgentOperationFromCommand(command);
+				if (!mapped.ok) required(mapped.message);
+				assertSupabaseManaged(supabase.getState());
+				// Identity comes from the envelope only. A shared MCP identity is
+				// matched by worktree, so it carries no session directory.
+				const holder = context.agent;
+				const sessionCwd = sessionCwdOf(agents, holder);
+				let result: SupabaseAgentResult;
+				try {
+					result = await supabase.runAgentOperation(
+						mapped.operation,
+						{
+							requestId: context.requestId,
+							synthetic: holder !== undefined && isSyntheticHolder(holder),
+							...(holder ? { holder } : {}),
+							...(sessionCwd ? { sessionCwd } : {}),
+						},
+						context.signal
+					);
+				} catch (error) {
+					throw supabaseAgentFailure(error, context.signal);
+				}
+				return checkedSupabaseResult(mapped.operation, result);
+			}
 			case 'input': {
 				if (!simulatorInput) {
 					unavailable(
@@ -853,6 +1472,10 @@ function createRoutes({
 					// Which Simulators are held, by whom, and whether that holder is
 					// still alive: the direct answer to "which device may I take".
 					holds: Object.values(state.holds),
+					// The same for each session's local Supabase stacks.
+					...(supabase
+						? { supabaseHolds: supabaseHolds(supabase.getState()) }
+						: {}),
 					discovery: state.discovery,
 					...(context.agent ? { you: context.agent } : {}),
 				};
@@ -876,7 +1499,13 @@ function createRoutes({
 					});
 				}
 				if (command.kind === 'release' && command.all) {
-					return releaseEverything(agents, lanes, context);
+					return releaseEverything(
+						agents,
+						lanes,
+						supabase,
+						context,
+						command.sessionCwd
+					);
 				}
 				const target = simulatorByUdid(
 					await simulator.refresh(),
@@ -1016,6 +1645,8 @@ function createRoutes({
 					simulator: simulatorState.capability,
 					native: simulatorState.native,
 					slimming: slimmingState.helper,
+					// Platform, whether it is on, and each repository's CLI gate.
+					...(supabase ? { supabase: supabaseDoctor(supabase) } : {}),
 				};
 			}
 			case 'simulators': {
@@ -1094,6 +1725,21 @@ function createRoutes({
 			case 'wait': {
 				if (command.condition.kind === 'job') {
 					const jobId = command.condition.jobId;
+					if (isSupabaseJobId(jobId)) {
+						if (!supabase) supabaseUnavailable();
+						let job: SupabaseJob | undefined;
+						try {
+							// Resolves at the timeout with the job still running.
+							job = await supabase.waitForJob(
+								jobId,
+								command.timeoutMs,
+								context.signal
+							);
+						} catch (error) {
+							throw supabaseAgentFailure(error, context.signal);
+						}
+						return followedSupabaseJob(job, jobId);
+					}
 					const simulatorJob = simulator
 						.getState()
 						.jobs.find((job) => job.id === jobId);
@@ -1267,9 +1913,28 @@ function createRoutes({
 					...slimming
 						.getState()
 						.jobs.map((job) => ({ source: 'slimming', ...job })),
+					...(supabase?.getState().jobs ?? []).map((job) => ({
+						source: 'supabase',
+						...job,
+					})),
 				];
 				if (command.operation === 'list') return jobs;
 				if (!command.jobId) required('jobs get and cancel require jobId.');
+				if (isSupabaseJobId(command.jobId)) {
+					if (!supabase) supabaseUnavailable();
+					const job = followedSupabaseJob(
+						supabase.job(command.jobId),
+						command.jobId
+					);
+					if (command.operation === 'get') {
+						return { source: 'supabase', ...job };
+					}
+					// A start or reset stops safely only from the desktop.
+					return {
+						cancelled: false,
+						next: 'Agents cannot cancel local Supabase jobs. Wait for it with wait --condition job, or ask the user to cancel it in RN Devtools › Supabase.',
+					};
+				}
 				const job = jobs.find((candidate) => candidate.id === command.jobId);
 				if (!job) unavailable('The requested job was not found.');
 				if (command.operation === 'get') return job;
@@ -1365,6 +2030,11 @@ function createRoutes({
 					);
 				}
 				const operationId = actionId(context.requestId);
+				// The CLI fills `agent` from the session variables. Over MCP, Codex
+				// passes none, and the envelope's synthetic `mcp-*` id is all there
+				// is; without it the lane would belong to the operator and refuse
+				// the very session that started it.
+				const laneAgent = command.agent ?? context.agent;
 				switch (command.operation) {
 					case 'ls': {
 						const state = await lanes.refresh();
@@ -1382,11 +2052,7 @@ function createRoutes({
 						// itself, so there is nothing to check here; the lane service's
 						// one-lane-per-device rule still applies for races.
 						if (command.udid) {
-							assertDeviceAccess(
-								agents,
-								command.udid,
-								command.agent ?? context.agent
-							);
+							assertDeviceAccess(agents, command.udid, laneAgent);
 						}
 						const receipt = await lanes.runOperation(
 							{
@@ -1404,7 +2070,8 @@ function createRoutes({
 								...(command.slimProfileId
 									? { slimProfileId: command.slimProfileId }
 									: {}),
-								...(command.agent ? { agent: command.agent } : {}),
+								...(command.backend ? { backend: command.backend } : {}),
+								...(laneAgent ? { agent: laneAgent } : {}),
 							},
 							context.signal
 						);
@@ -1414,17 +2081,19 @@ function createRoutes({
 								next: `No free Simulator: ${receipt.deviceRequest.message} RN Devtools is asking the user to start this lane on an existing Simulator or a new clone. Poll lane --operation ls; the deviceRequests entry with id ${receipt.deviceRequest.id} reports fulfilled with a laneId, or dismissed.`,
 							};
 						}
-						return laneReceiptResult(receipt);
+						return laneUpResult(receipt);
 					}
 					case 'launch': {
 						const lane = laneForTarget(lanes.getState(), command);
+						// Launching drives the lane's device, so only its holder may.
+						assertDeviceAccess(agents, lane.simulatorUdid, laneAgent);
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
 								kind: 'lane.launch',
 								laneId: lane.id,
 								...(command.url ? { url: command.url } : {}),
-								...(command.agent ? { agent: command.agent } : {}),
+								...(laneAgent ? { agent: laneAgent } : {}),
 							},
 							context.signal
 						);

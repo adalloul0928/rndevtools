@@ -7,6 +7,7 @@ import type { SimulatorInputBridge } from '../shared/simulator-input-protocol';
 import type { SimulatorBridge } from '../shared/simulator-protocol';
 import type { SimulatorStreamBridge } from '../shared/simulator-stream-protocol';
 import type { SlimmingBridge } from '../shared/slimming-protocol';
+import type { SupabaseBridge } from '../shared/supabase-protocol';
 
 declare global {
 	interface Window {
@@ -18,6 +19,7 @@ declare global {
 			LaneBridge &
 			AgentBridge &
 			SimulatorInputBridge &
-			SimulatorStreamBridge;
+			SimulatorStreamBridge &
+			SupabaseBridge;
 	}
 }

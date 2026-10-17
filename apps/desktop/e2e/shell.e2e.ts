@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { DesktopHarness } from './harness';
+import { DesktopHarness, simulatorToolIds } from './harness';
 
 let harness: DesktopHarness;
 
@@ -90,6 +90,12 @@ test('keyboard shortcuts switch workspaces and panels', async () => {
 		'#simulator/actions'
 	);
 
+	// Mod+8 opens Supabase, which took Settings' old digit; Settings is Mod+9.
+	await window.keyboard.press(`${modifier}+8`);
+	await expect(window).toHaveURL(/#simulator\/supabase$/);
+	await window.keyboard.press(`${modifier}+9`);
+	await expect(window).toHaveURL(/#simulator\/settings$/);
+
 	// Back to connected (Shift+Mod+C).
 	await window.keyboard.press(`${modifier}+Shift+C`);
 	await expect(
@@ -106,6 +112,30 @@ test('simulator sidebar footer opens Settings', async () => {
 	await expect(window.evaluate(() => window.location.hash)).resolves.toBe(
 		'#simulator/settings'
 	);
+});
+
+test('simulator sidebar groups its tools under Simulator, Backend and System', async () => {
+	await harness.openPanel('simulator/fleet');
+	const sidebar = harness.window.locator('.simulator-sidebar');
+	await expect(sidebar.locator('.tool-group-label')).toHaveText([
+		'Simulator',
+		'Backend',
+		'System',
+	]);
+	await expect(
+		sidebar.locator('.tool-group').nth(1).locator('.tool-nav-item')
+	).toHaveCount(1);
+	await expect(
+		sidebar.locator('.tool-group').nth(1).locator('.tool-nav-item')
+	).toContainText('Supabase');
+});
+
+test('simulator sidebar footer hint covers every tool shortcut', async () => {
+	await harness.openPanel('simulator/fleet');
+	// Shortcuts run from 1 in sidebar order, so the hint must reach Settings.
+	await expect(
+		harness.window.locator('.simulator-sidebar .shortcut-hint')
+	).toContainText(`1–${simulatorToolIds.length}`);
 });
 
 test('connected sidebar footer opens Diagnostics', async () => {

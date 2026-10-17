@@ -5,6 +5,7 @@ import {
 	AudioLines,
 	Camera,
 	Command,
+	DatabaseZap,
 	FolderCog,
 	Frame,
 	Laptop,
@@ -24,18 +25,28 @@ import {
 } from '@/components/simulator-ui';
 import {
 	Disclosure,
-	InfoPopover,
 	PanelNotice,
-	StatusPill,
+	ReadinessRow,
+	type ReadinessStatus,
 } from '@/components/ui';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
 } from '@/state/simulator-runtime';
+import {
+	useSupabaseNavigation,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
 import type {
 	SimulatorCapability,
 	SimulatorNativeState,
 } from '../../../shared/simulator-protocol';
+import {
+	isSupabaseControlEnabled,
+	SUPABASE_REASONS,
+	type SupabaseState,
+	supabasePlatformLabel,
+} from '../../../shared/supabase-protocol';
 
 type CapabilityId =
 	| 'xcode'
@@ -295,6 +306,9 @@ export function SettingsPanel() {
 						</div>
 						<Disclosure title="Optional features & permissions">
 							<div className="sim-capability-list">
+								{isSupabaseControlEnabled('global-settings-row') ? (
+									<LocalSupabaseRow />
+								) : null}
 								{capabilities
 									.filter((capability) => !capability.required)
 									.map(renderCapability)}
@@ -400,73 +414,176 @@ function CapabilityRow({
 	isBridgeAvailable: boolean;
 	onRunOnboarding: (operation: SimulatorOnboardingOperationInput) => void;
 }) {
-	const Icon = capability.icon;
-	const guidance = capabilityGuidance(capability, isBridgeAvailable);
+	const readiness = capabilityReadiness(capability);
 	const onboarding = capabilityOnboardingAction(capability.id);
 	return (
-		<div className="sim-capability-row">
-			<span className="sim-capability-icon">
-				<Icon className="h-4 w-4" />
-			</span>
-			<div className="sim-capability-copy">
-				<div>
-					<strong>{capability.label}</strong>
-					<InfoPopover label={capability.label}>
-						<p>{capability.description}</p>
-						<p className="mt-2 break-words">
-							{capability.detail ?? capability.mechanism}
-						</p>
-					</InfoPopover>
-					{capability.required ? <span>Required</span> : <span>Optional</span>}
-				</div>
-				{capability.status !== 'available' ? (
-					<p className="sim-capability-next-step">{guidance}</p>
-				) : null}
-			</div>
-			<div className="sim-capability-action">
-				<StatusPill
-					tone={
-						capability.status === 'available'
-							? 'success'
-							: capability.required
-								? 'warning'
-								: 'default'
-					}
+		<ReadinessRow
+			actions={
+				<>
+					{onboarding ? (
+						<Button
+							isDisabled={!isBridgeAvailable}
+							size="sm"
+							variant="secondary"
+							onPress={() => onRunOnboarding(onboarding.operation)}
+						>
+							{onboarding.label}
+						</Button>
+					) : null}
+					{capability.featureLink ? (
+						<Button
+							aria-label={`${capability.featureLink.label} for ${capability.label}`}
+							className="sim-capability-feature-link"
+							size="sm"
+							variant="ghost"
+							onPress={() => {
+								window.location.hash = capability.featureLink?.hash ?? '';
+							}}
+						>
+							{capability.featureLink.label}
+							<ArrowUpRight className="h-3 w-3" />
+						</Button>
+					) : null}
+				</>
+			}
+			{...(capability.status === 'available'
+				? {}
+				: { detail: capabilityGuidance(capability, isBridgeAvailable) })}
+			icon={capability.icon}
+			info={
+				<>
+					<p>{capability.description}</p>
+					<p className="mt-2 break-words">
+						{capability.detail ?? capability.mechanism}
+					</p>
+				</>
+			}
+			label={capability.label}
+			status={readiness.status}
+			statusLabel={readiness.label}
+			tag={capability.required ? 'Required' : 'Optional'}
+		/>
+	);
+}
+
+/** A capability's pill: Ready, Checking, Needs setup (required) or Not available. */
+export function capabilityReadiness(capability: {
+	status: SimulatorCapability['status'];
+	required: boolean;
+}): { status: ReadinessStatus; label: string } {
+	if (capability.status === 'available') {
+		return { status: 'ready', label: 'Ready' };
+	}
+	if (capability.status === 'checking') {
+		return { status: 'checking', label: 'Checking' };
+	}
+	return capability.required
+		? { status: 'needs-fix', label: 'Needs setup' }
+		: { status: 'optional', label: 'Not available' };
+}
+
+/**
+ * The global Local Supabase row: the platform verdict and whether the
+ * feature is on. It is optional, so it never adds to the Settings count.
+ */
+export function localSupabaseReadiness(
+	state: Pick<
+		SupabaseState,
+		'availability' | 'feature' | 'capacity' | 'repositories'
+	>,
+	bridgeAvailable: boolean
+): { status: ReadinessStatus; label: string; detail: string } {
+	if (!bridgeAvailable) {
+		return {
+			status: 'optional',
+			label: 'Not available',
+			detail: SUPABASE_REASONS.bridge,
+		};
+	}
+	const platform = supabasePlatformLabel(state.availability.platform);
+	if (!state.availability.platform.supported) {
+		return {
+			status: 'optional',
+			label: 'Not available',
+			detail: `Native Supabase needs Apple silicon and macOS 14 or later. This Mac: ${platform}.`,
+		};
+	}
+	if (state.feature.policyHealth === 'quarantined') {
+		return {
+			status: 'check',
+			label: 'Off',
+			detail:
+				"Supabase settings couldn't be read, so local Supabase was turned off and defaults restored.",
+		};
+	}
+	if (!state.feature.enabled) {
+		return {
+			status: 'optional',
+			label: 'Off',
+			detail: `This Mac can run it (${platform}). Off means off: nothing runs or polls.`,
+		};
+	}
+	const { running } = state.capacity;
+	if (running > 0) {
+		return {
+			status: 'ready',
+			label: `On · ${running} running`,
+			detail: `One local Supabase stack per worktree and branch · ${platform}.`,
+		};
+	}
+	const needsSetup =
+		state.repositories.length > 0 &&
+		!state.repositories.some(
+			(repository) => repository.readiness === 'ready'
+		) &&
+		state.repositories.some(
+			(repository) => repository.readiness === 'needs-fix'
+		);
+	return needsSetup
+		? {
+				status: 'check',
+				label: 'Needs setup',
+				detail:
+					'No tracked repository is ready for local Supabase yet. Review them in the Supabase tab.',
+			}
+		: {
+				status: 'ready',
+				label: 'On',
+				detail: `One local Supabase stack per worktree and branch · ${platform}.`,
+			};
+}
+
+function LocalSupabaseRow() {
+	const { state, isBridgeAvailable } = useSupabaseState();
+	const { openInSupabase } = useSupabaseNavigation();
+	const readiness = localSupabaseReadiness(state, isBridgeAvailable);
+	return (
+		<ReadinessRow
+			actions={
+				<Button
+					className="sim-capability-feature-link"
+					size="sm"
+					variant="ghost"
+					onPress={() => openInSupabase({ view: 'settings' })}
 				>
-					{capability.status === 'available'
-						? 'Ready'
-						: capability.status === 'checking'
-							? 'Checking'
-							: capability.required
-								? 'Needs setup'
-								: 'Not available'}
-				</StatusPill>
-				{onboarding ? (
-					<Button
-						isDisabled={!isBridgeAvailable}
-						size="sm"
-						variant="secondary"
-						onPress={() => onRunOnboarding(onboarding.operation)}
-					>
-						{onboarding.label}
-					</Button>
-				) : null}
-				{capability.featureLink ? (
-					<Button
-						aria-label={`${capability.featureLink.label} for ${capability.label}`}
-						className="sim-capability-feature-link"
-						size="sm"
-						variant="ghost"
-						onPress={() => {
-							window.location.hash = capability.featureLink?.hash ?? '';
-						}}
-					>
-						{capability.featureLink.label}
-						<ArrowUpRight className="h-3 w-3" />
-					</Button>
-				) : null}
-			</div>
-		</div>
+					Open Supabase settings
+					<ArrowUpRight className="h-3 w-3" />
+				</Button>
+			}
+			detail={readiness.detail}
+			icon={DatabaseZap}
+			info={
+				<p>
+					One local Supabase stack per worktree and branch, on 127.0.0.1, using
+					Supabase&apos;s native runtime. It is optional and alpha; turn it on
+					in the Supabase tab.
+				</p>
+			}
+			label="Local Supabase (alpha)"
+			status={readiness.status}
+			statusLabel={readiness.label}
+			tag="Optional"
+		/>
 	);
 }
 

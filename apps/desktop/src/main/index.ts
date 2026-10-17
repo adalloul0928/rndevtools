@@ -5,6 +5,7 @@ import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	app,
 	BrowserWindow,
+	clipboard,
 	dialog,
 	type IpcMainInvokeEvent,
 	ipcMain,
@@ -72,6 +73,10 @@ import {
 	slimmingSettingReceiptSchema,
 	slimmingSettingRequestSchema,
 } from '../shared/slimming-protocol';
+import {
+	laneDefaultBackend,
+	type SupabaseState,
+} from '../shared/supabase-protocol';
 import { ActionConfirmationStore } from './action-confirmation-store';
 import { AgentCliService } from './agent-cli-service';
 import { runAgentCliSetup } from './agent-cli-setup';
@@ -98,6 +103,7 @@ import {
 	PACKAGED_RENDERER_URL,
 	packagedRendererAssetPath,
 	trustedDevelopmentRendererUrl,
+	trustedLoopbackHttpUrl,
 	urlsMatchWithoutHash,
 } from './security';
 import { SimHelperClient } from './sim-helper-client';
@@ -121,6 +127,23 @@ import {
 import { slimmingConfirmationCopy } from './slimming-confirmation';
 import { SlimmingService } from './slimming-service';
 import { StagedCertificateStore } from './staged-certificate-store';
+import { shouldUseSupabaseDemo } from './supabase/demo-mode';
+import type {
+	SupabaseAgentPort,
+	SupabaseClipboardPort,
+	SupabaseDialogPort,
+	SupabaseLanePort,
+	SupabaseServiceApi,
+	SupabaseServiceDeps,
+	SupabaseShellPort,
+} from './supabase/service-ports';
+import { createSupabaseService } from './supabase/supabase-service';
+import {
+	createSupabaseInterestGate,
+	createSupabaseIpcHandlers,
+	createSupabaseStatePublisher,
+	supabaseInterestKey,
+} from './supabase-ipc';
 
 protocol.registerSchemesAsPrivileged([
 	{
@@ -164,6 +187,15 @@ let laneService: LaneService | undefined;
 let agentService: AgentService | undefined;
 let simulatorStreamService: SimulatorStreamService | undefined;
 let stagedCertificateStore: StagedCertificateStore | undefined;
+let supabaseService: SupabaseServiceApi | undefined;
+// Each window's Supabase interest counts only while it is visible; both the
+// gate and the state pushes reach the service once it exists.
+const supabaseInterest = createSupabaseInterestGate((senderKey, interest) =>
+	supabaseService?.setInterest(senderKey, interest)
+);
+const supabaseStatePublisher = createSupabaseStatePublisher(
+	broadcastSupabaseState
+);
 
 function rendererEntryUrl(): string {
 	return (
@@ -306,6 +338,18 @@ function broadcastAgentState(state: AgentState): void {
 		if (webContents.isDestroyed()) continue;
 		try {
 			webContents.send(IPC_CHANNELS.agentStateChanged, state);
+		} catch {
+			// A renderer can disappear between the destroyed check and send.
+		}
+	}
+}
+
+function broadcastSupabaseState(state: SupabaseState): void {
+	for (const window of windows) {
+		const webContents = window.webContents;
+		if (webContents.isDestroyed()) continue;
+		try {
+			webContents.send(IPC_CHANNELS.supabaseStateChanged, state);
 		} catch {
 			// A renderer can disappear between the destroyed check and send.
 		}
@@ -714,6 +758,150 @@ async function selectSimulatorInput(
 		? await dialog.showOpenDialog(owner, options)
 		: await dialog.showOpenDialog(options);
 	return result.canceled ? undefined : result.filePaths[0];
+}
+
+function windowForSender(senderId: number): BrowserWindow | undefined {
+	for (const window of windows) {
+		if (!window.isDestroyed() && window.webContents.id === senderId) {
+			return window;
+		}
+	}
+	return undefined;
+}
+
+/** Electron's dialogs for the Supabase service, modal to the asking window. */
+const supabaseDialog: SupabaseDialogPort = {
+	showMessageBox: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const messageBox: Electron.MessageBoxOptions = {
+			...options,
+			buttons: [...options.buttons],
+		};
+		const result = window
+			? await dialog.showMessageBox(window, messageBox)
+			: await dialog.showMessageBox(messageBox);
+		return {
+			response: result.response,
+			checkboxChecked: result.checkboxChecked,
+		};
+	},
+	showSaveDialog: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const save: Electron.SaveDialogOptions = {
+			title: options.title,
+			buttonLabel: options.buttonLabel,
+			defaultPath: options.defaultPath,
+			filters: options.filters.map((filter) => ({
+				name: filter.name,
+				extensions: [...filter.extensions],
+			})),
+		};
+		const result = window
+			? await dialog.showSaveDialog(window, save)
+			: await dialog.showSaveDialog(save);
+		return result.canceled || !result.filePath
+			? { canceled: true }
+			: { canceled: false, filePath: result.filePath };
+	},
+	showOpenDialog: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const open: Electron.OpenDialogOptions = {
+			title: options.title,
+			buttonLabel: options.buttonLabel,
+			properties: [...options.properties],
+			...(options.defaultPath === undefined
+				? {}
+				: { defaultPath: options.defaultPath }),
+		};
+		const result = window
+			? await dialog.showOpenDialog(window, open)
+			: await dialog.showOpenDialog(open);
+		return { canceled: result.canceled, filePaths: result.filePaths };
+	},
+};
+
+const supabaseShell: SupabaseShellPort = {
+	// Mailpit and Studio only: loopback http, never another host or scheme.
+	openExternal: async (url) => {
+		const trusted = trustedLoopbackHttpUrl(url);
+		if (!trusted) {
+			throw new Error('Only loopback http addresses open outside RN Devtools.');
+		}
+		await shell.openExternal(trusted);
+	},
+	// Paths come from the service's own records; the renderer never names one.
+	showItemInFolder: (itemPath) => {
+		if (!path.isAbsolute(itemPath) || itemPath.includes('\0')) {
+			throw new Error('Only an absolute path can be revealed in Finder.');
+		}
+		shell.showItemInFolder(itemPath);
+	},
+};
+
+// The service compares what it reads back before clearing, so a delayed clear
+// never wipes something the user copied since.
+const supabaseClipboard: SupabaseClipboardPort = {
+	writeText: (text) => clipboard.writeText(text),
+	readText: () => clipboard.readText(),
+};
+
+function supabaseLanePort(lanes: LaneService): SupabaseLanePort {
+	return {
+		lanes: () => lanes.getState().lanes,
+		laneById: (laneId) =>
+			lanes.getState().lanes.find((lane) => lane.id === laneId),
+		worktrees: () => lanes.getState().worktrees,
+		repositories: () => lanes.getState().repositories,
+		restartMetro: (laneId, reason) => lanes.restartMetro(laneId, reason),
+		launchDeferred: (laneId) => lanes.launchDeferred(laneId),
+		subscribe: (listener) => lanes.subscribe(() => listener()),
+	};
+}
+
+function supabaseAgentPort(agents: AgentService): SupabaseAgentPort {
+	return {
+		sessions: () => agents.getState().sessions,
+		holderLiveness: (holder, directory) =>
+			agents.holderLiveness(holder, directory),
+		discovery: () => {
+			const { claude, codex } = agents.getState().discovery;
+			return { claude, codex };
+		},
+		subscribe: (listener) => agents.subscribe(() => listener()),
+	};
+}
+
+function supabasePlatform(): SupabaseServiceDeps['platform'] {
+	return {
+		platform: process.platform,
+		arch: process.arch,
+		macosVersion:
+			process.platform === 'darwin' ? process.getSystemVersion() : undefined,
+	};
+}
+
+function registerSupabaseIpc(service: SupabaseServiceApi): void {
+	const handlers = createSupabaseIpcHandlers({
+		service: {
+			getState: () => service.getState(),
+			runOperation: (operation, context) =>
+				service.runOperation(operation, context),
+			describeConfirmation: (operation) =>
+				service.describeConfirmation(operation),
+			setInterest: supabaseInterest.setInterest,
+		},
+		confirmations: confirmationStore,
+		showConfirmationDialog: supabaseDialog.showMessageBox,
+		assertTrustedSender: assertTrustedRenderer,
+		now: Date.now,
+	});
+	ipcMain.handle(IPC_CHANNELS.getSupabaseState, handlers.getState);
+	ipcMain.handle(IPC_CHANNELS.runSupabaseOperation, handlers.runOperation);
+	ipcMain.handle(
+		IPC_CHANNELS.requestSupabaseConfirmation,
+		handlers.requestConfirmation
+	);
+	ipcMain.on(IPC_CHANNELS.setSupabaseInterest, handlers.setInterest);
 }
 
 function rejectedSimulatorAction(
@@ -1323,9 +1511,23 @@ function createWindow(): BrowserWindow {
 	window.on('restore', updateSimulatorPolling);
 	const senderId = window.webContents.id;
 	stagedCertificateStore?.registerSender(senderId);
+	// A hidden or minimized window has no Supabase interest; its last one comes
+	// back when it is shown again.
+	const supabaseKey = supabaseInterestKey(senderId);
+	const updateSupabaseInterest = () =>
+		supabaseInterest.setVisible(
+			supabaseKey,
+			!window.isDestroyed() && window.isVisible() && !window.isMinimized()
+		);
+	updateSupabaseInterest();
+	window.on('show', updateSupabaseInterest);
+	window.on('hide', updateSupabaseInterest);
+	window.on('minimize', updateSupabaseInterest);
+	window.on('restore', updateSupabaseInterest);
 	window.webContents.once('destroyed', () => {
 		confirmationStore.revokeSender(senderId);
 		void stagedCertificateStore?.revokeSender(senderId);
+		supabaseInterest.drop(supabaseKey);
 	});
 	window.once('ready-to-show', () => window.show());
 	window.webContents.session.setPermissionRequestHandler(
@@ -1487,6 +1689,37 @@ if (!app.requestSingleInstanceLock()) {
 				// The agent service is constructed next; it knows which sessions are
 				// alive, which is what decides whether a lane's owner is gone.
 				holds: () => agentService?.holds() ?? new Map(),
+				// The Supabase service is constructed after the agent service, and
+				// before any lane can start.
+				backends: {
+					ensureForLane: async (input, signal) =>
+						supabaseService
+							? supabaseService.ensureForLane(input, signal)
+							: {
+									summary: {
+										policy: input.policy,
+										status: 'skipped',
+										reason: 'disabled',
+										appEnvNames: [],
+										warnings: [],
+										reasonText: 'Local Supabase is not ready yet.',
+									},
+								},
+					detachLane: (laneId) => {
+						supabaseService?.detachLane(laneId);
+					},
+					// Lanes default to no backend unless the feature is on and the
+					// Mac supports it; otherwise every development lane would ask.
+					defaultPolicy: (environmentId) => {
+						const state = supabaseService?.getState();
+						return state?.feature.enabled &&
+							state.availability.platform.supported
+							? laneDefaultBackend(state.policy, environmentId)
+							: 'off';
+					},
+					describeWorktree: (worktreePath) =>
+						supabaseService?.describeWorktree(worktreePath),
+				},
 			});
 			agentService = new AgentService({
 				directory: path.join(app.getPath('userData'), 'agents'),
@@ -1499,6 +1732,27 @@ if (!app.requestSingleInstanceLock()) {
 						metro: lane.metro,
 						startedAt: lane.startedAt,
 					})) ?? [],
+				// Supabase stack holders get the same abandonment clocks as lanes.
+				holders: () => supabaseService?.holderKeys() ?? [],
+			});
+			const agentSocketPath = path.join(
+				app.getPath('userData'),
+				'agent',
+				'rndevtools.sock'
+			);
+			supabaseService = createSupabaseService({
+				userDataDirectory: app.getPath('userData'),
+				agentSocketDirectory: path.dirname(agentSocketPath),
+				lanes: supabaseLanePort(laneService),
+				agents: supabaseAgentPort(agentService),
+				dialog: supabaseDialog,
+				shell: supabaseShell,
+				clipboard: supabaseClipboard,
+				demo: shouldUseSupabaseDemo(
+					process.env.RNDEVTOOLS_DEMO,
+					app.isPackaged
+				),
+				platform: supabasePlatform(),
 			});
 			simulatorStreamService = new SimulatorStreamService({
 				frameDirectory: path.join(
@@ -1508,17 +1762,14 @@ if (!app.requestSingleInstanceLock()) {
 				encode: createNativeImageFrameEncoder(nativeImage),
 			});
 			agentCliService = new AgentCliService({
-				socketPath: path.join(
-					app.getPath('userData'),
-					'agent',
-					'rndevtools.sock'
-				),
+				socketPath: agentSocketPath,
 				handler: createAgentCommandRouter({
 					broker,
 					simulator: simulatorService,
 					slimming: slimmingService,
 					lanes: laneService,
 					agents: agentService,
+					supabase: supabaseService,
 					nativePlan: runNativePlan,
 					simulatorInput: (input, signal) =>
 						nativeHostClient.sendSimulatorInput(input, signal),
@@ -1566,6 +1817,7 @@ if (!app.requestSingleInstanceLock()) {
 				nativeResourceDirectory,
 				settings
 			);
+			registerSupabaseIpc(supabaseService);
 			broker.subscribe(broadcastState);
 			simulatorService.subscribe(broadcastSimulatorState);
 			slimmingService.subscribe(broadcastSlimmingState);
@@ -1573,6 +1825,9 @@ if (!app.requestSingleInstanceLock()) {
 			buildInsightsService.subscribe(broadcastBuildInsightsState);
 			laneService.subscribe(broadcastLaneState);
 			agentService.subscribe(broadcastAgentState);
+			supabaseService.subscribe(supabaseStatePublisher.publish);
+			// The lane start form reads each worktree's project from lane state.
+			supabaseService.subscribe(() => laneService?.backendsChanged());
 			simulatorStreamService.subscribeFrames(broadcastSimulatorStreamFrame);
 			simulatorStreamService.subscribeStatus(broadcastSimulatorStreamStatus);
 			await Promise.all([
@@ -1583,6 +1838,7 @@ if (!app.requestSingleInstanceLock()) {
 				buildInsightsService.start(),
 				laneService.start(),
 				agentService.start(),
+				supabaseService.start(),
 				agentCliService.start(),
 			]);
 			if (shutdownStarted) return;
@@ -1616,6 +1872,7 @@ app.on('before-quit', (event) => {
 	const certificateShutdown = simulatorShutdown
 		? simulatorShutdown.finally(() => stagedCertificateStore?.stop())
 		: stagedCertificateStore?.stop();
+	supabaseStatePublisher.dispose();
 	void Promise.allSettled([
 		broker.stop(),
 		simulatorShutdown,
@@ -1624,6 +1881,8 @@ app.on('before-quit', (event) => {
 		buildInsightsService?.stop(),
 		laneService?.stop(),
 		agentService?.stop(),
+		// Stopping the service never stops a stack; they outlive the app.
+		supabaseService?.stop(),
 		simulatorStreamService?.stop(),
 		agentCliService?.stop(),
 		certificateShutdown,

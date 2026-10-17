@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Lane } from '../../shared/lane-protocol';
+import type { Lane, LaneView } from '../../shared/lane-protocol';
 import type { DeviceSession } from '../../shared/protocol';
 import type {
 	SimulatorDevice,
@@ -7,8 +7,13 @@ import type {
 } from '../../shared/simulator-protocol';
 import type { SlimmingSimulatorStatus } from '../../shared/slimming-protocol';
 import {
+	createSupabaseDemoState,
+	SUPABASE_DEMO_IDS,
+} from '../../shared/supabase-demo-data';
+import {
 	agentLabel,
 	buildFleetRows,
+	connectedSessionsForSimulator,
 	type FleetRow,
 	fleetFilterCounts,
 	fleetRowMatches,
@@ -208,6 +213,7 @@ describe('fleetRowMatches and counts', () => {
 			shutdown: 1,
 			'with-lane': 1,
 			'with-agent': 1,
+			'with-backend': 0,
 		});
 		expect(
 			rows
@@ -305,5 +311,136 @@ describe('agent attachments on rows', () => {
 			},
 		});
 		expect(primaryAgent(rows[0] as FleetRow)?.sessionId).toBe('lane-owner');
+	});
+});
+
+describe('connectedSessionsForSimulator', () => {
+	const UDID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+	function appSession(
+		id: string,
+		status: DeviceSession['status'],
+		simulatorUdid: string | undefined,
+		lastSeenAt: number
+	): DeviceSession {
+		return {
+			...session(simulatorUdid, status),
+			info: {
+				id,
+				name: id,
+				platform: 'ios',
+				capabilities: [],
+				...(simulatorUdid ? { simulatorUdid } : {}),
+			},
+			lastSeenAt,
+		};
+	}
+
+	it('matches UDIDs case-insensitively and orders online sessions first', () => {
+		const result = connectedSessionsForSimulator(UDID, [
+			appSession('offline-newer', 'offline', UDID, 30),
+			appSession(
+				'unmatched',
+				'online',
+				'11111111-2222-4333-8444-555555555555',
+				40
+			),
+			appSession('online-older', 'online', UDID.toLowerCase(), 10),
+			appSession('simulated', 'simulated', UDID, 100),
+			appSession('v1', 'online', undefined, 50),
+		]);
+
+		expect(result.map((candidate) => candidate.info.id)).toEqual([
+			'online-older',
+			'simulated',
+			'offline-newer',
+		]);
+	});
+});
+
+describe('lane backends on rows', () => {
+	const ids = SUPABASE_DEMO_IDS;
+	const supabase = createSupabaseDemoState();
+	const checkout: LaneView = {
+		...lane(ids.simulatorCheckout, {
+			id: ids.laneCheckout,
+			branch: 'feat-checkout',
+			port: 8_102,
+		}),
+		backend: {
+			policy: 'auto',
+			status: 'ready',
+			stackId: ids.featCheckout,
+			apiUrl: 'http://127.0.0.1:21734',
+			appEnvNames: ['EXPO_PUBLIC_SUPABASE_URL'],
+			warnings: [],
+		},
+	};
+	const plain = lane(B, { port: 8_120, branch: 'feature/plain' });
+	const build = (state = supabase) =>
+		buildFleetRows({
+			devices: [
+				device(ids.simulatorCheckout, 'iPhone 17 Pro', 'booted'),
+				device(B, 'Plain lane', 'booted'),
+				device(C, 'Idle', 'shutdown'),
+			],
+			runtimes: [],
+			metricsByDevice: {},
+			slimmingByDevice: {},
+			lanes: [checkout, plain],
+			sessions: [],
+			supabase: state,
+		});
+
+	it('gives a lane its backend chip, ports and stack, and counts them', () => {
+		const rows = build();
+		const row = rows.find(
+			(candidate) => candidate.lane?.id === ids.laneCheckout
+		);
+		expect(row?.backend).toMatchObject({
+			chip: { label: 'db :21734', tone: 'success' },
+			stackId: ids.featCheckout,
+			apiPort: 21_734,
+			dbPort: 21_736,
+		});
+		expect(row?.backend?.line).toMatch(/ · stack 64616c83…$/);
+		expect(
+			rows.find((candidate) => candidate.lane?.id === plain.id)?.backend
+		).toBeUndefined();
+		expect(fleetFilterCounts(rows)['with-backend']).toBe(1);
+		expect(
+			rows
+				.filter((candidate) => fleetRowMatches(candidate, 'with-backend', ''))
+				.map((candidate) => candidate.device.name)
+		).toEqual(['iPhone 17 Pro']);
+	});
+
+	it('searches the API and database ports and the stack id prefix', () => {
+		const rows = build();
+		const names = (query: string) =>
+			rows
+				.filter((row) => fleetRowMatches(row, 'all', query))
+				.map((row) => row.device.name);
+		expect(names(':21734')).toEqual(['iPhone 17 Pro']);
+		expect(names(':21736')).toEqual(['iPhone 17 Pro']);
+		expect(names('64616c83')).toEqual(['iPhone 17 Pro']);
+		expect(names('db :21734')).toEqual(['iPhone 17 Pro']);
+	});
+
+	it('hides every chip while local Supabase is off or not given', () => {
+		const off = {
+			...supabase,
+			feature: { ...supabase.feature, enabled: false },
+		};
+		expect(build(off).some((row) => row.backend)).toBe(false);
+		const rows = buildFleetRows({
+			devices: [device(ids.simulatorCheckout, 'iPhone 17 Pro', 'booted')],
+			runtimes: [],
+			metricsByDevice: {},
+			slimmingByDevice: {},
+			lanes: [checkout],
+			sessions: [],
+		});
+		expect(rows[0]?.backend).toBeUndefined();
+		expect(fleetFilterCounts(rows)['with-backend']).toBe(0);
 	});
 });

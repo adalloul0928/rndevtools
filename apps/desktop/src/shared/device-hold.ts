@@ -19,6 +19,14 @@ import type { Lane } from './lane-protocol';
 /** How long an abandoned hold survives before the desktop releases it. */
 export const DEVICE_HOLD_GRACE_MS = 10 * 60 * 1_000;
 
+/**
+ * The CLI's MCP server makes up `mcp-<client name>` when the agent gave it no
+ * session variable, as Codex does. Every MCP session of that agent then shares
+ * the one id, so such a synthetic holder is matched by where its sessions
+ * work, never by the id alone. Detected by prefix, so nothing new is stored.
+ */
+const SYNTHETIC_SESSION_PREFIX = 'mcp-';
+
 const deviceHolderSchema = z.strictObject({
 	kind: z.enum(['claude', 'codex', 'other']),
 	sessionId: z.string().min(1).max(128),
@@ -49,22 +57,108 @@ function holderKey(holder: DeviceHolder): string {
 	return `${holder.kind}:${holder.sessionId}`;
 }
 
-export type DeviceHoldInputs = {
-	lanes: readonly Pick<
+/** Whether `holder` is a shared MCP identity rather than one session. */
+export function isSyntheticHolder(
+	holder: Pick<DeviceHolder, 'sessionId'>
+): boolean {
+	return holder.sessionId.startsWith(SYNTHETIC_SESSION_PREFIX);
+}
+
+/** Whether `child` is `parent` or lies inside it; trailing slashes are ignored. */
+export function isPathInside(child: string, parent: string): boolean {
+	const inner = child.replace(/\/+$/, '');
+	const outer = parent.replace(/\/+$/, '');
+	return inner === outer || inner.startsWith(`${outer}/`);
+}
+
+/**
+ * The abandonment clock a holder runs on. One session's holds share a clock.
+ * A synthetic holder gets one per resource directory, because its id stands
+ * for several sessions and only some of its resources may still have one of
+ * them working inside.
+ */
+export function holderClockKey(
+	holder: DeviceHolder,
+	directory?: string
+): string {
+	const key = holderKey(holder);
+	return directory !== undefined && isSyntheticHolder(holder)
+		? `${key}@${directory.replace(/\/+$/, '')}`
+		: key;
+}
+
+export type HolderLivenessInputs = {
+	/** `holderKey` of every agent session currently alive on this Mac. */
+	liveSessionKeys: ReadonlySet<string>;
+	/** Where the live sessions work; this is what decides synthetic holders. */
+	liveSessions?: readonly {
+		kind: DeviceHolder['kind'];
+		cwd?: string | undefined;
+	}[];
+	/**
+	 * When each absent holder was first noticed missing, by
+	 * {@link holderClockKey}. A holder without a clock counts as missing from
+	 * `now`, so its release never comes closer until a clock starts.
+	 */
+	missingSince: ReadonlyMap<string, number>;
+	now: number;
+};
+
+export type HolderLiveness =
+	| { live: true }
+	| { live: false; abandonedSince: number; releaseAt: number };
+
+/**
+ * Whether the holder of a resource (a Simulator here, any held resource in
+ * general) is still around and, when it is not, since when and until when the
+ * hold survives. The operator (no holder) is always live. A synthetic holder
+ * is live while a session of its kind works inside `directory`, the held
+ * resource's directory; without a directory it never is.
+ */
+export function resolveHolderLiveness(
+	holder: DeviceHolder | undefined,
+	inputs: HolderLivenessInputs,
+	directory?: string
+): HolderLiveness {
+	if (!holder || inputs.liveSessionKeys.has(holderKey(holder))) {
+		return { live: true };
+	}
+	if (
+		directory !== undefined &&
+		isSyntheticHolder(holder) &&
+		inputs.liveSessions?.some(
+			(session) =>
+				session.kind === holder.kind &&
+				session.cwd !== undefined &&
+				isPathInside(session.cwd, directory)
+		)
+	) {
+		return { live: true };
+	}
+	const since =
+		inputs.missingSince.get(holderClockKey(holder, directory)) ?? inputs.now;
+	return {
+		live: false,
+		abandonedSince: since,
+		releaseAt: since + DEVICE_HOLD_GRACE_MS,
+	};
+}
+
+export type DeviceHoldInputs = HolderLivenessInputs & {
+	lanes: readonly (Pick<
 		Lane,
-		'id' | 'simulatorUdid' | 'agent' | 'metro' | 'startedAt'
-	>[];
+		'id' | 'simulatorUdid' | 'metro' | 'startedAt'
+	> & {
+		agent?: DeviceHolder | undefined;
+		/** Where the lane's app lives; synthetic holders are judged against it. */
+		appDirectory?: string | undefined;
+	})[];
 	/** Agent claims: a device, and the session that claimed it. */
 	claims: readonly {
 		simulatorUdid: string;
 		kind: DeviceHolder['kind'];
 		sessionId: string;
 	}[];
-	/** `holderKey` of every agent session currently alive on this Mac. */
-	liveSessionKeys: ReadonlySet<string>;
-	/** Earliest time each absent holder was first noticed missing, by session key. */
-	missingSince: ReadonlyMap<string, number>;
-	now: number;
 };
 
 /**
@@ -83,12 +177,11 @@ export function resolveDeviceHolds(
 			: undefined;
 		holds.set(
 			udid,
-			finish(inputs, {
-				simulatorUdid: udid,
-				via: 'lane',
-				laneId: lane.id,
-				holder,
-			})
+			finish(
+				inputs,
+				{ simulatorUdid: udid, via: 'lane', laneId: lane.id, holder },
+				lane.appDirectory
+			)
 		);
 	}
 	for (const claim of inputs.claims) {
@@ -107,24 +200,21 @@ export function resolveDeviceHolds(
 }
 
 function finish(
-	inputs: DeviceHoldInputs,
-	partial: Pick<DeviceHold, 'simulatorUdid' | 'via' | 'laneId' | 'holder'>
+	inputs: HolderLivenessInputs,
+	partial: Pick<DeviceHold, 'simulatorUdid' | 'via' | 'laneId' | 'holder'>,
+	directory?: string
 ): DeviceHold {
 	// An operator-started lane has no agent and is never abandoned by this rule;
 	// the operator stops it from the panel.
-	if (!partial.holder) {
+	const liveness = resolveHolderLiveness(partial.holder, inputs, directory);
+	if (liveness.live) {
 		return { ...stripUndefined(partial), holderLive: true };
 	}
-	const key = holderKey(partial.holder);
-	if (inputs.liveSessionKeys.has(key)) {
-		return { ...stripUndefined(partial), holderLive: true };
-	}
-	const since = inputs.missingSince.get(key) ?? inputs.now;
 	return {
 		...stripUndefined(partial),
 		holderLive: false,
-		abandonedSince: since,
-		releaseAt: since + DEVICE_HOLD_GRACE_MS,
+		abandonedSince: liveness.abandonedSince,
+		releaseAt: liveness.releaseAt,
 	};
 }
 
@@ -142,14 +232,35 @@ export type DeviceAccessDecision =
  * Whether `requester` may mutate or drive the device. The operator (no
  * requester) may touch anything; an agent may touch a free device, a device it
  * holds, or a device whose hold is abandoned and past its grace period.
+ *
+ * A synthetic holder stands for every MCP session of its kind. A session of
+ * that kind working inside the held lane (`scope`) is the one keeping the hold
+ * alive, so it may use the device too, whether it calls over MCP or the CLI.
  */
 export function decideDeviceAccess(
 	hold: DeviceHold | undefined,
 	requester: DeviceHolder | undefined,
-	now: number
+	now: number,
+	scope?: {
+		/** The held lane's app directory. */
+		directory?: string | undefined;
+		/** Where the requesting session works, when it was discovered. */
+		requesterCwd?: string | undefined;
+	}
 ): DeviceAccessDecision {
 	if (!hold || !requester) return { allowed: true };
 	if (hold.holder && holderKey(hold.holder) === holderKey(requester)) {
+		return { allowed: true };
+	}
+	if (
+		hold.holder &&
+		isSyntheticHolder(hold.holder) &&
+		!isSyntheticHolder(requester) &&
+		hold.holder.kind === requester.kind &&
+		scope?.directory !== undefined &&
+		scope.requesterCwd !== undefined &&
+		isPathInside(scope.requesterCwd, scope.directory)
+	) {
 		return { allowed: true };
 	}
 	if (
@@ -175,6 +286,93 @@ export function decideDeviceAccess(
 		allowed: false,
 		hold,
 		reason: `Simulator ${hold.simulatorUdid} is held by ${owner} through ${what}${liveness}. Pick a free device, or ask the user to release it.`,
+	};
+}
+
+/**
+ * A remaining time the way holds read it: `45 s`, `7 min`, `3 h`, `3 days`.
+ * Rounds up, so a clock never reads as done before it is.
+ */
+export function formatHoldDuration(ms: number): string {
+	const remaining = Number.isFinite(ms) ? Math.max(0, ms) : 0;
+	const seconds = Math.ceil(remaining / 1_000);
+	if (seconds < 60) return `${Math.max(1, seconds)} s`;
+	const minutes = Math.ceil(remaining / 60_000);
+	if (minutes < 60) return `${minutes} min`;
+	const hours = Math.ceil(remaining / 3_600_000);
+	if (hours < 48) return `${hours} h`;
+	const days = Math.ceil(remaining / 86_400_000);
+	return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+/**
+ * What a hold label needs: whether the holder is alive, when an abandoned
+ * hold ends, and what kind of holder it is. Device holds and Supabase stack
+ * holds both fit this shape.
+ */
+export type HoldCountdownInput = {
+	live: boolean;
+	/** When an abandoned hold ends; absent while the holder is live. */
+	releaseAt?: number | undefined;
+	/**
+	 * `operator` is the person at the desktop (a pin, a lane they started);
+	 * `worktree` is a shared MCP identity matched by where its sessions work.
+	 */
+	holder?: 'operator' | 'lane' | 'claim' | 'session' | 'worktree' | undefined;
+	/** A shared `mcp-*` identity; it reads as held by its worktree. */
+	synthetic?: boolean | undefined;
+};
+
+export type HoldCountdownOptions = {
+	/** What happens when the clock runs out: a device hold releases, a stack stops. */
+	verb?: 'releases' | 'stops';
+	/**
+	 * The holder's sessions cannot be read right now, so abandonment clocks
+	 * are frozen instead of running.
+	 */
+	clocksPaused?: boolean;
+};
+
+export type HoldCountdownLabel = {
+	text: string;
+	tone: 'success' | 'warning' | 'info' | 'default';
+	/** Time left before the hold ends, while a clock runs. */
+	remainingMs?: number;
+};
+
+/**
+ * The one countdown wording for holds: `live`, `by worktree`, `operator`,
+ * `clocks paused`, or `gone · stops in 7 min`. A Simulator hold and a
+ * Supabase stack hold read the same, only the verb differs.
+ */
+export function holdCountdownLabel(
+	hold: HoldCountdownInput,
+	now: number,
+	options: HoldCountdownOptions = {}
+): HoldCountdownLabel {
+	if (hold.holder === 'operator') return { text: 'operator', tone: 'default' };
+	if (hold.live) {
+		return hold.holder === 'worktree' || hold.synthetic === true
+			? { text: 'by worktree', tone: 'success' }
+			: { text: 'live', tone: 'success' };
+	}
+	if (options.clocksPaused === true) {
+		return { text: 'clocks paused', tone: 'info' };
+	}
+	if (hold.releaseAt === undefined) return { text: 'gone', tone: 'warning' };
+	const verb = options.verb ?? 'releases';
+	const remainingMs = Math.max(0, hold.releaseAt - now);
+	if (remainingMs === 0) {
+		return {
+			text: `gone · ${verb === 'stops' ? 'stopping' : 'releasing'} now`,
+			tone: 'warning',
+			remainingMs,
+		};
+	}
+	return {
+		text: `gone · ${verb} in ${formatHoldDuration(remainingMs)}`,
+		tone: 'warning',
+		remainingMs,
 	};
 }
 

@@ -50,4 +50,11 @@ export const IPC_CHANNELS = {
 		'rndevtools-desktop:simulator:stream:set-subscriptions',
 	simulatorStreamFrame: 'rndevtools-desktop:simulator:stream:frame',
 	simulatorStreamStatus: 'rndevtools-desktop:simulator:stream:status',
+	getSupabaseState: 'rndevtools-desktop:supabase:get-state',
+	supabaseStateChanged: 'rndevtools-desktop:supabase:state-changed',
+	runSupabaseOperation: 'rndevtools-desktop:supabase:run-operation',
+	requestSupabaseConfirmation:
+		'rndevtools-desktop:supabase:request-confirmation',
+	/** Fire and forget (`ipcRenderer.send`); main handles it with `ipcMain.on`. */
+	setSupabaseInterest: 'rndevtools-desktop:supabase:set-interest',
 } as const;

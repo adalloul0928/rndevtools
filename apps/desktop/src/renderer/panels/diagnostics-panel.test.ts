@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { brokerTone, levelTone } from './diagnostics-panel';
+import { brokerTone, levelTone, trafficHealthTone } from './diagnostics-panel';
 
 describe('levelTone', () => {
 	it('maps diagnostic levels to status tones', () => {
@@ -20,5 +20,14 @@ describe('brokerTone', () => {
 	it('uses warning for starting or unknown states', () => {
 		expect(brokerTone(undefined)).toBe('warning');
 		expect(brokerTone('starting')).toBe('warning');
+	});
+});
+
+describe('trafficHealthTone', () => {
+	it('is green only when the app uses its lane stack', () => {
+		expect(trafficHealthTone('success')).toBe('brand');
+		expect(trafficHealthTone('warning')).toBe('warning');
+		expect(trafficHealthTone('danger')).toBe('danger');
+		expect(trafficHealthTone('default')).toBe('default');
 	});
 });

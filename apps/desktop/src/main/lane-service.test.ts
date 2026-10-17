@@ -1,8 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import {
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	utimes,
+	writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Lane } from '../shared/lane-protocol';
+import type {
+	Lane,
+	LaneOperationReceipt,
+	LaneState,
+} from '../shared/lane-protocol';
 import type {
 	SimulatorAction,
 	SimulatorJob,
@@ -13,8 +24,13 @@ import type {
 	SlimmingJob,
 	SlimmingState,
 } from '../shared/slimming-protocol';
+import type {
+	LaneBackendSummary,
+	LaneWorktreeSupabase,
+} from '../shared/supabase-protocol';
 import type { MetroLaunchInput, MetroSupervisorPort } from './lane-metro';
 import {
+	type LaneBackendPort,
 	LaneService,
 	type LaneSimulatorPort,
 	type LaneSlimmingPort,
@@ -26,6 +42,11 @@ import type {
 } from './lane-worktree';
 import type { SimulatorMutationLease } from './simulator-mutation-coordinator';
 import { SimulatorMutationCoordinator } from './simulator-mutation-coordinator';
+import type {
+	LaneBackendEnsureInput,
+	LaneBackendEnsureResult,
+	LaneBackendLateAttach,
+} from './supabase/service-ports';
 
 const UDID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
 const OTHER_UDID = 'FFFFFFFF-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
@@ -275,21 +296,44 @@ class FakeMetro implements MetroSupervisorPort {
 	readonly started: MetroLaunchInput[] = [];
 	readonly stopped: Array<{ pid: number; port: number }> = [];
 	readonly busyPorts = new Set<number>();
+	/** Ports where a packager answers /status, whoever it belongs to. */
 	readonly healthyPorts = new Set<number>();
+	/**
+	 * The process listening on each port. The first live Metro started on a
+	 * port binds it, as a real one would; a test can put a stranger there.
+	 */
+	readonly listeners = new Map<number, number>();
 	readonly deadPids = new Set<number>();
 	nextPid = 1_000;
 	logs = new Map<string, string>();
 
 	isPortFree = async (port: number) => !this.busyPorts.has(port);
-	start = async (input: MetroLaunchInput) => {
+	start = async (input: MetroLaunchInput) => this.launch(input);
+	/** Records a Metro launch and binds its port unless a live process holds it. */
+	launch(input: MetroLaunchInput, pid?: number): number {
+		let id = pid;
+		if (id === undefined) {
+			this.nextPid += 1;
+			id = this.nextPid;
+		}
 		this.started.push(input);
-		this.nextPid += 1;
-		return this.nextPid;
-	};
-	isHealthy = async (port: number) => this.healthyPorts.has(port);
+		const holder = this.listeners.get(input.port);
+		if (holder === undefined || this.deadPids.has(holder)) {
+			this.listeners.set(input.port, id);
+		}
+		return id;
+	}
+	/** Without a PID this is a port-only probe: whoever answers counts. */
+	isHealthy = async (port: number, pid?: number) =>
+		this.healthyPorts.has(port) &&
+		(pid === undefined ||
+			(this.listeners.get(port) === pid && !this.deadPids.has(pid)));
 	isProcessRunning = (pid: number) => !this.deadPids.has(pid);
+	/** A stopped Metro exits and lets go of its port, as a real one does. */
 	stop = async (pid: number, port: number) => {
 		this.stopped.push({ pid, port });
+		this.deadPids.add(pid);
+		if (this.listeners.get(port) === pid) this.listeners.delete(port);
 	};
 	readLogTail = async (logPath: string) => this.logs.get(logPath) ?? '';
 }
@@ -323,6 +367,95 @@ class FakeWorktrees implements WorktreeInspectorPort {
 	};
 	listWorktrees = async () => this.worktrees;
 	readExpoIdentity = async () => this.identity;
+}
+
+const STACK_ID =
+	'64616c83912c48442ec266f86ee2d7f004d2be5c8b7f31a6d6b4c2634f82145f';
+const JOB_ID = 'supabase-job-11111111-2222-4333-8444-555555555555';
+const API_URL = 'http://127.0.0.1:21734';
+const MOVED_API_URL = 'http://127.0.0.1:24410';
+const PUBLISHABLE_KEY = 'sb_publishable_lane_example';
+const URL_NAME = 'EXPO_PUBLIC_SUPABASE_URL';
+const KEY_NAME = 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY';
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+	let resolve: (value: T) => void = () => undefined;
+	const promise = new Promise<T>((settle) => {
+		resolve = settle;
+	});
+	return { promise, resolve };
+}
+
+/** What the backend port maps for a lane's Metro: public values only. */
+function backendEnv(apiUrl = API_URL): Record<string, string> {
+	return { [URL_NAME]: apiUrl, [KEY_NAME]: PUBLISHABLE_KEY };
+}
+
+function readySummary(apiUrl = API_URL): LaneBackendSummary {
+	return {
+		policy: 'auto',
+		status: 'ready',
+		stackId: STACK_ID,
+		apiUrl,
+		appEnvNames: [URL_NAME, KEY_NAME],
+		warnings: ['shared-default-keys'],
+	};
+}
+
+function ready(apiUrl = API_URL): LaneBackendEnsureResult {
+	return { summary: readySummary(apiUrl), laneEnv: backendEnv(apiUrl) };
+}
+
+/** A cold backend: not ready within the wait, attaching late. */
+function starting(
+	lateAttach: Promise<LaneBackendLateAttach>
+): LaneBackendEnsureResult {
+	return {
+		summary: {
+			policy: 'auto',
+			status: 'starting',
+			stackId: STACK_ID,
+			jobId: JOB_ID,
+			appEnvNames: [],
+			warnings: [],
+		},
+		lateAttach,
+	};
+}
+
+/**
+ * Stand-in for the Supabase service. Each ensure takes the next queued
+ * answer (a value or a promise the test settles) and is ready once they run
+ * out; every call and every detach is recorded.
+ */
+class FakeBackends implements LaneBackendPort {
+	readonly ensured: LaneBackendEnsureInput[] = [];
+	readonly detached: string[] = [];
+	readonly answers: Array<
+		LaneBackendEnsureResult | Promise<LaneBackendEnsureResult>
+	> = [];
+	policy: 'auto' | 'off' = 'auto';
+	detachError: Error | undefined;
+	onEnsure: ((input: LaneBackendEnsureInput) => void) | undefined;
+	readonly described = new Map<string, LaneWorktreeSupabase>();
+	describeError: Error | undefined;
+
+	ensureForLane = async (
+		input: LaneBackendEnsureInput
+	): Promise<LaneBackendEnsureResult> => {
+		this.ensured.push(input);
+		this.onEnsure?.(input);
+		return this.answers.shift() ?? ready();
+	};
+	detachLane = (laneId: string) => {
+		this.detached.push(laneId);
+		if (this.detachError) throw this.detachError;
+	};
+	defaultPolicy = () => this.policy;
+	describeWorktree = (worktreePath: string) => {
+		if (this.describeError) throw this.describeError;
+		return this.described.get(worktreePath);
+	};
 }
 
 describe('LaneService', () => {
@@ -360,9 +493,8 @@ describe('LaneService', () => {
 
 	function healthyMetro() {
 		metro.start = async (input) => {
-			metro.started.push(input);
 			metro.healthyPorts.add(input.port);
-			return 4_242;
+			return metro.launch(input, 4_242);
 		};
 	}
 
@@ -389,11 +521,7 @@ describe('LaneService', () => {
 
 	it('boots the simulator, leases a port, starts Metro, and deep-links the dev client', async () => {
 		// Metro becomes healthy as soon as it is started.
-		metro.start = async (input) => {
-			metro.started.push(input);
-			metro.healthyPorts.add(input.port);
-			return 4_242;
-		};
+		healthyMetro();
 		const receipt = await service.runOperation({
 			actionId: 'op-1',
 			kind: 'lane.start',
@@ -643,9 +771,8 @@ describe('LaneService', () => {
 
 	it('reports a Metro that exited before becoming ready and keeps the lease for inspection', async () => {
 		metro.start = async (input) => {
-			metro.started.push(input);
 			metro.deadPids.add(7);
-			return 7;
+			return metro.launch(input, 7);
 		};
 		const receipt = await service.runOperation({
 			actionId: 'op-1',
@@ -664,10 +791,7 @@ describe('LaneService', () => {
 	});
 
 	it('times out a Metro that never answers /status', async () => {
-		metro.start = async (input) => {
-			metro.started.push(input);
-			return 9;
-		};
+		metro.start = async (input) => metro.launch(input, 9);
 		const started = service.runOperation({
 			actionId: 'op-1',
 			kind: 'lane.start',
@@ -687,7 +811,7 @@ describe('LaneService', () => {
 		expect(service.getState().lanes[0]?.metro).toBe('starting');
 	});
 
-	it('launches deep links through the lane scheme and refreshes agent attribution', async () => {
+	it("launches deep links through the lane scheme and refreshes the holder's attribution", async () => {
 		metro.healthyPorts.add(8_100);
 		const started = await service.runOperation({
 			actionId: 'op-1',
@@ -696,6 +820,7 @@ describe('LaneService', () => {
 			simulatorUdid: UDID,
 			environment: 'development',
 			launch: false,
+			agent: { kind: 'codex', sessionId: 'thread-9' },
 		});
 		now += 1_000;
 		const launched = await service.runOperation({
@@ -716,6 +841,82 @@ describe('LaneService', () => {
 			{ kind: 'url.open' }
 		>;
 		expect(open.url).toBe('exampleapp://checkout/cart');
+	});
+
+	it('never hands a lane to another session that launches or resumes it', async () => {
+		metro.healthyPorts.add(8_100);
+		const startedAt = now;
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+			agent: { kind: 'claude', sessionId: 'session-1' },
+		});
+		const laneId = started.lane?.id as string;
+		const holder = {
+			kind: 'claude',
+			sessionId: 'session-1',
+			lastSeenAt: startedAt,
+		};
+
+		// The launch goes through, and the holder stays the holder.
+		now += 1_000;
+		const launched = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.launch',
+			laneId,
+			agent: { kind: 'codex', sessionId: 'thread-9' },
+		});
+		expect(launched.completed).toBe(true);
+		expect(launched.lane).toMatchObject({ lastLaunchedAt: now });
+		expect(launched.lane?.agent).toEqual(holder);
+
+		// A lane up for the same app resumes the lane without taking it.
+		now += 1_000;
+		const resumed = await service.runOperation({
+			actionId: 'op-3',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			environment: 'development',
+			launch: true,
+			agent: { kind: 'codex', sessionId: 'thread-9' },
+		});
+		expect(resumed.lane?.id).toBe(laneId);
+		expect(resumed.lane?.agent).toEqual(holder);
+		expect(service.getState().lanes[0]?.agent).toEqual(holder);
+
+		// The holder's own launch is what refreshes when it was last seen.
+		now += 1_000;
+		const own = await service.runOperation({
+			actionId: 'op-4',
+			kind: 'lane.launch',
+			laneId,
+			agent: { kind: 'claude', sessionId: 'session-1' },
+		});
+		expect(own.lane?.agent).toEqual({ ...holder, lastSeenAt: now });
+	});
+
+	it("keeps an operator's lane with the operator when an agent launches it", async () => {
+		metro.healthyPorts.add(8_100);
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		const launched = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.launch',
+			laneId: started.lane?.id as string,
+			agent: { kind: 'codex', sessionId: 'thread-9' },
+		});
+		expect(launched.completed).toBe(true);
+		expect(launched.lane).not.toHaveProperty('agent');
 	});
 
 	it('stops only the Metro the lane owns and releases the lease', async () => {
@@ -745,7 +946,47 @@ describe('LaneService', () => {
 		expect(again.error).toMatch(/does not exist/);
 	});
 
-	it('returns the Metro log tail for a lane', async () => {
+	it('returns the Metro log tail for a lane, redacted', async () => {
+		metro.healthyPorts.add(8_100);
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		const lane = started.lane as Lane;
+		// App console output lands in the Metro log verbatim.
+		metro.logs.set(
+			lane.logPath,
+			[
+				'Starting Metro Bundler',
+				'Waiting on http://localhost:8100',
+				' LOG  login {"password":"hunter2-example"}',
+				' LOG  Authorization: Bearer abcdefghijklmnop0123',
+				' LOG  session eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl',
+			].join('\n')
+		);
+		const log = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.log',
+			laneId: lane.id,
+			maxCharacters: 1_024,
+		});
+		expect(log.completed).toBe(true);
+		expect(log.log).toContain('Waiting on http://localhost:8100');
+		expect(log.log).toContain('[REDACTED');
+		for (const secret of [
+			'hunter2-example',
+			'abcdefghijklmnop0123',
+			'eyJzdWIiOiIxIn0',
+		]) {
+			expect(log.log).not.toContain(secret);
+		}
+	});
+
+	it('returns a log tail with no Supabase secret key or database password in it', async () => {
 		metro.healthyPorts.add(8_100);
 		const started = await service.runOperation({
 			actionId: 'op-1',
@@ -758,7 +999,13 @@ describe('LaneService', () => {
 		const lane = started.lane as Lane;
 		metro.logs.set(
 			lane.logPath,
-			'Starting Metro Bundler\nWaiting on http://localhost:8100'
+			[
+				'SECRET_KEY=sb_secret_example0000',
+				' LOG  env {"SECRET_KEY":"sb_secret_example0000"}',
+				' LOG  key sb_secret_example1111',
+				'DB_URL=postgresql://postgres:db-example-pw@127.0.0.1:54322/postgres',
+				' LOG  connecting to postgresql://postgres:hunter2-example@127.0.0.1:54322/postgres',
+			].join('\n')
 		);
 		const log = await service.runOperation({
 			actionId: 'op-2',
@@ -766,7 +1013,35 @@ describe('LaneService', () => {
 			laneId: lane.id,
 			maxCharacters: 1_024,
 		});
-		expect(log.log).toContain('Waiting on http://localhost:8100');
+		expect(log.completed).toBe(true);
+		for (const secret of ['sb_secret_', 'db-example-pw', 'hunter2-example']) {
+			expect(log.log).not.toContain(secret);
+		}
+		expect(log.log).toContain('127.0.0.1:54322/postgres');
+	});
+
+	it('keeps a redacted log tail within the requested size', async () => {
+		metro.healthyPorts.add(8_100);
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		const lane = started.lane as Lane;
+		// Each 'token=x' grows to 'token=[REDACTED]' when it is redacted.
+		metro.logs.set(lane.logPath, 'token=x\n'.repeat(32));
+		const log = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.log',
+			laneId: lane.id,
+			maxCharacters: 256,
+		});
+		expect(log.completed).toBe(true);
+		expect(log.log?.length).toBeLessThanOrEqual(256);
+		expect(log.log).not.toMatch(/token=x/);
 	});
 
 	it('reconciles leases on restart: dead Metros become stopped, the owner stays recorded', async () => {
@@ -895,6 +1170,1034 @@ describe('LaneService', () => {
 		const state = await service.refresh();
 		expect(state.error).toMatch(/not a git repository/);
 		expect(state.repositories).toEqual([REPO]);
+	});
+
+	describe('concurrent lane ups', () => {
+		beforeEach(async () => {
+			// A first-time repository costs one start a real file write, which
+			// would let the other start finish first; registered up front, both
+			// starts interleave await for await.
+			await store.addRepository(REPO);
+		});
+
+		function up(worktreePath: string, extra: Record<string, unknown> = {}) {
+			return service.runOperation({
+				actionId: `op-race-${Math.random().toString(16).slice(2)}`,
+				kind: 'lane.start',
+				worktreePath,
+				environment: 'development',
+				launch: false,
+				...extra,
+			});
+		}
+
+		function lanesOf(receipts: LaneOperationReceipt[]): Lane[] {
+			return receipts.flatMap((receipt) =>
+				receipt.lane ? [receipt.lane] : []
+			);
+		}
+
+		it('never share a Simulator or a port', async () => {
+			const receipts = await Promise.all([up(WORKTREE), up(OTHER_WORKTREE)]);
+			expect(receipts.map((receipt) => receipt.completed)).toEqual([
+				true,
+				true,
+			]);
+			const lanes = lanesOf(receipts);
+			expect(lanes).toHaveLength(2);
+			expect(new Set(lanes.map((lane) => lane.simulatorUdid)).size).toBe(2);
+			expect(new Set(lanes.map((lane) => lane.port)).size).toBe(2);
+			expect(service.getState().lanes).toHaveLength(2);
+		});
+
+		it('give the one free booted Simulator to one lane and park the other start', async () => {
+			simulator.state = simulatorState([{ udid: OTHER_UDID, state: 'booted' }]);
+			const receipts = await Promise.all([up(WORKTREE), up(OTHER_WORKTREE)]);
+			const lanes = lanesOf(receipts);
+			expect(lanes).toHaveLength(1);
+			expect(lanes[0]?.simulatorUdid).toBe(OTHER_UDID);
+			const requests = receipts.flatMap((receipt) =>
+				receipt.deviceRequest ? [receipt.deviceRequest] : []
+			);
+			expect(requests).toHaveLength(1);
+			expect(requests[0]?.message).toMatch(/1 by lanes/);
+			expect(metro.started).toHaveLength(1);
+		});
+
+		it('refuse a named Simulator another start is already taking', async () => {
+			const receipts = await Promise.all([
+				up(WORKTREE, { simulatorUdid: UDID }),
+				up(OTHER_WORKTREE, { simulatorUdid: UDID }),
+			]);
+			expect(lanesOf(receipts)).toHaveLength(1);
+			const refused = receipts.find((receipt) => !receipt.completed);
+			expect(refused?.error).toMatch(/already assigned to a lane starting/);
+			expect(metro.started).toHaveLength(1);
+		});
+
+		it('run one at a time for the same app, so the second resumes the first', async () => {
+			const [first, second] = await Promise.all([up(WORKTREE), up(WORKTREE)]);
+			expect(first?.lane?.id).toBeDefined();
+			expect(second?.lane?.id).toBe(first?.lane?.id);
+			expect(metro.started).toHaveLength(1);
+			expect(service.getState().lanes).toHaveLength(1);
+		});
+
+		it("keep a resuming lane's port from a fresh start", async () => {
+			const first = await up(WORKTREE, { simulatorUdid: UDID });
+			const stale = first.lane as Lane;
+			metro.deadPids.add(stale.metroPid as number);
+			await service.runOperation({ actionId: 'op-r', kind: 'lane.refresh' });
+			expect(service.getState().lanes[0]?.metro).toBe('stopped');
+
+			// The stopped lane's port looks free. Hold the resume while it
+			// respawns Metro there, and run a fresh start to completion meanwhile.
+			let release: () => void = () => undefined;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const launch = metro.start;
+			metro.start = async (input) => {
+				if (input.worktreePath === WORKTREE) await gate;
+				return launch(input);
+			};
+			const resume = up(WORKTREE, { simulatorUdid: UDID });
+			const fresh = await up(OTHER_WORKTREE, { simulatorUdid: OTHER_UDID });
+			release();
+			const receipts = [await resume, fresh];
+			expect(receipts.map((receipt) => receipt.completed)).toEqual([
+				true,
+				true,
+			]);
+			expect(receipts[0]?.lane).toMatchObject({ id: stale.id, port: 8_100 });
+			const ports = service
+				.getState()
+				.lanes.filter((lane) => lane.metro !== 'stopped')
+				.map((lane) => lane.port);
+			expect(ports).toHaveLength(2);
+			expect(new Set(ports).size).toBe(2);
+		});
+
+		it('refuse to resume a lane on a port that went to another lane', async () => {
+			const first = await up(WORKTREE, { simulatorUdid: UDID });
+			const stale = first.lane as Lane;
+			metro.deadPids.add(stale.metroPid as number);
+			await service.runOperation({ actionId: 'op-r', kind: 'lane.refresh' });
+			const second = await up(OTHER_WORKTREE, { simulatorUdid: OTHER_UDID });
+			expect(second.lane?.port).toBe(stale.port);
+
+			const resumed = await up(WORKTREE, { simulatorUdid: UDID });
+			expect(resumed.completed).toBe(false);
+			expect(resumed.error).toMatch(
+				new RegExp(`Port ${stale.port} now belongs to lane ${second.lane?.id}`)
+			);
+			expect(metro.started).toHaveLength(2);
+		});
+
+		it('keep a Simulator the user chose for a parked start from an agent picking it', async () => {
+			// Park a start for the third worktree, then free one device.
+			await up(WORKTREE, { simulatorUdid: UDID });
+			const other = await up(OTHER_WORKTREE, { simulatorUdid: OTHER_UDID });
+			const parked = await up(THIRD_WORKTREE);
+			await service.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId: other.lane?.id as string,
+			});
+
+			const [provided, agentUp] = await Promise.all([
+				service.runOperation({
+					actionId: 'op-use',
+					kind: 'lane.provide-device',
+					requestId: parked.deviceRequest?.id as string,
+					decision: 'use',
+					simulatorUdid: OTHER_UDID,
+				}),
+				up(REPO),
+			]);
+			expect(provided.lane).toMatchObject({
+				simulatorUdid: OTHER_UDID,
+				worktreePath: THIRD_WORKTREE,
+			});
+			expect(agentUp.lane).toBeUndefined();
+			expect(agentUp.deviceRequest?.status).toBe('pending');
+		});
+	});
+
+	describe('Metro health', () => {
+		it("does not launch against another packager answering on the lane's port", async () => {
+			// Something grabbed 8100 after the bind probe passed and answers /status.
+			metro.healthyPorts.add(8_100);
+			metro.listeners.set(8_100, 31_337);
+			const started = service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: true,
+			});
+			const advance = setInterval(() => {
+				now += 5_000;
+			}, 5);
+			const receipt = await started;
+			clearInterval(advance);
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toMatch(/did not become ready/);
+			expect(simulator.actions.map((action) => action.kind)).not.toContain(
+				'url.open'
+			);
+			expect(service.getState().lanes[0]?.metro).toBe('starting');
+		});
+
+		it("restarts a dead lane's Metro instead of trusting another packager on its port", async () => {
+			metro.healthyPorts.add(8_100);
+			const first = await service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			metro.deadPids.add(first.lane?.metroPid as number);
+			metro.listeners.set(8_100, 31_337);
+			const again = await service.runOperation({
+				actionId: 'op-2',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(again.lane?.id).toBe(first.lane?.id);
+			expect(metro.started).toHaveLength(2);
+			expect(again.lane?.metroPid).not.toBe(first.lane?.metroPid);
+		});
+
+		it("reports ready on reconcile only for the lane's own Metro", async () => {
+			metro.healthyPorts.add(8_100);
+			metro.listeners.set(8_100, 31_337);
+			await service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			await service.runOperation({ actionId: 'op-r', kind: 'lane.refresh' });
+			expect(service.getState().lanes[0]?.metro).toBe('starting');
+			metro.listeners.delete(8_100);
+			metro.listeners.set(8_100, service.getState().lanes[0]?.metroPid ?? 0);
+			await service.runOperation({ actionId: 'op-r2', kind: 'lane.refresh' });
+			expect(service.getState().lanes[0]?.metro).toBe('ready');
+		});
+
+		it('does not bring back a lane stopped while reconcile was probing it', async () => {
+			metro.healthyPorts.add(8_100);
+			const started = await service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			let release: () => void = () => undefined;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const probe = metro.isHealthy;
+			metro.isHealthy = async (port, pid) => {
+				await gate;
+				return probe(port, pid);
+			};
+			const refreshed = service.runOperation({
+				actionId: 'op-r',
+				kind: 'lane.refresh',
+			});
+			const stopped = await service.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId: started.lane?.id as string,
+			});
+			expect(stopped.completed).toBe(true);
+			release();
+			await refreshed;
+			expect(service.getState().lanes).toEqual([]);
+		});
+	});
+
+	describe('lane environment for Metro', () => {
+		const laneEnv = {
+			EXPO_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
+			EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_lane_only',
+		};
+
+		it('hands Metro what the port resolves, on start and on resume, and never stores or echoes it', async () => {
+			metro.healthyPorts.add(8_100);
+			const asked: unknown[] = [];
+			const withEnv = new LaneService({
+				store: new LaneStore(root),
+				simulator,
+				metro,
+				worktrees,
+				now: () => now,
+				resolveLaneEnv: async (lane) => {
+					asked.push(lane);
+					return laneEnv;
+				},
+			});
+			await withEnv.start();
+			const start = {
+				kind: 'lane.start' as const,
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			};
+			const started = await withEnv.runOperation({
+				...start,
+				actionId: 'op-env-1',
+			});
+			expect(started.completed).toBe(true);
+			expect(metro.started[0]?.laneEnv).toEqual(laneEnv);
+			expect(asked).toEqual([
+				{
+					id: started.lane?.id,
+					worktreePath: WORKTREE,
+					branch: 'feature/a',
+					simulatorUdid: UDID,
+					environment: 'development',
+					port: 8_100,
+				},
+			]);
+
+			// A resume that respawns Metro asks again.
+			metro.deadPids.add(started.lane?.metroPid as number);
+			const resumed = await withEnv.runOperation({
+				...start,
+				actionId: 'op-env-2',
+			});
+			expect(resumed.lane?.id).toBe(started.lane?.id);
+			expect(metro.started[1]?.laneEnv).toEqual(laneEnv);
+			expect(asked).toHaveLength(2);
+
+			// A launch input only: not in lanes.json, the state, or a receipt.
+			for (const text of [
+				await readFile(path.join(root, 'lanes.json'), 'utf8'),
+				JSON.stringify(withEnv.getState()),
+				JSON.stringify(started),
+				JSON.stringify(resumed),
+			]) {
+				expect(text).not.toContain('sb_publishable_lane_only');
+				expect(text).not.toContain('http://127.0.0.1:54321');
+			}
+			await withEnv.stop();
+		});
+
+		it('passes no lane env when no port supplies one', async () => {
+			metro.healthyPorts.add(8_100);
+			await service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(metro.started[0]).not.toHaveProperty('laneEnv');
+		});
+	});
+
+	describe('local backends', () => {
+		let backends: FakeBackends;
+		let lanes: LaneService;
+
+		beforeEach(async () => {
+			backends = new FakeBackends();
+			// Every spawn gets its own PID and answers at once, so a restart
+			// is visible as a new Metro on the same port.
+			metro.start = async (input) => {
+				metro.healthyPorts.add(input.port);
+				return metro.launch(input);
+			};
+			lanes = new LaneService({
+				store: new LaneStore(root),
+				simulator,
+				metro,
+				worktrees,
+				now: () => now,
+				backends,
+			});
+			await lanes.start();
+		});
+
+		afterEach(async () => {
+			await lanes.stop();
+		});
+
+		function up(extra: Record<string, unknown> = {}) {
+			return lanes.runOperation({
+				actionId: `op-backend-${Math.random().toString(16).slice(2)}`,
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: true,
+				agent: { kind: 'claude', sessionId: 'session-1' },
+				...extra,
+			});
+		}
+
+		function kinds(): string[] {
+			return simulator.actions.map((action) => action.kind);
+		}
+
+		it("puts each worktree's Supabase project on the lane wire", async () => {
+			metro.healthyPorts.add(8_100);
+			expect((await up()).completed).toBe(true);
+			const worktreeOf = (state: LaneState) =>
+				state.worktrees.find((worktree) => worktree.path === WORKTREE);
+			expect(worktreeOf(lanes.getState())?.supabase).toBeUndefined();
+			const published: LaneState[] = [];
+			lanes.subscribe((state) => published.push(state));
+			backends.described.set(WORKTREE, {
+				project: 'managed',
+				portsPinned: true,
+			});
+			lanes.backendsChanged();
+			expect(published).toHaveLength(1);
+			expect(worktreeOf(published[0] as LaneState)?.supabase).toEqual({
+				project: 'managed',
+				portsPinned: true,
+			});
+			// Nothing the start form shows moved: nothing is published.
+			lanes.backendsChanged();
+			expect(published).toHaveLength(1);
+			// A malformed or failing answer reads as unknown.
+			backends.described.set(WORKTREE, {
+				project: 'elsewhere',
+			} as unknown as LaneWorktreeSupabase);
+			lanes.backendsChanged();
+			expect(published).toHaveLength(2);
+			expect(worktreeOf(published[1] as LaneState)?.supabase).toBeUndefined();
+			backends.describeError = new Error('the backend went away');
+			expect(worktreeOf(lanes.getState())?.supabase).toBeUndefined();
+		});
+
+		/** Waits for work a lane does on its own, such as a late attach. */
+		function eventually(assertion: () => void) {
+			return vi.waitFor(assertion, { timeout: 3_000 });
+		}
+
+		/** Runs the injected clock fast until `done` holds. */
+		async function advanceClockUntil(done: () => boolean) {
+			const advance = setInterval(() => {
+				now += 5_000;
+			}, 5);
+			try {
+				await vi.waitFor(() => expect(done()).toBe(true), { timeout: 4_000 });
+			} finally {
+				clearInterval(advance);
+			}
+		}
+
+		it('ensures the backend while the Simulator boots, then hands Metro exactly the mapped public names', async () => {
+			const answer = deferred<LaneBackendEnsureResult>();
+			backends.answers.push(answer.promise);
+			const bootRequestedAtEnsure: boolean[] = [];
+			backends.onEnsure = () => {
+				bootRequestedAtEnsure.push(kinds().includes('device.boot'));
+			};
+			const started = up();
+			// The boot goes ahead while the backend is still coming up, and
+			// Metro waits for it.
+			await vi.waitFor(() => expect(kinds()).toContain('device.boot'));
+			expect(bootRequestedAtEnsure).toEqual([false]);
+			expect(metro.started).toEqual([]);
+
+			answer.resolve(ready());
+			const receipt = await started;
+			expect(receipt.completed).toBe(true);
+			expect(backends.ensured).toEqual([
+				{
+					laneId: receipt.lane?.id,
+					worktreePath: WORKTREE,
+					branch: 'feature/a',
+					environmentId: 'development',
+					policy: 'auto',
+					agent: { kind: 'claude', sessionId: 'session-1' },
+					waitMs: 15_000,
+				},
+			]);
+			expect(metro.started).toHaveLength(1);
+			expect(metro.started[0]?.laneEnv).toEqual({
+				EXPO_PUBLIC_SUPABASE_URL: API_URL,
+				EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY,
+			});
+			expect(receipt.backend).toEqual(readySummary());
+			expect(receipt.lane?.backend).toEqual(readySummary());
+			expect(lanes.getState().lanes[0]?.backend).toEqual(readySummary());
+			expect(kinds()).toEqual(['device.boot', 'app.list', 'url.open']);
+		});
+
+		it('waits at most 15 s past the Metro spawn point, then defers the launch until a late attach restarts Metro with the backend', async () => {
+			const answer = deferred<LaneBackendEnsureResult>();
+			backends.answers.push(answer.promise);
+			const started = up();
+			await advanceClockUntil(() => metro.started.length === 1);
+			const receipt = await started;
+			expect(receipt.completed).toBe(true);
+			const first = receipt.lane as Lane;
+			expect(metro.started[0]).not.toHaveProperty('laneEnv');
+			expect(receipt.backend).toEqual({
+				policy: 'auto',
+				status: 'starting',
+				appEnvNames: [],
+				warnings: [],
+				launch: 'deferred',
+			});
+			expect(kinds()).toEqual(['device.boot']);
+
+			answer.resolve(ready());
+			await eventually(() =>
+				expect(lanes.getState().lanes[0]?.lastLaunchedAt).toBeDefined()
+			);
+			expect(metro.stopped).toEqual([
+				{ pid: first.metroPid, port: first.port },
+			]);
+			expect(metro.started).toHaveLength(2);
+			expect(metro.started[1]).toMatchObject({
+				port: first.port,
+				laneEnv: backendEnv(),
+			});
+			const lane = lanes.getState().lanes[0];
+			expect(lane).toMatchObject({ id: first.id, port: first.port });
+			expect(lane?.metroPid).not.toBe(first.metroPid);
+			expect(lane?.backend).toEqual({ ...readySummary(), metro: 'restarted' });
+			expect(kinds()).toEqual(['device.boot', 'app.list', 'url.open']);
+		});
+
+		it('launches an auto lane without its backend when the late attach fails, and says why', async () => {
+			const late = deferred<LaneBackendLateAttach>();
+			backends.answers.push(starting(late.promise));
+			const receipt = await up();
+			expect(receipt.completed).toBe(true);
+			expect(receipt.backend).toMatchObject({
+				status: 'starting',
+				jobId: JOB_ID,
+				launch: 'deferred',
+			});
+			expect(metro.started[0]).not.toHaveProperty('laneEnv');
+			expect(kinds()).not.toContain('url.open');
+
+			late.resolve({
+				summary: {
+					policy: 'auto',
+					status: 'skipped',
+					reason: 'capacity',
+					reasonText: 'Twelve stacks already run on this Mac.',
+					appEnvNames: [],
+					warnings: [],
+				},
+			});
+			await eventually(() =>
+				expect(lanes.getState().lanes[0]?.lastLaunchedAt).toBeDefined()
+			);
+			expect(metro.started).toHaveLength(1);
+			expect(metro.stopped).toEqual([]);
+			expect(lanes.getState().lanes[0]?.backend).toEqual({
+				policy: 'auto',
+				status: 'skipped',
+				reason: 'capacity',
+				reasonText: 'Twelve stacks already run on this Mac.',
+				appEnvNames: [],
+				warnings: [],
+			});
+		});
+
+		it('fails a required lane before Metro spawns when its backend cannot serve it, and lets the backend go', async () => {
+			backends.answers.push({
+				summary: {
+					policy: 'required',
+					status: 'blocked',
+					reason: 'ports-pinned',
+					reasonText: 'Port keys are pinned in supabase/config.toml.',
+					appEnvNames: [],
+					warnings: [],
+				},
+			});
+			const receipt = await up({ backend: 'required' });
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toBe(
+				'This lane requires its local backend, which is blocked (ports-pinned). Port keys are pinned in supabase/config.toml.'
+			);
+			expect(receipt.backend).toMatchObject({
+				policy: 'required',
+				status: 'blocked',
+				reason: 'ports-pinned',
+			});
+			expect(backends.ensured[0]?.policy).toBe('required');
+			expect(metro.started).toEqual([]);
+			expect(lanes.getState().lanes).toEqual([]);
+			expect(backends.detached).toContain(backends.ensured[0]?.laneId);
+		});
+
+		it("stops a required lane's Metro when its late attach fails", async () => {
+			const late = deferred<LaneBackendLateAttach>();
+			backends.answers.push(starting(late.promise));
+			const receipt = await up({ backend: 'required' });
+			expect(receipt.completed).toBe(true);
+			expect(receipt.backend).toMatchObject({
+				policy: 'required',
+				status: 'starting',
+				launch: 'deferred',
+			});
+
+			late.resolve({
+				summary: {
+					policy: 'required',
+					status: 'failed',
+					reason: 'failed',
+					reasonText: 'The database did not become healthy.',
+					appEnvNames: [],
+					warnings: [],
+				},
+			});
+			await eventually(() =>
+				expect(lanes.getState().lanes[0]?.metro).toBe('stopped')
+			);
+			expect(metro.stopped).toEqual([
+				{ pid: receipt.lane?.metroPid, port: receipt.lane?.port },
+			]);
+			expect(kinds()).not.toContain('url.open');
+			expect(lanes.getState().lanes[0]?.backend).toEqual({
+				policy: 'required',
+				status: 'failed',
+				reason: 'failed',
+				reasonText:
+					'The lane requires its local backend, so its Metro was stopped. The database did not become healthy.',
+				appEnvNames: [],
+				warnings: [],
+			});
+		});
+
+		it('makes no backend call when the policy is off, by default or by choice', async () => {
+			backends.policy = 'off';
+			const byDefault = await up();
+			expect(byDefault.completed).toBe(true);
+			expect(byDefault).not.toHaveProperty('backend');
+			expect(byDefault.lane).not.toHaveProperty('backend');
+
+			backends.policy = 'auto';
+			const byChoice = await up({
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				backend: 'off',
+			});
+			expect(byChoice.completed).toBe(true);
+			expect(backends.ensured).toEqual([]);
+			expect(metro.started.map((input) => input.laneEnv)).toEqual([
+				undefined,
+				undefined,
+			]);
+			for (const lane of lanes.getState().lanes) {
+				expect(lane).not.toHaveProperty('backend');
+			}
+		});
+
+		it('re-ensures on every lane up and restarts a running Metro only when the backend URL changed', async () => {
+			const first = await up();
+			const same = await up();
+			expect(same.lane?.id).toBe(first.lane?.id);
+			expect(backends.ensured).toHaveLength(2);
+			expect(metro.started).toHaveLength(1);
+			expect(metro.stopped).toEqual([]);
+			expect(same.backend).toEqual({ ...readySummary(), metro: 'unchanged' });
+
+			// The stack's ports moved: Metro restarts on its own port with them.
+			backends.answers.push(ready(MOVED_API_URL));
+			const moved = await up();
+			expect(moved.lane?.id).toBe(first.lane?.id);
+			expect(metro.stopped).toEqual([
+				{ pid: first.lane?.metroPid, port: first.lane?.port },
+			]);
+			expect(metro.started).toHaveLength(2);
+			expect(metro.started[1]).toMatchObject({
+				port: first.lane?.port,
+				laneEnv: backendEnv(MOVED_API_URL),
+			});
+			expect(moved.lane?.metroPid).not.toBe(first.lane?.metroPid);
+			expect(moved.backend).toEqual({
+				...readySummary(MOVED_API_URL),
+				metro: 'restarted',
+			});
+		});
+
+		it('asks for the backend of the branch the worktree is on now', async () => {
+			const first = await up();
+			worktrees.worktrees = worktrees.worktrees.map((worktree) =>
+				worktree.path === WORKTREE
+					? { ...worktree, branch: 'feature/a-next' }
+					: worktree
+			);
+			const again = await up();
+			expect(again.lane?.id).toBe(first.lane?.id);
+			expect(backends.ensured.map((input) => input.branch)).toEqual([
+				'feature/a',
+				'feature/a-next',
+			]);
+		});
+
+		it('respawns a dead Metro with whatever the backend serves now', async () => {
+			const first = await up();
+			metro.deadPids.add(first.lane?.metroPid as number);
+			backends.answers.push(ready(MOVED_API_URL));
+			const resumed = await up();
+			expect(resumed.lane?.id).toBe(first.lane?.id);
+			expect(metro.stopped).toEqual([]);
+			expect(metro.started).toHaveLength(2);
+			expect(metro.started[1]?.laneEnv).toEqual(backendEnv(MOVED_API_URL));
+			expect(resumed.backend).toMatchObject({ apiUrl: MOVED_API_URL });
+		});
+
+		it('lets the backend go on lane stop without waiting, and a failing port never keeps the lane', async () => {
+			const started = await up();
+			backends.detachError = new Error('The backend service is gone.');
+			const stopped = await lanes.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId: started.lane?.id as string,
+			});
+			expect(stopped.completed).toBe(true);
+			expect(backends.detached).toEqual([started.lane?.id]);
+			expect(lanes.getState().lanes).toEqual([]);
+		});
+
+		it('drops a late attach for a lane that stopped meanwhile', async () => {
+			const late = deferred<LaneBackendLateAttach>();
+			backends.answers.push(starting(late.promise));
+			const started = await up();
+			await lanes.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId: started.lane?.id as string,
+			});
+			late.resolve(ready());
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(metro.started).toHaveLength(1);
+			expect(kinds()).not.toContain('url.open');
+		});
+
+		it('never writes the backend to lanes.json, and never puts a key in the state or a receipt', async () => {
+			const late = deferred<LaneBackendLateAttach>();
+			backends.answers.push(starting(late.promise));
+			const started = await up();
+			late.resolve(ready());
+			await eventually(() =>
+				expect(lanes.getState().lanes[0]?.lastLaunchedAt).toBeDefined()
+			);
+			const resumed = await up();
+			const stored = await readFile(path.join(root, 'lanes.json'), 'utf8');
+			for (const text of [
+				'backend',
+				STACK_ID,
+				JOB_ID,
+				'21734',
+				URL_NAME,
+				PUBLISHABLE_KEY,
+			]) {
+				expect(stored).not.toContain(text);
+			}
+			for (const text of [
+				JSON.stringify(lanes.getState()),
+				JSON.stringify(started),
+				JSON.stringify(resumed),
+			]) {
+				expect(text).not.toContain(PUBLISHABLE_KEY);
+			}
+			// The public API URL is what the wire reports.
+			expect(JSON.stringify(lanes.getState())).toContain(API_URL);
+		});
+
+		it("keeps a parked start's backend policy and starts with it once the user provides a Simulator", async () => {
+			await up({ backend: 'off' });
+			const other = await up({
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				backend: 'off',
+			});
+			const parked = await lanes.runOperation({
+				actionId: 'op-park',
+				kind: 'lane.start',
+				worktreePath: THIRD_WORKTREE,
+				environment: 'development',
+				launch: false,
+				backend: 'required',
+			});
+			expect(parked.deviceRequest).toMatchObject({
+				status: 'pending',
+				backend: 'required',
+			});
+			expect(lanes.getState().deviceRequests[0]?.backend).toBe('required');
+			await lanes.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId: other.lane?.id as string,
+			});
+
+			const provided = await lanes.runOperation({
+				actionId: 'op-use',
+				kind: 'lane.provide-device',
+				requestId: parked.deviceRequest?.id as string,
+				decision: 'use',
+				simulatorUdid: OTHER_UDID,
+			});
+			expect(provided.completed).toBe(true);
+			expect(backends.ensured).toHaveLength(1);
+			expect(backends.ensured[0]).toMatchObject({
+				worktreePath: THIRD_WORKTREE,
+				policy: 'required',
+			});
+			expect(provided.backend).toMatchObject({
+				policy: 'required',
+				status: 'ready',
+			});
+		});
+
+		it("restarts a lane's own Metro on its port with the backend's current values, and reopens the app", async () => {
+			const started = await up();
+			const opens = () => kinds().filter((kind) => kind === 'url.open').length;
+			expect(opens()).toBe(1);
+			backends.answers.push(ready(MOVED_API_URL));
+			await lanes.restartMetro(started.lane?.id as string, 'ports-moved');
+			expect(backends.ensured.at(-1)).toEqual({
+				laneId: started.lane?.id,
+				worktreePath: WORKTREE,
+				branch: 'feature/a',
+				environmentId: 'development',
+				policy: 'auto',
+				agent: { kind: 'claude', sessionId: 'session-1' },
+				waitMs: 0,
+			});
+			expect(metro.stopped).toEqual([
+				{ pid: started.lane?.metroPid, port: started.lane?.port },
+			]);
+			expect(metro.started[1]).toMatchObject({
+				port: started.lane?.port,
+				laneEnv: backendEnv(MOVED_API_URL),
+			});
+			expect(opens()).toBe(2);
+			expect(lanes.getState().lanes[0]?.backend).toEqual({
+				...readySummary(MOVED_API_URL),
+				metro: 'restarted',
+			});
+		});
+
+		it('restarts Metro without the backend once the backend detaches, asking it nothing', async () => {
+			const started = await up();
+			await lanes.restartMetro(started.lane?.id as string, 'detach');
+			expect(backends.ensured).toHaveLength(1);
+			expect(metro.stopped).toEqual([
+				{ pid: started.lane?.metroPid, port: started.lane?.port },
+			]);
+			expect(metro.started).toHaveLength(2);
+			expect(metro.started[1]).not.toHaveProperty('laneEnv');
+			expect(kinds().filter((kind) => kind === 'url.open')).toHaveLength(1);
+			expect(lanes.getState().lanes[0]?.backend).toEqual({
+				policy: 'auto',
+				status: 'stopped',
+				stackId: STACK_ID,
+				appEnvNames: [],
+				warnings: [],
+				metro: 'restarted',
+			});
+		});
+
+		it('refuses to restart a Metro whose PID cannot be proven, or one that is not running', async () => {
+			const started = await up();
+			const laneId = started.lane?.id as string;
+			const stop = metro.stop;
+			metro.stop = async (pid, port) => {
+				throw new Error(
+					`Process ${pid} is no longer the Metro serving port ${port}; refusing to stop it.`
+				);
+			};
+			await expect(lanes.restartMetro(laneId, 'operator')).rejects.toThrow(
+				/refusing to stop it/
+			);
+			expect(metro.started).toHaveLength(1);
+			expect(lanes.getState().lanes[0]?.metroPid).toBe(started.lane?.metroPid);
+			expect(lanes.getState().lanes[0]?.backend).toMatchObject({
+				metro: 'needs-restart',
+				reasonText: expect.stringMatching(/could not be restarted/),
+			});
+
+			metro.stop = stop;
+			metro.deadPids.add(started.lane?.metroPid as number);
+			await expect(lanes.restartMetro(laneId, 'operator')).rejects.toThrow(
+				/isn't running/
+			);
+			expect(metro.started).toHaveLength(1);
+		});
+
+		it('opens a held-back dev client once through launchDeferred', async () => {
+			backends.answers.push(
+				starting(new Promise<LaneBackendLateAttach>(() => undefined))
+			);
+			const started = await up();
+			expect(started.backend).toMatchObject({ launch: 'deferred' });
+			const laneId = started.lane?.id as string;
+			await lanes.launchDeferred(laneId);
+			await lanes.launchDeferred(laneId);
+			expect(kinds().filter((kind) => kind === 'url.open')).toHaveLength(1);
+			expect(lanes.getState().lanes[0]?.backend).not.toHaveProperty('launch');
+		});
+
+		it("leaves a name the lane's environment pins to the environment", async () => {
+			const pinned = new LaneService({
+				store: new LaneStore(root),
+				simulator,
+				metro,
+				worktrees,
+				now: () => now,
+				backends,
+				environments: [
+					{
+						id: 'development',
+						portRange: [8_100, 8_199],
+						metroEnv: { EXPO_PUBLIC_SUPABASE_URL: 'https://example.com' },
+					},
+				],
+			});
+			await pinned.start();
+			const receipt = await pinned.runOperation({
+				actionId: 'op-pinned',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(metro.started[0]?.metroEnv).toEqual({
+				EXPO_PUBLIC_SUPABASE_URL: 'https://example.com',
+			});
+			expect(metro.started[0]?.laneEnv).toEqual({
+				EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY,
+			});
+			expect(receipt.backend).toEqual({
+				...readySummary(),
+				appEnvNames: [KEY_NAME],
+				warnings: ['shared-default-keys', 'pinned-by-environment'],
+			});
+			await pinned.stop();
+		});
+
+		it('never fails an auto lane over its backend: a throwing port, or variables Metro would refuse', async () => {
+			backends.ensureForLane = async () => {
+				throw new Error('The backend service crashed.');
+			};
+			const crashed = await up();
+			expect(crashed.completed).toBe(true);
+			expect(crashed.backend).toMatchObject({
+				status: 'failed',
+				reason: 'failed',
+				reasonText:
+					'The local backend could not be ensured: The backend service crashed.',
+			});
+			expect(metro.started[0]).not.toHaveProperty('laneEnv');
+			expect(kinds()).toContain('url.open');
+
+			backends.ensureForLane = async () => ({
+				summary: readySummary(),
+				laneEnv: { [URL_NAME]: API_URL, EXPO_PUBLIC_KEY: 'sb_secret_example' },
+			});
+			const refused = await up({
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+			});
+			expect(refused.completed).toBe(true);
+			expect(refused.backend).toMatchObject({
+				status: 'failed',
+				stackId: STACK_ID,
+				reasonText: expect.stringMatching(/^Metro would refuse/),
+			});
+			expect(metro.started[1]).not.toHaveProperty('laneEnv');
+			expect(JSON.stringify(refused)).not.toContain('sb_secret_example');
+		});
+
+		it('without a backend port, records auto as skipped and refuses required before anything boots', async () => {
+			const start = {
+				kind: 'lane.start' as const,
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			};
+			const required = await service.runOperation({
+				...start,
+				actionId: 'op-required',
+				backend: 'required',
+			});
+			expect(required.completed).toBe(false);
+			expect(required.error).toMatch(/cannot require one/);
+			expect(simulator.actions).toEqual([]);
+
+			const auto = await service.runOperation({
+				...start,
+				actionId: 'op-auto',
+				backend: 'auto',
+			});
+			expect(auto.completed).toBe(true);
+			expect(auto.backend).toMatchObject({
+				policy: 'auto',
+				status: 'skipped',
+				reason: 'disabled',
+			});
+			expect(metro.started[0]).not.toHaveProperty('laneEnv');
+		});
+	});
+
+	describe('lane log retention', () => {
+		const DAY_MS = 24 * 60 * 60 * 1_000;
+
+		async function agedLog(ageMs: number): Promise<string> {
+			const file = store.logPathFor(store.newLaneId());
+			await writeFile(file, 'Starting Metro Bundler\n');
+			const seconds = (now - ageMs) / 1_000;
+			await utimes(file, seconds, seconds);
+			return file;
+		}
+
+		async function logs(): Promise<string[]> {
+			return readdir(path.join(root, 'logs'));
+		}
+
+		it('deletes the logs of lanes gone past a week when it starts, then hourly', async () => {
+			const gone = await agedLog(8 * DAY_MS);
+			const recent = await agedLog(DAY_MS);
+			const restarted = new LaneService({
+				store: new LaneStore(root),
+				simulator,
+				metro,
+				worktrees,
+				now: () => now,
+			});
+			await restarted.start();
+			expect(await logs()).not.toContain(path.basename(gone));
+			expect(await logs()).toContain(path.basename(recent));
+
+			// Reconcile runs every few seconds; pruning does not.
+			const later = await agedLog(8 * DAY_MS);
+			await restarted.runOperation({ actionId: 'op-r1', kind: 'lane.refresh' });
+			expect(await logs()).toContain(path.basename(later));
+			now += 60 * 60_000;
+			await restarted.runOperation({ actionId: 'op-r2', kind: 'lane.refresh' });
+			expect(await logs()).not.toContain(path.basename(later));
+			await restarted.stop();
+		});
 	});
 
 	describe('picking a Simulator', () => {

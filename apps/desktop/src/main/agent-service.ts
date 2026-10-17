@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
 	AGENT_TOUCH_TTL_MS,
 	type AgentClaim,
+	type AgentKind,
 	type AgentOperation,
 	type AgentSession,
 	type AgentState,
@@ -15,11 +16,14 @@ import {
 	attributeAgents,
 } from '../shared/agent-protocol';
 import {
-	DEVICE_HOLD_GRACE_MS,
 	type DeviceHold,
 	type DeviceHolder,
 	decideDeviceAccess,
+	type HolderLiveness,
+	type HolderLivenessInputs,
+	holderClockKey,
 	resolveDeviceHolds,
+	resolveHolderLiveness,
 } from '../shared/device-hold';
 import {
 	discoverAgentSessions,
@@ -29,6 +33,29 @@ import {
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const MAX_CLAIMS = 200;
 const MAX_TOUCHES = 1_000;
+const EVERY_AGENT_KIND: ReadonlySet<AgentKind> = new Set([
+	'claude',
+	'codex',
+	'other',
+]);
+
+/**
+ * The agent kinds whose sessions cannot be seen right now. Their holders are
+ * unknown rather than gone. Nothing discovers `other` sessions, so those are
+ * never known to be gone.
+ */
+function unseenKinds(
+	discovery: Pick<SessionDiscoveryResult, 'claude' | 'codex'>
+): Set<AgentKind> {
+	const kinds = new Set<AgentKind>(['other']);
+	if (discovery.claude === 'unavailable') kinds.add('claude');
+	if (discovery.codex === 'unavailable') kinds.add('codex');
+	return kinds;
+}
+
+function errorText(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
 
 const storedClaimsSchema = z.strictObject({
 	version: z.literal(1),
@@ -92,6 +119,15 @@ export type AgentLaneSource = () => readonly {
 	startedAt: number;
 }[];
 
+/**
+ * Holders of resources other than lanes and claims, with the directory each
+ * resource lives in. Their clocks run like a lane owner's.
+ */
+type AgentHolderSource = () => readonly {
+	holder: DeviceHolder;
+	directory?: string | undefined;
+}[];
+
 type AgentListener = (state: AgentState) => void;
 
 /**
@@ -103,12 +139,23 @@ type AgentListener = (state: AgentState) => void;
 export class AgentService {
 	readonly #store: AgentClaimStore;
 	readonly #lanes: AgentLaneSource;
+	readonly #holders: AgentHolderSource;
 	readonly #discover: () => Promise<SessionDiscoveryResult>;
 	readonly #now: () => number;
 	readonly #pollIntervalMs: number;
 	readonly #listeners = new Set<AgentListener>();
 	readonly #touches = new Map<string, AgentTouch>();
+	/**
+	 * Abandonment clocks by `holderClockKey`: when each holder that a lane, a
+	 * claim, or another resource names was first noticed missing. In memory
+	 * only, so a desktop restart starts them over.
+	 */
 	readonly #missingSince = new Map<string, number>();
+	/**
+	 * Clocks paused because their holder's agent kind cannot be seen right now,
+	 * with how long each had run when it paused.
+	 */
+	readonly #pausedClocks = new Map<string, number>();
 	#sessions: AgentSession[] = [];
 	#discovery: AgentState['discovery'] = { claude: 'ok', codex: 'ok' };
 	#revision = 0;
@@ -121,18 +168,22 @@ export class AgentService {
 	constructor({
 		directory,
 		lanes,
+		holders = () => [],
 		discover = discoverAgentSessions,
 		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 		now = Date.now,
 	}: {
 		directory: string;
 		lanes: AgentLaneSource;
+		/** Holders of other resources, so their clocks run; see `holderLiveness`. */
+		holders?: AgentHolderSource;
 		discover?: () => Promise<SessionDiscoveryResult>;
 		pollIntervalMs?: number;
 		now?: () => number;
 	}) {
 		this.#store = new AgentClaimStore(directory);
 		this.#lanes = lanes;
+		this.#holders = holders;
 		this.#discover = discover;
 		this.#pollIntervalMs = pollIntervalMs;
 		this.#now = now;
@@ -164,27 +215,38 @@ export class AgentService {
 	 */
 	holds(): Map<string, DeviceHold> {
 		return resolveDeviceHolds({
-			lanes: this.#lanes().map((lane) => ({
-				id: lane.id,
-				simulatorUdid: lane.simulatorUdid,
-				metro: lane.metro,
-				startedAt: lane.startedAt,
-				...(lane.agent ? { agent: { ...lane.agent, lastSeenAt: 0 } } : {}),
-			})),
+			lanes: this.#lanes(),
 			claims: this.#store.claims(),
-			liveSessionKeys: new Set(this.#sessions.map(agentSessionKey)),
-			missingSince: this.#missingSince,
-			now: this.#now(),
+			...this.#livenessInputs(),
 		});
+	}
+
+	/**
+	 * Whether the holder of some other resource is still around, on the same
+	 * clocks as device holds. List the resource's holders in the `holders`
+	 * option: a holder no lane, claim, or listed resource names has no clock,
+	 * and reads as gone from now on every call.
+	 */
+	holderLiveness(holder: DeviceHolder, directory?: string): HolderLiveness {
+		return resolveHolderLiveness(holder, this.#livenessInputs(), directory);
 	}
 
 	/** Whether `requester` (an agent, or the operator when undefined) may touch the device. */
 	access(simulatorUdid: string, requester: DeviceHolder | undefined) {
-		return decideDeviceAccess(
-			this.holds().get(simulatorUdid.toUpperCase()),
-			requester,
-			this.#now()
-		);
+		const hold = this.holds().get(simulatorUdid.toUpperCase());
+		const lane = hold?.laneId
+			? this.#lanes().find((candidate) => candidate.id === hold.laneId)
+			: undefined;
+		const session = requester
+			? this.#sessions.find(
+					(candidate) =>
+						agentSessionKey(candidate) === agentSessionKey(requester)
+				)
+			: undefined;
+		return decideDeviceAccess(hold, requester, this.#now(), {
+			directory: lane?.appDirectory,
+			requesterCwd: session?.cwd,
+		});
 	}
 
 	subscribe(listener: AgentListener): () => void {
@@ -305,50 +367,133 @@ export class AgentService {
 	}
 
 	async #refreshInternal(): Promise<AgentState> {
+		let result: SessionDiscoveryResult;
 		try {
-			const result = await this.#discover();
+			result = await this.#discover();
+		} catch (error) {
+			this.#discovery = { ...this.#discovery, error: errorText(error) };
+			// Nothing was seen, so nobody is known to be gone.
+			this.#runHolderClocks(EVERY_AGENT_KIND);
+			this.#touch();
+			return this.getState();
+		}
+		try {
 			this.#sessions = result.sessions.slice(0, 200);
 			this.#discovery = {
 				claude: result.claude,
 				codex: result.codex,
 				...(result.error ? { error: result.error } : {}),
 			};
+			this.#runHolderClocks(unseenKinds(result));
 			await this.#expireAbandonedClaims();
 			this.#pruneTouches();
 		} catch (error) {
-			this.#discovery = {
-				...this.#discovery,
-				error: error instanceof Error ? error.message : String(error),
-			};
+			this.#discovery = { ...this.#discovery, error: errorText(error) };
 		}
 		this.#touch();
 		return this.getState();
 	}
 
-	/** Drops claims whose session has been gone for the whole touch TTL. */
-	async #expireAbandonedClaims(): Promise<void> {
-		const live = new Set(this.#sessions.map(agentSessionKey));
+	#livenessInputs(now = this.#now()): HolderLivenessInputs {
+		let clocks: ReadonlyMap<string, number> = this.#missingSince;
+		if (this.#pausedClocks.size > 0) {
+			// A paused clock reads as having run exactly as long as it had when it
+			// paused, so its release never comes closer while it is paused.
+			const effective = new Map(this.#missingSince);
+			for (const [key, elapsed] of this.#pausedClocks) {
+				effective.set(key, now - elapsed);
+			}
+			clocks = effective;
+		}
+		return {
+			liveSessionKeys: new Set(this.#sessions.map(agentSessionKey)),
+			liveSessions: this.#sessions,
+			missingSince: clocks,
+			now,
+		};
+	}
+
+	/** Every holder a lane, a claim, or another resource names. */
+	#namedHolders(): { holder: DeviceHolder; directory?: string | undefined }[] {
+		return [
+			...this.#lanes().flatMap((lane) =>
+				lane.agent
+					? [
+							{
+								holder: {
+									kind: lane.agent.kind,
+									sessionId: lane.agent.sessionId,
+								},
+								directory: lane.appDirectory,
+							},
+						]
+					: []
+			),
+			...this.#store.claims().map((claim) => ({
+				holder: { kind: claim.kind, sessionId: claim.sessionId },
+			})),
+			...this.#holders(),
+		];
+	}
+
+	/**
+	 * Runs one abandonment clock per named holder. A clock starts when its
+	 * holder goes missing and is dropped when the holder is live again or
+	 * nothing names it any more. While a kind's sessions cannot be seen
+	 * (`unseen`), its holders are unknown rather than gone: their running
+	 * clocks pause, none start, and paused ones resume where they stopped once
+	 * the kind can be seen again.
+	 */
+	#runHolderClocks(unseen: ReadonlySet<AgentKind>): void {
 		const now = this.#now();
-		const kept: AgentClaim[] = [];
-		let changed = false;
-		for (const claim of this.#store.claims()) {
-			const key = agentSessionKey(claim);
-			if (live.has(key)) {
+		const inputs = this.#livenessInputs(now);
+		const named = new Set<string>();
+		for (const { holder, directory } of this.#namedHolders()) {
+			const key = holderClockKey(holder, directory);
+			if (named.has(key)) continue;
+			named.add(key);
+			if (resolveHolderLiveness(holder, inputs, directory).live) {
 				this.#missingSince.delete(key);
-				kept.push(claim);
+				this.#pausedClocks.delete(key);
 				continue;
 			}
-			const since = this.#missingSince.get(key) ?? now;
-			this.#missingSince.set(key, since);
+			const since = this.#missingSince.get(key);
+			if (unseen.has(holder.kind)) {
+				if (since !== undefined) {
+					this.#pausedClocks.set(key, now - since);
+					this.#missingSince.delete(key);
+				}
+				continue;
+			}
+			const elapsed = this.#pausedClocks.get(key);
+			if (elapsed !== undefined) {
+				this.#missingSince.set(key, now - elapsed);
+				this.#pausedClocks.delete(key);
+			} else if (since === undefined) {
+				this.#missingSince.set(key, now);
+			}
+		}
+		for (const clocks of [this.#missingSince, this.#pausedClocks]) {
+			for (const key of clocks.keys()) {
+				if (!named.has(key)) clocks.delete(key);
+			}
+		}
+	}
+
+	/** Drops claims whose holder has been gone for the hold grace period. */
+	async #expireAbandonedClaims(): Promise<void> {
+		const inputs = this.#livenessInputs();
+		const claims = this.#store.claims();
+		const kept: AgentClaim[] = claims.filter((claim) => {
+			const liveness = resolveHolderLiveness(
+				{ kind: claim.kind, sessionId: claim.sessionId },
+				inputs
+			);
 			// A claim is a hold; it expires on the same clock as every other hold
 			// so a device never stays claimed after its lane would have released.
-			if (now - since >= DEVICE_HOLD_GRACE_MS) {
-				changed = true;
-				continue;
-			}
-			kept.push(claim);
-		}
-		if (changed) await this.#store.set(kept);
+			return liveness.live || inputs.now < liveness.releaseAt;
+		});
+		if (kept.length !== claims.length) await this.#store.set(kept);
 	}
 
 	#pruneTouches(): void {

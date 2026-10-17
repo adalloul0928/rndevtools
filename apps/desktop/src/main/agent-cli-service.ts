@@ -14,6 +14,7 @@ import {
 	agentCliRequestSchema,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
+import { SUPABASE_AGENT_DEFAULT_WAIT_MS } from '../shared/supabase-protocol';
 
 const MAX_CONNECTIONS = 8;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -21,6 +22,22 @@ const RATE_WINDOW_MS = 10_000;
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * Lane up and launch boot a Simulator and wait for Metro, and native plans
+ * fingerprint a worktree with Expo's own tooling. The Go CLI waits 240 s for
+ * them; stopping just short of that still reaches the agent as a typed error.
+ */
+const LONG_REQUEST_TIMEOUT_MS = 230_000;
+/**
+ * `supabase up` waits up to waitMs for the stack and then answers with a job,
+ * so it gets that wait plus this margin. Reads (ls, status, env, log) answer
+ * from quick CLI calls. down only queues a stop and destroy only files a
+ * request, so both stay inside the Go CLI's 45 s deadline for them; reset
+ * keeps the default, inside the CLI's 75 s.
+ */
+const SUPABASE_UP_MARGIN_MS = 10_000;
+const SUPABASE_READ_TIMEOUT_MS = 30_000;
+const SUPABASE_QUICK_TIMEOUT_MS = 40_000;
 const MAX_REQUEST_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_ERROR_LENGTH = 4 * 1024;
 
@@ -97,7 +114,37 @@ function handlerTimeoutMs(command: AgentCliCommand): number {
 	if (command.kind === 'recipe' && command.operation === 'run') {
 		return MAX_REQUEST_TIMEOUT_MS;
 	}
+	if (
+		command.kind === 'native' ||
+		(command.kind === 'lane' &&
+			(command.operation === 'up' || command.operation === 'launch'))
+	) {
+		return LONG_REQUEST_TIMEOUT_MS;
+	}
+	if (command.kind === 'supabase') return supabaseTimeoutMs(command);
 	return REQUEST_TIMEOUT_MS;
+}
+
+function supabaseTimeoutMs(
+	command: Extract<AgentCliCommand, { kind: 'supabase' }>
+): number {
+	switch (command.operation) {
+		case 'up':
+			return (
+				(command.waitMs ?? SUPABASE_AGENT_DEFAULT_WAIT_MS) +
+				SUPABASE_UP_MARGIN_MS
+			);
+		case 'ls':
+		case 'status':
+		case 'env':
+		case 'log':
+			return SUPABASE_READ_TIMEOUT_MS;
+		case 'destroy':
+		case 'down':
+			return SUPABASE_QUICK_TIMEOUT_MS;
+		case 'reset':
+			return REQUEST_TIMEOUT_MS;
+	}
 }
 
 function failureResponse(
@@ -393,6 +440,9 @@ export class AgentCliService {
 						code: 'invalid_request',
 						message: 'The command did not match rndevtools/1.',
 						retryable: false,
+						// Usually a CLI or tool list newer or older than this desktop.
+						recovery:
+							'Update RN Devtools, or restart the agent session to reload the rndevtools tools.',
 					})
 				)
 			);

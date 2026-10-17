@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { deviceHoldSchema } from './device-hold';
+import { deviceHoldSchema, isPathInside } from './device-hold';
 
 /**
  * Agents: which coding-agent session is driving which Simulator.
@@ -195,10 +195,8 @@ export function attributeAgents({
 	}
 	for (const lane of lanes) {
 		for (const session of sessions) {
-			if (!session.cwd) continue;
-			const cwd = session.cwd.replace(/\/+$/, '');
-			const app = lane.appDirectory.replace(/\/+$/, '');
-			if (cwd === app || cwd.startsWith(`${app}/`)) {
+			// The same rule decides whether a synthetic holder is live on a lane.
+			if (session.cwd && isPathInside(session.cwd, lane.appDirectory)) {
 				push(lane.simulatorUdid, {
 					...session,
 					via: 'lane',

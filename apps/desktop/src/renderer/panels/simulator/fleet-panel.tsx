@@ -6,6 +6,7 @@ import {
 	ChevronDown,
 	Copy,
 	Cpu,
+	DatabaseZap,
 	HardDrive,
 	LayoutGrid,
 	List,
@@ -41,6 +42,7 @@ import {
 	SimulatorPanelHeader,
 	TargetStatePill,
 } from '@/components/simulator-ui';
+import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	ConfirmAction,
 	Disclosure,
@@ -58,6 +60,7 @@ import {
 } from '@/simulator/disk-inventory-model';
 import {
 	buildFleetRows,
+	connectedSessionsForSimulator,
 	type FleetRow,
 	type FleetStateFilter,
 	fleetFilterCounts,
@@ -65,6 +68,7 @@ import {
 	primaryAgent,
 	shortPath,
 } from '@/simulator/fleet-model';
+import { supabaseChipsVisible } from '@/simulator/supabase-cross-panel';
 import { targetConfig } from '@/simulator/target-config';
 import { useAgentRuntime } from '@/state/agent-runtime';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -74,7 +78,11 @@ import {
 	useSimulatorRuntime,
 } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
-import type { Lane } from '../../../shared/lane-protocol';
+import {
+	useSupabaseNavigation,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
+import type { Lane, LaneView } from '../../../shared/lane-protocol';
 import type { DeviceSession } from '../../../shared/protocol';
 import type {
 	SimulatorApp,
@@ -134,26 +142,6 @@ export function simulatorOpenPresentation(
 	};
 }
 
-export function connectedSessionsForSimulator(
-	udid: string,
-	sessions: readonly DeviceSession[]
-): DeviceSession[] {
-	const normalizedUdid = udid.toUpperCase();
-	const statusRank: Record<DeviceSession['status'], number> = {
-		online: 0,
-		simulated: 1,
-		offline: 2,
-	};
-	return sessions
-		.filter(
-			(session) => session.info.simulatorUdid?.toUpperCase() === normalizedUdid
-		)
-		.sort((left, right) => {
-			const rankDifference = statusRank[left.status] - statusRank[right.status];
-			return rankDifference || right.lastSeenAt - left.lastSeenAt;
-		});
-}
-
 type FleetLayout = 'wall' | 'list';
 const FLEET_LAYOUT_KEY = 'rndevtools.desktop.fleet.layout';
 const FLEET_TILE_KEY = 'rndevtools.desktop.fleet.tile';
@@ -202,6 +190,9 @@ export function FleetPanel() {
 	const slimming = useSlimmingRuntime();
 	const lanes = useLaneRuntime();
 	const agents = useAgentRuntime();
+	const { state: supabase } = useSupabaseState();
+	const { openInSupabase } = useSupabaseNavigation();
+	const backendsShown = supabaseChipsVisible(supabase);
 	const [query, setQuery] = useState('');
 	const [filter, setFilter] = useState<FleetStateFilter>('all');
 	const [layout, setLayout] = useState<FleetLayout>(readStoredLayout);
@@ -455,6 +446,11 @@ export function FleetPanel() {
 						<NativeSelect.Option value="with-agent">
 							With agent ({filterCounts['with-agent']})
 						</NativeSelect.Option>
+						{backendsShown || filter === 'with-backend' ? (
+							<NativeSelect.Option value="with-backend">
+								With backend ({filterCounts['with-backend']})
+							</NativeSelect.Option>
+						) : null}
 						<NativeSelect.Indicator>
 							<ChevronDown className="h-3 w-3" />
 						</NativeSelect.Indicator>
@@ -626,6 +622,10 @@ export function FleetPanel() {
 								key={selectedDevice.udid}
 								isBridgeAvailable={isBridgeAvailable}
 								lane={rowByUdid.get(selectedDevice.udid)?.lane}
+								backend={rowByUdid.get(selectedDevice.udid)?.backend}
+								onOpenInSupabase={(stackId) =>
+									openInSupabase(stackId === undefined ? {} : { stackId })
+								}
 								attachedAgents={
 									rowByUdid.get(selectedDevice.udid)?.agents ?? []
 								}
@@ -645,8 +645,12 @@ export function FleetPanel() {
 										{ successMessage: `Lane ${lane.branch} stopped.` }
 									)
 								}
-								onOpenLanes={() => {
-									window.location.hash = 'simulator/lanes';
+								onOpenLanes={(laneId) => {
+									if (laneId === undefined) {
+										window.location.hash = 'simulator/lanes';
+									} else {
+										lanes.focusLane(laneId);
+									}
 								}}
 								slim={rowByUdid.get(selectedDevice.udid)?.slim}
 								target={selectedDevice}
@@ -800,6 +804,9 @@ function DeviceWall({
 							</span>
 							<span className="device-tile-chips">
 								{row.lane ? <LaneChip lane={row.lane} compact /> : null}
+								{row.backend ? (
+									<SupabaseChip summary={row.lane?.backend} />
+								) : null}
 								{row.live && row.slim.level !== 'unknown' ? (
 									<SlimChip slim={row.slim} />
 								) : null}
@@ -820,6 +827,11 @@ function DeviceWall({
 	);
 }
 
+/**
+ * A row's two lines. With a backend chip the trailing cluster no longer fits
+ * at 1080 px and below, so there the chips move to line 2 and the state pill
+ * joins the name on line 1 (styles.css, Supabase in other panels).
+ */
 function FleetRowText({
 	row,
 	target,
@@ -827,10 +839,29 @@ function FleetRowText({
 	row: FleetRow | undefined;
 	target: SimulatorDevice;
 }) {
+	const backend = row?.backend;
 	return (
-		<div className="sim-list-copy">
-			<strong>{target.name}</strong>
-			<span className="sim-list-subtitle">
+		<div className={`sim-list-copy ${backend ? 'fleet-row-copy' : ''}`}>
+			{backend ? (
+				<span className="fleet-row-line">
+					<strong className="fleet-row-name">{target.name}</strong>
+					<span className="fleet-row-narrow">
+						<TargetStatePill state={target.state} />
+					</span>
+				</span>
+			) : (
+				<strong>{target.name}</strong>
+			)}
+			{backend && row ? (
+				<span className="fleet-row-chips fleet-row-narrow">
+					{row.lane ? <LaneChip lane={row.lane} compact /> : null}
+					<SupabaseChip summary={row.lane?.backend} />
+					{row.live && row.slim.level !== 'unknown' ? (
+						<SlimChip slim={row.slim} />
+					) : null}
+				</span>
+			) : null}
+			<span className={`sim-list-subtitle ${backend ? 'fleet-row-wide' : ''}`}>
 				<span className="sim-list-subtitle-item">
 					{row?.runtimeName ?? target.runtimeIdentifier}
 				</span>
@@ -869,8 +900,11 @@ function FleetRowTrailing({
 	target: SimulatorDevice;
 }) {
 	return (
-		<div className="sim-list-trailing">
+		<div
+			className={`sim-list-trailing ${row?.backend ? 'fleet-row-wide' : ''}`}
+		>
 			{row?.lane ? <LaneChip lane={row.lane} compact /> : null}
+			{row?.backend ? <SupabaseChip summary={row.lane?.backend} /> : null}
 			{row?.live && row.slim.level !== 'unknown' ? (
 				<SlimChip slim={row.slim} />
 			) : null}
@@ -1069,6 +1103,7 @@ function TargetDetail({
 	connectedSessions,
 	isBridgeAvailable,
 	lane,
+	backend,
 	attachedAgents,
 	laneBusy,
 	slim,
@@ -1077,6 +1112,7 @@ function TargetDetail({
 	onLaneLaunch,
 	onLaneStop,
 	onOpenLanes,
+	onOpenInSupabase,
 }: {
 	target: SimulatorDevice;
 	runtime: SimulatorRuntime | undefined;
@@ -1086,7 +1122,8 @@ function TargetDetail({
 	metrics: SimulatorDeviceMetrics | undefined;
 	connectedSessions: DeviceSession[];
 	isBridgeAvailable: boolean;
-	lane: Lane | undefined;
+	lane: LaneView | undefined;
+	backend: FleetRow['backend'];
 	attachedAgents: FleetRow['agents'];
 	laneBusy: boolean;
 	slim: FleetRow['slim'] | undefined;
@@ -1094,7 +1131,9 @@ function TargetDetail({
 	onOpenConnectedSession: (deviceId: string) => void;
 	onLaneLaunch: (lane: Lane) => void;
 	onLaneStop: (lane: Lane) => void;
-	onOpenLanes: () => void;
+	/** Opens Lanes on this lane, or on the start form without one. */
+	onOpenLanes: (laneId?: string) => void;
+	onOpenInSupabase: (stackId?: string) => void;
 }) {
 	const [renameName, setRenameName] = useState(target.name);
 	const [cloneName, setCloneName] = useState(`${target.name} Copy`);
@@ -1253,6 +1292,21 @@ function TargetDetail({
 							{lane.port}
 							{lane.metroPid ? ` · pid ${lane.metroPid}` : ''}
 						</p>
+						{backend ? (
+							<div className="sim-lane-backend">
+								<span className="sim-lane-backend-label">Backend</span>
+								<SupabaseChip summary={lane.backend} />
+								<span className="sim-lane-backend-line">{backend.line}</span>
+								<Button
+									aria-label={`Open the backend of ${lane.branch} in Supabase`}
+									size="sm"
+									variant="ghost"
+									onPress={() => onOpenInSupabase(backend.stackId)}
+								>
+									<DatabaseZap className="h-3.5 w-3.5" /> Open in Supabase
+								</Button>
+							</div>
+						) : null}
 						<div className="sim-action-row">
 							<Button
 								isDisabled={
@@ -1264,7 +1318,11 @@ function TargetDetail({
 							>
 								<Play className="h-3.5 w-3.5" /> Launch app
 							</Button>
-							<Button size="sm" variant="secondary" onPress={onOpenLanes}>
+							<Button
+								size="sm"
+								variant="secondary"
+								onPress={() => onOpenLanes(lane.id)}
+							>
 								<ScrollText className="h-3.5 w-3.5" /> Open in Lanes
 							</Button>
 							<ConfirmAction
@@ -1281,7 +1339,7 @@ function TargetDetail({
 				) : (
 					<div className="sim-lane-section">
 						<p className="sim-section-empty">No lane runs on this Simulator.</p>
-						<Button size="sm" variant="secondary" onPress={onOpenLanes}>
+						<Button size="sm" variant="secondary" onPress={() => onOpenLanes()}>
 							<Waypoints className="h-3.5 w-3.5" /> Start a lane here
 						</Button>
 					</div>

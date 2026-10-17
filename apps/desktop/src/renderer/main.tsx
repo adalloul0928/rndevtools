@@ -12,6 +12,7 @@ import { RecipeRuntimeProvider } from './state/recipe-runtime';
 import { SimulatorRuntimeProvider } from './state/simulator-runtime';
 import { SimulatorStreamProvider } from './state/simulator-stream-runtime';
 import { SlimmingRuntimeProvider } from './state/slimming-runtime';
+import { SupabaseRuntimeProvider } from './state/supabase-runtime';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Desktop root element was not found.');
@@ -25,9 +26,11 @@ createRoot(root).render(
 						<RecipeRuntimeProvider>
 							<LaneRuntimeProvider>
 								<AgentRuntimeProvider>
-									<SimulatorStreamProvider>
-										<App />
-									</SimulatorStreamProvider>
+									<SupabaseRuntimeProvider>
+										<SimulatorStreamProvider>
+											<App />
+										</SimulatorStreamProvider>
+									</SupabaseRuntimeProvider>
 								</AgentRuntimeProvider>
 							</LaneRuntimeProvider>
 						</RecipeRuntimeProvider>

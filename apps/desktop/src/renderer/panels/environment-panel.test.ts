@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { EnvironmentEntry } from '../../shared/protocol';
 import {
+	createSupabaseDemoState,
+	SUPABASE_DEMO_IDS,
+} from '../../shared/supabase-demo-data';
+import {
 	environmentHealth,
+	laneStackPhrase,
 	statusLabel,
 	validationTone,
 } from './environment-panel';
@@ -59,5 +64,21 @@ describe('environmentHealth', () => {
 
 	it('reports full health when all checked entries are valid', () => {
 		expect(environmentHealth([entry('valid')]).score).toBe(100);
+	});
+});
+
+describe('laneStackPhrase', () => {
+	const stack = createSupabaseDemoState().stacks.find(
+		(candidate) => candidate.id === SUPABASE_DEMO_IDS.featCheckout
+	);
+
+	it('names the lane stack the declared URL is compared with', () => {
+		expect(
+			laneStackPhrase({
+				...(stack ? { expectedStack: stack } : {}),
+				labels: { expectedPort: 21_734 },
+			})
+		).toBe('the stack for feat-checkout (:21734)');
+		expect(laneStackPhrase({ labels: {} })).toBe("this lane's stack");
 	});
 });

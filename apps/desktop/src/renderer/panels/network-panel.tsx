@@ -13,10 +13,13 @@ import {
 	ChevronDown,
 	CirclePause,
 	CirclePlay,
+	DatabaseZap,
+	Filter,
 	Radio,
 	Trash2,
 	Wifi,
 	WifiOff,
+	X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -33,13 +36,26 @@ import {
 	Toolbar,
 } from '@/components/ui';
 import {
+	settleNetworkFilter,
+	useAppTraffic,
+	useNetworkFilterIntent,
+} from '@/lib/app-traffic';
+import {
 	formatBytes,
 	formatClock,
 	formatDuration,
 	truncateMiddle,
 } from '@/lib/format';
+import {
+	type NetworkTargetBadge,
+	type NetworkTargetFilter,
+	networkTargetFilter,
+	networkTargetKey,
+} from '@/simulator/app-traffic-model';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
+import { useSupabaseNavigation } from '@/state/supabase-runtime';
 import type { NetworkEntry } from '../../shared/protocol';
+import type { SupabaseTrafficTarget } from '../../shared/supabase-traffic';
 
 // Classification is shared with the on-device panel. The local copy disagreed
 // with it: aborted requests were missing from `errors`, and `supabase` matched
@@ -112,6 +128,21 @@ export function headersText(
 		.join('\n');
 }
 
+/**
+ * Requests to one backend: the filter the connected banner's Show this
+ * traffic asks for, kept per device so another app's list is never
+ * narrowed by it.
+ */
+export function matchesNetworkTarget(
+	target: SupabaseTrafficTarget | undefined,
+	filter: NetworkTargetFilter | null
+): boolean {
+	return (
+		filter === null ||
+		(target !== undefined && networkTargetKey(target) === filter.key)
+	);
+}
+
 function MethodBadge({ method }: { method: string }) {
 	return (
 		<Badge className="font-mono font-semibold" tone={methodBadgeTone(method)}>
@@ -148,6 +179,23 @@ export function NetworkPanel() {
 	);
 	const paused = pausedEntries !== null;
 	const setProfileReason = actionUnavailableReason('network', 'setProfile');
+	const traffic = useAppTraffic();
+	const { targetFor, badgeFor } = traffic;
+	const { openInSupabase } = useSupabaseNavigation();
+	const [targetChip, setTargetChip] = useState<{
+		deviceId: string | undefined;
+		filter: NetworkTargetFilter;
+	} | null>(null);
+	const targetFilter =
+		targetChip && targetChip.deviceId === deviceId ? targetChip.filter : null;
+	const intent = useNetworkFilterIntent();
+	useEffect(() => {
+		if (!intent) return;
+		// The banner's Show this traffic: the backend segment, one backend.
+		setFilter('supabase');
+		setTargetChip({ deviceId: intent.deviceId, filter: intent.target });
+		settleNetworkFilter(intent.nonce);
+	}, [intent]);
 	useEffect(() => {
 		if (pausedSnapshot && pausedSnapshot.deviceId !== deviceId) {
 			setPausedSnapshot(null);
@@ -164,6 +212,7 @@ export function NetworkPanel() {
 		return entries
 			.filter((entry) => {
 				if (!matchesNetworkSegment(entry, filter)) return false;
+				if (!matchesNetworkTarget(targetFor(entry), targetFilter)) return false;
 				return (
 					!needle ||
 					[
@@ -180,7 +229,7 @@ export function NetworkPanel() {
 				);
 			})
 			.sort((left, right) => right.at - left.at);
-	}, [entries, filter, query]);
+	}, [entries, filter, query, targetFilter, targetFor]);
 
 	const selected =
 		filtered.find((entry) => entry.id === selectedId) ?? filtered[0] ?? null;
@@ -197,16 +246,22 @@ export function NetworkPanel() {
 				id: 'request',
 				header: 'Request',
 				minWidth: 340,
-				cell: (entry) => (
-					<div className="min-w-0 py-0.5">
-						<div className="truncate font-mono text-xs text-(--foreground)">
-							{entry.path}
+				cell: (entry) => {
+					const target = targetFor(entry);
+					return (
+						<div className="min-w-0 py-0.5">
+							<div className="truncate font-mono text-xs text-(--foreground)">
+								{entry.path}
+							</div>
+							<div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-(--text-3)">
+								{target ? <TargetBadge badge={badgeFor(target)} /> : null}
+								<span className="truncate">
+									{entry.host} {entry.source ? `· ${entry.source}` : ''}
+								</span>
+							</div>
 						</div>
-						<div className="mt-0.5 truncate text-xs text-(--text-3)">
-							{entry.host} {entry.source ? `· ${entry.source}` : ''}
-						</div>
-					</div>
-				),
+					);
+				},
 			},
 			{
 				id: 'status',
@@ -254,8 +309,30 @@ export function NetworkPanel() {
 				),
 			},
 		],
-		[]
+		[badgeFor, targetFor]
 	);
+
+	const selectedTarget = selected ? targetFor(selected) : undefined;
+	const selectedBackend = selectedTarget
+		? {
+				badge: badgeFor(selectedTarget),
+				target: selectedTarget,
+				onOpen: () =>
+					openInSupabase(
+						selectedTarget.kind === 'this-stack' ||
+							selectedTarget.kind === 'other-stack'
+							? { stackId: selectedTarget.stackId }
+							: {}
+					),
+				onOnly: () => {
+					setFilter('supabase');
+					setTargetChip({
+						deviceId,
+						filter: networkTargetFilter(selectedTarget),
+					});
+				},
+			}
+		: undefined;
 
 	function onSelectionChange(selection: DataGridSelection): void {
 		if (selection === 'all') {
@@ -328,6 +405,7 @@ export function NetworkPanel() {
 					ariaLabel="Search network requests"
 					placeholder="URL, method, status…"
 					value={query}
+					widthClassName="w-[260px] max-[1080px]:w-[200px]"
 					onChange={setQuery}
 				/>
 				<div className="flex items-center gap-1">
@@ -344,6 +422,23 @@ export function NetworkPanel() {
 						</Button>
 					))}
 				</div>
+				{targetFilter ? (
+					<span className="network-target-filter">
+						<Badge className="network-target-filter-label">
+							{targetFilter.label}
+						</Badge>
+						<Button
+							aria-label={`Show every backend, not only ${targetFilter.label}`}
+							className="sim-icon-button"
+							isIconOnly
+							size="sm"
+							variant="ghost"
+							onPress={() => setTargetChip(null)}
+						>
+							<X className="h-3.5 w-3.5" />
+						</Button>
+					</span>
+				) : null}
 				<span className="sim-toolbar-separator" />
 				<div className="sim-toolbar-field">
 					<span>Fetch profile</span>
@@ -465,6 +560,7 @@ export function NetworkPanel() {
 				<aside className="detail-pane">
 					{selected ? (
 						<NetworkDetail
+							backend={selectedBackend}
 							entry={selected}
 							tab={detailTab}
 							onTabChange={setDetailTab}
@@ -478,14 +574,33 @@ export function NetworkPanel() {
 	);
 }
 
+/** The backend a Supabase-shaped request went to, beside its host. */
+function TargetBadge({ badge }: { badge: NetworkTargetBadge }) {
+	return (
+		<Badge className="network-target-badge" tone={badge.tone}>
+			{badge.label}
+		</Badge>
+	);
+}
+
 function NetworkDetail({
 	entry,
 	tab,
 	onTabChange,
+	backend,
 }: {
 	entry: NetworkEntry;
 	tab: DetailTab;
 	onTabChange: (tab: DetailTab) => void;
+	/** Set for Supabase-shaped requests: which backend, and what to do about it. */
+	backend?:
+		| Readonly<{
+				badge: NetworkTargetBadge;
+				target: SupabaseTrafficTarget;
+				onOpen: () => void;
+				onOnly: () => void;
+		  }>
+		| undefined;
 }) {
 	return (
 		<div className="flex h-full flex-col">
@@ -525,6 +640,37 @@ function NetworkDetail({
 						<KeyValue label="Host" value={entry.host} mono />
 						<KeyValue label="Path" value={entry.path} mono />
 						<KeyValue label="Source" value={entry.source ?? 'fetch'} />
+						{backend ? (
+							<KeyValue
+								label="Backend"
+								value={
+									<span className="network-target-detail">
+										<TargetBadge badge={backend.badge} />
+										<span>{backend.badge.detail}</span>
+										<span className="network-target-detail-actions">
+											{backend.target.kind === 'this-stack' ||
+											backend.target.kind === 'other-stack' ? (
+												<Button
+													size="sm"
+													variant="ghost"
+													onPress={backend.onOpen}
+												>
+													<DatabaseZap className="h-3.5 w-3.5" /> Open in
+													Supabase
+												</Button>
+											) : null}
+											<Button
+												size="sm"
+												variant="ghost"
+												onPress={backend.onOnly}
+											>
+												<Filter className="h-3.5 w-3.5" /> Only this backend
+											</Button>
+										</span>
+									</span>
+								}
+							/>
+						) : null}
 						<KeyValue
 							label="Content type"
 							value={entry.contentType ?? 'Unknown'}

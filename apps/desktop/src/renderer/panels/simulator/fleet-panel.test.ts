@@ -1,37 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { DeviceSession } from '../../../shared/protocol';
 import {
 	clampFleetTile,
-	connectedSessionsForSimulator,
 	FLEET_TILE_RANGE,
 	parseSimulatorCreateCount,
 	simulatorEraseAvailability,
 	simulatorOpenPresentation,
 } from './fleet-panel';
-
-const UDID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
-
-function session(
-	id: string,
-	status: DeviceSession['status'],
-	simulatorUdid: string | undefined,
-	lastSeenAt: number
-): DeviceSession {
-	return {
-		info: {
-			id,
-			name: id,
-			platform: 'ios',
-			capabilities: [],
-			...(simulatorUdid ? { simulatorUdid } : {}),
-		},
-		status,
-		connectedAt: 1,
-		lastSeenAt,
-		sequence: 1,
-		tools: {} as DeviceSession['tools'],
-	};
-}
 
 describe('Simulator Fleet destructive-action policy', () => {
 	it('allows erase only for an available, shut-down target on a live bridge', () => {
@@ -114,28 +88,7 @@ describe('Simulator Fleet open behavior', () => {
 	});
 });
 
-describe('Simulator Fleet connected-session association', () => {
-	it('matches UDIDs case-insensitively and orders online sessions first', () => {
-		const result = connectedSessionsForSimulator(UDID, [
-			session('offline-newer', 'offline', UDID, 30),
-			session(
-				'unmatched',
-				'online',
-				'11111111-2222-4333-8444-555555555555',
-				40
-			),
-			session('online-older', 'online', UDID.toLowerCase(), 10),
-			session('simulated', 'simulated', UDID, 100),
-			session('v1', 'online', undefined, 50),
-		]);
-
-		expect(result.map((candidate) => candidate.info.id)).toEqual([
-			'online-older',
-			'simulated',
-			'offline-newer',
-		]);
-	});
-
+describe('Simulator Fleet wall tiles', () => {
 	it('clamps and steps the wall tile size, falling back to the default', () => {
 		expect(clampFleetTile(Number.NaN)).toBe(FLEET_TILE_RANGE.default);
 		expect(clampFleetTile(0)).toBe(FLEET_TILE_RANGE.min);

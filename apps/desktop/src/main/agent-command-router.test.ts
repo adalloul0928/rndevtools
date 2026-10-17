@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentOperation, AgentState } from '../shared/agent-protocol';
 import { createDemoDevice } from '../shared/demo-data';
+import { decideDeviceAccess, resolveDeviceHolds } from '../shared/device-hold';
 import {
 	DEFAULT_LANE_ENVIRONMENTS,
 	type Lane,
 	type LaneOperation,
+	type LaneOperationReceipt,
 	type LaneState,
 } from '../shared/lane-protocol';
 import type { DesktopAction, DesktopState } from '../shared/protocol';
@@ -19,9 +21,28 @@ import {
 	type SlimmingState,
 	slimmingStateSchema,
 } from '../shared/slimming-protocol';
-import type { AgentCliError } from './agent-cli-service';
-import { createAgentCommandRouter } from './agent-command-router';
+import {
+	createSupabaseDemoState,
+	SUPABASE_DEMO_IDS,
+} from '../shared/supabase-demo-data';
+import {
+	type SupabaseAgentOperation,
+	type SupabaseAgentResult,
+	type SupabaseAgentStack,
+	type SupabaseDoctorInfo,
+	type SupabaseState,
+	supabaseAgentRecovery,
+} from '../shared/supabase-protocol';
+import { AgentCliError } from './agent-cli-service';
+import {
+	type AgentSupabasePort,
+	createAgentCommandRouter,
+} from './agent-command-router';
 import { NativeHostResponseError } from './native-host-client';
+import type {
+	SupabaseAgentContext,
+	SupabaseReleaseResult,
+} from './supabase/service-ports';
 
 const UDID = '11111111-2222-3333-4444-555555555555';
 const OTHER_UDID = 'BBBBBBBB-0000-4000-8000-000000000002';
@@ -1182,7 +1203,14 @@ describe('agent command router', () => {
 						};
 					}
 					if (operation.kind === 'agent.release') {
-						state.claims = [];
+						const { agent } = operation;
+						state.claims = state.claims.filter(
+							(claim) =>
+								claim.simulatorUdid !== operation.simulatorUdid ||
+								(agent !== undefined &&
+									`${claim.kind}:${claim.sessionId}` !==
+										`${agent.kind}:${agent.sessionId}`)
+						);
 						state.byDevice = {};
 					}
 					return state;
@@ -1300,7 +1328,12 @@ describe('agent command router', () => {
 				refresh: async () => lanes.getState(),
 				runOperation: async (operation: LaneOperation) => {
 					laneOperations.push(operation);
-					return { ...operation, completed: true, state: lanes.getState() };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						state: lanes.getState(),
+					};
 				},
 			};
 			const handler = createAgentCommandRouter({
@@ -1319,6 +1352,7 @@ describe('agent command router', () => {
 			expect(result).toEqual({
 				you: me,
 				stoppedLanes: ['lane-11111111-2222-4333-8444-555555555555'],
+				pendingLanes: [],
 				releasedClaims: [UDID],
 				errors: [],
 			});
@@ -1334,6 +1368,239 @@ describe('agent command router', () => {
 			await expect(
 				handler({ kind: 'release', all: true }, context)
 			).rejects.toMatchObject({ code: 'no_agent_session' });
+		});
+
+		function releaseLane(
+			n: number,
+			worktreePath: string,
+			agent: { kind: 'claude' | 'codex' | 'other'; sessionId: string }
+		): Lane {
+			return {
+				id: `lane-${String(n).repeat(8)}-2222-4333-8444-555555555555`,
+				worktreePath,
+				branch: `feature-${n}`,
+				simulatorUdid: `AAAAAAAA-0000-4000-8000-00000000000${n}`,
+				environment: 'development',
+				port: 8_100 + n,
+				metro: 'ready',
+				logPath: `${worktreePath}/lane.log`,
+				startedAt: now,
+				agent: { ...agent, lastSeenAt: now },
+			};
+		}
+
+		/** A lane port whose stops remove the lane once `stop` settles. */
+		function releaseLanes(
+			initial: Lane[],
+			stop: (
+				laneId: string
+			) => Promise<Partial<LaneOperationReceipt>> = async () => ({})
+		) {
+			let current = initial;
+			const stops: Array<{ laneId: string; signal: AbortSignal }> = [];
+			const state = (): LaneState => ({
+				revision: 1,
+				updatedAt: now,
+				environments: [...DEFAULT_LANE_ENVIRONMENTS],
+				lanes: current,
+				worktrees: [],
+				repositories: [],
+				deviceRequests: [],
+			});
+			const port = {
+				getState: state,
+				refresh: async () => state(),
+				runOperation: async (
+					operation: LaneOperation,
+					signal: AbortSignal
+				): Promise<LaneOperationReceipt> => {
+					if (operation.kind !== 'lane.stop') {
+						throw new Error(`Unexpected ${operation.kind}.`);
+					}
+					stops.push({ laneId: operation.laneId, signal });
+					const outcome = await stop(operation.laneId);
+					if (outcome.completed !== false) {
+						current = current.filter((lane) => lane.id !== operation.laneId);
+					}
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						...outcome,
+					};
+				},
+			};
+			return { port, stops };
+		}
+
+		it('release --all reports failed stops as errors and slow ones as pending, within 2 s and detached from the request', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
+			port
+				.getState()
+				.claims.push({ simulatorUdid: UDID, ...me, claimedAt: now });
+			const failed = releaseLane(1, '/Users/dev/app-a', me);
+			const slow = releaseLane(2, '/Users/dev/app-b', me);
+			const quick = releaseLane(3, '/Users/dev/app-c', me);
+			let slowFinished = false;
+			const { port: lanes, stops } = releaseLanes(
+				[failed, slow, quick],
+				async (laneId) => {
+					if (laneId === failed.id) {
+						return {
+							completed: false,
+							error: 'Metro on port 8101 did not stop.',
+						};
+					}
+					if (laneId === slow.id) {
+						await new Promise((resolve) => setTimeout(resolve, 5_000));
+						slowFinished = true;
+					}
+					return {};
+				}
+			);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+				lanes,
+			});
+			const request = new AbortController();
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			try {
+				let result: unknown;
+				const released = handler(
+					{ kind: 'release', all: true },
+					{ ...context, signal: request.signal, agent: me }
+				).then((value) => {
+					result = value;
+				});
+				// The session-end client hangs up; the stops carry on regardless.
+				request.abort();
+				await vi.advanceTimersByTimeAsync(1_999);
+				expect(result).toEqual({
+					you: me,
+					stoppedLanes: [quick.id],
+					pendingLanes: [slow.id],
+					releasedClaims: [UDID],
+					errors: [`lane ${failed.id}: Metro on port 8101 did not stop.`],
+				});
+				expect(stops.map((stop) => [stop.laneId, stop.signal.aborted])).toEqual(
+					[
+						[failed.id, false],
+						[slow.id, false],
+						[quick.id, false],
+					]
+				);
+				expect(slowFinished).toBe(false);
+				await vi.advanceTimersByTimeAsync(5_000);
+				expect(slowFinished).toBe(true);
+				expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([
+					failed.id,
+				]);
+				await released;
+			} finally {
+				vi.useRealTimers();
+			}
+			expect(operations).toEqual([
+				{ kind: 'agent.release', simulatorUdid: UDID, agent: me },
+			]);
+		});
+
+		it('release --all matches a shared MCP identity’s lanes and claims only by sessionCwd', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const thread = { kind: 'codex' as const, sessionId: 'thread-1' };
+			const shared = {
+				kind: 'codex' as const,
+				sessionId: 'mcp-codex-mcp-client',
+			};
+			const inside = releaseLane(1, '/Users/dev/app-a', shared);
+			const elsewhere = releaseLane(2, '/Users/dev/app-b', shared);
+			const otherKind = releaseLane(3, '/Users/dev/app-a', {
+				kind: 'claude',
+				sessionId: 'mcp-claude-code',
+			});
+			const own = releaseLane(4, '/Users/dev/app-c', thread);
+			const otherThread = releaseLane(5, '/Users/dev/app-a', {
+				kind: 'codex',
+				sessionId: 'thread-2',
+			});
+			const bareUdid = 'AAAAAAAA-0000-4000-8000-000000000006';
+			const ownUdid = 'AAAAAAAA-0000-4000-8000-000000000007';
+			port.getState().claims.push(
+				// On the device of the shared lane the session works in.
+				{ simulatorUdid: inside.simulatorUdid, ...shared, claimedAt: now },
+				// No lane, so no directory to match: left to the hold clock.
+				{ simulatorUdid: bareUdid, ...shared, claimedAt: now },
+				{ simulatorUdid: ownUdid, ...thread, claimedAt: now }
+			);
+			const { port: lanes } = releaseLanes([
+				inside,
+				elsewhere,
+				otherKind,
+				own,
+				otherThread,
+			]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+				lanes,
+			});
+
+			// The session-end hook reports the thread's own id and where it worked.
+			await expect(
+				handler(
+					{
+						kind: 'release',
+						all: true,
+						sessionCwd: '/Users/dev/app-a/src/../src/',
+					},
+					{ ...context, agent: thread }
+				)
+			).resolves.toEqual({
+				you: thread,
+				stoppedLanes: [inside.id, own.id],
+				pendingLanes: [],
+				releasedClaims: [inside.simulatorUdid, ownUdid],
+				errors: [],
+			});
+			expect(operations).toEqual([
+				{
+					kind: 'agent.release',
+					simulatorUdid: inside.simulatorUdid,
+					agent: shared,
+				},
+				{ kind: 'agent.release', simulatorUdid: ownUdid, agent: thread },
+			]);
+
+			// Over MCP the id itself says nothing about which session is asking.
+			const unscoped = (await handler(
+				{ kind: 'release', all: true },
+				{ ...context, agent: shared }
+			)) as Record<string, unknown>;
+			expect(unscoped).toMatchObject({
+				stoppedLanes: [],
+				pendingLanes: [],
+				releasedClaims: [],
+				errors: [],
+			});
+			expect(unscoped.next).toMatch(/sessionCwd/);
+			expect(unscoped.next).toMatch(/lane --operation down/);
+
+			await expect(
+				handler(
+					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app-b' },
+					{ ...context, agent: shared }
+				)
+			).resolves.toMatchObject({ stoppedLanes: [elsewhere.id] });
+			expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([
+				otherKind.id,
+				otherThread.id,
+			]);
+			expect(
+				port.getState().claims.map((claim) => claim.simulatorUdid)
+			).toEqual([bareUdid]);
 		});
 
 		it('records a touch for every device-targeted command that carried a session, after it succeeds', async () => {
@@ -1603,7 +1870,13 @@ describe('agent command router', () => {
 				refresh: async () => state,
 				runOperation: async (operation: LaneOperation) => {
 					operations.push(operation);
-					return { ...operation, completed: true, lane, state };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						lane,
+						state,
+					};
 				},
 			},
 			simulatorInput: async (input) => {
@@ -1650,6 +1923,13 @@ describe('agent command router', () => {
 		await expect(
 			handler({ kind: 'lane', operation: 'down', laneId: lane.id }, asStranger)
 		).rejects.toMatchObject({ code: 'device_held' });
+		// A launch would make the stranger the lane's agent, so it is refused too.
+		await expect(
+			handler(
+				{ kind: 'lane', operation: 'launch', laneId: lane.id, url: 'checkout' },
+				asStranger
+			)
+		).rejects.toMatchObject({ code: 'device_held' });
 		await expect(
 			handler(
 				{
@@ -1664,6 +1944,10 @@ describe('agent command router', () => {
 
 		// The holder, and the operator (no agent on the request), get through.
 		await handler(
+			{ kind: 'lane', operation: 'launch', laneId: lane.id },
+			asOwner
+		);
+		await handler(
 			{ kind: 'lane', operation: 'down', laneId: lane.id },
 			asOwner
 		);
@@ -1676,10 +1960,141 @@ describe('agent command router', () => {
 			asOwner
 		);
 		expect(operations.map((operation) => operation.kind)).toEqual([
+			'lane.launch',
 			'lane.stop',
 			'lane.stop',
 		]);
+		expect(operations[0]).toMatchObject({ agent: owner });
 		expect(inputs).toHaveLength(1);
+	});
+
+	it('records the envelope agent on lane up and launch, so a Codex MCP caller holds its own lane', async () => {
+		const { dependencies } = fixture();
+		const shared = {
+			kind: 'codex' as const,
+			sessionId: 'mcp-codex-mcp-client',
+		};
+		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
+		let current: Lane[] = [];
+		const operations: LaneOperation[] = [];
+		const state = (): LaneState => ({
+			revision: 1,
+			updatedAt: now,
+			environments: [...DEFAULT_LANE_ENVIRONMENTS],
+			lanes: current,
+			worktrees: [],
+			repositories: [],
+			deviceRequests: [],
+		});
+		const unused = () => {
+			throw new Error('unused');
+		};
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			lanes: {
+				getState: state,
+				refresh: async () => state(),
+				runOperation: async (operation: LaneOperation) => {
+					operations.push(operation);
+					if (operation.kind === 'lane.start') {
+						current = [
+							{
+								id: laneId,
+								worktreePath: operation.worktreePath,
+								branch: 'feature',
+								simulatorUdid: UDID,
+								environment: 'development',
+								port: 8_100,
+								metro: 'ready',
+								logPath: '/Users/dev/lane.log',
+								startedAt: now,
+								...(operation.agent
+									? { agent: { ...operation.agent, lastSeenAt: now } }
+									: {}),
+							},
+						];
+					}
+					if (operation.kind === 'lane.stop') current = [];
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						...(current[0] ? { lane: current[0] } : {}),
+					};
+				},
+			},
+			agents: {
+				getState: unused,
+				refresh: unused,
+				runOperation: unused,
+				touch: () => undefined,
+				// The real hold rules over this lane state, with no live sessions.
+				access: (udid, requester) =>
+					decideDeviceAccess(
+						resolveDeviceHolds({
+							lanes: current,
+							claims: [],
+							liveSessionKeys: new Set(),
+							missingSince: new Map(),
+							now,
+						}).get(udid.toUpperCase()),
+						requester,
+						now
+					),
+			},
+			simulatorInput: async (input) => ({
+				udid: input.udid,
+				kind: input.kind,
+				messages: 1,
+				elapsedMilliseconds: 1,
+			}),
+		});
+		const asCodex = { ...context, agent: shared };
+
+		await handler(
+			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
+			asCodex
+		);
+		expect(operations[0]).toMatchObject({ kind: 'lane.start', agent: shared });
+		expect(current[0]?.agent).toMatchObject(shared);
+		await handler({ kind: 'lane', operation: 'launch', laneId }, asCodex);
+		expect(operations[1]).toMatchObject({ kind: 'lane.launch', agent: shared });
+		await expect(
+			handler(
+				{
+					kind: 'input',
+					input: { kind: 'button', udid: UDID, button: 'home' },
+				},
+				asCodex
+			)
+		).resolves.toMatchObject({ kind: 'button' });
+		await expect(
+			handler(
+				{ kind: 'lane', operation: 'launch', laneId },
+				{ ...context, agent: { kind: 'claude', sessionId: 'claude-1' } }
+			)
+		).rejects.toMatchObject({ code: 'device_held' });
+		await handler({ kind: 'lane', operation: 'down', laneId }, asCodex);
+
+		// The command's own agent, filled from the session variables, still wins.
+		await handler(
+			{
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app',
+				agent: { kind: 'codex', sessionId: 'thread-1' },
+			},
+			asCodex
+		);
+		expect(operations.map((operation) => operation.kind)).toEqual([
+			'lane.start',
+			'lane.launch',
+			'lane.stop',
+			'lane.start',
+		]);
+		expect(operations[3]).toMatchObject({
+			agent: { kind: 'codex', sessionId: 'thread-1' },
+		});
 	});
 
 	it('lets lane up omit the udid: the lane service picks a device, and a parked request comes back with next steps', async () => {
@@ -1732,7 +2147,13 @@ describe('agent command router', () => {
 				refresh: async () => state,
 				runOperation: async (operation: LaneOperation) => {
 					operations.push(operation);
-					return { ...operation, completed: true, deviceRequest, state };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						deviceRequest,
+						state,
+					};
 				},
 			},
 		});
@@ -1800,16 +2221,39 @@ describe('agent command router', () => {
 				runOptions.push(options);
 				if (operation.kind === 'lane.start') {
 					state = { ...state, lanes: [lane] };
-					return { ...operation, completed: true, lane, state };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						lane,
+						state,
+					};
 				}
 				if (operation.kind === 'lane.log') {
-					return { ...operation, completed: true, lane, log: 'metro ready' };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						lane,
+						log: 'metro ready',
+					};
 				}
 				if (operation.kind === 'lane.stop') {
 					state = { ...state, lanes: [] };
-					return { ...operation, completed: true, state };
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						state,
+					};
 				}
-				return { ...operation, completed: true, lane, state };
+				return {
+					actionId: operation.actionId,
+					kind: operation.kind,
+					completed: true,
+					lane,
+					state,
+				};
 			},
 		};
 		const handler = createAgentCommandRouter({ ...dependencies, lanes });
@@ -1922,5 +2366,898 @@ describe('agent command router', () => {
 				retryable: true,
 			})
 		);
+	});
+
+	describe('local Supabase', () => {
+		const STACK_ID = SUPABASE_DEMO_IDS.featCheckout;
+		const WORKTREE = '/Users/dev/example-app-wt/feat-checkout';
+		const claude = { kind: 'claude' as const, sessionId: 'claude-1' };
+		const sharedCodex = {
+			kind: 'codex' as const,
+			sessionId: 'mcp-codex-mcp-client',
+		};
+		const STACK: SupabaseAgentStack = {
+			id: STACK_ID,
+			status: 'ready',
+			origin: 'managed',
+			mode: 'managed',
+			runtime: 'native',
+			exposure: 'loopback',
+			branchContext: 'refs/heads/feat-checkout',
+			worktreePath: WORKTREE,
+			projectRoot: WORKTREE,
+			apiPort: 21_734,
+			dbPort: 21_735,
+			laneIds: [],
+			holders: [{ holder: 'session', agent: claude, live: true }],
+			yours: true,
+			cli: { version: '2.121.0', gate: 'verified', run: 'pnpm exec supabase' },
+		};
+		// Placeholder values in the shapes the contract allows; not real keys.
+		const ENV = {
+			API_URL: 'http://127.0.0.1:21734',
+			REST_URL: 'http://127.0.0.1:21734/rest/v1',
+			PUBLISHABLE_KEY: 'sb_publishable_EXAMPLEKEY000',
+			ANON_KEY: 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.ZXhhbXBsZQ',
+		};
+		const DOCTOR: SupabaseDoctorInfo = {
+			enabled: true,
+			capability: 'ready',
+			platform: { supported: true, arch: 'arm64', macosVersion: '15.1' },
+			repositories: [
+				{
+					label: '~/code/example-app',
+					mode: 'managed',
+					cli: { version: '2.121.0', gate: 'verified' },
+				},
+				{
+					label: '~/code/example-admin',
+					mode: 'observed',
+					cli: { version: '2.122.0', gate: 'unsupported' },
+				},
+			],
+			running: 2,
+			cap: 12,
+			sysv: { used: 6, limit: 32 },
+			containerEngine: { docker: 'absent', podman: 'absent' },
+			stats: {
+				starts: 4,
+				failures: 1,
+				failuresByCode: { cli_mismatch: 1 },
+				p50Ms: 4_500,
+				p95Ms: 6_300,
+			},
+			warnings: [],
+		};
+
+		function resultFor(operation: SupabaseAgentOperation): SupabaseAgentResult {
+			switch (operation.operation) {
+				case 'up':
+					return {
+						operation: 'up',
+						stack: STACK,
+						appEnv: [
+							'EXPO_PUBLIC_SUPABASE_URL',
+							'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+						],
+						metro: 'no-lane',
+						cli: {
+							run: 'pnpm exec supabase',
+							workdir: WORKTREE,
+							version: '2.121.0',
+						},
+						next: 'Run `pnpm exec supabase migration up --local` from the worktree.',
+						warnings: ['shared-default-keys'],
+					};
+				case 'down':
+					return {
+						operation: 'down',
+						stackId: STACK_ID,
+						released: true,
+						stopping: true,
+						keptBy: [],
+						next: 'It stops in 60 s unless someone holds it again.',
+					};
+				case 'ls':
+					return { operation: 'ls', stacks: [STACK] };
+				case 'status':
+					return {
+						operation: 'status',
+						stack: STACK,
+						services: [
+							{ service: 'database', state: 'running', health: 'healthy' },
+						],
+						checkedAt: now,
+					};
+				case 'env':
+					return { operation: 'env', stackId: STACK_ID, env: ENV };
+				case 'reset':
+					return {
+						operation: 'reset',
+						stackId: STACK_ID,
+						status: 'complete',
+						seed: operation.seed,
+						next: 'The local database was reset.',
+					};
+				case 'log':
+					return {
+						operation: 'log',
+						stackId: STACK_ID,
+						records: [],
+						truncated: false,
+					};
+				case 'destroy':
+					return {
+						operation: 'destroy',
+						stackId: STACK_ID,
+						requestId: SUPABASE_DEMO_IDS.requestOldUi,
+						status: 'pending',
+						expiresAt: now + 600_000,
+						next: 'The user decides in RN Devtools.',
+					};
+			}
+		}
+
+		function supabaseFake(state = createSupabaseDemoState({ now })) {
+			const calls: Array<{
+				operation: SupabaseAgentOperation;
+				context: SupabaseAgentContext;
+				signal: AbortSignal;
+			}> = [];
+			const releases: Array<Parameters<AgentSupabasePort['releaseHolder']>[0]> =
+				[];
+			const waits: Array<{ jobId: string; timeoutMs: number }> = [];
+			const fake = {
+				state: state as SupabaseState,
+				answer: async (operation: SupabaseAgentOperation): Promise<unknown> =>
+					resultFor(operation),
+				release: async (): Promise<SupabaseReleaseResult> => ({
+					releasedStackIds: [],
+					pendingStops: [],
+				}),
+				doctor: (): SupabaseDoctorInfo => DOCTOR,
+			};
+			const port: AgentSupabasePort = {
+				getState: () => fake.state,
+				runAgentOperation: async (operation, context, signal) => {
+					calls.push({ operation, context, signal });
+					return (await fake.answer(operation)) as SupabaseAgentResult;
+				},
+				releaseHolder: (input) => {
+					releases.push(input);
+					return fake.release();
+				},
+				job: (jobId) => fake.state.jobs.find((job) => job.id === jobId),
+				waitForJob: async (jobId, timeoutMs) => {
+					waits.push({ jobId, timeoutMs });
+					return fake.state.jobs.find((job) => job.id === jobId);
+				},
+				doctor: () => fake.doctor(),
+			};
+			return { port, fake, calls, releases, waits };
+		}
+
+		function agentsWith(sessions: AgentState['sessions']) {
+			const state: AgentState = {
+				revision: 1,
+				updatedAt: now,
+				sessions,
+				byDevice: {},
+				claims: [],
+				holds: {},
+				discovery: { claude: 'ok', codex: 'ok' },
+			};
+			return {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async () => state,
+				touch: () => undefined,
+			};
+		}
+
+		it('reports absent local Supabase with a typed recovery path', async () => {
+			const { handler } = fixture();
+			const jobId = SUPABASE_DEMO_IDS.jobFixAuth;
+			for (const command of [
+				{ kind: 'supabase', operation: 'ls' },
+				{ kind: 'wait', condition: { kind: 'job', jobId }, timeoutMs: 1_000 },
+				{ kind: 'jobs', operation: 'get', jobId },
+			] as const) {
+				await expect(handler(command, context)).rejects.toMatchObject({
+					code: 'unavailable',
+					recovery: 'Update RN Devtools and retry.',
+				});
+			}
+			expect(await handler({ kind: 'doctor' }, context)).not.toHaveProperty(
+				'supabase'
+			);
+		});
+
+		it('runs the contract operation with the envelope identity and returns the checked result', async () => {
+			const { dependencies } = fixture();
+			const { port, calls } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+				agents: agentsWith([
+					{
+						kind: 'claude',
+						sessionId: 'claude-1',
+						title: 'checkout',
+						cwd: `${WORKTREE}/apps/mobile`,
+					},
+					{
+						kind: 'codex',
+						sessionId: 'thread-9',
+						title: 'payments',
+						cwd: '/Users/dev/example-app-wt/feat-payments',
+					},
+				]),
+			});
+			const signal = new AbortController().signal;
+			const up = {
+				operation: 'up',
+				target: { worktreePath: WORKTREE },
+				waitMs: 30_000,
+			} as const;
+			await expect(
+				handler(
+					{ kind: 'supabase', operation: 'up', worktreePath: WORKTREE },
+					{ ...context, signal, agent: claude }
+				)
+			).resolves.toEqual(resultFor(up));
+			expect(calls[0]).toEqual({
+				operation: up,
+				context: {
+					requestId: context.requestId,
+					synthetic: false,
+					holder: claude,
+					sessionCwd: `${WORKTREE}/apps/mobile`,
+				},
+				signal,
+			});
+
+			// The contract's defaults (seed on, 200 lines); a stack id prefix
+			// passes through for the service to resolve.
+			await handler(
+				{
+					kind: 'supabase',
+					operation: 'reset',
+					stackId: STACK_ID.slice(0, 8),
+					note: 'Start over.',
+				},
+				{ ...context, agent: claude }
+			);
+			await handler(
+				{
+					kind: 'supabase',
+					operation: 'log',
+					worktreePath: WORKTREE,
+					services: ['gateway'],
+					since: '10m',
+				},
+				{ ...context, agent: claude }
+			);
+			expect(calls.slice(1).map((call) => call.operation)).toEqual([
+				{
+					operation: 'reset',
+					target: { stackId: STACK_ID.slice(0, 8) },
+					seed: true,
+					// Kept for the request card when another session holds it.
+					note: 'Start over.',
+				},
+				{
+					operation: 'log',
+					target: { worktreePath: WORKTREE },
+					tail: 200,
+					services: ['gateway'],
+					since: '10m',
+				},
+			]);
+
+			// A shared MCP identity is matched by worktree, so it carries no
+			// session directory even while one of its sessions is discovered.
+			await handler(
+				{ kind: 'supabase', operation: 'down', worktreePath: WORKTREE },
+				{ ...context, agent: sharedCodex }
+			);
+			expect(calls[3]?.context).toEqual({
+				requestId: context.requestId,
+				synthetic: true,
+				holder: sharedCodex,
+			});
+			// No session on the envelope: the operator's own CLI.
+			await expect(
+				handler({ kind: 'supabase', operation: 'ls' }, context)
+			).resolves.toEqual({ operation: 'ls', stacks: [STACK] });
+			expect(calls[4]?.context).toEqual({
+				requestId: context.requestId,
+				synthetic: false,
+			});
+		});
+
+		it('refuses while local Supabase is off, unsupported, or unreadable, and never suggests Docker', async () => {
+			const { dependencies } = fixture();
+			const { port, fake, calls } = supabaseFake(
+				createSupabaseDemoState({ now, variant: 'off' })
+			);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+			});
+			const up = {
+				kind: 'supabase',
+				operation: 'up',
+				worktreePath: WORKTREE,
+			} as const;
+			const off = await handler(up, { ...context, agent: claude }).catch(
+				(error: unknown) => error as AgentCliError
+			);
+			expect(off).toMatchObject({
+				code: 'supabase_disabled',
+				retryable: false,
+			});
+			const recovery = (off as AgentCliError).recovery;
+			expect(recovery).toMatch(
+				/^Ask the user to turn on local Supabase in RN Devtools › Supabase/
+			);
+			expect(recovery).toMatch(/`supabase start --runtime native`/);
+			expect(recovery).not.toMatch(/docker/i);
+
+			fake.state = createSupabaseDemoState({ now, variant: 'unsupported' });
+			await expect(handler(up, context)).rejects.toMatchObject({
+				code: 'supabase_unsupported',
+				message: 'Native Supabase needs Apple silicon and macOS 14 or later.',
+				recovery: supabaseAgentRecovery('supabase_unsupported'),
+			});
+
+			const demo = createSupabaseDemoState({ now });
+			fake.state = {
+				...demo,
+				feature: { ...demo.feature, policyHealth: 'quarantined' },
+			};
+			await expect(handler(up, context)).rejects.toMatchObject({
+				code: 'supabase_disabled',
+				message: expect.stringContaining('could not read'),
+			});
+			expect(calls).toEqual([]);
+		});
+
+		it('maps service failures to typed errors whose recovery names the next call', async () => {
+			const { dependencies } = fixture();
+			const { port, fake } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+			});
+			const failure = async (thrown: unknown, signal = context.signal) => {
+				fake.answer = async () => {
+					throw thrown;
+				};
+				return await handler(
+					{ kind: 'supabase', operation: 'up', worktreePath: WORKTREE },
+					{ ...context, signal, agent: claude }
+				).then(
+					() => {
+						throw new Error('Expected the operation to fail.');
+					},
+					(error: unknown) => error as AgentCliError
+				);
+			};
+
+			// Typed errors keep their own recovery, or get the contract's.
+			const own = new AgentCliError({
+				code: 'supabase_held',
+				message: 'Codex 5d1b8f40 holds this stack.',
+				recovery: 'Ask the user to release it.',
+			});
+			expect(await failure(own)).toBe(own);
+			expect(
+				await failure(
+					new AgentCliError({
+						code: 'supabase_held',
+						message: 'Codex 5d1b8f40 holds this stack.',
+					})
+				)
+			).toMatchObject({
+				code: 'supabase_held',
+				recovery: supabaseAgentRecovery('supabase_held'),
+			});
+			// Plain errors with an agent code, and the worktree's runner.
+			expect(
+				await failure(
+					Object.assign(new Error('12 of 12 stacks are running.'), {
+						code: 'supabase_capacity',
+					})
+				)
+			).toMatchObject({
+				code: 'supabase_capacity',
+				message: '12 of 12 stacks are running.',
+				retryable: true,
+				recovery: supabaseAgentRecovery('supabase_capacity'),
+			});
+			expect(
+				await failure({
+					code: 'cli_unverified',
+					message: 'Supabase CLI 2.122.0 is not verified.',
+					runner: 'pnpm exec supabase',
+				})
+			).toMatchObject({
+				code: 'cli_unverified',
+				retryable: false,
+				recovery: supabaseAgentRecovery('cli_unverified', 'pnpm exec supabase'),
+			});
+			// Off always reads the same, naming the runner when the service does.
+			expect(
+				await failure(
+					new AgentCliError({
+						code: 'supabase_disabled',
+						message: 'Local Supabase is off.',
+						recovery: supabaseAgentRecovery('supabase_disabled'),
+					})
+				)
+			).toMatchObject({
+				code: 'supabase_disabled',
+				recovery: expect.stringMatching(/^Ask the user to turn on/),
+			});
+			const runnerOff = await failure({
+				code: 'supabase_disabled',
+				message: 'Local Supabase is off.',
+				runner: 'pnpm exec supabase',
+			});
+			expect(runnerOff.recovery).toContain(
+				'`pnpm exec supabase start --runtime native`'
+			);
+			expect(
+				(await failure({ code: 'cli_unverified', runner: '`rm -rf ~`' }))
+					.recovery
+			).toBe(supabaseAgentRecovery('cli_unverified'));
+			// Renderer-shaped failures map onto agent codes without operator copy.
+			expect(
+				await failure({
+					code: 'unknown_target',
+					title: 'Unknown stack',
+					message: 'No stack matches 64616c83.',
+					recovery: 'Refresh the list.',
+					retry: 'none',
+					details: {},
+				})
+			).toMatchObject({
+				code: 'not_found',
+				retryable: false,
+				recovery: supabaseAgentRecovery('not_found'),
+			});
+			// Anything else is redacted, bounded, and worth one retry.
+			const internal = await failure(
+				new TypeError('cannot parse SECRET_KEY=sb_secret_EXAMPLE000 here')
+			);
+			expect(internal).toMatchObject({
+				code: 'supabase_failed',
+				retryable: true,
+				recovery: supabaseAgentRecovery('supabase_failed'),
+			});
+			expect(internal.message).not.toContain('sb_secret_');
+			// A request the client abandoned reads as cancelled.
+			const abandoned = new AbortController();
+			abandoned.abort();
+			expect(
+				await failure(new Error('The operation was aborted.'), abandoned.signal)
+			).toMatchObject({ code: 'cancelled' });
+		});
+
+		it('withholds results that break the agent contract or carry key material outside env', async () => {
+			const { dependencies } = fixture();
+			const { port, fake } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+			});
+			const up = {
+				kind: 'supabase',
+				operation: 'up',
+				worktreePath: WORKTREE,
+			} as const;
+			const upResult = resultFor({
+				operation: 'up',
+				target: { worktreePath: WORKTREE },
+				waitMs: 30_000,
+			});
+			for (const answer of [
+				{ ...upResult, stack: { ...STACK, apiUrl: ENV.API_URL } },
+				{
+					...upResult,
+					next: 'Connect with postgresql://postgres:postgres@127.0.0.1:21735/postgres.',
+				},
+				{ ...upResult, next: `Send apikey ${ENV.ANON_KEY}.` },
+				{ ...upResult, next: `Use ${ENV.PUBLISHABLE_KEY} in the app.` },
+				// Another operation's result, or none at all.
+				resultFor({ operation: 'env', target: { worktreePath: WORKTREE } }),
+				undefined,
+			]) {
+				fake.answer = async () => answer;
+				await expect(handler(up, context)).rejects.toMatchObject({
+					code: 'supabase_failed',
+					message: expect.stringContaining('withheld'),
+					retryable: true,
+				});
+			}
+
+			// env is the one result that carries the public URL and keys.
+			fake.answer = async (operation) => resultFor(operation);
+			await expect(
+				handler(
+					{ kind: 'supabase', operation: 'env', worktreePath: WORKTREE },
+					context
+				)
+			).resolves.toEqual({ operation: 'env', stackId: STACK_ID, env: ENV });
+
+			// Service log lines are redacted once more on the way out.
+			const entry = {
+				type: 'entry',
+				timestamp: '2026-10-17T05:00:00.000Z',
+				source: 'history',
+				service: 'gateway',
+				instanceId: 'gateway',
+				stream: 'stdout',
+				line: `GET /rest/v1/notes?apikey=${ENV.PUBLISHABLE_KEY}&select=id 200 ${ENV.ANON_KEY}`,
+			} as const;
+			const marker = {
+				type: 'marker',
+				timestamp: entry.timestamp,
+				source: 'history',
+				service: 'gateway',
+				instanceId: 'gateway',
+				kind: 'launch',
+			} as const;
+			fake.answer = async () => ({
+				operation: 'log',
+				stackId: STACK_ID,
+				records: [entry, marker],
+				truncated: false,
+			});
+			const log = (await handler(
+				{ kind: 'supabase', operation: 'log', worktreePath: WORKTREE },
+				context
+			)) as Extract<SupabaseAgentResult, { operation: 'log' }>;
+			expect(log.records).toEqual([
+				{
+					...entry,
+					line: 'GET /rest/v1/notes?apikey=[REDACTED]&select=id 200 [REDACTED JWT]',
+				},
+				marker,
+			]);
+		});
+
+		it('release --all drops the session’s stack holds and reports them', async () => {
+			const { dependencies } = fixture();
+			const { port, fake, releases } = supabaseFake();
+			fake.release = async () => ({
+				releasedStackIds: [STACK_ID],
+				pendingStops: [STACK_ID],
+			});
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: agentsWith([]),
+				supabase: port,
+			});
+			await expect(
+				handler(
+					{ kind: 'release', all: true, sessionCwd: `${WORKTREE}/src/../src/` },
+					{ ...context, agent: claude }
+				)
+			).resolves.toEqual({
+				you: claude,
+				stoppedLanes: [],
+				pendingLanes: [],
+				releasedClaims: [],
+				releasedStacks: [STACK_ID],
+				pendingStops: [STACK_ID],
+				errors: [],
+			});
+			expect(releases).toEqual([
+				{ holder: claude, sessionCwd: `${WORKTREE}/src` },
+			]);
+
+			// A failed release is reported, redacted, beside the rest.
+			fake.release = async () => {
+				throw new Error('registry write failed near sb_secret_EXAMPLE000');
+			};
+			const failed = (await handler(
+				{ kind: 'release', all: true },
+				{ ...context, agent: claude }
+			)) as { releasedStacks: string[]; errors: string[] };
+			expect(failed.releasedStacks).toEqual([]);
+			expect(failed.errors).toEqual([
+				expect.stringMatching(/^supabase: registry write failed near /),
+			]);
+			expect(failed.errors.join(' ')).not.toContain('sb_secret_');
+			expect(releases[1]).toEqual({ holder: claude });
+
+			// A shared MCP identity without its directory releases nothing.
+			const unscoped = (await handler(
+				{ kind: 'release', all: true },
+				{ ...context, agent: sharedCodex }
+			)) as { releasedStacks: string[]; next?: string };
+			expect(unscoped.releasedStacks).toEqual([]);
+			expect(unscoped.next).toMatch(/sessionCwd/);
+			expect(unscoped.next).toMatch(/supabase --operation down/);
+			expect(releases).toHaveLength(2);
+			await handler(
+				{ kind: 'release', all: true, sessionCwd: WORKTREE },
+				{ ...context, agent: sharedCodex }
+			);
+			expect(releases[2]).toEqual({
+				holder: sharedCodex,
+				sessionCwd: WORKTREE,
+			});
+		});
+
+		it('release --all answers within 2 s while the stack release still runs', async () => {
+			const { dependencies } = fixture();
+			const { port, fake } = supabaseFake();
+			let finished = false;
+			fake.release = async () => {
+				await new Promise((resolve) => setTimeout(resolve, 5_000));
+				finished = true;
+				return { releasedStackIds: [STACK_ID], pendingStops: [] };
+			};
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: agentsWith([]),
+				supabase: port,
+			});
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			try {
+				let result: unknown;
+				const released = handler(
+					{ kind: 'release', all: true },
+					{ ...context, agent: claude }
+				).then((value) => {
+					result = value;
+				});
+				await vi.advanceTimersByTimeAsync(1_999);
+				expect(result).toEqual({
+					you: claude,
+					stoppedLanes: [],
+					pendingLanes: [],
+					releasedClaims: [],
+					releasedStacks: [],
+					pendingStops: [],
+					errors: [
+						'supabase: dropping the stack holds took longer than 1.5 s and continues in the background.',
+					],
+				});
+				expect(finished).toBe(false);
+				await vi.advanceTimersByTimeAsync(5_000);
+				expect(finished).toBe(true);
+				await released;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('follows Supabase jobs through wait and jobs, and reports lost ones', async () => {
+			const { dependencies } = fixture();
+			const { port, fake, waits } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+			});
+			const jobId = SUPABASE_DEMO_IDS.jobFixAuth;
+			const job = fake.state.jobs[0];
+			await expect(
+				handler(
+					{
+						kind: 'wait',
+						condition: { kind: 'job', jobId },
+						timeoutMs: 45_000,
+					},
+					context
+				)
+			).resolves.toEqual(job);
+			expect(waits).toEqual([{ jobId, timeoutMs: 45_000 }]);
+			await expect(
+				handler({ kind: 'jobs', operation: 'list' }, context)
+			).resolves.toEqual([{ source: 'supabase', ...job }]);
+			await expect(
+				handler({ kind: 'jobs', operation: 'get', jobId }, context)
+			).resolves.toEqual({ source: 'supabase', ...job });
+			await expect(
+				handler({ kind: 'jobs', operation: 'cancel', jobId }, context)
+			).resolves.toMatchObject({
+				cancelled: false,
+				next: expect.stringContaining('RN Devtools › Supabase'),
+			});
+
+			const lost = {
+				code: 'job_lost',
+				retryable: true,
+				recovery: supabaseAgentRecovery('job_lost'),
+			};
+			const unknown = 'supabase-job-00000000-0000-4000-8000-000000000000';
+			await expect(
+				handler(
+					{
+						kind: 'wait',
+						condition: { kind: 'job', jobId: unknown },
+						timeoutMs: 1_000,
+					},
+					context
+				)
+			).rejects.toMatchObject(lost);
+			await expect(
+				handler({ kind: 'jobs', operation: 'get', jobId: unknown }, context)
+			).rejects.toMatchObject(lost);
+			fake.state = {
+				...fake.state,
+				jobs: fake.state.jobs.map((candidate) => ({
+					...candidate,
+					status: 'lost' as const,
+				})),
+			};
+			await expect(
+				handler(
+					{ kind: 'wait', condition: { kind: 'job', jobId }, timeoutMs: 1_000 },
+					context
+				)
+			).rejects.toMatchObject(lost);
+		});
+
+		it('lists each session’s stack holds in agents and reports Supabase in doctor', async () => {
+			const { dependencies } = fixture();
+			const { port, fake } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: agentsWith([]),
+				supabase: port,
+			});
+			const ids = SUPABASE_DEMO_IDS;
+			const agents = (await handler({ kind: 'agents' }, context)) as {
+				supabaseHolds: unknown[];
+			};
+			// Lane holds without an agent and the operator's pin are nobody's session.
+			expect(agents.supabaseHolds).toEqual([
+				{
+					stackId: ids.featCheckout,
+					branch: 'feat-checkout',
+					via: 'lane',
+					laneId: ids.laneCheckout,
+					holder: { kind: 'claude', sessionId: ids.claudeCheckout },
+					holderLive: true,
+				},
+				{
+					stackId: ids.featCheckout,
+					branch: 'feat-checkout',
+					via: 'session',
+					holder: { kind: 'codex', sessionId: ids.codexAbandoned },
+					holderLive: false,
+					abandonedSince: now - 3 * 60_000,
+					releaseAt: now + 7 * 60_000,
+				},
+				{
+					stackId: ids.featPayments,
+					branch: 'feat-payments',
+					via: 'worktree',
+					holder: { kind: 'codex', sessionId: ids.codexSynthetic },
+					holderLive: true,
+				},
+			]);
+
+			await expect(handler({ kind: 'doctor' }, context)).resolves.toMatchObject(
+				{ supabase: DOCTOR }
+			);
+			// A doctor section that cannot be read, or breaks its bounds, never
+			// fails doctor itself.
+			fake.doctor = () => {
+				throw new Error('The policy store is busy.');
+			};
+			await expect(handler({ kind: 'doctor' }, context)).resolves.toMatchObject(
+				{ supabase: { capability: 'unavailable', error: expect.any(String) } }
+			);
+			fake.doctor = () => ({
+				...DOCTOR,
+				warnings: Array.from({ length: 17 }, () => 'Too many warnings.'),
+			});
+			await expect(handler({ kind: 'doctor' }, context)).resolves.toMatchObject(
+				{ supabase: { capability: 'unavailable' } }
+			);
+		});
+
+		it('forwards lane up’s backend policy and says what to do while the stack starts', async () => {
+			const { dependencies } = fixture();
+			const lane: Lane = {
+				id: 'lane-11111111-2222-4333-8444-555555555555',
+				worktreePath: WORKTREE,
+				branch: 'feat-checkout',
+				simulatorUdid: UDID,
+				environment: 'development',
+				port: 8_100,
+				metro: 'ready',
+				logPath: '/Users/dev/lane.log',
+				startedAt: now,
+			};
+			const state: LaneState = {
+				revision: 1,
+				updatedAt: now,
+				environments: [...DEFAULT_LANE_ENVIRONMENTS],
+				lanes: [],
+				worktrees: [],
+				repositories: [],
+				deviceRequests: [],
+			};
+			const operations: LaneOperation[] = [];
+			let backend: LaneOperationReceipt['backend'];
+			let completed = true;
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				lanes: {
+					getState: () => state,
+					refresh: async () => state,
+					runOperation: async (operation: LaneOperation) => {
+						operations.push(operation);
+						return {
+							actionId: operation.actionId,
+							kind: operation.kind,
+							completed,
+							...(completed
+								? { lane }
+								: {
+										error: "The lane requires this worktree's local Supabase.",
+									}),
+							...(backend ? { backend } : {}),
+						};
+					},
+				},
+			});
+			const up = {
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: WORKTREE,
+			} as const;
+
+			await expect(handler(up, context)).resolves.not.toHaveProperty('next');
+			expect(operations[0]).not.toHaveProperty('backend');
+
+			const jobId = SUPABASE_DEMO_IDS.jobFixAuth;
+			backend = {
+				policy: 'auto',
+				status: 'starting',
+				appEnvNames: [],
+				warnings: [],
+				jobId,
+				launch: 'deferred',
+			};
+			const starting = (await handler({ ...up, backend: 'auto' }, context)) as {
+				backend?: unknown;
+				next?: string;
+			};
+			expect(operations[1]).toMatchObject({
+				kind: 'lane.start',
+				backend: 'auto',
+			});
+			expect(starting.backend).toEqual(backend);
+			expect(starting.next).toBe(
+				`This worktree's local Supabase is still starting; the dev client launches once it is ready. Follow it with wait --condition job --job-id ${jobId}.`
+			);
+
+			backend = {
+				policy: 'required',
+				status: 'refused',
+				reason: 'ports-pinned',
+				appEnvNames: [],
+				warnings: [],
+				reasonText: 'supabase/config.toml pins api.port.',
+			};
+			completed = false;
+			await expect(
+				handler({ ...up, backend: 'required' }, context)
+			).rejects.toMatchObject({
+				code: 'lane_failed',
+				message: "The lane requires this worktree's local Supabase.",
+				retryable: true,
+				recovery: expect.stringContaining('backend auto'),
+			});
+			expect(operations[2]).toMatchObject({ backend: 'required' });
+		});
 	});
 });

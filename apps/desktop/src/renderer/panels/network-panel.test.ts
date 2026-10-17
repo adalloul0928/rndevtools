@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { headersText, methodBadgeTone, statusTone } from './network-panel';
+import {
+	headersText,
+	matchesNetworkTarget,
+	methodBadgeTone,
+	statusTone,
+} from './network-panel';
 
 describe('methodBadgeTone', () => {
 	it('maps HTTP verbs to semantic badge tones', () => {
@@ -37,5 +42,34 @@ describe('headersText', () => {
 		expect(
 			headersText({ 'X-Trace': '1', 'Content-Type': 'application/json' })
 		).toBe('Content-Type: application/json\nX-Trace: 1');
+	});
+});
+
+describe('matchesNetworkTarget', () => {
+	const stack = 'a'.repeat(64);
+	const filter = { key: `stack:${stack}`, label: 'origin 127.0.0.1:24410' };
+
+	it('keeps every request without a backend filter', () => {
+		expect(matchesNetworkTarget(undefined, null)).toBe(true);
+	});
+
+	it('keeps only requests to the filtered backend', () => {
+		expect(
+			matchesNetworkTarget(
+				{ kind: 'other-stack', stackId: stack, port: 24_410 },
+				filter
+			)
+		).toBe(true);
+		expect(
+			matchesNetworkTarget(
+				{
+					kind: 'hosted',
+					host: 'abcd1234.supabase.co',
+					projectRef: 'abcd1234',
+				},
+				filter
+			)
+		).toBe(false);
+		expect(matchesNetworkTarget(undefined, filter)).toBe(false);
 	});
 });

@@ -8,6 +8,7 @@ import {
 	laneDeepLink,
 	laneDevClientLaunchUrl,
 	laneHealth,
+	laneOperationReceiptSchema,
 	laneOperationSchema,
 	laneSchema,
 	laneSlimSummary,
@@ -104,6 +105,104 @@ describe('lane protocol schemas', () => {
 			repositories: ['/Users/dev/app'],
 		});
 		expect(state.lanes).toHaveLength(1);
+	});
+});
+
+describe('lane backends on the wire', () => {
+	const backend = {
+		policy: 'auto',
+		status: 'ready',
+		stackId: '64616c83912c48442ec266f86ee2d7f004d2be5c8b7f31a6d6b4c2634f82145f',
+		apiUrl: 'http://127.0.0.1:21734',
+		appEnvNames: ['EXPO_PUBLIC_SUPABASE_URL'],
+		warnings: ['shared-default-keys'],
+	};
+	const emptyState = {
+		revision: 1,
+		updatedAt: 1,
+		environments: DEFAULT_LANE_ENVIRONMENTS,
+		lanes: [],
+		worktrees: [],
+		repositories: [],
+	};
+
+	it('lets lane.start ask for a backend policy, and leaves an omitted one to the desktop', () => {
+		const start = {
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: '/Users/dev/app',
+		};
+		for (const policy of ['auto', 'off', 'required'] as const) {
+			expect(
+				laneOperationSchema.parse({ ...start, backend: policy })
+			).toMatchObject({ backend: policy });
+		}
+		expect(laneOperationSchema.parse(start)).not.toHaveProperty('backend');
+		expect(
+			laneOperationSchema.safeParse({ ...start, backend: 'docker' }).success
+		).toBe(false);
+		// Only a start names a backend.
+		expect(
+			laneOperationSchema.safeParse({
+				actionId: 'op-2',
+				kind: 'lane.launch',
+				laneId: lane().id,
+				backend: 'auto',
+			}).success
+		).toBe(false);
+	});
+
+	it("carries a lane's backend in the state and receipts, never in a stored lane", () => {
+		const withBackend = { ...lane(), backend };
+		// lanes.json validates with laneSchema, which refuses the field.
+		expect(laneSchema.safeParse(withBackend).success).toBe(false);
+		expect(
+			laneStateSchema.parse({ ...emptyState, lanes: [withBackend] }).lanes[0]
+				?.backend
+		).toEqual(backend);
+		const receipt = laneOperationReceiptSchema.parse({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			completed: true,
+			lane: withBackend,
+			backend,
+		});
+		expect(receipt.backend).toEqual(backend);
+		expect(receipt.lane?.backend).toEqual(backend);
+		// Names and loopback URLs only: no values, no key, no remote URL.
+		for (const smuggled of [
+			{ ...backend, apiUrl: 'https://example.com' },
+			{ ...backend, publishableKey: 'sb_publishable_example' },
+			{ ...backend, appEnvNames: ['expo-public-url'] },
+		]) {
+			expect(
+				laneStateSchema.safeParse({
+					...emptyState,
+					lanes: [{ ...lane(), backend: smuggled }],
+				}).success
+			).toBe(false);
+		}
+	});
+
+	it('keeps the backend policy on a parked device request', () => {
+		const state = laneStateSchema.parse({
+			...emptyState,
+			deviceRequests: [
+				{
+					id: 'device-request-1',
+					status: 'pending',
+					requestedAt: 1,
+					updatedAt: 1,
+					message: 'All 2 available Simulators are in use.',
+					worktreePath: '/Users/dev/app-feature-c',
+					branch: 'feature-c',
+					environment: 'development',
+					launch: true,
+					backend: 'required',
+				},
+			],
+		});
+		expect(state.deviceRequests[0]?.backend).toBe('required');
 	});
 });
 
@@ -268,6 +367,55 @@ describe('allocateLanePort', () => {
 			})
 		).rejects.toThrow(/No free Metro port/);
 	});
+
+	it('skips a port another start claimed and claims the one it returns', async () => {
+		const claimed = new Set([8_100]);
+		const claim = (port: number) => {
+			if (claimed.has(port)) return false;
+			claimed.add(port);
+			return true;
+		};
+		await expect(
+			allocateLanePort({
+				environment,
+				lanes: [],
+				isPortFree: async () => true,
+				claim,
+			})
+		).resolves.toBe(8_101);
+		expect(claimed).toEqual(new Set([8_100, 8_101]));
+		await expect(
+			allocateLanePort({
+				environment,
+				lanes: [],
+				isPortFree: async () => true,
+				preferredPort: 8_100,
+				claim,
+			})
+		).rejects.toThrow(/already in use/);
+	});
+
+	it('never hands two concurrent starts the same port', async () => {
+		// Both bind probes pass before either start has a Metro on the port;
+		// the claim after each probe is what keeps them apart.
+		const claimed = new Set<number>();
+		const claim = (port: number) => {
+			if (claimed.has(port)) return false;
+			claimed.add(port);
+			return true;
+		};
+		const ports = await Promise.all(
+			[0, 1, 2].map(() =>
+				allocateLanePort({
+					environment,
+					lanes: [],
+					isPortFree: async () => true,
+					claim,
+				})
+			)
+		);
+		expect(new Set(ports).size).toBe(3);
+	});
 });
 
 describe('findLaneConflict', () => {
@@ -290,6 +438,37 @@ describe('findLaneConflict', () => {
 				worktreePath: '/Users/dev/app-feature-b',
 				simulatorUdid: OTHER_UDID,
 			})
+		).toBeUndefined();
+	});
+
+	it('treats what an in-flight start reserved like a lane', () => {
+		const reservations = [
+			{ appDirectory: '/Users/dev/app-feature-c', simulatorUdid: UDID },
+		];
+		expect(
+			findLaneConflict(
+				[],
+				{ worktreePath: '/Users/dev/app-feature-c', simulatorUdid: OTHER_UDID },
+				reservations
+			)
+		).toMatch(/app-feature-c already has a lane starting/);
+		expect(
+			findLaneConflict(
+				[],
+				{
+					worktreePath: '/Users/dev/app-feature-b',
+					simulatorUdid: UDID.toLowerCase(),
+				},
+				reservations
+			)
+		).toMatch(/already assigned to a lane starting for/);
+		// A reservation that has not chosen a Simulator yet holds only its app.
+		expect(
+			findLaneConflict(
+				[],
+				{ worktreePath: '/Users/dev/app-feature-b', simulatorUdid: UDID },
+				[{ appDirectory: '/Users/dev/app-feature-c' }]
+			)
 		).toBeUndefined();
 	});
 });

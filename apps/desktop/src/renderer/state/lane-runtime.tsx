@@ -6,6 +6,7 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from 'react';
 import {
@@ -27,6 +28,89 @@ type WithoutActionId<T> = T extends { actionId: string }
 	: never;
 type LaneOperationInput = WithoutActionId<LaneOperation>;
 
+/**
+ * Where another panel sends the operator in Lanes: a lane by id (a bare
+ * string), or the Agents view, optionally at one session's card, keyed
+ * `kind:sessionId` like agentSessionKey.
+ * @public
+ */
+export type LaneFocusTarget =
+	| string
+	| Readonly<{ view: 'lanes'; laneId?: string }>
+	| Readonly<{ view: 'agents'; sessionKey?: string }>;
+
+/** A focus request the Lanes panel applies once, then reports handled. */
+type LaneFocusRequest = Readonly<{
+	view: 'lanes' | 'agents';
+	laneId?: string;
+	sessionKey?: string;
+	nonce: number;
+}>;
+
+export function laneFocusRequest(
+	target: LaneFocusTarget,
+	nonce: number
+): LaneFocusRequest {
+	if (typeof target === 'string') {
+		return { view: 'lanes', laneId: target, nonce };
+	}
+	if (target.view === 'agents') {
+		return {
+			view: 'agents',
+			...(target.sessionKey === undefined
+				? {}
+				: { sessionKey: target.sessionKey }),
+			nonce,
+		};
+	}
+	return {
+		view: 'lanes',
+		...(target.laneId === undefined ? {} : { laneId: target.laneId }),
+		nonce,
+	};
+}
+
+/**
+ * What the Lanes panel does with a pending request: wait for the first lane
+ * state when it names a lane not listed yet, or apply it. A lane that is gone
+ * by then still opens Lanes, on its default selection.
+ */
+export function resolveLaneFocus(
+	request: LaneFocusRequest,
+	lanes: readonly Readonly<{ id: string }>[],
+	isLoading: boolean
+):
+	| Readonly<{ kind: 'wait' }>
+	| Readonly<{
+			kind: 'apply';
+			view: 'lanes' | 'agents';
+			laneId?: string;
+			sessionKey?: string;
+	  }> {
+	if (request.view === 'agents') {
+		return {
+			kind: 'apply',
+			view: 'agents',
+			...(request.sessionKey === undefined
+				? {}
+				: { sessionKey: request.sessionKey }),
+		};
+	}
+	const listed =
+		request.laneId !== undefined &&
+		lanes.some((lane) => lane.id === request.laneId);
+	if (request.laneId !== undefined && !listed && isLoading) {
+		return { kind: 'wait' };
+	}
+	return {
+		kind: 'apply',
+		view: 'lanes',
+		...(listed && request.laneId !== undefined
+			? { laneId: request.laneId }
+			: {}),
+	};
+}
+
 type LaneRuntimeValue = {
 	state: LaneState;
 	isLoading: boolean;
@@ -41,6 +125,15 @@ type LaneRuntimeValue = {
 		messages?: { pendingMessage?: string; successMessage?: string }
 	) => Promise<LaneOperationReceipt | undefined>;
 	laneForSimulator: (udid: string) => LaneState['lanes'][number] | undefined;
+	/** The latest request to show a lane or an Agents card, until handled. */
+	focus: LaneFocusRequest | null;
+	/**
+	 * Opens Lanes at a lane, or the Agents view at a session's card, and
+	 * navigates to `#simulator/lanes`.
+	 */
+	focusLane: (target: LaneFocusTarget) => void;
+	/** The Lanes panel applied the request with this nonce. */
+	focusHandled: (nonce: number) => void;
 };
 
 const EMPTY_LANE_STATE: LaneState = {
@@ -169,6 +262,21 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 		await runOperation({ kind: 'lane.refresh' });
 	}, [runOperation]);
 
+	// The Lanes panel mounts lazily and keeps its view and selection locally,
+	// so a deep link waits here until the panel applies it.
+	const [focus, setFocus] = useState<LaneFocusRequest | null>(null);
+	const focusNonce = useRef(0);
+	const focusLane = useCallback((target: LaneFocusTarget) => {
+		focusNonce.current += 1;
+		setFocus(laneFocusRequest(target, focusNonce.current));
+		if (window.location.hash !== '#simulator/lanes') {
+			window.location.hash = 'simulator/lanes';
+		}
+	}, []);
+	const focusHandled = useCallback((nonce: number) => {
+		setFocus((current) => (current?.nonce === nonce ? null : current));
+	}, []);
+
 	const value = useMemo<LaneRuntimeValue>(
 		() => ({
 			state,
@@ -183,6 +291,9 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 				state.lanes.find(
 					(lane) => lane.simulatorUdid.toUpperCase() === udid.toUpperCase()
 				),
+			focus,
+			focusLane,
+			focusHandled,
 		}),
 		[
 			state,
@@ -192,6 +303,9 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 			actionStatus,
 			refresh,
 			runOperation,
+			focus,
+			focusLane,
+			focusHandled,
 		]
 	);
 

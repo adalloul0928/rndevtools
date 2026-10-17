@@ -127,7 +127,8 @@ export function SimulatorMetric({
 			</Card.Header>
 			<Card.Content className="sim-metric-content">
 				<strong>{value}</strong>
-				<span>{detail}</span>
+				{/* Narrow layouts may cut the detail; hovering shows all of it. */}
+				<span title={detail}>{detail}</span>
 			</Card.Content>
 		</Card>
 	);
@@ -149,7 +150,7 @@ export function DenseVirtualList<T extends object>({
 	className = '',
 }: {
 	ariaLabel: string;
-	items: T[];
+	items: readonly T[];
 	getId: (item: T) => string;
 	renderItem: (item: T) => ReactNode;
 	textValue: (item: T) => string;
@@ -167,10 +168,14 @@ export function DenseVirtualList<T extends object>({
 		: selectedId !== undefined && onSelect
 			? 'single'
 			: 'none';
+	// React Aria caches each row by item identity; without these the
+	// highlight would stay on the previously selected row.
+	const selectionKey = selectedIds?.join('\n') ?? selectedId ?? null;
 	return (
 		<ListView
 			aria-label={ariaLabel}
 			className={`sim-virtual-list ${className}`}
+			dependencies={[selectionMode, selectionKey]}
 			items={items}
 			selectionMode={selectionMode}
 			selectionBehavior={selectionMode === 'multiple' ? 'toggle' : 'replace'}

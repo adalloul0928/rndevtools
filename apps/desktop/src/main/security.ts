@@ -2,6 +2,10 @@ import path from 'node:path';
 import { URL } from 'node:url';
 
 const MAX_EXTERNAL_URL_LENGTH = 8 * 1024;
+const MAX_LOOPBACK_URL_LENGTH = 2 * 1024;
+/** The literal loopback hosts local services listen on, as URL parses them. */
+const LOOPBACK_LITERAL_HOSTS = new Set(['127.0.0.1', '[::1]']);
+const DEFAULT_DIALOG_TEXT_LENGTH = 160;
 const RENDERER_ASSET_EXTENSIONS = new Set([
 	'.css',
 	'.html',
@@ -64,6 +68,93 @@ export function trustedDevelopmentRendererUrl(
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * The URL `shell.openExternal` may open for a local service main resolved
+ * itself, such as Mailpit or Studio: `http://127.0.0.1:<port>` or
+ * `http://[::1]:<port>`, optionally with a path, written canonically, with no
+ * credentials, query or fragment. `localhost`, other addresses, https and
+ * every other scheme are refused, so a bad value can never open a remote
+ * page or hand a URL to another application.
+ */
+export function trustedLoopbackHttpUrl(value: string): string | undefined {
+	if (
+		typeof value !== 'string' ||
+		value.length === 0 ||
+		value.length > MAX_LOOPBACK_URL_LENGTH ||
+		/[?#]/.test(value)
+	) {
+		return undefined;
+	}
+	try {
+		const url = new URL(value);
+		const port = Number(url.port);
+		if (
+			url.protocol !== 'http:' ||
+			!LOOPBACK_LITERAL_HOSTS.has(url.hostname) ||
+			!isLoopbackHostname(url.hostname) ||
+			!Number.isInteger(port) ||
+			port < 1 ||
+			url.username ||
+			url.password ||
+			(url.href !== value && url.href !== `${value}/`)
+		) {
+			return undefined;
+		}
+		return url.href;
+	} catch {
+		return undefined;
+	}
+}
+
+function isDialogControl(codePoint: number): boolean {
+	return (
+		codePoint <= 0x1f ||
+		(codePoint >= 0x7f && codePoint <= 0x9f) ||
+		// The Arabic letter mark, left-to-right and right-to-left marks.
+		codePoint === 0x061c ||
+		codePoint === 0x200e ||
+		codePoint === 0x200f ||
+		// Line and paragraph separators, bidirectional embeddings and overrides.
+		(codePoint >= 0x2028 && codePoint <= 0x202e) ||
+		// Bidirectional isolates.
+		(codePoint >= 0x2066 && codePoint <= 0x2069) ||
+		// Invisible spacing: the zero-width space and byte-order mark.
+		codePoint === 0x200b ||
+		codePoint === 0xfeff
+	);
+}
+
+/**
+ * Makes text safe for one line of a native dialog: canonically composed
+ * (NFC), control, bidirectional and invisible characters replaced with
+ * spaces, whitespace collapsed, and the result bounded to `maxLength` code
+ * points with an ellipsis. Compatibility forms are kept, so a full-width
+ * lookalike of a branch name still reads differently from the real one.
+ * Empty text becomes the fallback.
+ */
+export function sanitizeDialogText(
+	value: string | undefined,
+	options: Readonly<{ maxLength?: number; fallback?: string }> = {}
+): string {
+	const maxLength =
+		options.maxLength !== undefined &&
+		Number.isInteger(options.maxLength) &&
+		options.maxLength > 0
+			? options.maxLength
+			: DEFAULT_DIALOG_TEXT_LENGTH;
+	const cleaned = Array.from((value ?? '').normalize('NFC'), (character) =>
+		isDialogControl(character.codePointAt(0) ?? 0) ? ' ' : character
+	)
+		.join('')
+		.replace(/\s+/gu, ' ')
+		.trim();
+	if (!cleaned) return options.fallback ?? '';
+	const characters = Array.from(cleaned);
+	return characters.length <= maxLength
+		? cleaned
+		: `${characters.slice(0, maxLength - 1).join('')}…`;
 }
 
 export function urlsMatchWithoutHash(left: string, right: string): boolean {

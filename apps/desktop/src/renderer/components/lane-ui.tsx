@@ -61,13 +61,14 @@ export function AgentGlyph({ kind }: { kind: LaneAgent['kind'] }) {
 
 /**
  * Which coding agent holds this lane. This is the headline signal on a busy
- * wall, so it gets the only saturated colour on a row.
+ * wall, so it gets the only saturated colour on a row. Any holder with a kind
+ * and a session fits, so Supabase stack holders render the same badge.
  */
 export function AgentBadge({
 	agent,
 	showSession = false,
 }: {
-	agent: LaneAgent;
+	agent: Pick<LaneAgent, 'kind' | 'sessionId'> & { lastSeenAt?: number };
 	showSession?: boolean;
 }) {
 	return (

@@ -1,5 +1,13 @@
+import {
+	type LaneBackendBrief,
+	laneBackendBrief,
+} from '@/simulator/supabase-cross-panel';
 import type { DeviceAgent } from '../../shared/agent-protocol';
-import type { Lane, LaneAgent, LaneHealth } from '../../shared/lane-protocol';
+import type {
+	LaneAgent,
+	LaneHealth,
+	LaneView,
+} from '../../shared/lane-protocol';
 import { laneHealth } from '../../shared/lane-protocol';
 import type { DeviceSession } from '../../shared/protocol';
 import type {
@@ -8,11 +16,13 @@ import type {
 	SimulatorRuntime,
 } from '../../shared/simulator-protocol';
 import type { SlimmingSimulatorStatus } from '../../shared/slimming-protocol';
+import type { SupabaseState } from '../../shared/supabase-protocol';
 
 /**
  * One row on the fleet wall. The Simulator inventory, resource sample, slim
- * status, lane lease, and connected app sessions arrive from four services;
- * the panel should read one shape and never re-derive these joins in JSX.
+ * status, lane lease, the lane's local backend, and connected app sessions
+ * arrive from five services; the panel should read one shape and never
+ * re-derive these joins in JSX.
  */
 export type FleetRow = {
 	device: SimulatorDevice;
@@ -22,8 +32,10 @@ export type FleetRow = {
 	memoryBytes: number | undefined;
 	processCount: number | undefined;
 	slim: FleetSlimSummary;
-	lane: Lane | undefined;
+	lane: LaneView | undefined;
 	laneHealth: LaneHealth | undefined;
+	/** The lane's local Supabase stack, while local Supabase is on. */
+	backend: LaneBackendBrief | undefined;
 	sessions: DeviceSession[];
 	/** Coding-agent sessions attached by claim, touch, or lane cwd. */
 	agents: readonly DeviceAgent[];
@@ -42,7 +54,8 @@ export type FleetStateFilter =
 	| 'booted'
 	| 'shutdown'
 	| 'with-lane'
-	| 'with-agent';
+	| 'with-agent'
+	| 'with-backend';
 
 const TRANSITIONAL_STATES = new Set<SimulatorDevice['state']>([
 	'booting',
@@ -119,14 +132,17 @@ export function buildFleetRows({
 	lanes,
 	sessions,
 	agentsByDevice = {},
+	supabase,
 }: {
 	devices: readonly SimulatorDevice[];
 	runtimes: readonly SimulatorRuntime[];
 	metricsByDevice: Readonly<Record<string, SimulatorDeviceMetrics>>;
 	slimmingByDevice: Readonly<Record<string, SlimmingSimulatorStatus>>;
-	lanes: readonly Lane[];
+	lanes: readonly LaneView[];
 	sessions: readonly DeviceSession[];
 	agentsByDevice?: Readonly<Record<string, readonly DeviceAgent[]>>;
+	/** Local Supabase, for each lane's backend chip; none hides them. */
+	supabase?: Pick<SupabaseState, 'feature' | 'stacks' | 'jobs'> | undefined;
 }): FleetRow[] {
 	const runtimeById = new Map(
 		runtimes.map((runtime) => [runtime.identifier, runtime.name])
@@ -166,6 +182,8 @@ export function buildFleetRows({
 				processCount: live ? metrics?.processCount : undefined,
 				slim: fleetSlimSummary(slimmingByDevice[device.udid], live),
 				laneHealth: lane ? laneHealth(lane) : undefined,
+				backend:
+					lane && supabase ? laneBackendBrief(lane, supabase) : undefined,
 				rank: fleetRank(partial),
 			};
 		})
@@ -195,6 +213,9 @@ export function fleetRowMatches(
 		case 'with-agent':
 			if (!primaryAgent(row)) return false;
 			break;
+		case 'with-backend':
+			if (!row.backend) return false;
+			break;
 		default:
 			break;
 	}
@@ -211,6 +232,11 @@ export function fleetRowMatches(
 		row.lane?.agent
 			? `${row.lane.agent.kind} ${row.lane.agent.sessionId}`
 			: undefined,
+		// A backend matches its chip, its API and database ports, and its stack id.
+		row.backend?.chip.label,
+		row.backend?.apiPort === undefined ? undefined : `:${row.backend.apiPort}`,
+		row.backend?.dbPort === undefined ? undefined : `:${row.backend.dbPort}`,
+		row.backend?.stackId,
 		...row.agents.map(
 			(agent) => `${agent.kind} ${agent.sessionId} ${agent.title}`
 		),
@@ -231,7 +257,32 @@ export function fleetFilterCounts(
 		shutdown: rows.filter((row) => row.device.state === 'shutdown').length,
 		'with-lane': rows.filter((row) => row.lane).length,
 		'with-agent': rows.filter((row) => primaryAgent(row)).length,
+		'with-backend': rows.filter((row) => row.backend).length,
 	};
+}
+
+/**
+ * The app sessions that report this Simulator, online first, then the most
+ * recently seen; UDIDs match case-insensitively.
+ */
+export function connectedSessionsForSimulator(
+	udid: string,
+	sessions: readonly DeviceSession[]
+): DeviceSession[] {
+	const normalizedUdid = udid.toUpperCase();
+	const statusRank: Record<DeviceSession['status'], number> = {
+		online: 0,
+		simulated: 1,
+		offline: 2,
+	};
+	return sessions
+		.filter(
+			(session) => session.info.simulatorUdid?.toUpperCase() === normalizedUdid
+		)
+		.sort((left, right) => {
+			const rankDifference = statusRank[left.status] - statusRank[right.status];
+			return rankDifference || right.lastSeenAt - left.lastSeenAt;
+		});
 }
 
 /** Abbreviates `/Users/me/code/app-feature` to `~/code/app-feature`. */

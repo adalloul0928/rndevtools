@@ -3,6 +3,7 @@ import {
 	formatDuration,
 	formatRelativeTime as formatElapsed,
 } from '@rndevtools/core/format';
+import { formatHoldDuration } from '../../shared/device-hold';
 
 // Byte and duration rendering is shared with the on-device panels so the same
 // value never reads differently on the two surfaces. The local copies also
@@ -34,6 +35,72 @@ export function formatRelativeTime(
 	const elapsed = formatElapsed(timestamp, now);
 	if (elapsed === undefined) return '—';
 	return elapsed === 'now' ? elapsed : `${elapsed} ago`;
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
+
+const dayFormat = new Intl.DateTimeFormat(undefined, {
+	month: 'short',
+	day: 'numeric',
+});
+const dayWithYearFormat = new Intl.DateTimeFormat(undefined, {
+	month: 'short',
+	day: 'numeric',
+	year: 'numeric',
+});
+
+/**
+ * A future time the way countdowns read it: `in 45 s`, `in 7 min`, `in 3 h`,
+ * `in 3 days`, then a date (`Oct 31`) a week or more out. It rounds up like
+ * hold clocks do, so a countdown never reads as done before it is; a time
+ * that has passed reads `now`.
+ */
+export function formatUntil(timestamp: number, now = Date.now()): string {
+	if (!Number.isFinite(timestamp)) return '—';
+	const remaining = timestamp - (Number.isFinite(now) ? now : timestamp);
+	if (remaining <= 0) return 'now';
+	if (remaining < WEEK_MS) return `in ${formatHoldDuration(remaining)}`;
+	const sameYear =
+		new Date(timestamp).getFullYear() === new Date(now).getFullYear();
+	return (sameYear ? dayFormat : dayWithYearFormat).format(timestamp);
+}
+
+/**
+ * How long ago something happened, rounded down: `just now`, `45 s ago`,
+ * `7 min ago`, `3 h ago`, `16 days ago`. The spaced units match the
+ * countdowns, unlike the compact `formatRelativeTime`.
+ */
+export function formatAgo(timestamp: number, now = Date.now()): string {
+	if (!Number.isFinite(timestamp)) return '—';
+	const elapsed = Math.max(
+		0,
+		(Number.isFinite(now) ? now : timestamp) - timestamp
+	);
+	const seconds = Math.floor(elapsed / 1_000);
+	if (seconds < 5) return 'just now';
+	if (seconds < 60) return `${seconds} s ago`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes} min ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 48) return `${hours} h ago`;
+	return `${Math.floor(hours / 24)} days ago`;
+}
+
+/**
+ * Sizes in B, KB, MB and GB, with `—` for an unknown or invalid size. One
+ * decimal below 10 MB and for gigabytes, so stack sizes stay short in rows.
+ */
+export function formatSize(bytes: number | undefined): string {
+	if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return '—';
+	if (bytes < 1_024) return `${Math.round(bytes)} B`;
+	if (bytes < 1_024 ** 2) return `${Math.round(bytes / 1_024)} KB`;
+	if (bytes < 1_024 ** 3) {
+		const megabytes = bytes / 1_024 ** 2;
+		return megabytes < 10
+			? `${megabytes.toFixed(1)} MB`
+			: `${Math.round(megabytes)} MB`;
+	}
+	return `${(bytes / 1_024 ** 3).toFixed(1)} GB`;
 }
 
 export function formatPercent(value: number | undefined): string {

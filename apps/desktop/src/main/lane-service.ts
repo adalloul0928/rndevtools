@@ -12,12 +12,15 @@ import {
 	LANE_METRO_HEALTH_TIMEOUT_MS,
 	type Lane,
 	type LaneAgent,
+	type LaneBackendPolicy,
 	type LaneDeviceRequest,
 	type LaneEnvironment,
 	type LaneOperation,
 	type LaneOperationReceipt,
+	type LaneReservation,
 	type LaneSlim,
 	type LaneState,
+	type LaneView,
 	type LaneWorktree,
 	laneAppDirectory,
 	laneDeepLink,
@@ -40,13 +43,31 @@ import {
 	type SlimmingJob,
 	type SlimmingState,
 } from '../shared/slimming-protocol';
-import { type MetroSupervisorPort, metroSupervisor } from './lane-metro';
+import {
+	type LaneBackendSummary,
+	type LaneWorktreeSupabase,
+	laneBackendSummarySchema,
+	laneWorktreeSupabaseSchema,
+	sanitizeSupabaseDisplayText,
+} from '../shared/supabase-protocol';
+import {
+	laneEnvProblem,
+	type MetroSupervisorPort,
+	metroSupervisor,
+} from './lane-metro';
 import type { LaneStore } from './lane-store';
 import { type WorktreeInspectorPort, worktreeInspector } from './lane-worktree';
 import type {
 	SimulatorMutationCoordinatorPort,
 	SimulatorMutationLease,
 } from './simulator-mutation-coordinator';
+import {
+	LANE_BACKEND_DEFAULT_WAIT_MS,
+	type LaneBackendEnsureInput,
+	type LaneBackendEnsureResult,
+	type LaneBackendLateAttach,
+	type SupabaseMetroRestartReason,
+} from './supabase/service-ports';
 
 const TERMINAL_SIMULATOR_STATUSES = new Set([
 	'complete',
@@ -59,6 +80,15 @@ const RECONCILE_INTERVAL_MS = 5_000;
 /** How long a settled device request stays listed for the agent that made it. */
 const DEVICE_REQUEST_TTL_MS = 30 * 60_000;
 const MAX_ERROR_LENGTH = 4 * 1024;
+/** How long the Metro log of a lane that is gone is kept once it stops growing. */
+const LANE_LOG_RETENTION_MS = 7 * 24 * 60 * 60_000;
+const LANE_LOG_PRUNE_INTERVAL_MS = 60 * 60_000;
+/** How often a wait on the injected clock looks at it again. */
+const CLOCK_POLL_INTERVAL_MS = 250;
+/** How long a Metro restart waits for the old Metro to let go of the port. */
+const METRO_EXIT_TIMEOUT_MS = 10_000;
+const METRO_EXIT_POLL_INTERVAL_MS = 100;
+const MAX_BACKEND_REASON_LENGTH = 1_024;
 
 export type LaneSimulatorPort = {
 	getState: () => SimulatorState;
@@ -85,16 +115,99 @@ export type LaneSlimmingPort = {
 	subscribe: (listener: (state: SlimmingState) => void) => () => void;
 };
 
+/**
+ * A worktree's local backend as a lane sees it: the Supabase service in
+ * main. `ensureForLane` answers with a summary instead of rejecting over a
+ * backend problem, and adds `lateAttach` (which never rejects) when the
+ * backend is still starting. `detachLane` drops the lane's hold without
+ * waiting for anything to stop. `defaultPolicy` is what a start that names
+ * no backend gets in that environment.
+ */
+export type LaneBackendPort = {
+	ensureForLane: (
+		input: LaneBackendEnsureInput,
+		signal?: AbortSignal
+	) => Promise<LaneBackendEnsureResult>;
+	detachLane: (laneId: string) => void;
+	defaultPolicy: (environmentId: string) => 'auto' | 'off';
+	/** The worktree's Supabase project for the start form, when known. */
+	describeWorktree?: (worktreePath: string) => LaneWorktreeSupabase | undefined;
+};
+
 type LaneListener = (state: LaneState) => void;
 
 type LaneStartInput = Extract<LaneOperation, { kind: 'lane.start' }>;
+
+type BackendEnv = Readonly<Record<string, string>>;
+
+/**
+ * What main knows about one lane's local backend. In memory only: lanes.json
+ * never holds it, and a desktop restart forgets it until the next lane up
+ * asks the backend port again.
+ */
+type LaneBackendRecord = {
+	policy: LaneBackendPolicy;
+	/** The port's latest answer, as the lane wire allows it. */
+	summary: LaneBackendSummary;
+	/** What the lane's current Metro was spawned with; never stored or echoed. */
+	env?: BackendEnv | undefined;
+	/** Bumped by every new answer, so an older late attach knows it lost. */
+	generation: number;
+	/** A dev-client launch held back until the backend is ready. */
+	deferredLaunch: boolean;
+	metro?: 'restarted' | 'unchanged' | 'needs-restart' | undefined;
+	/** The lane's own word on its backend, such as a restart that failed. */
+	note?: string | undefined;
+};
+
+/** An ensure in flight; its answer never rejects. */
+type PendingBackend = {
+	policy: 'auto' | 'required';
+	answer: Promise<LaneBackendEnsureResult>;
+};
+
+/** What a lane does with its backend once its Metro is due. */
+type BackendDecision = {
+	summary: LaneBackendSummary;
+	/** Present when the backend serves the lane now: this Metro gets it. */
+	env?: BackendEnv | undefined;
+	/** Present while the backend is still starting; settles when it is not. */
+	late?: Promise<LaneBackendLateAttach> | undefined;
+};
+
+/** A `required` lane start refused over its backend; the receipt carries why. */
+class LaneBackendError extends Error {
+	readonly summary: LaneBackendSummary;
+
+	constructor(summary: LaneBackendSummary) {
+		const state = summary.reason
+			? `${summary.status} (${summary.reason})`
+			: summary.status;
+		super(
+			`This lane requires its local backend, which is ${state}.${summary.reasonText ? ` ${summary.reasonText}` : ''}`
+		);
+		this.summary = summary;
+	}
+}
+
+/** The lane a laneEnv is resolved for, as known when its Metro spawns. */
+type LaneEnvTarget = Pick<
+	Lane,
+	| 'id'
+	| 'worktreePath'
+	| 'appPath'
+	| 'branch'
+	| 'simulatorUdid'
+	| 'environment'
+	| 'port'
+>;
 
 /**
  * A lane start either produces a lane or, when no Simulator was named and none
  * is free, a device request the user settles from the Lanes panel.
  */
 export type LaneStartOutcome =
-	| { lane: Lane; deviceRequest?: undefined }
+	| { lane: LaneView; deviceRequest?: undefined }
 	| { lane?: undefined; deviceRequest: LaneDeviceRequest };
 
 const TERMINAL_SLIMMING_STATUSES = new Set([
@@ -110,6 +223,41 @@ function safeError(error: unknown): string {
 	);
 }
 
+/** One line of redacted, bounded text the lane wire accepts as a reason. */
+function backendReason(text: string): string {
+	return sanitizeSupabaseDisplayText(
+		redactDiagnosticText(text),
+		MAX_BACKEND_REASON_LENGTH
+	);
+}
+
+function backendSummary(
+	policy: LaneBackendPolicy,
+	status: LaneBackendSummary['status'],
+	extra: Partial<LaneBackendSummary> = {}
+): LaneBackendSummary {
+	return { policy, status, appEnvNames: [], warnings: [], ...extra };
+}
+
+function failedBackend(
+	policy: LaneBackendPolicy,
+	text: string
+): LaneBackendSummary {
+	return backendSummary(policy, 'failed', {
+		reason: 'failed',
+		reasonText: backendReason(text),
+	});
+}
+
+/** Compares two sets of backend variables, whatever their key order. */
+function envFingerprint(env: BackendEnv | undefined): string {
+	return JSON.stringify(
+		Object.entries(env ?? {}).sort(([left], [right]) =>
+			left.localeCompare(right)
+		)
+	);
+}
+
 function isPhone(device: SimulatorDevice): boolean {
 	return /iphone/i.test(device.deviceTypeIdentifier ?? device.name);
 }
@@ -118,6 +266,26 @@ function isPhone(device: SimulatorDevice): boolean {
 function runtimeVersion(device: SimulatorDevice): number {
 	const match = /-(\d+)-(\d+)$/.exec(device.runtimeIdentifier);
 	return match ? Number(match[1]) + Number(match[2]) / 100 : 0;
+}
+
+/** Resolves once `promise` settles either way; rejects if `signal` aborts first. */
+function whenSettled(
+	promise: Promise<unknown>,
+	signal: AbortSignal
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const onAbort = () => reject(new Error('Lane operation cancelled.'));
+		if (signal.aborted) {
+			onAbort();
+			return;
+		}
+		signal.addEventListener('abort', onAbort, { once: true });
+		const done = () => {
+			signal.removeEventListener('abort', onAbort);
+			resolve();
+		};
+		promise.then(done, done);
+	});
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -148,6 +316,22 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * signed-parent authorization. A refused slim is recorded as `skipped` with
  * the reason and the lane starts anyway, so an agent is never blocked on a
  * slim it cannot get.
+ *
+ * Concurrent starts never share a device or a port. Starts for one app
+ * directory run one at a time, and a start holds an in-memory reservation of
+ * its app directory, Simulator, and port from its first step until its lane
+ * is stored, which other starts check alongside the stored lanes.
+ *
+ * A lane may get its worktree's local backend through the backend port. The
+ * ensure runs while the Simulator boots and slims; Metro waits for it at most
+ * LANE_BACKEND_DEFAULT_WAIT_MS more and then gets only the public values the
+ * port maps (URL, publishable key). A backend that is late attaches later:
+ * Metro starts without those names, the dev-client launch waits, and the
+ * attach restarts Metro with them and launches. `auto` never fails a lane
+ * over its backend. `required` fails the start before Metro spawns when the
+ * backend cannot serve the lane, and stops the lane's Metro when a late
+ * attach fails. What the lane knows about its backend lives in memory and on
+ * the wire only.
  */
 export class LaneService {
 	readonly #store: LaneStore;
@@ -159,15 +343,34 @@ export class LaneService {
 	readonly #worktrees: WorktreeInspectorPort;
 	readonly #environments: readonly LaneEnvironment[];
 	readonly #maxWorkers: number;
+	readonly #resolveLaneEnv:
+		| ((
+				lane: LaneEnvTarget
+		  ) => Promise<Readonly<Record<string, string>> | undefined>)
+		| undefined;
+	readonly #backends: LaneBackendPort | undefined;
 	readonly #now: () => number;
 	readonly #listeners = new Set<LaneListener>();
+	/** The worktrees' Supabase projects as last published. */
+	#publishedBackendsKey = '';
 	readonly #deviceRequests = new Map<string, LaneDeviceRequest>();
+	readonly #reservations = new Set<LaneReservation>();
+	/**
+	 * The last start, Metro restart, or late attach queued for each app
+	 * directory, settled or not.
+	 */
+	readonly #startsByApp = new Map<string, Promise<void>>();
+	/** Each lane's local backend, by lane id. */
+	readonly #backendRecords = new Map<string, LaneBackendRecord>();
+	/** Aborted by stop(): work the lanes do on their own ends with it. */
+	readonly #lifecycle = new AbortController();
 	#worktreeCache: LaneWorktree[] = [];
 	#revision = 0;
 	#updatedAt: number;
 	#error: string | undefined;
 	#reconcileTimer: NodeJS.Timeout | undefined;
 	#refreshPromise: Promise<LaneState> | undefined;
+	#logsPrunedAt: number | undefined;
 	#stopped = false;
 
 	constructor({
@@ -179,6 +382,8 @@ export class LaneService {
 		worktrees = worktreeInspector,
 		environments = DEFAULT_LANE_ENVIRONMENTS,
 		metroMaxWorkers = 2,
+		resolveLaneEnv,
+		backends,
 		holds,
 		now = Date.now,
 	}: {
@@ -191,6 +396,22 @@ export class LaneService {
 		worktrees?: WorktreeInspectorPort;
 		environments?: readonly LaneEnvironment[];
 		metroMaxWorkers?: number;
+		/**
+		 * Variables for one lane's Metro on top of its environment's metroEnv,
+		 * asked for each time that Metro spawns: on a start, a resume, or a
+		 * restart. They are a launch input only, never stored in lanes.json or
+		 * echoed in LaneState, because a value may be a key. None by default.
+		 */
+		resolveLaneEnv?: (
+			lane: LaneEnvTarget
+		) => Promise<Readonly<Record<string, string>> | undefined>;
+		/**
+		 * The worktree's own local backend. Without it a lane has none: `auto`
+		 * is recorded as skipped and `required` is refused before boot. Its
+		 * values are applied over resolveLaneEnv's, and like them reach only
+		 * Metro's spawn env.
+		 */
+		backends?: LaneBackendPort;
 		/**
 		 * Who holds each Simulator, from the agent service. When set, reconcile
 		 * releases a lane whose owning agent has been gone past the grace
@@ -207,6 +428,8 @@ export class LaneService {
 		this.#worktrees = worktrees;
 		this.#environments = environments;
 		this.#maxWorkers = metroMaxWorkers;
+		this.#resolveLaneEnv = resolveLaneEnv;
+		this.#backends = backends;
 		this.#holds = holds;
 		this.#now = now;
 		this.#updatedAt = now();
@@ -224,6 +447,7 @@ export class LaneService {
 
 	async stop(): Promise<void> {
 		this.#stopped = true;
+		this.#lifecycle.abort();
 		if (this.#reconcileTimer) clearInterval(this.#reconcileTimer);
 		// Metro processes are detached on purpose; they keep serving the agents
 		// that started them after the desktop app quits.
@@ -238,13 +462,17 @@ export class LaneService {
 			revision: this.#revision,
 			updatedAt: this.#updatedAt,
 			environments: this.#environments,
-			lanes,
-			worktrees: this.#worktreeCache.map((worktree) => ({
-				...worktree,
-				...(laneByWorktree.has(worktree.path)
-					? { laneId: laneByWorktree.get(worktree.path) }
-					: {}),
-			})),
+			lanes: lanes.map((lane) => this.#view(lane)),
+			worktrees: this.#worktreeCache.map((worktree) => {
+				const supabase = this.#describeWorktree(worktree.path);
+				return {
+					...worktree,
+					...(laneByWorktree.has(worktree.path)
+						? { laneId: laneByWorktree.get(worktree.path) }
+						: {}),
+					...(supabase ? { supabase } : {}),
+				};
+			}),
 			repositories: this.#store.repositories(),
 			deviceRequests: [...this.#deviceRequests.values()],
 			...(this.#error ? { error: this.#error } : {}),
@@ -254,6 +482,38 @@ export class LaneService {
 	subscribe(listener: LaneListener): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
+	}
+
+	/**
+	 * The backend's view of the worktrees changed: publish again, but only
+	 * when what the start form shows actually moved.
+	 */
+	backendsChanged(): void {
+		const key = this.#worktreeBackendsKey();
+		if (key === this.#publishedBackendsKey) return;
+		this.#touch();
+	}
+
+	#describeWorktree(worktreePath: string): LaneWorktreeSupabase | undefined {
+		try {
+			const described = this.#backends?.describeWorktree?.(worktreePath);
+			return described &&
+				laneWorktreeSupabaseSchema.safeParse(described).success
+				? described
+				: undefined;
+		} catch {
+			// The start form falls back to the Supabase state's own rows.
+			return undefined;
+		}
+	}
+
+	#worktreeBackendsKey(): string {
+		return JSON.stringify(
+			this.#worktreeCache.map((worktree) => [
+				worktree.path,
+				this.#describeWorktree(worktree.path) ?? null,
+			])
+		);
 	}
 
 	refresh(): Promise<LaneState> {
@@ -280,6 +540,7 @@ export class LaneService {
 						...base,
 						completed: true,
 						...outcome,
+						...(outcome.lane?.backend ? { backend: outcome.lane.backend } : {}),
 						state: this.getState(),
 					});
 				}
@@ -289,6 +550,7 @@ export class LaneService {
 						...base,
 						completed: true,
 						...outcome,
+						...(outcome.lane?.backend ? { backend: outcome.lane.backend } : {}),
 						state: this.getState(),
 					});
 				}
@@ -302,7 +564,7 @@ export class LaneService {
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
-						lane,
+						lane: this.#view(lane),
 						state: this.getState(),
 					});
 				}
@@ -316,14 +578,16 @@ export class LaneService {
 				}
 				case 'lane.log': {
 					const lane = this.#requireLane(operation.laneId);
-					const log = await this.#metro.readLogTail(
-						lane.logPath,
-						operation.maxCharacters
-					);
+					// The tail is raw Metro output, app console logs included, so it
+					// leaves main redacted, and cut back to size because redaction
+					// can lengthen it.
+					const log = redactDiagnosticText(
+						await this.#metro.readLogTail(lane.logPath, operation.maxCharacters)
+					).slice(-operation.maxCharacters);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
-						lane,
+						lane: this.#view(lane),
 						log,
 					});
 				}
@@ -353,6 +617,9 @@ export class LaneService {
 				...base,
 				completed: false,
 				error: safeError(error),
+				...(error instanceof LaneBackendError
+					? { backend: error.summary }
+					: {}),
 			});
 		}
 	}
@@ -363,8 +630,71 @@ export class LaneService {
 		return this.refresh();
 	}
 
-	async startLane(
+	startLane(
 		input: LaneStartInput,
+		signal: AbortSignal
+	): Promise<LaneStartOutcome> {
+		return this.#startLane(input, signal);
+	}
+
+	/**
+	 * Lane up is single-flight per app directory: a start for an app another
+	 * start is still working on waits for that one to settle, then finds its
+	 * lane (and resumes it) or its failure, so one app never gets two lanes.
+	 * Starts for different apps run side by side and keep apart through their
+	 * reservations. `held` is a reservation the caller took earlier (a device
+	 * the user chose for a parked request), which this start takes over.
+	 */
+	async #startLane(
+		input: LaneStartInput,
+		signal: AbortSignal,
+		held?: LaneReservation
+	): Promise<LaneStartOutcome> {
+		// Whichever checkout contains it, the requested directory is the app
+		// directory (the checkout itself, or the Expo app inside it), so it
+		// keys the start before anything is looked up.
+		const appDirectory = path.resolve(input.worktreePath);
+		return this.#serialize(appDirectory, signal, async () => {
+			const reservation = held ?? { appDirectory };
+			this.#reservations.add(reservation);
+			try {
+				return await this.#startReserved(input, reservation, signal);
+			} finally {
+				this.#reservations.delete(reservation);
+			}
+		});
+	}
+
+	/**
+	 * Runs `task` once everything queued before it for `appDirectory` has
+	 * settled: starts, Metro restarts, and late attaches for one app never
+	 * interleave. The next task for the app waits for this one and all
+	 * before it, even when this one gives up waiting because `signal` fired.
+	 */
+	async #serialize<T>(
+		appDirectory: string,
+		signal: AbortSignal,
+		task: () => Promise<T>
+	): Promise<T> {
+		const previous = this.#startsByApp.get(appDirectory);
+		const run = (async () => {
+			if (previous) await whenSettled(previous, signal);
+			return task();
+		})();
+		const tail = Promise.allSettled([previous, run]).then(() => undefined);
+		this.#startsByApp.set(appDirectory, tail);
+		try {
+			return await run;
+		} finally {
+			if (this.#startsByApp.get(appDirectory) === tail) {
+				this.#startsByApp.delete(appDirectory);
+			}
+		}
+	}
+
+	async #startReserved(
+		input: LaneStartInput,
+		reservation: LaneReservation,
 		signal: AbortSignal
 	): Promise<LaneStartOutcome> {
 		const requestedPath = path.resolve(input.worktreePath);
@@ -419,30 +749,42 @@ export class LaneService {
 							input.simulatorUdid.toUpperCase())
 			);
 		if (existing) {
-			return {
-				lane: await this.#resumeLane(existing, input, environment, signal),
-			};
+			const resumed = await this.#resumeLane(
+				existing,
+				input,
+				{ environment, branch: worktree.branch },
+				reservation,
+				signal
+			);
+			return { lane: this.#view(resumed) };
 		}
 		await this.#store.addRepository(repositoryRoot);
 
+		// From the inventory to the reservation there is no await: the device
+		// is picked, checked, and reserved before any other start can look.
 		const inventory = await this.#simulator.refresh();
+		const others = this.#otherReservations(reservation);
 		const simulatorUdid =
-			input.simulatorUdid ?? this.#pickFreeDevice(inventory.devices);
+			input.simulatorUdid ?? this.#pickFreeDevice(inventory.devices, others);
 		if (!simulatorUdid) {
 			return {
 				deviceRequest: this.#parkDeviceRequest(input, {
 					worktreePath,
 					...(appPath ? { appPath } : {}),
 					branch: worktree.branch,
-					message: this.#noFreeDeviceReason(inventory.devices),
+					message: this.#noFreeDeviceReason(inventory.devices, others),
 				}),
 			};
 		}
-		const conflict = findLaneConflict(this.#store.lanes(), {
-			worktreePath,
-			...(appPath ? { appPath } : {}),
-			simulatorUdid,
-		});
+		const conflict = findLaneConflict(
+			this.#store.lanes(),
+			{
+				worktreePath,
+				...(appPath ? { appPath } : {}),
+				simulatorUdid,
+			},
+			others
+		);
 		if (conflict) throw new Error(conflict);
 
 		const device = inventory.devices.find(
@@ -454,11 +796,13 @@ export class LaneService {
 				'The Simulator is not available in the current inventory.'
 			);
 		}
+		reservation.simulatorUdid = device.udid;
 
 		const port = await allocateLanePort({
 			environment,
 			lanes: this.#store.lanes(),
 			isPortFree: this.#metro.isPortFree,
+			claim: (candidate) => this.#claimPort(reservation, candidate),
 			...(input.preferredPort !== undefined
 				? { preferredPort: input.preferredPort }
 				: {}),
@@ -471,45 +815,13 @@ export class LaneService {
 		const slimRequest = input.slimProfileId
 			? this.#slimRequest(input.slimProfileId)
 			: undefined;
+		// Likewise a backend this lane cannot have.
+		const backendPolicy = this.#backendPolicy(input.backend, environment);
 		const id = this.#store.newLaneId();
 		const logPath = this.#store.logPathFor(id);
 		const startedAt = this.#now();
 		const agent = this.#agentWithTimestamp(input.agent);
-
-		// Boot first: a lane whose device cannot boot should not leave a Metro
-		// running for nothing.
-		if (device.state !== 'booted') {
-			await this.#runSimulatorAction(
-				{
-					actionId: `lane-boot-${randomUUID()}`,
-					kind: 'device.boot',
-					udid: device.udid,
-				},
-				signal
-			);
-		}
-
-		// Slim before Metro so the dev client's first launch lands on a device
-		// that already has its services trimmed. Without approval the lane is
-		// parked in needs-approval and everything else proceeds.
-		let slim: LaneSlim | undefined;
-		if (slimRequest) {
-			slim = await this.#applySlim(
-				device.udid,
-				slimRequest,
-				input.agent,
-				signal
-			);
-		}
-
-		const metroPid = await this.#metro.start({
-			worktreePath: appPath ?? worktreePath,
-			port,
-			logPath,
-			maxWorkers: this.#maxWorkers,
-			...(environment.metroEnv ? { metroEnv: environment.metroEnv } : {}),
-		});
-		let lane: Lane = {
+		const target = {
 			id,
 			worktreePath,
 			...(appPath ? { appPath } : {}),
@@ -517,39 +829,107 @@ export class LaneService {
 			simulatorUdid: device.udid,
 			environment: environment.id,
 			port,
-			metroPid,
-			metro: 'starting',
-			logPath,
-			...(identity.bundleIdentifier
-				? { bundleIdentifier: identity.bundleIdentifier }
-				: {}),
-			...(identity.scheme ? { scheme: identity.scheme } : {}),
-			startedAt,
-			...(agent ? { agent } : {}),
-			...(slim ? { slim } : {}),
 		};
-		await this.#store.upsert(lane);
+
+		// The backend starts now and comes up while the Simulator boots and
+		// slims; nothing below waits for it until Metro is due.
+		const pending = this.#beginBackend(target, backendPolicy, input.agent);
+		let lane: Lane;
+		let decision: BackendDecision | undefined;
+		try {
+			// Boot first: a lane whose device cannot boot should not leave a
+			// Metro running for nothing.
+			if (device.state !== 'booted') {
+				await this.#runSimulatorAction(
+					{
+						actionId: `lane-boot-${randomUUID()}`,
+						kind: 'device.boot',
+						udid: device.udid,
+					},
+					signal
+				);
+			}
+
+			// Slim before Metro so the dev client's first launch lands on a device
+			// that already has its services trimmed. Without approval the lane is
+			// parked in needs-approval and everything else proceeds.
+			let slim: LaneSlim | undefined;
+			if (slimRequest) {
+				slim = await this.#applySlim(
+					device.udid,
+					slimRequest,
+					input.agent,
+					signal
+				);
+			}
+
+			// A `required` backend that cannot serve the lane fails it here,
+			// before anything is spawned.
+			decision = pending
+				? await this.#decideBackend(pending, environment, signal)
+				: undefined;
+			const metroPid = await this.#spawnMetro(
+				{ ...target, logPath },
+				environment,
+				decision?.env
+			);
+			lane = {
+				...target,
+				metroPid,
+				metro: 'starting',
+				logPath,
+				...(identity.bundleIdentifier
+					? { bundleIdentifier: identity.bundleIdentifier }
+					: {}),
+				...(identity.scheme ? { scheme: identity.scheme } : {}),
+				startedAt,
+				...(agent ? { agent } : {}),
+				...(slim ? { slim } : {}),
+			};
+			if (decision) {
+				// Recorded before the lane is stored, so its first broadcast says
+				// where its backend stands.
+				const record = this.#recordBackend(id, backendPolicy, decision.summary);
+				record.env = decision.env;
+				record.deferredLaunch = input.launch && decision.late !== undefined;
+			}
+			await this.#store.upsert(lane);
+		} catch (error) {
+			// The lane never came to exist, so the backend lets go of it: now,
+			// and again once the ensure settles in case it took the hold late.
+			this.#releaseBackend(id);
+			void pending?.answer.then(() => this.#releaseBackend(id));
+			throw error;
+		}
+		// The stored lane holds the app, the device, and the port from here.
+		this.#reservations.delete(reservation);
 		this.#touch();
 		// The repository may be new to the store; make its worktrees visible
 		// without waiting for the next explicit refresh.
 		await this.refresh().catch(() => undefined);
 
-		if (input.launch) {
+		const record = this.#backendRecords.get(id);
+		if (decision?.late && record) {
+			this.#awaitLateAttach(lane, record.generation, decision.late);
+		}
+		if (input.launch && !record?.deferredLaunch) {
 			lane = await this.launchLane(id, undefined, input.agent, signal);
 		}
-		return { lane };
+		return { lane: this.#view(lane) };
 	}
 
 	/**
 	 * The free Simulator a lane gets when the agent named none: nobody's lane,
-	 * nobody's live claim, available in the inventory. iPhones first (the dev
-	 * client is a phone app), booted before shut down so the lane starts fast,
-	 * then the newest runtime, then by name so the choice is stable.
+	 * no other start's reservation, nobody's live claim, available in the
+	 * inventory. iPhones first (the dev client is a phone app), booted before
+	 * shut down so the lane starts fast, then the newest runtime, then by name
+	 * so the choice is stable.
 	 */
-	#pickFreeDevice(devices: readonly SimulatorDevice[]): string | undefined {
-		const laneUdids = new Set(
-			this.#store.lanes().map((lane) => lane.simulatorUdid.toUpperCase())
-		);
+	#pickFreeDevice(
+		devices: readonly SimulatorDevice[],
+		others: readonly LaneReservation[]
+	): string | undefined {
+		const laneUdids = this.#takenUdids(others);
 		const holds = this.#holds?.() ?? new Map<string, DeviceHold>();
 		const candidates = devices.filter(
 			(device) =>
@@ -573,14 +953,16 @@ export class LaneService {
 			)[0]?.udid;
 	}
 
-	#noFreeDeviceReason(devices: readonly SimulatorDevice[]): string {
+	#noFreeDeviceReason(
+		devices: readonly SimulatorDevice[],
+		others: readonly LaneReservation[]
+	): string {
 		const available = devices.filter((device) => device.isAvailable);
 		if (available.length === 0) {
 			return 'No Simulator is available in the current inventory.';
 		}
-		const laneUdids = new Set(
-			this.#store.lanes().map((lane) => lane.simulatorUdid.toUpperCase())
-		);
+		// A device another start is taking counts as its lane's already.
+		const laneUdids = this.#takenUdids(others);
 		const holds = this.#holds?.();
 		let byLanes = 0;
 		let bySessions = 0;
@@ -590,6 +972,57 @@ export class LaneService {
 			else if (holds?.get(udid)) bySessions += 1;
 		}
 		return `All ${available.length} available Simulators are in use: ${byLanes} by lanes, ${bySessions} claimed by other sessions.`;
+	}
+
+	#otherReservations(reservation: LaneReservation): LaneReservation[] {
+		return [...this.#reservations].filter((other) => other !== reservation);
+	}
+
+	/** Upper-cased UDIDs a stored lane or another in-flight start has. */
+	#takenUdids(others: readonly LaneReservation[]): Set<string> {
+		return new Set([
+			...this.#store.lanes().map((lane) => lane.simulatorUdid.toUpperCase()),
+			...others.flatMap((other) =>
+				other.simulatorUdid ? [other.simulatorUdid.toUpperCase()] : []
+			),
+		]);
+	}
+
+	/**
+	 * Who already has `port`: a live lane other than `laneId`, or another
+	 * in-flight start that claimed it. A stopped lane's port is free again.
+	 */
+	#portHolder(
+		reservation: LaneReservation,
+		port: number,
+		laneId?: string
+	): string | undefined {
+		const lane = this.#store
+			.lanes()
+			.find(
+				(candidate) =>
+					candidate.id !== laneId &&
+					candidate.metro !== 'stopped' &&
+					candidate.port === port
+			);
+		if (lane) return `lane ${lane.id}`;
+		for (const other of this.#reservations) {
+			if (other !== reservation && other.port === port) {
+				return `a lane starting for ${other.appDirectory}`;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Takes `port` for `reservation` unless someone already has it. The check
+	 * and the claim are one synchronous step, so no other start can slip in
+	 * between them.
+	 */
+	#claimPort(reservation: LaneReservation, port: number): boolean {
+		if (this.#portHolder(reservation, port)) return false;
+		reservation.port = port;
+		return true;
 	}
 
 	/**
@@ -630,6 +1063,7 @@ export class LaneService {
 				: {}),
 			launch: input.launch,
 			...(input.slimProfileId ? { slimProfileId: input.slimProfileId } : {}),
+			...(input.backend ? { backend: input.backend } : {}),
 			...(input.agent ? { agent: input.agent } : {}),
 		};
 		this.#deviceRequests.set(request.id, request);
@@ -687,12 +1121,27 @@ export class LaneService {
 					? 'Cloning the Simulator…'
 					: 'Starting the lane…',
 		});
+		// Hold the device the user chose from this moment (a clone from the
+		// moment it exists), so a lane up that picks its own device cannot take
+		// it while the clone or the start is still running.
+		const reservation: LaneReservation = {
+			appDirectory: laneAppDirectory(request),
+			...(input.decision === 'use'
+				? { simulatorUdid: input.simulatorUdid }
+				: {}),
+		};
+		this.#reservations.add(reservation);
 		try {
 			const simulatorUdid =
 				input.decision === 'clone'
-					? await this.#cloneDevice(input.simulatorUdid, request.branch, signal)
+					? await this.#cloneDevice(
+							input.simulatorUdid,
+							request.branch,
+							reservation,
+							signal
+						)
 					: input.simulatorUdid;
-			const outcome = await this.startLane(
+			const outcome = await this.#startLane(
 				{
 					actionId: input.actionId,
 					kind: 'lane.start',
@@ -706,9 +1155,11 @@ export class LaneService {
 					...(current.slimProfileId
 						? { slimProfileId: current.slimProfileId }
 						: {}),
+					...(current.backend ? { backend: current.backend } : {}),
 					...(current.agent ? { agent: current.agent } : {}),
 				},
-				signal
+				signal,
+				reservation
 			);
 			if (!outcome.lane) {
 				throw new Error('The lane did not start on the chosen Simulator.');
@@ -725,13 +1176,19 @@ export class LaneService {
 				message: safeError(error),
 			});
 			throw error;
+		} finally {
+			this.#reservations.delete(reservation);
 		}
 	}
 
-	/** Clones a Simulator for a lane and returns the copy's UDID. */
+	/**
+	 * Clones a Simulator for a lane and returns the copy's UDID, reserving it
+	 * for the lane the moment it shows up in the inventory.
+	 */
 	async #cloneDevice(
 		sourceUdid: string,
 		branch: string,
+		reservation: LaneReservation,
 		signal: AbortSignal
 	): Promise<string> {
 		const before = this.#simulator.getState().devices;
@@ -764,6 +1221,7 @@ export class LaneService {
 		if (!clone) {
 			throw new Error(`The clone "${name}" did not appear in the inventory.`);
 		}
+		reservation.simulatorUdid = clone.udid;
 		return clone.udid;
 	}
 
@@ -771,39 +1229,128 @@ export class LaneService {
 	 * Brings an existing lane back to running for a repeated `lane up`: if its
 	 * Metro is gone, start a fresh one on the lane's own port; then launch the
 	 * dev client when asked. The lane keeps its id, port, and log.
+	 *
+	 * The backend is asked again each time, for the worktree's branch as it is
+	 * now. A Metro that is gone respawns with whatever the backend serves
+	 * within the wait. A running one restarts only when the backend's values
+	 * changed (its API URL moved, say) or when what it was spawned with is
+	 * unknown, as after a desktop restart. A backend still starting attaches
+	 * late, and the launch waits for it unless Metro already has values.
 	 */
 	async #resumeLane(
 		existing: Lane,
 		input: Extract<LaneOperation, { kind: 'lane.start' }>,
-		environment: LaneEnvironment,
+		{ environment, branch }: { environment: LaneEnvironment; branch: string },
+		reservation: LaneReservation,
 		signal: AbortSignal
 	): Promise<Lane> {
 		let lane = existing;
-		const metroAlive =
-			(await this.#metro.isHealthy(lane.port)) ||
-			(lane.metroPid !== undefined &&
-				this.#metro.isProcessRunning(lane.metroPid));
+		// Only the lane's own Metro counts as alive: a packager answering on the
+		// port may be another worktree's, which is no reason to skip a respawn.
+		const metroAlive = this.#isMetroRunning(lane);
 		if (!metroAlive) {
-			const metroPid = await this.#metro.start({
-				worktreePath: laneAppDirectory(lane),
-				port: lane.port,
-				logPath: lane.logPath,
-				maxWorkers: this.#maxWorkers,
-				...(environment.metroEnv ? { metroEnv: environment.metroEnv } : {}),
-			});
+			// A stopped lane's port reads as free to other starts. Claim it before
+			// the first await, and never take it back from a lane that got it
+			// meanwhile.
+			const holder = this.#portHolder(reservation, lane.port, lane.id);
+			if (holder) {
+				throw new Error(
+					`Port ${lane.port} now belongs to ${holder}. Stop lane ${lane.id} and start it again to lease a new port.`
+				);
+			}
+			reservation.port = lane.port;
+		}
+		const previous = this.#backendRecords.get(lane.id);
+		const policy = this.#backendPolicy(
+			input.backend ?? previous?.policy,
+			environment
+		);
+		const pending = this.#beginBackend({ ...lane, branch }, policy, lane.agent);
+		let decision: BackendDecision | undefined;
+		try {
+			decision = pending
+				? await this.#decideBackend(pending, environment, signal)
+				: undefined;
+		} catch (error) {
+			// A required backend that cannot serve the lane fails this lane up;
+			// the lane itself keeps running as it was.
+			if (error instanceof LaneBackendError) {
+				this.#recordBackend(lane.id, policy, error.summary);
+				this.#touch();
+			}
+			throw error;
+		}
+		if (!decision && previous) {
+			// Turned off on this lane up: the backend lets go of the lane, and a
+			// running Metro that has its values restarts without them.
+			this.#releaseBackend(lane.id);
+			if (metroAlive && Object.keys(previous.env ?? {}).length > 0) {
+				lane = await this.#respawnMetro(lane, environment, undefined);
+			}
+		}
+		const record = decision
+			? this.#recordBackend(lane.id, policy, decision.summary)
+			: undefined;
+		if (!metroAlive) {
+			const metroPid = await this.#spawnMetro(lane, environment, decision?.env);
 			lane = {
 				...lane,
 				metroPid,
 				metro: 'starting',
 				startedAt: this.#now(),
 			};
+			if (record) record.env = decision?.env;
 			await this.#store.upsert(lane);
+			this.#reservations.delete(reservation);
+			this.#touch();
+		} else if (record && decision?.env) {
+			await this.#attachEnv(lane, environment, record, decision.env);
+			lane = this.#store.get(lane.id) ?? lane;
+		}
+		// A launch held back by an earlier start counts as asked for.
+		const wantsLaunch = input.launch || previous?.deferredLaunch === true;
+		if (record) {
+			record.deferredLaunch =
+				wantsLaunch && decision?.late !== undefined && record.env === undefined;
+			if (decision?.late) {
+				this.#awaitLateAttach(lane, record.generation, decision.late);
+			}
 			this.#touch();
 		}
-		if (input.launch) {
+		if (wantsLaunch && !record?.deferredLaunch) {
 			lane = await this.launchLane(lane.id, undefined, input.agent, signal);
 		}
 		return lane;
+	}
+
+	/**
+	 * Spawns a lane's Metro with its environment's metroEnv and, over the
+	 * variables a wired lane env source resolves for this lane, the public
+	 * values its backend serves.
+	 */
+	async #spawnMetro(
+		lane: LaneEnvTarget & Pick<Lane, 'logPath'>,
+		environment: LaneEnvironment,
+		backendEnv?: BackendEnv
+	): Promise<number> {
+		const resolved = await this.#resolveLaneEnv?.({
+			id: lane.id,
+			worktreePath: lane.worktreePath,
+			...(lane.appPath ? { appPath: lane.appPath } : {}),
+			branch: lane.branch,
+			simulatorUdid: lane.simulatorUdid,
+			environment: lane.environment,
+			port: lane.port,
+		});
+		const laneEnv = { ...resolved, ...backendEnv };
+		return this.#metro.start({
+			worktreePath: laneAppDirectory(lane),
+			port: lane.port,
+			logPath: lane.logPath,
+			maxWorkers: this.#maxWorkers,
+			...(environment.metroEnv ? { metroEnv: environment.metroEnv } : {}),
+			...(Object.keys(laneEnv).length > 0 ? { laneEnv } : {}),
+		});
 	}
 
 	async launchLane(
@@ -846,13 +1393,27 @@ export class LaneService {
 			},
 			signal
 		);
-		const touched = this.#agentWithTimestamp(agent) ?? lane.agent;
+		// A launch never moves the hold. The lane's agent stays its holder for
+		// the lane's life: its own launch refreshes when it was last seen, and a
+		// launch by anyone else (another session, or an agent on an operator's
+		// lane) leaves the holder as it was. Refusing non-holders is the
+		// router's job; this keeps ownership intact whoever gets through.
+		const holder =
+			lane.agent &&
+			agent &&
+			lane.agent.kind === agent.kind &&
+			lane.agent.sessionId === agent.sessionId
+				? this.#agentWithTimestamp(agent)
+				: lane.agent;
 		lane = {
 			...lane,
 			metro: 'ready',
 			lastLaunchedAt: this.#now(),
-			...(touched ? { agent: touched } : {}),
+			...(holder ? { agent: holder } : {}),
 		};
+		// Whoever launched, a launch held back for the backend has happened.
+		const record = this.#backendRecords.get(laneId);
+		if (record) record.deferredLaunch = false;
 		await this.#store.upsert(lane);
 		this.#touch();
 		return lane;
@@ -864,7 +1425,133 @@ export class LaneService {
 			await this.#metro.stop(lane.metroPid, lane.port);
 		}
 		await this.#store.remove(laneId);
+		// The backend lets go of the lane without anything waiting for a stop,
+		// and nothing it does can keep the lane alive.
+		this.#releaseBackend(laneId);
 		this.#touch();
+	}
+
+	/**
+	 * Restarts a lane's own Metro on its port with the lane's current backend
+	 * values, for the backend port: after a stack attached late, moved its
+	 * ports, or followed a branch switch, or when the operator asks. For
+	 * `detach` the new Metro gets no backend values. For every other reason
+	 * the backend port is asked for the lane's values again (ensureForLane
+	 * with waitMs 0, which must answer from the port's own records rather than
+	 * wait on the work that asked for this restart). The lane keeps its id,
+	 * port, and log, the old Metro is stopped only once its PID is proven to
+	 * be this lane's, and a dev client that was open relaunches against the
+	 * new Metro. A launch still held back stays for launchDeferred.
+	 */
+	async restartMetro(
+		laneId: string,
+		reason: SupabaseMetroRestartReason
+	): Promise<void> {
+		if (this.#stopped) throw new Error('Lanes are shutting down.');
+		const lane = this.#requireLane(laneId);
+		const signal = this.#lifecycle.signal;
+		await this.#serialize(path.resolve(laneAppDirectory(lane)), signal, () =>
+			this.#restartMetroNow(laneId, reason, signal)
+		);
+	}
+
+	async #restartMetroNow(
+		laneId: string,
+		reason: SupabaseMetroRestartReason,
+		signal: AbortSignal
+	): Promise<void> {
+		const lane = this.#requireLane(laneId);
+		if (!this.#isMetroRunning(lane)) {
+			throw new Error(
+				`Metro isn't running for lane ${laneId}. Run lane up to start it again.`
+			);
+		}
+		const environment = this.#environmentFor(lane);
+		const previous = this.#backendRecords.get(laneId);
+		if (reason === 'detach') {
+			// Nothing to take back from a Metro known to have no backend values;
+			// one spawned before a desktop restart may have them.
+			const hasValues = !previous || Object.keys(previous.env ?? {}).length > 0;
+			if (hasValues) await this.#respawnMetro(lane, environment, undefined);
+			if (previous) {
+				const record = this.#recordBackend(laneId, previous.policy, {
+					...backendSummary(previous.policy, 'stopped'),
+					...(previous.summary.stackId
+						? { stackId: previous.summary.stackId }
+						: {}),
+				});
+				record.env = undefined;
+				record.metro = hasValues ? 'restarted' : 'unchanged';
+				// An auto lane's held-back launch goes ahead without the backend;
+				// a required lane's waits for the backend to come back.
+				if (record.deferredLaunch && record.policy !== 'required') {
+					await this.#launchInBackground(laneId, record, signal);
+				}
+			}
+			this.#touch();
+			return;
+		}
+		const policy = previous?.policy === 'required' ? 'required' : 'auto';
+		const decision = await this.#decideBackend(
+			this.#ensureBackend(
+				{ ...lane, branch: this.#currentBranch(lane) },
+				policy,
+				lane.agent,
+				0
+			),
+			environment,
+			signal,
+			{ refuse: false }
+		);
+		const record = this.#recordBackend(laneId, policy, decision.summary);
+		this.#touch();
+		if (!decision.env) {
+			// Still starting: the late attach restarts Metro once it is ready.
+			if (decision.late) {
+				this.#awaitLateAttach(lane, record.generation, decision.late);
+				return;
+			}
+			throw new Error(
+				`The lane's local backend is ${decision.summary.status}, so its Metro was left as it was.${decision.summary.reasonText ? ` ${decision.summary.reasonText}` : ''}`
+			);
+		}
+		let restarted: Lane;
+		try {
+			restarted = await this.#respawnMetro(lane, environment, decision.env);
+		} catch (error) {
+			record.metro = 'needs-restart';
+			record.note = backendReason(
+				`Metro could not be restarted with the backend: ${safeError(error)}`
+			);
+			this.#touch();
+			throw error;
+		}
+		record.env = decision.env;
+		record.metro = 'restarted';
+		this.#touch();
+		if (restarted.lastLaunchedAt !== undefined && !record.deferredLaunch) {
+			await this.#launchInBackground(laneId, record, signal);
+		}
+	}
+
+	/**
+	 * Opens the dev client a lane start held back for its backend, if it is
+	 * still held back; otherwise does nothing. The lane's own late attach
+	 * launches too, and whichever comes first wins.
+	 */
+	async launchDeferred(laneId: string): Promise<void> {
+		if (this.#stopped) throw new Error('Lanes are shutting down.');
+		const lane = this.#requireLane(laneId);
+		if (!this.#backendRecords.get(laneId)?.deferredLaunch) return;
+		const signal = this.#lifecycle.signal;
+		await this.#serialize(
+			path.resolve(laneAppDirectory(lane)),
+			signal,
+			async () => {
+				if (!this.#backendRecords.get(laneId)?.deferredLaunch) return;
+				await this.launchLane(laneId, undefined, undefined, signal);
+			}
+		);
 	}
 
 	/**
@@ -902,17 +1589,46 @@ export class LaneService {
 			}
 			const status = this.#metroStatus(lane);
 			const liveStatus =
-				status === 'stopped'
+				status === 'stopped' || lane.metroPid === undefined
 					? 'stopped'
-					: (await this.#metro.isHealthy(lane.port))
+					: (await this.#metro.isHealthy(lane.port, lane.metroPid))
 						? 'ready'
 						: 'starting';
-			if (liveStatus !== lane.metro) {
-				await this.#store.upsert({ ...lane, metro: liveStatus });
+			// The probe awaited; write back onto the lane as it is now, and not
+			// at all if it was stopped or got a new Metro meanwhile.
+			const current = this.#store.get(lane.id);
+			if (
+				current &&
+				current.metroPid === lane.metroPid &&
+				liveStatus !== current.metro
+			) {
+				await this.#store.upsert({ ...current, metro: liveStatus });
+				changed = true;
+			}
+		}
+		// Only stopLane removes lanes and it forgets their backends; this is the
+		// backstop for anything that slipped past it.
+		const laneIds = new Set(this.#store.lanes().map((lane) => lane.id));
+		for (const laneId of this.#backendRecords.keys()) {
+			if (!laneIds.has(laneId)) {
+				this.#backendRecords.delete(laneId);
 				changed = true;
 			}
 		}
 		if (changed) this.#touch();
+		// Logs of lanes that are gone go a week after they stop growing,
+		// checked when the service starts and hourly after that.
+		if (
+			this.#logsPrunedAt === undefined ||
+			now - this.#logsPrunedAt >= LANE_LOG_PRUNE_INTERVAL_MS
+		) {
+			this.#logsPrunedAt = now;
+			try {
+				await this.#store.pruneLogs(LANE_LOG_RETENTION_MS, now);
+			} catch {
+				// Best effort: a log that cannot go now goes on a later pass.
+			}
+		}
 	}
 
 	async #refreshWorktrees(): Promise<LaneState> {
@@ -958,11 +1674,21 @@ export class LaneService {
 		return lane.metro === 'stopped' ? 'starting' : lane.metro;
 	}
 
+	/**
+	 * Waits for the lane's own Metro to serve its port. Another packager
+	 * answering there does not count, so a lane can never be reported ready,
+	 * or its dev client launched, against another worktree's Metro.
+	 */
 	async #waitForMetro(lane: Lane, signal: AbortSignal): Promise<boolean> {
 		const deadline = this.#now() + LANE_METRO_HEALTH_TIMEOUT_MS;
 		while (this.#now() < deadline) {
 			if (signal.aborted) throw new Error('Lane launch cancelled.');
-			if (await this.#metro.isHealthy(lane.port)) return true;
+			if (
+				lane.metroPid !== undefined &&
+				(await this.#metro.isHealthy(lane.port, lane.metroPid))
+			) {
+				return true;
+			}
 			if (
 				lane.metroPid !== undefined &&
 				!this.#metro.isProcessRunning(lane.metroPid)
@@ -974,6 +1700,563 @@ export class LaneService {
 			await sleep(HEALTH_POLL_INTERVAL_MS, signal);
 		}
 		return false;
+	}
+
+	#isMetroRunning(lane: Lane): boolean {
+		return (
+			lane.metroPid !== undefined && this.#metro.isProcessRunning(lane.metroPid)
+		);
+	}
+
+	/**
+	 * The lane's worktree branch as the last worktree listing saw it; the
+	 * lane's own record keeps the branch it started on.
+	 */
+	#currentBranch(lane: Lane): string {
+		return (
+			this.#worktreeCache.find(
+				(worktree) => path.resolve(worktree.path) === lane.worktreePath
+			)?.branch ?? lane.branch
+		);
+	}
+
+	/** The lane's environment; one this build no longer lists has no metroEnv. */
+	#environmentFor(lane: Lane): LaneEnvironment {
+		return (
+			this.#environments.find(
+				(candidate) => candidate.id === lane.environment
+			) ?? { id: lane.environment, portRange: [lane.port, lane.port] }
+		);
+	}
+
+	/**
+	 * Replaces the lane's own Metro with a fresh one on the lane's port, given
+	 * `backendEnv` over what the lane env source resolves. The old Metro is
+	 * stopped only once the supervisor proves its PID is this lane's (a
+	 * refusal leaves it running and throws), and the lane stays stored the
+	 * whole time, so its port stays leased.
+	 */
+	async #respawnMetro(
+		lane: Lane,
+		environment: LaneEnvironment,
+		backendEnv: BackendEnv | undefined
+	): Promise<Lane> {
+		const pid = lane.metroPid;
+		if (pid !== undefined && this.#metro.isProcessRunning(pid)) {
+			await this.#metro.stop(pid, lane.port);
+			await this.#waitForMetroExit(pid, lane.port);
+		}
+		const current = this.#store.get(lane.id);
+		if (!current || current.metroPid !== pid) {
+			throw new Error(
+				`Lane ${lane.id} stopped or got another Metro while this one restarted.`
+			);
+		}
+		const metroPid = await this.#spawnMetro(current, environment, backendEnv);
+		// A lane stopped while its Metro spawned leaves that Metro no one to
+		// serve, so it goes too.
+		const latest = this.#store.get(lane.id);
+		if (!latest || latest.metroPid !== pid) {
+			await this.#metro.stop(metroPid, current.port).catch(() => undefined);
+			throw new Error(`Lane ${lane.id} stopped while its Metro restarted.`);
+		}
+		const next: Lane = {
+			...latest,
+			metroPid,
+			metro: 'starting',
+			startedAt: this.#now(),
+		};
+		await this.#store.upsert(next);
+		this.#touch();
+		return next;
+	}
+
+	/** Waits for a stopped Metro to exit and let go of the lane's port. */
+	async #waitForMetroExit(pid: number, port: number): Promise<void> {
+		const deadline = this.#now() + METRO_EXIT_TIMEOUT_MS;
+		while (
+			this.#metro.isProcessRunning(pid) ||
+			!(await this.#metro.isPortFree(port))
+		) {
+			if (this.#now() >= deadline) {
+				throw new Error(
+					`Metro on port ${port} did not exit within ${METRO_EXIT_TIMEOUT_MS / 1_000}s of being stopped. The lane keeps its port; start it again once the port is free.`
+				);
+			}
+			await sleep(METRO_EXIT_POLL_INTERVAL_MS, this.#lifecycle.signal);
+		}
+	}
+
+	/**
+	 * The backend policy a start or a resume runs with: what it asked for,
+	 * else the environment's default from the backend port, else off. Without
+	 * a backend port nothing can honour `required`, so it fails here, before
+	 * anything boots.
+	 */
+	#backendPolicy(
+		requested: LaneBackendPolicy | undefined,
+		environment: LaneEnvironment
+	): LaneBackendPolicy {
+		const policy = requested ?? this.#defaultBackendPolicy(environment);
+		if (policy === 'required' && !this.#backends) {
+			throw new Error(
+				'This desktop session has no local backends, so a lane cannot require one. Start it with backend auto or off.'
+			);
+		}
+		return policy;
+	}
+
+	#defaultBackendPolicy(environment: LaneEnvironment): LaneBackendPolicy {
+		try {
+			return this.#backends?.defaultPolicy(environment.id) === 'auto'
+				? 'auto'
+				: 'off';
+		} catch {
+			return 'off';
+		}
+	}
+
+	/** Starts asking the backend port for a lane, unless its policy is off. */
+	#beginBackend(
+		target: Pick<
+			Lane,
+			'id' | 'worktreePath' | 'appPath' | 'branch' | 'environment'
+		>,
+		policy: LaneBackendPolicy,
+		agent: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined
+	): PendingBackend | undefined {
+		return policy === 'off'
+			? undefined
+			: this.#ensureBackend(target, policy, agent);
+	}
+
+	/**
+	 * Asks the backend port to ensure a lane's backend, starting now. Its
+	 * answer never rejects: a port that throws reads as a failed backend.
+	 * Without a port the backend is skipped (`required` never gets here).
+	 *
+	 * The ensure is detached from the request that asked: a cancelled lane up
+	 * stops waiting and lets go through detachLane, while a stack already on
+	 * its way keeps starting for the next lane up to attach.
+	 */
+	#ensureBackend(
+		target: Pick<
+			Lane,
+			'id' | 'worktreePath' | 'appPath' | 'branch' | 'environment'
+		>,
+		policy: 'auto' | 'required',
+		agent: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined,
+		waitMs: number = LANE_BACKEND_DEFAULT_WAIT_MS
+	): PendingBackend {
+		const port = this.#backends;
+		if (!port) {
+			return {
+				policy,
+				answer: Promise.resolve({
+					summary: backendSummary(policy, 'skipped', {
+						reason: 'disabled',
+						reasonText:
+							'Local backends are not available in this desktop session.',
+					}),
+				}),
+			};
+		}
+		const input: LaneBackendEnsureInput = {
+			laneId: target.id,
+			worktreePath: target.worktreePath,
+			...(target.appPath ? { appPath: target.appPath } : {}),
+			branch: target.branch,
+			environmentId: target.environment,
+			policy,
+			...(agent
+				? { agent: { kind: agent.kind, sessionId: agent.sessionId } }
+				: {}),
+			waitMs,
+		};
+		const failed = (error: unknown): LaneBackendEnsureResult => ({
+			summary: failedBackend(
+				policy,
+				`The local backend could not be ensured: ${safeError(error)}`
+			),
+		});
+		let answer: Promise<LaneBackendEnsureResult>;
+		try {
+			answer = port.ensureForLane(input, this.#lifecycle.signal).catch(failed);
+		} catch (error) {
+			answer = Promise.resolve(failed(error));
+		}
+		return { policy, answer };
+	}
+
+	/**
+	 * Waits for the backend at most LANE_BACKEND_DEFAULT_WAIT_MS past now,
+	 * the moment a Metro is due, and decides what that Metro gets. Unless
+	 * `refuse` is off, a `required` backend that cannot serve the lane and is
+	 * not still starting throws a LaneBackendError.
+	 */
+	async #decideBackend(
+		pending: PendingBackend,
+		environment: LaneEnvironment,
+		signal: AbortSignal,
+		{ refuse = true }: { refuse?: boolean } = {}
+	): Promise<BackendDecision> {
+		const answer = await this.#untilDeadline(
+			pending.answer,
+			this.#now() + LANE_BACKEND_DEFAULT_WAIT_MS,
+			signal
+		);
+		let decision: BackendDecision;
+		if (!answer) {
+			// Not ready in time: Metro goes without the backend's names, and
+			// the answer, whenever it comes, attaches it.
+			decision = {
+				summary: backendSummary(pending.policy, 'starting'),
+				late: pending.answer.then((late) => this.#lateAnswer(late)),
+			};
+		} else {
+			const read = this.#readBackend(
+				pending.policy,
+				environment,
+				answer.summary,
+				answer.laneEnv
+			);
+			decision =
+				read.summary.status === 'starting' && !read.env && answer.lateAttach
+					? { summary: read.summary, late: answer.lateAttach }
+					: read;
+		}
+		if (
+			refuse &&
+			pending.policy === 'required' &&
+			!decision.env &&
+			!decision.late
+		) {
+			throw new LaneBackendError(decision.summary);
+		}
+		return decision;
+	}
+
+	/** What a port's answer that came after the wait amounts to. */
+	#lateAnswer(
+		answer: LaneBackendEnsureResult
+	): LaneBackendLateAttach | Promise<LaneBackendLateAttach> {
+		if (answer.summary.status === 'starting' && answer.lateAttach) {
+			return answer.lateAttach;
+		}
+		return {
+			summary: answer.summary,
+			...(answer.laneEnv ? { laneEnv: answer.laneEnv } : {}),
+		};
+	}
+
+	/**
+	 * Reads one answer from the backend port: the summary to record and, when
+	 * the backend serves the lane now, the variables its Metro gets. A name
+	 * the environment's metroEnv sets stays the environment's
+	 * (`pinned-by-environment`), and a summary the lane wire would refuse, or
+	 * variables Metro would refuse, read as a failed backend. `shadowed` (the
+	 * app's own dotenv files win) serves an `auto` lane with a warning and
+	 * never a `required` one.
+	 */
+	#readBackend(
+		policy: 'auto' | 'required',
+		environment: LaneEnvironment,
+		summary: LaneBackendSummary,
+		laneEnv: BackendEnv | undefined
+	): { summary: LaneBackendSummary; env?: BackendEnv } {
+		const parsed = laneBackendSummarySchema.safeParse({ ...summary, policy });
+		if (!parsed.success) {
+			return {
+				summary: failedBackend(
+					policy,
+					'The local backend answered in a form RN Devtools could not read.'
+				),
+			};
+		}
+		// Whether the launch waits and how Metro took the backend are the
+		// lane's to say.
+		const { launch: _launch, metro: _metro, ...read } = parsed.data;
+		const serves =
+			read.status === 'ready' ||
+			(read.status === 'shadowed' && policy === 'auto');
+		if (!serves) return { summary: read };
+		const offered = Object.entries(laneEnv ?? {});
+		const pinned = new Set(
+			offered
+				.filter(([name]) => environment.metroEnv?.[name] !== undefined)
+				.map(([name]) => name)
+		);
+		const env = Object.fromEntries(
+			offered.filter(([name]) => !pinned.has(name))
+		);
+		const problem = laneEnvProblem(env);
+		if (problem) {
+			return {
+				summary: {
+					...failedBackend(
+						policy,
+						`Metro would refuse the backend's app variables. ${problem}`
+					),
+					...(read.stackId ? { stackId: read.stackId } : {}),
+				},
+			};
+		}
+		if (pinned.size === 0) return { summary: read, env };
+		return {
+			summary: {
+				...read,
+				appEnvNames: read.appEnvNames.filter((name) => !pinned.has(name)),
+				warnings: read.warnings.includes('pinned-by-environment')
+					? read.warnings
+					: [...read.warnings, 'pinned-by-environment'],
+			},
+			env,
+		};
+	}
+
+	/**
+	 * Records the port's latest answer for a lane, superseding any late attach
+	 * still waiting on an earlier one. What the current Metro was spawned
+	 * with, and a launch still held back, carry over.
+	 */
+	#recordBackend(
+		laneId: string,
+		policy: LaneBackendPolicy,
+		summary: LaneBackendSummary
+	): LaneBackendRecord {
+		const previous = this.#backendRecords.get(laneId);
+		const record: LaneBackendRecord = {
+			policy,
+			summary,
+			env: previous?.env,
+			generation: (previous?.generation ?? 0) + 1,
+			deferredLaunch: previous?.deferredLaunch ?? false,
+		};
+		this.#backendRecords.set(laneId, record);
+		return record;
+	}
+
+	/**
+	 * Forgets a lane's backend and tells the port to drop the lane's hold,
+	 * without waiting on it: a port that throws or rejects changes nothing
+	 * for the lane.
+	 */
+	#releaseBackend(laneId: string): void {
+		this.#backendRecords.delete(laneId);
+		const port = this.#backends;
+		if (!port) return;
+		try {
+			const result: unknown = port.detachLane(laneId);
+			// Typed void, but an async port's rejection must not go unhandled.
+			if (result instanceof Promise) result.catch(() => undefined);
+		} catch {
+			// The lane is gone whatever the backend makes of it.
+		}
+	}
+
+	/** A stored lane as the wire reports it, with its backend when known. */
+	#view(lane: Lane): LaneView {
+		const record = this.#backendRecords.get(lane.id);
+		if (!record) return lane;
+		return {
+			...lane,
+			backend: {
+				...record.summary,
+				...(record.note ? { reasonText: record.note } : {}),
+				...(record.deferredLaunch ? { launch: 'deferred' as const } : {}),
+				...(record.metro ? { metro: record.metro } : {}),
+			},
+		};
+	}
+
+	/**
+	 * Attaches a backend that was not ready when the lane's Metro spawned,
+	 * once it is, or settles the lane without it once it failed. Queued
+	 * behind whatever else runs for the lane's app, and dropped when the lane
+	 * stopped or a newer answer superseded this one.
+	 */
+	#awaitLateAttach(
+		lane: Lane,
+		generation: number,
+		late: Promise<LaneBackendLateAttach>
+	): void {
+		const appDirectory = path.resolve(laneAppDirectory(lane));
+		const signal = this.#lifecycle.signal;
+		void late
+			.catch(
+				(error: unknown): LaneBackendLateAttach => ({
+					summary: failedBackend(
+						'auto',
+						`The local backend did not attach: ${safeError(error)}`
+					),
+				})
+			)
+			.then((answer) =>
+				this.#serialize(appDirectory, signal, () =>
+					this.#applyLateAttach(lane.id, generation, answer, signal)
+				)
+			)
+			.catch(() => undefined);
+	}
+
+	async #applyLateAttach(
+		laneId: string,
+		generation: number,
+		answer: LaneBackendLateAttach,
+		signal: AbortSignal
+	): Promise<void> {
+		const record = this.#backendRecords.get(laneId);
+		const lane = this.#store.get(laneId);
+		if (this.#stopped || !lane || record?.generation !== generation) return;
+		const policy = record.policy === 'required' ? 'required' : 'auto';
+		const environment = this.#environmentFor(lane);
+		const read = this.#readBackend(
+			policy,
+			environment,
+			answer.summary,
+			answer.laneEnv
+		);
+		record.summary = read.summary;
+		record.metro = undefined;
+		record.note = undefined;
+		if (read.env) {
+			await this.#attachEnv(lane, environment, record, read.env);
+			// A Metro that could not take the backend keeps a held-back launch
+			// held back; lane up or Restart Metro picks it up.
+			if (
+				record.metro !== 'needs-restart' &&
+				(record.deferredLaunch ||
+					(record.metro === 'restarted' && lane.lastLaunchedAt !== undefined))
+			) {
+				await this.#launchInBackground(laneId, record, signal);
+			}
+		} else if (policy === 'required') {
+			record.deferredLaunch = false;
+			await this.#stopMetroWithoutBackend(lane, record);
+		} else if (record.deferredLaunch) {
+			// An auto lane launches without the backend, which says why.
+			await this.#launchInBackground(laneId, record, signal);
+		}
+		this.#touch();
+	}
+
+	/**
+	 * Gives a running lane's Metro the backend's values: a PID-verified
+	 * restart on the lane's port, unless the current Metro was spawned with
+	 * exactly these. A Metro that is gone, or a restart the supervisor
+	 * refuses, marks the backend `needs-restart` with the reason instead of
+	 * failing anything.
+	 */
+	async #attachEnv(
+		lane: Lane,
+		environment: LaneEnvironment,
+		record: LaneBackendRecord,
+		env: BackendEnv
+	): Promise<void> {
+		if (!this.#isMetroRunning(lane)) {
+			record.metro = 'needs-restart';
+			record.note =
+				'Metro for this lane is not running. Run lane up to start it with the backend.';
+			return;
+		}
+		if (
+			record.env !== undefined &&
+			envFingerprint(record.env) === envFingerprint(env)
+		) {
+			record.metro = 'unchanged';
+			return;
+		}
+		try {
+			await this.#respawnMetro(lane, environment, env);
+			record.env = env;
+			record.metro = 'restarted';
+		} catch (error) {
+			record.metro = 'needs-restart';
+			record.note = backendReason(
+				`Metro could not be restarted with the backend: ${safeError(error)}`
+			);
+		}
+	}
+
+	/**
+	 * Stops a `required` lane's Metro once its backend failed to attach. The
+	 * lane stays listed with the reason, holding its device, until it is
+	 * stopped or started again.
+	 */
+	async #stopMetroWithoutBackend(
+		lane: Lane,
+		record: LaneBackendRecord
+	): Promise<void> {
+		const why = record.summary.reasonText
+			? ` ${record.summary.reasonText}`
+			: '';
+		const pid = lane.metroPid;
+		if (pid === undefined || !this.#metro.isProcessRunning(pid)) return;
+		try {
+			await this.#metro.stop(pid, lane.port);
+		} catch (error) {
+			record.note = backendReason(
+				`The lane requires its local backend, but its Metro could not be stopped: ${safeError(error)}${why}`
+			);
+			return;
+		}
+		record.note = backendReason(
+			`The lane requires its local backend, so its Metro was stopped.${why}`
+		);
+		const current = this.#store.get(lane.id);
+		if (current?.metroPid === pid) {
+			await this.#store.upsert({ ...current, metro: 'stopped' });
+		}
+	}
+
+	/**
+	 * Opens the dev client for a lane on the lane's own account, not the
+	 * agent's; a failure is noted on the lane's backend, after what the
+	 * backend itself said.
+	 */
+	async #launchInBackground(
+		laneId: string,
+		record: LaneBackendRecord,
+		signal: AbortSignal
+	): Promise<void> {
+		try {
+			await this.launchLane(laneId, undefined, undefined, signal);
+		} catch (error) {
+			record.deferredLaunch = false;
+			const why = record.summary.reasonText
+				? `${record.summary.reasonText} `
+				: '';
+			record.note = backendReason(
+				`${why}The dev client did not open: ${safeError(error)}`
+			);
+		}
+	}
+
+	/**
+	 * `promise`'s value, or undefined once the injected clock reaches
+	 * `deadline` first. Rejects when `signal` aborts.
+	 */
+	async #untilDeadline<T>(
+		promise: Promise<T>,
+		deadline: number,
+		signal: AbortSignal
+	): Promise<T | undefined> {
+		let settled = false;
+		const value = promise.then((result) => {
+			settled = true;
+			return { result };
+		});
+		const timeout = (async () => {
+			while (!settled && this.#now() < deadline) {
+				await sleep(CLOCK_POLL_INTERVAL_MS, signal);
+			}
+			return undefined;
+		})();
+		try {
+			return (await Promise.race([value, timeout]))?.result;
+		} finally {
+			settled = true;
+		}
 	}
 
 	async #runSimulatorAction(
@@ -1189,6 +2472,7 @@ export class LaneService {
 	#touch(): void {
 		this.#revision += 1;
 		this.#updatedAt = this.#now();
+		this.#publishedBackendsKey = this.#worktreeBackendsKey();
 		const state = this.getState();
 		for (const listener of this.#listeners) {
 			try {
