@@ -46,6 +46,11 @@ Local iOS Simulator tooling on macOS:
   log are visible on the fleet wall and in the Lanes panel
 - A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket,
   including `lane up|down|ls|launch|log` and an agent skill
+- Local Supabase per worktree (alpha): the Supabase tab (⌘8) tracks every native
+  local Supabase stack on this Mac. For each one it shows the agent session, lane,
+  Simulator and worktree/branch it belongs to. It starts, stops, resets, migrates,
+  inspects, reads logs for and cleans up stacks, and lets lanes start the
+  worktree's stack automatically. See [Local Supabase per worktree](#local-supabase-per-worktree-alpha).
 
 Protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
 app-scoped network conditions, request/recipe correlation, and development camera
@@ -131,6 +136,66 @@ Wildcard binding is intentionally a second opt-in. If a local setup truly requir
 
 Diagnostic payloads are metadata-only by default. For a local Metro development session that deliberately needs sanitized query values and HTTP bodies, set `EXPO_PUBLIC_DEVTOOLS_CAPTURE_PAYLOADS=true`. The flag is ignored outside `__DEV__`; assume any opted-in payload can contain application data and keep the connection local and temporary.
 
+## Local Supabase per worktree (alpha)
+
+The Supabase tab (Simulator workspace, Backend group, ⌘8) runs one native local
+Supabase stack per git worktree and branch. It uses the Supabase CLI's
+experimental stack backend: no Docker, automatic loopback ports, and about
+160 MiB per idle stack. Design, measurements, the full UI specification and the
+as-built notes are in [`experiments/supabase-backends/`](experiments/supabase-backends/).
+
+### Requirements
+
+- **This Mac:** Apple silicon with macOS 14 or later.
+- **Turn it on:** Supabase › Turn on local Supabase. It is off by default, and
+  nothing is probed or spawned while it is off.
+- **The repository:**
+  - commits `[experimental] stack = true` in `supabase/config.toml`, pins no ports,
+    and preferably disables Studio and analytics in config
+    (see [`examples/expo-demo/supabase`](../../examples/expo-demo/supabase/config.toml));
+  - pins `supabase` exactly as a devDependency. RN Devtools runs the worktree's own
+    CLI and never a global one, and it verifies CLI 2.121.0.
+
+### What it does
+
+- **Native only.** It creates every stack with `--runtime native` and never uses
+  `auto` or Docker. After every start it runs `lsof` over the stack's process
+  tree and stops the stack if anything listens beyond loopback. A Docker or
+  Podman stack it finds is flagged as LAN-exposed; one on a worktree RN Devtools
+  manages is stopped once and never attached.
+- **Lanes.** A lane on a development worktree starts or resumes that worktree's
+  stack while the Simulator boots. Its Metro gets only the stack's API URL and
+  publishable key, under variable names you configure in the tab's settings.
+- **Agents.** Agents use `rndevtools supabase --operation up|down|ls|status|env|reset|log|destroy`,
+  or the `supabase` MCP tool, plus the worktree's own `supabase … --local` data
+  commands. `rndevtools setup` installs the `rndevtools-supabase` skill and a
+  hook that steers agents away from hand-run lifecycle commands while RN Devtools
+  manages the worktree. Destroying, or resetting a stack another session holds,
+  becomes a request you approve.
+- **Holds and cleanup.** Stacks are held by lanes, agent sessions and your pins,
+  like Simulators. One stops 60 s after its last holder releases it, 10 min after
+  that holder's session is gone, or at once when its worktree is deleted. Data is
+  kept. Destroying is never automatic: Clean up suggests orphaned, stale-branch and
+  long-stopped stacks with their sizes.
+- **Branch switches.** Stack identity includes the git branch. RN Devtools follows
+  a held stack to the new branch after HEAD has been stable for 30 s and no rebase
+  or merge is running, and switching back reattaches the old one. Following from
+  the stack's notice, or an agent's `up`, skips the 30 s wait.
+- **Confirmations.** Destroy, reset, recreate, enabling Studio, stopping a stack
+  RN Devtools didn't start, turning the feature on or turning it off while
+  managed stacks run, settings that weaken a safeguard, and approving an agent's
+  destroy or reset go through a native dialog with Cancel as the default and a
+  one-time token. Database changes run only from the stack's own worktree, and
+  only while that worktree is on the stack's branch.
+
+### Trade-off
+
+Supabase recommends Docker for several local projects on one machine. Native
+stacks share this Mac's process table, the default local keys are public
+constants shared by every stack, and `supabase_admin` is trusted on loopback.
+Treat local Supabase as single-user-Mac tooling: stacks are separate databases,
+not isolated tenants.
+
 ## Security and privacy boundaries
 
 - The Electron renderer runs sandboxed with context isolation, no Node integration, a Content Security Policy, denied popups/navigation, and a frozen preload bridge.
@@ -156,6 +221,12 @@ Diagnostic payloads are metadata-only by default. For a local Metro development 
   read-only inspection remains available.
 - Build artifacts, captures, process data, recipes, and evidence remain local. Build source
   paths stay in Electron main and never cross the preload boundary.
+- Local Supabase keys, the database URL and CLI output stay in Electron main. The
+  renderer receives loopback URLs, ports, ids and redacted, bounded text. Copying a
+  key or psql command happens in main, and main clears the clipboard 60 s later if
+  it still holds that text. The Supabase CLI runs with an allowlisted environment
+  from a neutral working directory, with telemetry and update checks off. Nothing
+  Supabase-related crosses the unauthenticated broker.
 
 This remains an internal development tool. Do not enable its mobile client in release builds or expose the LAN broker on an untrusted network.
 

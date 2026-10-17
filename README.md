@@ -12,9 +12,9 @@ Two halves that version together:
 - **On your Mac** — an Electron app that connects over a loopback WebSocket and
   gives the same diagnostics a real desktop UI, plus Simulator fleet
   management, lanes (one git worktree per Simulator with its own Metro port,
-  for parallel branches and coding agents), deep links and permissions,
-  screenshot and recording capture, build insights, and experimental
-  Simulator slimming.
+  for parallel branches and coding agents), a native local Supabase stack per
+  worktree (alpha), deep links and permissions, screenshot and recording
+  capture, build insights, and experimental Simulator slimming.
 
 ## Packages
 

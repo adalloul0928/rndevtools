@@ -1,6 +1,6 @@
 # Per-worktree local Supabase for lanes: design
 
-> **Status:** proposal, not implemented. Produced on 2026-10-16 from research, a hands-on spike, and tag-level verification; see [FINDINGS.md](FINDINGS.md).
+> **Status:** implemented on 2026-10-17; [IMPLEMENTATION.md](IMPLEMENTATION.md) records what shipped, how it was verified and where it departs from this design (names say `supabase`, not `backend`). Produced on 2026-10-16 from research, a hands-on spike, and tag-level verification; see [FINDINGS.md](FINDINGS.md).
 > **Pinned upstream:** Supabase CLI 2.121.0. Supabase source references are relative to `supabase/cli@v2.121.0` unless they say `@develop`. rndevtools references are relative to the repository root, at commit 88ee67b.
 > **Origin:** three competing designs (managed, adopt, risk-first MVP) were scored by two judges. MVP ranked first and managed second, within about one point of each other, so this design is a synthesis of the two.
 

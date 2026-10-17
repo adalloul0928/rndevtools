@@ -93,6 +93,106 @@ All stacks were destroyed afterwards, and no owners, listeners, port reservation
   - `rm -rf` is denied by the permission layer.
 
 
+## Spike 2 (2026-10-17): the CLI surfaces behind management controls
+
+Setup:
+- **Environment:** the same sandbox as spike 1. Supabase CLI 2.121.0, native runtime, an allowlisted env, a scratch `SUPABASE_HOME`, and telemetry off.
+- **Calls:** every call passed `--output-format json` (or `stream-json`) plus `--workdir`/`--stack-id`.
+- **Teardown:** all stacks were destroyed afterwards, leaving no owners, port reservations, SysV segments or listeners.
+- **Loopback:** confirmed with lsof on every start, including after Studio came back on resume.
+
+### Start and progress
+- **Command:** `stack start --runtime native --exclude studio,analytics --workdir <root>` took 6.3 s on a destroyed-then-recreated identity (warm cache, fresh initdb, migrations, seed).
+- **Composition:** database, rest, auth, realtime, storage, functions and mail. There is no studio, pgmeta, analytics or `/mcp`, `env` has no STUDIO_URL or MCP_URL, and the stack has 8 listeners, all on 127.0.0.1.
+- **Deterministic identity:** re-creating a destroyed identity gave the same stack id. It also got the same API port (26211) this time, but the DB port changed, so ports must never be assumed stable.
+- **Progress in stream-json:**
+  - It emits only `{type:"log", level:"info"|"success", message, timestamp}` and a final `{type:"result", data:<start JSON>, timestamp}`.
+  - Detailed steps arrive on stderr:
+    - `[task] start: Starting local Supabase stack...`
+    - `Seeding globals from roles.sql...`
+    - `Applying migration <file>...`, one line per migration
+    - `Seeding data from supabase/seed.sql...`
+    - `[task] done: Stack is ready.` or `[task] failed: <message>`
+  - A progress stepper can be built from redacted stderr lines, with N = the number of migration files counted statically.
+
+### Status semantics (`stack status --stack-id <id> --output-format json`)
+
+**Running stack:**
+- `owner`=`reachable`, `lifecycle`=`running`.
+- `readiness`=`sleeping` while any lazy member sleeps. It stayed `sleeping` even with rest, auth and storage awake, so stack-level readiness is coarse; the UI must derive per-service state from `services[]`.
+- Members (`composition.members[]`) carry `activation` (`eager`|`lazy`), `state` (`running`|`sleeping`), `lifecycle` (`running`|`stopped`) and `health` (`healthy` or absent).
+- Per-service rows: the database is `state=running lifecycle=running health=healthy`; a sleeping service is `state=sleeping lifecycle=stopped` with no health.
+
+**Wake behaviour:**
+- Waking auth also woke mail, a dependency wake.
+- Wake latencies: REST 347 ms, Auth 793 ms, Storage 1.4 s.
+
+**Stopped stack:**
+- `owner`=`unavailable`, no `lifecycle`, `readiness`=`unavailable`.
+- Every member and service has `state`=`unavailable` with no lifecycle or health.
+- `endpoints` is `{}`, and `env` keeps only ANON_KEY, PUBLISHABLE_KEY, SECRET_KEY and SERVICE_ROLE_KEY.
+- `config_drift.status` is still reported (`unchanged`).
+
+**Listing** (`stack list`): a stopped stack shows `owner`=`unavailable`; a running one `reachable`.
+
+**Unknown id:** exit 1, `{"_tag":"Error","error":{"code":"ExperimentalStackStatusError","message":"Stack <id> was not found","suggestion":"Run `supabase stack list` to see managed stacks and their IDs."}}`.
+
+### Lifecycle verbs
+| Verb | Command | Wall time | Notes |
+|---|---|---|---|
+| Restart | `stack restart --stack-id <id> --output-format json` | 0.8 s | Returns `{id, services:[{id, service, lifecycle, health, wake_enabled}], message}`. Exclusions persisted (still no studio or analytics). |
+| Stop | `stack stop --stack-id <id>` | 0.3 s (mostly asleep) | Returns `{stopped:[ids], not_running:[ids], message}`. |
+| Resume | `stack start --stack-id <id>` on a stopped stack | 1.6 s | **Exclusions did not persist.** Without `--exclude` the resumed composition put analytics, pgmeta and studio back (lazy) and `studio.http` reappeared. The desktop must pass `--exclude` on every resume, and an agent's bare resume re-enables Studio, which the UI must detect as composition drift. Returns the start JSON without `endpoint_changes` when ports did not move. |
+| Failed first start | `start` that fails | | Still registers the stack (`stack list` shows it, owner unavailable). A pinned-port conflict left a registered stack that had to be destroyed. The UI needs a "failed to start" row with Destroy. |
+
+### Logs (`stack logs --stack-id <id> [--service <kind>|gateway] [--tail N] [--since 10m|ISO|start] [--follow] --output-format json|stream-json`)
+- **json:** an array of records:
+  - `{type:"log-entry", timestamp, source:"history", service, instance_id, stream:"stdout"|"stderr", line}`
+  - `{type:"log-marker", timestamp, source:"history", service, instance_id, kind:"launch"}`
+- **stream-json:** the same records as NDJSON.
+- **While stopped:** history is readable; `--follow` needs a running stack.
+- **The `gateway` service** writes Apache-style access lines with full paths and query strings (e.g. `GET /rest/v1/notes?select=id&limit=1`).
+- **Database logs** include SQL statement text (`LOG: statement: CREATE T...`).
+- **Redaction:** no keys appeared in the sample, but query strings and SQL can carry PII or tokens. The viewer must redact (sb_secret_, JWTs, URL userinfo, token-like query params) and bound output.
+
+### Migrations
+- **Listing:** `migration list --local --workdir <root> --output-format json` returns `{migrations:[{local, remote, time}], message:"Migrations listed"}`.
+  - A pending migration has `remote:""`; an applied one has `remote` equal to `local`.
+- **Applying:** `migration up --local --workdir <root> --output-format json` returns `{applied:[<absolute file paths>], message:"Migrations applied"}` in 0.3 s. Stderr shows `Applying migration <file>...`.
+- **`--db-url` targeting** (`migration list|up --db-url <DB_URL> --workdir <root>`):
+  - It works **only** when DB_URL belongs to the stack of that workdir's current branch identity; the CLI then treats it as local.
+  - From any other workdir the same loopback URL counts as a **remote** database: it prompts "reset the remote database?", which `--yes` auto-confirms, and it tries TLS (it failed with `DbConnectError` plus the suggestion `sslmode=disable`).
+  - With `sslmode=disable` it would apply or reset the stack using the **other worktree's** migrations.
+  - **Rule:** the desktop must run database-mutating commands (`migration up`, `db reset`) only with `--workdir` equal to the stack's own project root, and only while that worktree's HEAD matches the stack's `branch_context`. Never mutate across worktrees via `--db-url`.
+  - Read-only inspection via `--db-url` is safe.
+
+### Reset
+- **Command:** `db reset --local --workdir <root> --output-format json` returns `{target:"local", version:"", message:"Reset local database."}` in about 4.3-4.9 s.
+- **What happens:** it re-applies every migration and the seed (stderr shows each step).
+- **What is kept:** the owner PID and the composition.
+- **Flags:** `--no-seed`, `--version <v>`, `--last <n>`, `--sql-paths <p>`.
+- **`--db-url`** with the matching stack's own URL from its own workdir behaves the same as `--local`. From another workdir it is the remote path described above, so **never use it**.
+
+### Database inspection (read-only; `--local` or `--db-url`)
+- **`inspect db db-stats`** (0.2 s) returns `{rows:[{database_size:"11 MB", total_index_size, total_table_size, total_toast_size, time_since_stats_reset, index_hit_rate, table_hit_rate, wal_size}], message}`.
+- **`inspect db table-stats`** (0.2 s) returns `{rows:[{name:"public.notes", table_size, index_size, total_size, estimated_row_count, seq_scans}], message}`.
+- **Other subcommands:** `locks`, `blocking`, `long-running-queries`, `outliers`, `calls`, `index-stats`, `role-stats`, `vacuum-stats`, `bloat`, `replication-slots`, `traffic-profile` (plus deprecated ones).
+
+### Export
+- **Command:** `db dump --local --data-only --workdir <root> -f <file>` worked natively in 1.4 s, producing a 63 KB file for 1000 rows.
+- **Output:** stdout JSON is `null` when `-f` is used; stderr reads "Dumping data from local database... Dumped schema to <file>".
+- **Restore:** there is no CLI restore. An "Export data" control is viable; "Import" or "Snapshot restore" is not, today.
+
+### Errors observed
+| Code | When |
+|---|---|
+| `ExperimentalStackStatusError` | "No managed stack exists for the selected project." (branch switched) or "Stack <id> was not found" |
+| `ExperimentalStackStartError` | A pinned-port conflict, e.g. "rest <instance>: Public port 54321 for api is in use by the stack of project <path> (stack <id>); run `supabase stack stop` in that project, or configure a different port for api", with the suggestion "Set `api.port` in supabase/config.toml (or SUPABASE_API_PORT) to a free port." |
+| `LocalDbRunningError` | "The local stack is not running." |
+| `DbConnectError` | A TLS or connection failure, with an `sslmode` suggestion |
+
+Codes are coarse; the message text names the specific cause, the conflicting project and the stack. The UI classifier needs message patterns, tested against recorded fixtures.
+
 ## Verification at v2.121.0 and in rndevtools
 
 ### identity-runtime-ports
@@ -146,7 +246,6 @@ New findings:
 - The owner inherits the full env and the cwd of whatever process ran start: HostProcess.ts:495-516 passes no env option and uses cwd: process.cwd(). By macOS behaviour (inferred, not tested) it also inherits that process's sandbox for its whole life. Desktop-started owners therefore run outside agent sandboxes, and agent-started ones stay confined.
 - Offline destroy prerequisites: SUPABASE_EXPERIMENTAL_STACK=1 in the env, because the deleted worktree's config.toml can no longer enable the command group (experimental-feature.ts:89-108), and an existing cwd. A full id that is not registered makes destroy probe both Docker and Podman before confirming (effect.ts:1039-1061; destroy.handler.ts:58-63). Docker's daemon hangs on this Mac, so expect slow failures for stale or unregistered ids; the probe bound was not verified.
 - After an owner crash, its Postgres can keep running for up to about 15 s, holding its SysV segment and PGDATA, because the launcher sends SIGINT first and waits the 15 s budget before SIGKILL (native-launcher.ts:182-211; Database.ts:518-519). Native socket directories live at /tmp/supabase-<uid>/pg-<digest> (runtime/postgres-user.ts:15-22,240-249).
-- Housekeeping: I downloaded the homebrew-core arm64_tahoe supabase bottle (sha256 verified against the formula) to /tmp only to read its embedded release string, and used a scratch git repo for the worktree test. All of these scratch files and dirs (/tmp/lifecycle-verify-*) have been deleted. /tmp/sec-review-npm-cli was only read. No supabase binary was executed.
 
 ### credentials-security
 
@@ -243,7 +342,6 @@ New findings:
 - Codex 0.162.1 has a lead and a dead end for MCP identity. Its strings contain an x-codex-turn-metadata structure with threadId, turnId and callId, but whether it reaches third-party stdio tools/call _meta is unverified, and rndevtools' server.go:291-294 ignores _meta anyway. Its MCP config supports env and env_vars (source local or remote), but there is no evidence a per-thread id is available to forward.
 - Lane logs are never deleted. stopLane removes the lease but not logs/<laneId>.log (lane-service.ts:861-868; lane-store.ts:36-38), so unredacted Metro output, including app console logs, piles up under userData/lanes/logs.
 - #missingSince is in memory only (agent-service.ts:111), so every desktop restart resets the abandonment clock for all holds. Stack GC needs its own persisted or reconstructed abandoned-since timestamps.
-- Housekeeping: the repo was not modified (git status clean). Two temp files outside the repo were left because rm was denied: /tmp/codex-strings-verify.txt (strings dump of the Codex binary) and /tmp/verify-redact-scripts/check.mjs (the redactor test script).
 
 ## Research summaries
 

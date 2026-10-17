@@ -29,7 +29,7 @@ Use the narrowest workspace command that proves a change, then run that workspac
 
 ## Universal Rules
 
-- **Nothing product-specific.** This toolkit is installed by teams whose app you have never seen. A product name, URL scheme, bundle identifier, app group, vendor header, or storage namespace belongs in an option with a neutral default, not in a source file. Test fixtures use `example.com` / `ExampleApp`.
+- **Nothing product-specific.** This toolkit is installed by teams whose app you have never seen. A product name, URL scheme, bundle identifier, app group, vendor header, or storage namespace belongs in an option with a neutral default, not in a source file. Test fixtures use `example.com` / `ExampleApp`. Third-party tools the toolkit integrates with (Expo, SimSlim, TanStack Query, Supabase) may be named in source; the consuming app's own identity and conventions, such as its environment variable names, may not.
 - Match existing TypeScript and Biome conventions; avoid `any` unless a boundary is narrowed immediately.
 - Keep changes scoped. Reuse established components, services, schemas, and helpers before adding a parallel abstraction.
 - Both npm packages ship TypeScript source because Reanimated worklets must be compiled by the consuming app. Do not add a bundler without solving workletization first.
