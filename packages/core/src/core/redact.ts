@@ -1,10 +1,29 @@
+// Some secrets have no shape a value rule can recognize (root keys and S3
+// signatures are bare hex), so their names alone mark them as sensitive.
 const SENSITIVE_KEY =
-	/(?:authorization|cookie|csrf|jwt|token|secret|password|passcode|session|api[-_]?key|email|phone|user[-_]?id)/i;
+	/(?:authorization|cookie|csrf|jwt|token|secret|password|passcode|session|api[-_]?key|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]?amz[-_]?(?:credential|signature)|email|phone|user[-_]?id)/i;
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const BEARER = /\bBearer\s+[A-Za-z\d._~+/=-]+/gi;
-const JWT = /\beyJ[A-Za-z\d_-]+\.[A-Za-z\d_-]+\.[A-Za-z\d_-]+\b/g;
+// The signature may be empty: an unsigned token still carries its claims.
+const JWT = /\beyJ[A-Za-z\d_-]+\.[A-Za-z\d_-]+\.[A-Za-z\d_-]*/g;
+// Supabase secret API keys, under any name and inside encoded text. There is
+// deliberately no rule for bare 64-hex values: stack ids have that shape.
+const SECRET_API_KEY = /sb_secret_[A-Za-z\d_-]+/g;
+// Keeps the user and the address. The password runs to the last `@` of the
+// authority, because unencoded `@` in passwords is common, but never past a
+// quote, so it cannot swallow the rest of a JSON document. A password another
+// layer already redacted, such as a URL-encoded marker, is left as it is.
+const URL_PASSWORD =
+	/(\/\/[^\s:/?#@"`<>\\]*):(?!(?:\[|%5B)REDACTED)[^\s/?#"`<>\\]*@/gi;
+// `code` (PKCE and OAuth codes) is too generic a name to redact everywhere, so
+// it counts only as a query or fragment parameter.
+const CREDENTIAL_PARAMETER = /([?&#;]code=)[^&#;\s"'<>]+/gi;
+// Mirrors the credential parameters Supabase's own gateway redacts
+// (supabase/cli packages/stack/src/internal/redact-credentials.ts), plus
+// names whose sensitive word is followed by more of the name, such as
+// SECRET_KEY or SERVICE_ROLE_KEY.
 const SENSITIVE_NAME =
-	'(?:authorization|cookie|csrf|jwt|(?:access|refresh|id)[-_]?token|token|client[-_]?secret|secret|password|passcode|session(?:[-_]?id)?|api[-_]?key|email|phone|user[-_]?id)';
+	'(?:authorization|cookie|csrf|jwt|(?:access|refresh|id)[-_]?token|token(?:[-_]?hash)?|client[-_]?secret|secret(?:[-_]?(?:access[-_]?)?key)?|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]amz[-_](?:credential|signature)|password|passcode|session(?:[-_]?id)?|api[-_]?key|email|phone|user[-_]?id)';
 const DOUBLE_QUOTED_SECRET_ASSIGNMENT = new RegExp(
 	`(["']?${SENSITIVE_NAME}["']?\\s*[=:]\\s*)"(?:\\\\.|[^"\\\\])*(?:"|$)`,
 	'gi',
@@ -33,7 +52,10 @@ export function redactDiagnosticText(value: string): string {
 		.replace(DOUBLE_QUOTED_SECRET_ASSIGNMENT, '$1"[REDACTED]"')
 		.replace(SINGLE_QUOTED_SECRET_ASSIGNMENT, "$1'[REDACTED]'")
 		.replace(UNQUOTED_SECRET_ASSIGNMENT, '$1[REDACTED]')
+		.replace(CREDENTIAL_PARAMETER, '$1[REDACTED]')
+		.replace(URL_PASSWORD, '$1:[REDACTED]@')
 		.replace(BEARER, 'Bearer [REDACTED]')
+		.replace(SECRET_API_KEY, '[REDACTED SECRET KEY]')
 		.replace(JWT, '[REDACTED JWT]')
 		.replace(EMAIL, '[REDACTED EMAIL]');
 }

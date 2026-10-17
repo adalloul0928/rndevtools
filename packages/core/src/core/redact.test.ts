@@ -1,9 +1,25 @@
 import {
 	diagnosticErrorText,
+	isSensitiveDiagnosticKey,
 	redactDiagnosticText,
 	sanitizeDiagnosticValue,
 	sanitizeDiagnosticValueWithMetadata,
 } from './redact';
+
+function base64Url(value: unknown): string {
+	return btoa(JSON.stringify(value))
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
+}
+
+/** Builds token-shaped fixtures at runtime so no key literal sits in source. */
+function jwt(payload: Record<string, unknown>, signature = 'c2lnbmF0dXJl') {
+	return `${base64Url({ alg: 'HS256', typ: 'JWT' })}.${base64Url(payload)}.${signature}`;
+}
+
+const STACK_ID =
+	'64616c83912c48442ec266f86ee2d7f004d2be5c8b7f31a6d6b4c2634f82145f';
 
 describe('redactDiagnosticText', () => {
 	it('redacts quoted JSON credentials and URL-style assignments', () => {
@@ -46,6 +62,211 @@ describe('redactDiagnosticText', () => {
 
 		expect(sanitizeDiagnosticValue(value)).toBe('2026-08-23T00:00:00.000Z');
 		expect(getTime).not.toHaveBeenCalled();
+	});
+});
+
+describe('redactDiagnosticText backend credentials', () => {
+	it('redacts compound secret names in env, JSON, and YAML assignments', () => {
+		expect(redactDiagnosticText('SECRET_KEY=sb_secret_x')).toBe(
+			'SECRET_KEY=[REDACTED]',
+		);
+		expect(redactDiagnosticText('{"SECRET_KEY":"sb_secret_x"}')).toBe(
+			'{"SECRET_KEY":"[REDACTED]"}',
+		);
+		expect(redactDiagnosticText('SECRET_KEY: sb_secret_x')).toBe(
+			'SECRET_KEY: [REDACTED]',
+		);
+		expect(
+			redactDiagnosticText(`SERVICE_ROLE_KEY=${jwt({ role: 'service_role' })}`),
+		).toBe('SERVICE_ROLE_KEY=[REDACTED]');
+		expect(
+			redactDiagnosticText(
+				`{"serviceRoleKey":"${jwt({ role: 'service_role' })}"}`,
+			),
+		).toBe('{"serviceRoleKey":"[REDACTED]"}');
+		expect(redactDiagnosticText(`ROOT_KEY=${'0a'.repeat(32)}`)).toBe(
+			'ROOT_KEY=[REDACTED]',
+		);
+		expect(
+			redactDiagnosticText(
+				'DB_URL=postgresql://postgres:pw@127.0.0.1:54322/postgres',
+			),
+		).toBe('DB_URL=[REDACTED]');
+	});
+
+	it('redacts secrets whose sensitive word is followed by more of the name', () => {
+		const text = [
+			'SUPABASE_AUTH_SECRET_KEY=one',
+			'JWT_SECRET=two',
+			'S3_PROTOCOL_ACCESS_KEY_SECRET=three',
+			'AWS_SECRET_ACCESS_KEY=four',
+			'secret_access_key = "five"',
+			'SUPABASE_DB_ROOT_KEY=six',
+		].join('\n');
+		expect(redactDiagnosticText(text)).toBe(
+			[
+				'SUPABASE_AUTH_SECRET_KEY=[REDACTED]',
+				'JWT_SECRET=[REDACTED]',
+				'S3_PROTOCOL_ACCESS_KEY_SECRET=[REDACTED]',
+				'AWS_SECRET_ACCESS_KEY=[REDACTED]',
+				'secret_access_key = "[REDACTED]"',
+				'SUPABASE_DB_ROOT_KEY=[REDACTED]',
+			].join('\n'),
+		);
+	});
+
+	it('redacts bare secret API keys under any name or encoding', () => {
+		expect(redactDiagnosticText('using sb_secret_x for admin')).toBe(
+			'using [REDACTED SECRET KEY] for admin',
+		);
+		expect(redactDiagnosticText('{"key":"sb_secret_abc-DEF_123"}')).toBe(
+			'{"key":"[REDACTED SECRET KEY]"}',
+		);
+		expect(redactDiagnosticText('apikey%3Dsb_secret_x%26next')).toBe(
+			'apikey%3D[REDACTED SECRET KEY]%26next',
+		);
+	});
+
+	it('redacts URL passwords but keeps the user and the address', () => {
+		expect(
+			redactDiagnosticText('postgresql://postgres:pw@127.0.0.1:1/postgres'),
+		).toBe('postgresql://postgres:[REDACTED]@127.0.0.1:1/postgres');
+		expect(
+			redactDiagnosticText('postgres://admin:p@ss:w0rd@10.0.0.5:5432/app'),
+		).toBe('postgres://admin:[REDACTED]@10.0.0.5:5432/app');
+		expect(redactDiagnosticText('redis://:pw@127.0.0.1:6379')).toBe(
+			'redis://:[REDACTED]@127.0.0.1:6379',
+		);
+		expect(redactDiagnosticText('connect //svc:pw@[::1]:5432/db')).toBe(
+			'connect //svc:[REDACTED]@[::1]:5432/db',
+		);
+	});
+
+	it('stops a URL password at the end of its quoted value', () => {
+		expect(
+			redactDiagnosticText(
+				'{"url":"postgres://u:pw@127.0.0.1/db","note":"ping person@example.com"}',
+			),
+		).toBe(
+			'{"url":"postgres://u:[REDACTED]@127.0.0.1/db","note":"ping [REDACTED EMAIL]"}',
+		);
+	});
+
+	it('leaves URL passwords that another layer already redacted', () => {
+		for (const text of [
+			'https://%5BREDACTED%5D:%5BREDACTED%5D@127.0.0.1/a',
+			'https://user:%5bredacted%5d@127.0.0.1/a',
+			'postgres://u:[REDACTED]@127.0.0.1/db',
+		]) {
+			expect(redactDiagnosticText(text)).toBe(text);
+		}
+	});
+
+	it('redacts the upstream credential query parameters', () => {
+		expect(
+			redactDiagnosticText(
+				'https://example.com/callback?code=pkce-code&state=kept#access_token=a&refresh_token=b&provider_token=c&provider_refresh_token=d&expires_in=3600',
+			),
+		).toBe(
+			'https://example.com/callback?code=[REDACTED]&state=kept#access_token=[REDACTED]&refresh_token=[REDACTED]&provider_token=[REDACTED]&provider_refresh_token=[REDACTED]&expires_in=3600',
+		);
+		expect(
+			redactDiagnosticText(
+				'/auth/v1/verify?token_hash=hash&type=email&apikey=k&jwt=j&id_token=i&token=t',
+			),
+		).toBe(
+			'/auth/v1/verify?token_hash=[REDACTED]&type=email&apikey=[REDACTED]&jwt=[REDACTED]&id_token=[REDACTED]&token=[REDACTED]',
+		);
+		expect(
+			redactDiagnosticText(
+				'/storage/v1/s3/b/o?X-Amz-Credential=id%2Fscope&X-Amz-Signature=sig&X-Amz-Security-Token=st&X-Amz-Expires=60',
+			),
+		).toBe(
+			'/storage/v1/s3/b/o?X-Amz-Credential=[REDACTED]&X-Amz-Signature=[REDACTED]&X-Amz-Security-Token=[REDACTED]&X-Amz-Expires=60',
+		);
+	});
+
+	it('redacts JWTs that carry no signature', () => {
+		expect(redactDiagnosticText(`token ${jwt({ sub: '1' }, '')} end`)).toBe(
+			'token [REDACTED JWT] end',
+		);
+	});
+
+	it('is stable when callers redact text that was already redacted', () => {
+		const once = redactDiagnosticText(
+			`SECRET_KEY=sb_secret_x key sb_secret_y ${jwt({ role: 'anon' })} postgresql://postgres:pw@127.0.0.1:1/postgres?code=abc`,
+		);
+		expect(once).toBe(
+			'SECRET_KEY=[REDACTED] key [REDACTED SECRET KEY] [REDACTED JWT] postgresql://postgres:[REDACTED]@127.0.0.1:1/postgres?code=[REDACTED]',
+		);
+		expect(redactDiagnosticText(once)).toBe(once);
+	});
+
+	it('keeps stack ids, publishable keys, and non-credential codes', () => {
+		const kept = [
+			`stack ${STACK_ID} started`,
+			`--stack-id ${STACK_ID}`,
+			`{"id":"${STACK_ID}"}`,
+			'PUBLISHABLE_KEY=sb_publishable_x',
+			'{"publishable_key":"sb_publishable_x"}',
+			'keys starting with sb_secret_ are refused',
+			'exit code=1',
+			'{"code":"PGRST116","message":"no rows"}',
+			'error_code=42',
+			'postgres://postgres@127.0.0.1:54322/postgres',
+			'http://127.0.0.1:54321/rest/v1',
+		];
+		for (const text of kept) expect(redactDiagnosticText(text)).toBe(text);
+	});
+});
+
+describe('isSensitiveDiagnosticKey backend names', () => {
+	it('flags secret-bearing names whose values have no recognizable shape', () => {
+		for (const key of [
+			'SERVICE_ROLE_KEY',
+			'serviceRoleKey',
+			'ROOT_KEY',
+			'rootKey',
+			'DB_URL',
+			'dbUrl',
+			'X-Amz-Signature',
+			'X-Amz-Credential',
+		]) {
+			expect(isSensitiveDiagnosticKey(key)).toBe(true);
+		}
+	});
+
+	it('keeps public names readable', () => {
+		for (const key of ['PUBLISHABLE_KEY', 'ANON_KEY', 'API_URL', 'stackId']) {
+			expect(isSensitiveDiagnosticKey(key)).toBe(false);
+		}
+	});
+
+	it('projects a stack env map without its secrets', () => {
+		const serialized = JSON.stringify(
+			sanitizeDiagnosticValue({
+				env: {
+					API_URL: 'http://127.0.0.1:54321',
+					DB_URL: 'postgresql://postgres:pw@127.0.0.1:54322/postgres',
+					PUBLISHABLE_KEY: 'sb_publishable_x',
+					ROOT_KEY: '0a'.repeat(32),
+					SECRET_KEY: 'sb_secret_x',
+					SERVICE_ROLE_KEY: jwt({ role: 'service_role' }),
+				},
+				endpoint: 'postgresql://postgres:pw@127.0.0.1:54322/postgres',
+				id: STACK_ID,
+			}),
+		);
+		expect(serialized).not.toContain('sb_secret_');
+		expect(serialized).not.toContain('eyJ');
+		expect(serialized).not.toContain(':pw@');
+		expect(serialized).not.toContain('0a'.repeat(32));
+		expect(serialized).toContain('sb_publishable_x');
+		expect(serialized).toContain('http://127.0.0.1:54321');
+		expect(serialized).toContain(
+			'postgresql://postgres:[REDACTED]@127.0.0.1:54322',
+		);
+		expect(serialized).toContain(STACK_ID);
 	});
 });
 
