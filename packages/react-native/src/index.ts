@@ -57,6 +57,8 @@ export {
 
 export {
 	clearImageOverlay,
+	configureImageOverlay,
+	type ImageOverlayOptions,
 	imageOverlay,
 	RNDEVTOOLS_IMAGE_OVERLAY_LIMITS,
 	setLocalImageOverlaySource,

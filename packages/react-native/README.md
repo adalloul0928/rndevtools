@@ -113,6 +113,24 @@ The verifier greps for devtools markers in the emitted JavaScript and fails the
 build if any survive. The `--marker` flag adds strings specific to your own
 panels.
 
+Two opt-in checks catch a release bundle that was built against a developer's
+machine, for example after a local backend's URL and keys were copied into a
+`.env` file that the export also reads:
+
+```sh
+npx rndevtools-verify-bundle ./build --forbid-loopback-urls --preset supabase-local
+```
+
+- `--forbid-loopback-urls` fails on literal `http(s)://` and `ws(s)://` URLs
+  whose host is `localhost`, `*.localhost`, `127.x.x.x` or `[::1]`.
+- `--preset supabase-local` fails on Supabase secret keys (`sb_secret_…`), on
+  JWTs whose payload carries `role: service_role`, and on JWTs issued by a
+  local Supabase stack (`iss: supabase-demo`), whose default keys every local
+  stack shares. A hosted project's URL and publishable or anon key pass.
+
+A failure names each file and what was found, never the key itself. An
+unknown flag or preset fails the run instead of skipping its check.
+
 ## Sharing native builds across worktrees
 
 Running several git worktrees of one app side by side (the desktop app's
@@ -163,6 +181,26 @@ wire your storage into the storage panel. The secure-store adapter takes an
 explicit key manifest: it never enumerates the keychain, so only keys you list
 are ever readable. `devtoolsCameraProvider` serves desktop-pushed image
 fixtures to an instrumented development camera.
+
+## Image overlays
+
+`imageOverlay` holds a reference image, such as a design export, for your app
+to draw over its own screens. Local files and clipboard images need no setup.
+Remote images are downloaded only from hosts you allow, and none are allowed
+by default:
+
+```ts
+import { configureImageOverlay } from '@rndevtools/react-native';
+
+configureImageOverlay({
+  // Hostnames or HTTPS URLs; unset, blank and non-HTTPS entries are ignored.
+  allowedRemoteHosts: ['designs.example.com', process.env.EXPO_PUBLIC_ASSET_URL],
+});
+```
+
+Each call replaces the previous list. Earlier versions also trusted the hosts
+in `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` and `EXPO_PUBLIC_SUPABASE_URL` without
+being asked; pass those variables here to keep that behaviour.
 
 ## License
 
