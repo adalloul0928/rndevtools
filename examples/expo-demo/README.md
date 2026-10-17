@@ -39,6 +39,27 @@ git worktree add ../demo-feature feature/x        # same native shell, new JS
 cd ../demo-feature && npx expo run:ios --device <other-udid> --no-bundler   # installs from cache
 ```
 
+## A local Supabase per worktree
+
+[`supabase/`](supabase/config.toml) is the repository setup RN Devtools
+recommends for per-worktree local Supabase. It does three things:
+
+- It opts into the Supabase CLI's managed stack backend (`[experimental] stack = true`).
+- It pins no ports, so every worktree gets its own automatic ones.
+- It turns Studio and analytics off in config, so even a start an agent runs by hand stays lean and has no unauthenticated SQL endpoint.
+
+With local Supabase turned on in the desktop app's Supabase tab, a lane started on this app gets its own native stack. Its Metro receives only the stack's public URL and publishable key, under the variable names configured in that tab.
+
+RN Devtools runs the worktree's own CLI and never a global one, so a real app adds `supabase` as an exact devDependency. 2.121.0 is the release RN Devtools verifies. This example leaves the dependency out to keep its install small.
+
+To start a stack yourself:
+
+```sh
+pnpm exec supabase start --runtime native
+```
+
+Never use `--runtime auto`: it prefers Docker, whose stacks listen on every interface.
+
 ## Prove the pruning works
 
 ```sh
