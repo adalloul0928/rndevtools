@@ -44,6 +44,19 @@ Simulator's state or the model's day cannot favour one condition.
 - **rndevtools calls**: every socket request, as `kind:operation`, with `!code`
   appended on failure, so recovery behaviour is visible per run.
 
+The database prompts (`start-local-db`, `reset-seed`, `apply-migration`,
+`two-worktrees`) measure local Supabase steering the same way.
+
+- **Adopted:** an agent sends `supabase:up` to the socket.
+- **Leaked:** it starts, stops or destroys a stack by hand, picks a non-native
+  runtime, runs `stop --all`, or kills a stack's processes.
+
+The worktree's own `--local` data commands (`migration up`, `db reset`,
+`gen types`) are expected, and `leak-rule.mjs` does not count them. Both
+skills are installed in the skill conditions. Run these prompts against a
+fixture repository that has `supabase/config.toml` (the Expo example's is
+one), with local Supabase turned on in the fixture desktop.
+
 Transcripts are kept per run for reading what the agent actually did.
 
 ## Running

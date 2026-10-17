@@ -53,7 +53,10 @@ function runCli(argv, { timeout = 30_000, env } = {}) {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktop = path.resolve(here, '..', '..');
 const cli = path.join(desktop, 'build', 'native', 'mac-arm64', 'rndevtools');
-const skillSource = path.join(desktop, 'native', 'rndevtools-cli', 'internal', 'setup', 'skills', 'rndevtools-lanes', 'SKILL.md');
+// Every skill setup embeds: the lanes skill, and the local Supabase skill the
+// database prompts exercise.
+const skillsRoot = path.join(desktop, 'native', 'rndevtools-cli', 'internal', 'setup', 'skills');
+const skillNames = ['rndevtools-lanes', 'rndevtools-supabase'];
 let cachedAws;
 const UDID = process.env.RNDEVTOOLS_EXPERIMENT_UDID ?? '727CE7B2-CCBA-47A5-8803-1D61DCEBCF44';
 
@@ -290,9 +293,11 @@ function recordCodexCommands(output, bashLog) {
 // MARK: - Helpers
 
 function installSkill(skillsDirectory) {
-	const target = path.join(skillsDirectory, 'rndevtools-lanes');
-	fs.mkdirSync(target, { recursive: true });
-	fs.copyFileSync(skillSource, path.join(target, 'SKILL.md'));
+	for (const name of skillNames) {
+		const target = path.join(skillsDirectory, name);
+		fs.mkdirSync(target, { recursive: true });
+		fs.copyFileSync(path.join(skillsRoot, name, 'SKILL.md'), path.join(target, 'SKILL.md'));
+	}
 }
 
 function renderPrompt(prompt) {
