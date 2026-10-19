@@ -16,7 +16,7 @@
 		"@rndevtools/react-native": "workspace:*",
 		"@tanstack/react-query": "catalog:",
 		"expo": "catalog:",
-		"expo-constants": "57.0.18",
+		"expo-constants": "57.0.21",
 		"expo-device": "57.0.2",
 		"expo-file-system": "57.0.7",
 		"react": "catalog:",

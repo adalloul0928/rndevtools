@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
 	"root": false,
 	"files": {
 		"includes": [
@@ -10,8 +10,7 @@
 			"scripts/**/*.{cjs,mjs}",
 			"e2e/**/*.ts",
 			"*.json",
-			"*.ts",
-			"*.tsx"
+			"*.ts"
 		]
 	},
 	"css": {

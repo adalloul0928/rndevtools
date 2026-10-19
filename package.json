@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@12.4.1",
   "engines": {
-    "node": "^22.19.0 || ^24.3.0 || >=25.0.0",
+    "node": "^22.19.0 || ^24.3.0 || >=26.0.0",
     "pnpm": ">=12.4.1 <13"
   },
   "scripts": {
@@ -18,11 +18,9 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test:run",
-    "quality": "turbo lint typecheck test:run",
-    "prepare": "husky"
+    "quality": "turbo lint typecheck test:run"
   },
   "devDependencies": {
-    "husky": "^9.1.7",
-    "turbo": "2.10.12"
+    "turbo": "2.11.7"
   }
 }
