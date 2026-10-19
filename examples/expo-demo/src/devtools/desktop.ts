@@ -3,13 +3,15 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 } from '@rndevtools/core/desktop-protocol';
+// The narrow entry points keep this headless module off the root barrel, which
+// also loads the camera provider and the image overlay.
+import { getDevtoolsAuthorization } from '@rndevtools/react-native/authorization';
 import {
 	type DesktopClientHandle,
-	getDevtoolsAuthorization,
 	shouldStartDesktopClient,
 	simulatorUdidFromPath,
 	startDesktopClient,
-} from '@rndevtools/react-native';
+} from '@rndevtools/react-native/desktop';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Paths } from 'expo-file-system';

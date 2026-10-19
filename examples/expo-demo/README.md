@@ -20,7 +20,7 @@ same.
 
 ```sh
 pnpm install
-pnpm --dir examples/expo-demo start
+pnpm --dir examples/expo-demo exec expo start
 ```
 
 Open the desktop app alongside it and the device appears automatically — the
