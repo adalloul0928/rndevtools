@@ -163,20 +163,25 @@ func (authorizer *Authorizer) Authorize(ctx context.Context, request protocol.Re
 	return nil
 }
 
+// simulatorID reads the target with the same struct decoding the helper
+// service uses to act on it, where field names match case-insensitively and
+// the last match wins. An exact-key lookup would let a payload carrying both
+// "simulatorId" and "SIMULATORID" authorize one Simulator while the operation
+// runs against the other.
 func simulatorID(payload json.RawMessage) (string, error) {
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &object); err != nil {
+	var target struct {
+		SimulatorID *string `json:"simulatorId"`
+	}
+	if err := json.Unmarshal(payload, &target); err != nil {
 		return "", err
 	}
-	raw, ok := object["simulatorId"]
-	if !ok {
+	if target.SimulatorID == nil {
 		return "", fmt.Errorf("simulatorId is missing")
 	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil || value == "" {
+	if *target.SimulatorID == "" {
 		return "", fmt.Errorf("simulatorId is invalid")
 	}
-	return value, nil
+	return *target.SimulatorID, nil
 }
 
 func denied(message string) *protocol.APIError {

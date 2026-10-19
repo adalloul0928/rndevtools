@@ -176,6 +176,42 @@ func TestAuthorizationRejectsMismatchesExpiryAndUntrustedParent(t *testing.T) {
 	}
 }
 
+// The Swift broker binds the grant to the exact "simulatorId" key, while the
+// helper decodes payloads with encoding/json, which matches keys
+// case-insensitively and keeps the last match.
+func TestAuthorizationBindsTheSimulatorTheHelperActsOnWhenKeysDifferOnlyByCase(t *testing.T) {
+	const actedOnSimulatorID = "11111111-2222-3333-4444-555555555555"
+	now := time.Unix(1_900_000_000, 0)
+	for _, variant := range []string{"SIMULATORID", "simulatorID", "ſimulatorId"} {
+		t.Run(variant, func(t *testing.T) {
+			request := decodeRequest(t, `{"protocolVersion":2,"requestId":"mutation-1","operation":"disk_cleanup","payload":{"simulatorId":"`+testSimulatorID+`","`+variant+`":"`+actedOnSimulatorID+`","categoryIds":["caches"],"confirmation":"CLEAN_SIMULATOR_DISK"}}`)
+			var payload struct {
+				SimulatorID  string   `json:"simulatorId"`
+				CategoryIDs  []string `json:"categoryIds"`
+				Confirmation string   `json:"confirmation"`
+			}
+			if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil || payload.SimulatorID != actedOnSimulatorID {
+				t.Fatalf("helper payload decoding changed: %#v %#v", payload, apiError)
+			}
+			for _, bound := range []string{testSimulatorID, actedOnSimulatorID} {
+				value := validEnvelope(request, now.Add(15*time.Second), 42)
+				value.SimulatorID = bound
+				data, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				authorizer := New(bytes.NewReader(data), &stubAttestor{})
+				authorizer.now = func() time.Time { return now }
+				authorizer.parentPID = func() int { return 42 }
+				apiError := authorizer.Authorize(context.Background(), request)
+				if allowed := bound == actedOnSimulatorID; (apiError == nil) != allowed {
+					t.Fatalf("grant bound to %s: allowed=%v, want %v (%#v)", bound, apiError == nil, allowed, apiError)
+				}
+			}
+		})
+	}
+}
+
 func mutationRequest(t *testing.T, operation protocol.Operation) protocol.Request {
 	t.Helper()
 	return decodeRequest(t, `{"protocolVersion":2,"requestId":"mutation-1","operation":"`+string(operation)+`","payload":{"simulatorId":"`+testSimulatorID+`","checkpointToken":"bound-prepared-token","profileId":"rndevtools-development"}}`)

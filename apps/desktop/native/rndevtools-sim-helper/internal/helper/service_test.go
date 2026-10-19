@@ -703,6 +703,49 @@ func TestUndoSurvivesNewHelperProcessUsingOpaqueCheckpoint(t *testing.T) {
 	}
 }
 
+func TestUndoKeepsTheBootStateTheSimulatorHasWhenUndoStarts(t *testing.T) {
+	backend := newFakeBackend()
+	backend.device.State = "Shutdown"
+	firstService := NewService(backend, "dev", "unknown")
+	result, apiError := firstService.Handle(context.Background(), request(protocol.OperationApplyProfile, preparedApplyPayload(t, firstService, "rndevtools-development")))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	checkpointToken := result.(MutationEvidence).CheckpointToken
+	if backend.device.State != "Shutdown" {
+		t.Fatalf("apply did not restore the shutdown state: %#v", backend.device)
+	}
+	// A lane boots the Simulator for use after the change was applied.
+	backend.device.State = "Booted"
+
+	secondService := NewService(backend, "dev", "unknown")
+	undoResult, apiError := secondService.Handle(context.Background(), request(protocol.OperationUndoLast, preparedUndoPayload(t, secondService, checkpointToken)))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	undo := undoResult.(MutationEvidence)
+	if !undo.Changed || undo.OriginalBootState != "Booted" || undo.FinalBootState != "Booted" || backend.device.State != "Booted" {
+		t.Fatalf("undo shut down a Simulator that was booted when it started: %#v backend=%#v", undo, backend.device)
+	}
+}
+
+func TestNoChangeUndoKeepsTheCurrentBootState(t *testing.T) {
+	backend := newFakeBackend()
+	target, err := encodeRestorePoint(helperTestUDID, "Shutdown", backend.tuple, []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(backend, "dev", "unknown")
+	result, apiError := service.Handle(context.Background(), request(protocol.OperationUndoLast, preparedUndoPayload(t, service, target)))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	undo := result.(MutationEvidence)
+	if undo.Changed || backend.applyCalls != 0 || undo.FinalBootState != "Booted" || backend.device.State != "Booted" {
+		t.Fatalf("a no-change undo changed the boot state: %#v backend=%#v", undo, backend.device)
+	}
+}
+
 func TestUndoRejectsCheckpointAfterCompatibilityTupleChanges(t *testing.T) {
 	backend := newFakeBackend()
 	firstService := NewService(backend, "dev", "unknown")

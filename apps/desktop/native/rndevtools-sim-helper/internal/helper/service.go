@@ -414,14 +414,17 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		if err != nil {
 			return nil, protocol.NewError("invalid_checkpoint", "checkpointToken is invalid or incompatible with this helper.", false)
 		}
+		// Undo restores the checkpoint's managed services, not the boot state
+		// recorded with it: like apply and restore, it ends in the boot state
+		// the Simulator had when the undo started, so it never shuts down a
+		// device that was booted for use after the original change.
 		result, apiError := service.mutate(ctx, mutationRequest{
-			Operation:            protocol.OperationUndoLast,
-			SimulatorID:          payload.SimulatorID,
-			Desired:              checkpoint.ManagedDisabledServiceIDs,
-			Acknowledgement:      payload.Acknowledgement,
-			PreparedToken:        payload.PreparedCheckpointToken,
-			UndoCheckpoint:       &checkpoint,
-			FinalBootStateTarget: checkpoint.OriginalBootState,
+			Operation:       protocol.OperationUndoLast,
+			SimulatorID:     payload.SimulatorID,
+			Desired:         checkpoint.ManagedDisabledServiceIDs,
+			Acknowledgement: payload.Acknowledgement,
+			PreparedToken:   payload.PreparedCheckpointToken,
+			UndoCheckpoint:  &checkpoint,
 		})
 		if apiError != nil {
 			return nil, apiError

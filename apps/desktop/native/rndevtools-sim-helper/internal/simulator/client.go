@@ -36,6 +36,7 @@ const (
 
 var (
 	bootTimeout          = simslim.BootTimeout
+	commandWaitDelay     = 2 * time.Second
 	udidPattern          = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 	runtimePattern       = regexp.MustCompile(`^com\.apple\.CoreSimulator\.SimRuntime\.iOS-[A-Za-z0-9.-]{1,80}$`)
 	deviceTypePattern    = regexp.MustCompile(`^com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9.-]{1,96}$`)
@@ -893,10 +894,19 @@ func (fixedRunner) Run(parent context.Context, timeout time.Duration, executable
 	if executable != xcrunExecutable && executable != swVersExecutable && executable != sysctlExecutable {
 		return commandResult{}, errors.New("executable is not allowlisted")
 	}
+	return runBounded(parent, timeout, executable, args...)
+}
+
+func runBounded(parent context.Context, timeout time.Duration, executable string, args ...string) (commandResult, error) {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, args...)
 	command.Env = allowedEnvironment()
+	// Killing simctl does not close the output pipes it handed to a process
+	// inside the Simulator (simctl spawn), so an unbounded Wait would block
+	// until that process exits on its own, past both the timeout and FD 4
+	// cancellation. WaitDelay closes the pipes shortly after the kill or exit.
+	command.WaitDelay = commandWaitDelay
 	stdout := &limitedBuffer{limit: maxStdoutBytes}
 	stderr := &limitedBuffer{limit: maxStderrBytes}
 	command.Stdout = stdout
@@ -905,6 +915,9 @@ func (fixedRunner) Run(parent context.Context, timeout time.Duration, executable
 	result := commandResult{stdout: stdout.Bytes(), stderr: stderr.Bytes(), exitCode: 0}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return commandResult{}, errors.New("native command timed out")
+	}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return commandResult{}, errors.New("native command exited but a process it started kept its output open")
 	}
 	if stdout.overflow || stderr.overflow {
 		return commandResult{}, errors.New("native command output exceeded its safety limit")

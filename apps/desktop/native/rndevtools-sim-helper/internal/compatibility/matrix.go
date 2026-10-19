@@ -63,15 +63,6 @@ func VerifiedTuples() []Tuple {
 	return out
 }
 
-func IsVerified(candidate Tuple) bool {
-	for _, entry := range matrixEntries {
-		if entry.Status == "verified" && entry.Tuple == candidate {
-			return true
-		}
-	}
-	return false
-}
-
 func Evaluate(candidate Tuple, operation, acknowledgement, expectedCatalogVersion string) (Decision, error) {
 	decision := Classify(candidate, expectedCatalogVersion)
 	switch decision.Status {
