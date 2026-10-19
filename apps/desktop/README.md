@@ -12,7 +12,7 @@ Connected app diagnostics:
 - TanStack Query queries, bounded sanitized payload previews, mutations, invalidate, and refetch actions
 - Expo Router map, history, and allowlisted navigation
 - Environment validation and health scoring
-- Explicit, read-only Zustand store projections and change history
+- Explicit Zustand store projections and change history, with confirmed Apply patch and Restore for stores declared restorable
 - Guarded restore points for declared safe state sources, with rollback attempts
 - JS responsiveness reviews with optional native UI/CPU/memory channels
 - Targeted component registry with source, test ID, safe instance projection, measured bounds, and on-device highlight
@@ -77,15 +77,18 @@ pnpm --filter @rndevtools/desktop dev:simulator
 That command verifies the pinned vendored SimSlim source, builds the Go and
 Swift helpers for the current architecture, then starts Electron.
 
-Electron 43 has no install hook, so `pnpm install` deliberately does not fetch
-the runtime. The first `dev`, `package`, or `make` prints
+The pinned Electron release has no install hook, so `pnpm install` deliberately
+does not fetch the runtime. The first `dev`, `package`, or `make` prints
 `Downloading Electron binary...` and pulls roughly 110 MB from GitHub releases;
 every later run reuses it. On an offline machine or behind a proxy, set
 `ELECTRON_MIRROR` before that first run.
 
-The mobile diagnostics client is mounted only alongside the internal dev-menu
-host, and only in `development` builds — preview and production never dial the
-broker.
+The mobile diagnostics client starts only when the host's
+`shouldStartDesktopClient({ isDevelopmentBuild })` check passes: in a
+development build, outside tests, and unless
+`EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true`. Hosts pass their own
+development-build flag (the Expo demo passes `__DEV__`), so preview and
+production builds never dial the broker.
 
 The broker listens on `ws://127.0.0.1:47931/device` by default. Expo simulators discover loopback and the Expo development host automatically. If that port is occupied, both sides try the next nine ports.
 
@@ -127,14 +130,15 @@ Loopback is the safe default. The broker itself speaks plaintext WebSocket, whil
 
 ```bash
 RNDEVTOOLS_BIND_ADDRESS=<computer-lan-ip> RNDEVTOOLS_TOKEN=<long-random-token> pnpm --filter @rndevtools/desktop dev
-EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL='wss://<tls-endpoint>/device?token=<long-random-token>' pnpm --dir apps/mobile start
+# From your app's directory:
+EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL='wss://<tls-endpoint>/device?token=<long-random-token>' npx expo start
 ```
 
 The desktop Diagnostics panel lists the broker endpoints. Treat a tokenized URL as a development credential and do not paste it into tickets or logs. `RNDEVTOOLS_PORT` changes the initial port; if it is occupied, the broker tries the next nine ports. An explicit mobile URL should include the selected port when the TLS endpoint does not use its protocol default. Set `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true` to disable the development client.
 
 Wildcard binding is intentionally a second opt-in. If a local setup truly requires `0.0.0.0` or `::`, also set `RNDEVTOOLS_ALLOW_WILDCARD=true`; prefer an exact interface address because wildcard binding can include VPN and other unintended adapters. Never expose the plaintext broker directly to an untrusted network.
 
-Diagnostic payloads are metadata-only by default. For a local Metro development session that deliberately needs sanitized query values and HTTP bodies, set `EXPO_PUBLIC_DEVTOOLS_CAPTURE_PAYLOADS=true`. The flag is ignored outside `__DEV__`; assume any opted-in payload can contain application data and keep the connection local and temporary.
+Diagnostic payloads are metadata-only by default. A host that deliberately needs sanitized query values or HTTP bodies opts in per plugin, with `createQueryPlugin({ captureData: true })` and `createNetworkPlugin({ captureBody: true })`; both default to `false`. Assume any opted-in payload can contain application data, and keep the connection local and temporary.
 
 ## Local Supabase per worktree (alpha)
 

@@ -573,6 +573,7 @@ P1 detail
 - flags[], diskBytes?, uploadsBytes?, uploadsInDeletedWorktree, memoryBytes?, measuredAt?, lastUsedAt?.
 - Drift: configDrift {status, paths?}, compositionDrift?.
 - lastError?: ClassifiedSupabaseError {code (17), title, message ≤ 4096, recovery, retry, display-safe details}.
+- recreateChanges?[{service?, path?, key?, saved?, requested?, editable}] ≤ 64: what a needs-recreate stack can't adopt, as the start that set the state listed it. It stays until the state clears, so a later failure for another reason replaces lastError but not this.
 - appEnvNames[], envShadow?[{file, line, name}], bucketsConfigured, migrationCount, requestIds[], activeJobId?.
 
 **Inspection** (pushed only while a stack is inspected)
@@ -940,7 +941,7 @@ Cross-panel
 - components/ui.tsx: StatusDot, DisabledReason, RequestCard, ReadinessRow.
 - components/supabase-ui.tsx: HolderBadge, HolderChain, StackStatePill, SupabaseChip, ServiceRow, StepList, LogView, MainCopyButton, SupabaseSelect.
 - shared/device-hold.ts: holdCountdownLabel.
-- lib/format.ts: formatUntil and formatSize.
+- lib/format.ts: formatSize.
 
 **Extensions**
 - Disclosure: controlled open state.
@@ -1017,7 +1018,7 @@ Cross-panel
 | `SimulatorToolDefinition.group + simulatorBadge` | extend | simulator/simulator-config.ts:23-96; app.tsx:801-947 | Backend group, generic sidebar sections, badge tone. | group: 'simulator' \| 'backend' \| 'system'; simulatorBadge(tool, ctx): {value, tone: 'default' \| 'warning' \| 'danger', label} \| undefined |
 | `Disclosure, ConfirmAction, SearchControl, AgentBadge` | extend | ui.tsx:50-68, 294-363, 133-168; lane-ui.tsx:66-85 | Controlled open/onToggle (keeps defaultOpen callers); describedBy on both branches of ConfirmAction; widthClassName; agent prop as Pick<LaneAgent, 'kind' \| 'sessionId'>. | Disclosure({title, open?, onToggle?, defaultOpen?}); ConfirmAction({..., describedBy?}); SearchControl({..., widthClassName = 'w-[260px]'}) |
 | `ReadinessRow` | extend | settings-panel.tsx:391-471 (CapabilityRow) moved to components/ui.tsx | Repository checks, Settings capability rows, global Local Supabase row. | ReadinessRow({icon, label, status: 'ready' \| 'needs-fix' \| 'check' \| 'optional' \| 'checking', detail, lines?, fix?, actions?}) |
-| `holdCountdownLabel, formatUntil, formatSize` | extend | shared/device-hold.ts; lanes-panel.tsx:825-856 (LaneHoldNote adopts it); lib/format.ts:30-47 | One tested countdown label; future-time and GB-capable size formatting with — for unknown. | holdCountdownLabel({live, releaseAt?}, now, verb): {text, tone}; formatUntil(ts, now); formatSize(bytes?) |
+| `holdCountdownLabel, formatSize` | extend | shared/device-hold.ts; lanes-panel.tsx:825-856 (LaneHoldNote adopts it); lib/format.ts:30-47 | One tested countdown label; GB-capable size formatting with — for unknown. | holdCountdownLabel({live, releaseAt?}, now, verb): {text, tone}; formatSize(bytes?) |
 | `CSS fixes` | extend | styles.css:2211-2215, 928, 5499 | Blue tokens for .sim-state-pill.is-info; new .tool-count.is-danger; Supabase section (about 200 lines, tokens only). |  |
 | `Cross-panel extensions` | extend | lanes-panel.tsx:401-418, 469-688, 858-1060; fleet-model.ts:40-45; fleet-panel.tsx:137-155, 801-880, 1215-1289; agents-view.tsx:21-268; settings-panel.tsx:283-330; lane-runtime.tsx; network-panel.tsx:138, 200-215; diagnostics-panel.tsx:297-338 | Chips, Backend select and section, with-backend filter, backend lines, global row, focusLane intent; P5 network intent, target badges, exported HealthCard with default tone; connectedSessionsForSimulator moves to fleet-model.ts. |  |
 | `SupabasePanel and views` | new | panels/simulator/supabase-panel.tsx, supabase-stack-detail.tsx, supabase-repositories-view.tsx, supabase-requests-view.tsx, supabase-settings-view.tsx | Lazy prop-less panel, view routing and the skeleton. | export function SupabasePanel() |
@@ -1032,11 +1033,12 @@ Cross-panel
 ### P1 · Turn on local Supabase…
 
 - **Location:** Off-state EmptyPanel; Settings view switch
-- **Preconditions:** Bridge; platform supported (verdict from main without spawning); feature off. A quarantined policy restarts from defaults.
+- **Preconditions:** Bridge; platform supported (verdict from main without spawning); feature off, with no Stop managed stacks turn-off still running. A quarantined policy restarts from defaults.
 - **Disabled reasons (visible copy):**
   - Supabase controls need the secure desktop bridge. Open the packaged RN Devtools app.
   - Needs Apple silicon and macOS 14 or later.
   - Turning on…
+  - Local Supabase is still turning off.
 - **Confirmation:** main-dialog-token
 - **CLI:** `main-only: supabase.set-enabled {enabled: true, confirmationToken}; then the first reconcile runs `<bin> --version` per candidate (cached) and `<newest verified bin> stack list --output-format json`; nothing starts`
 - **Progress:** Switch reads Turning on…; three Skeleton rows until the first list.
@@ -1051,7 +1053,7 @@ Cross-panel
 - **Disabled reasons (visible copy):**
   - Turning off… waiting for running starts to finish.
 - **Confirmation:** main-dialog-token
-- **CLI:** `main-only: supabase.set-enabled {enabled: false, disposition?, confirmationToken?}; Stop managed stacks runs `any validated <bin> stack stop --stack-id <id> --output-format json` per running managed or adopted stack, two at a time`
+- **CLI:** `main-only: supabase.set-enabled {enabled: false, disposition?, confirmationToken?}; Stop managed stacks runs `any validated <bin> stack stop --stack-id <id> --output-format json` per running managed or adopted stack and per stack a running start, restart, stop-and-start, Studio switch or recreate brings up, one at a time once none of those is queued or running; any job still waiting its turn is called off when it comes`
 - **Progress:** Turning off… · Stopping 3 managed stacks (1 of 3); running starts finish first.
 - **Success copy:** Local Supabase is off. · Local Supabase is off. 3 stacks keep running. · Local Supabase is off. Stopped 3 managed stacks; data kept.
 - **Failure:** Local Supabase is off, but feat/x did not stop: <title>.
@@ -1175,7 +1177,7 @@ Cross-panel
   - The worktree is on <current>. Starting this stack would load <current>'s settings. Switch back to <branch> first.
   - Its worktree was deleted. Destroy this stack to free its ports and data.
   - This stack runs on Docker and listens on your network. Destroy it; lane up then creates a native one.
-  - This stack must be recreated: <key> changed from <saved> to <requested>.
+  - This stack must be recreated: <key> changed from <saved> to <requested>. When every listed change is editable, instead: <key> changed from <saved> to <requested>. Revert it to keep this stack, or recreate it.
   - RN Devtools didn't start this stack. Adopt it first.
   - 12 of 12 stacks are running and all are in use. Stop one, or raise the limit in Settings.
 - **Confirmation:** none

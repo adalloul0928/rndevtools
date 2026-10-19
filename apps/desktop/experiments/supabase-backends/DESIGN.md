@@ -1,6 +1,6 @@
 # Per-worktree local Supabase for lanes: design
 
-> **Status:** implemented on 2026-10-17; [IMPLEMENTATION.md](IMPLEMENTATION.md) records what shipped, how it was verified and where it departs from this design (names say `supabase`, not `backend`). Produced on 2026-10-16 from research, a hands-on spike, and tag-level verification; see [FINDINGS.md](FINDINGS.md).
+> **Status:** implemented on 2026-10-17; [IMPLEMENTATION.md](IMPLEMENTATION.md) records what shipped, how it was verified and where it departs from this design (names say `supabase`, not `backend`). The [as-built notes](#as-built-notes) at the end list engine behaviours that a later repo-wide review changed. Produced on 2026-10-16 from research, a hands-on spike, and tag-level verification; see [FINDINGS.md](FINDINGS.md).
 > **Pinned upstream:** Supabase CLI 2.121.0. Supabase source references are relative to `supabase/cli@v2.121.0` unless they say `@develop`. rndevtools references are relative to the repository root, at commit 88ee67b.
 > **Origin:** three competing designs (managed, adopt, risk-first MVP) were scored by two judges. MVP ranked first and managed second, within about one point of each other, so this design is a synthesis of the two.
 
@@ -1024,7 +1024,7 @@ export const errorEnvelope = z.object({
 | `is served by release (\S+), but this client is release (\S+)` (HostProcess.ts:323-329) | `supabase_cli_mismatch` | stop (cross-release), then start with the worktree binary |
 | `No managed stack exists` | `backend_not_found` | create |
 | `The local stack is not running.` | `backend_not_running` | resume |
-| root `recreate_command` or `stack_changes` | `needs_recreate` | dialog; never retried |
+| root `recreate_command` or `stack_changes` | `needs_recreate` | dialog; never retried automatically: a lane up, an agent up or an operator Follow tries again (the operator's Start is refused with the recreate reason), and a stack status whose `config_drift` is unchanged clears the flag |
 | `Requested runtime (\w+) does not match existing stack runtime (docker\|podman)` | `container_runtime` | stop once, flag, notify |
 | `Public port (\d+) for (\S+) is in use by …` / `Port … is in use by another process` (Ports.ts:134, 369) | `ports_pinned` | name the holder and the config lines |
 | native port collision / port-allocation | `backend_transient` | one automatic retry |
@@ -1322,7 +1322,7 @@ The toggle sits in the existing Lanes/Agents fieldset (lanes-panel.tsx:118, 190-
 - Readout: "3 running of 12 · Postgres slots 6/32".
 - A "2 transient" counter for shadow roots named `supabase-shadow-*`, which are hidden by default.
 
-**Table** (DataTable, ui.tsx:505; pure helpers in backends-model.ts):
+**Table** (pure helpers in backends-model.ts):
 | Column | Content |
 |---|---|
 | Status | dot plus state; `managed` / `adopted` / `external` tag |
@@ -2067,7 +2067,7 @@ No Go changes: agents get backends through `lane up`'s environment default.
 - backend-service.test.ts (P5):
 - branch follow respects the debounce and markers and follows held stacks only; switch-back reattaches; an explicit up bypasses the debounce;
 - a missing owner binary leads to a restart with a verified version, and to observed with an unverified one;
-- `needs_recreate` is never retried.
+- `needs_recreate` is never retried automatically: a lane up, an agent up or an operator Follow tries again (the operator's Start is refused with the recreate reason), and a stack status whose `config_drift` is unchanged clears the flag.
 - lane-service.test.ts (P3):
 - `metro.started[i].env` contains exactly the mapped names and values;
 - `pinned-by-environment` and `shadowed` work;
@@ -2219,7 +2219,7 @@ Any official build of one version shares the release id. The next release will a
 - **Two more creation paths (new).** `db start` (no `--runtime` flag; db/start/start.command.ts:10-15) and `db schema declarative generate|sync --local` both create a postgres-only project stack with `selectStackRuntime(undefined)`, i.e. runtime auto (stack-local-database.ts:220-246 with :235; generate.handler.ts:180-185; sync.handler.ts:282).
 - **Change:** these are not plain data-plane commands. Rules F2, F3, M2 and M3 cover them.
 - **Error envelope.** `recreate_command`, `stack_changes` and `destroyed_stacks` sit at the envelope root, next to `_tag` and `error` (output.layer.ts:542-547; machine-error-context.service.ts:4-12; start.handler.ts:888-895; destroy.handler.ts:189-191).
-- **Change:** the classifier reads the root, `needs_recreate` is never retried, and partial destroys use the root list.
+- **Change:** the classifier reads the root, `needs_recreate` is never retried automatically, and partial destroys use the root list.
 - **JSON endpoint addresses.** They are always 127.0.0.1, even for container runtimes whose listeners bind 0.0.0.0 (Network.ts:111-113).
 - **Change:** exposure is derived only from runtime plus lsof over the process tree, and an lsof failure fails closed. Adopt's 'listeners-unverified' attach is rejected.
 - **Loose parsing.** `z.looseObject` passes undeclared keys through, so plain `status` env would keep SECRET_KEY, SERVICE_ROLE_KEY and DB_URL (status/SIDE_EFFECTS.md).
@@ -2281,3 +2281,15 @@ Any official build of one version shares the release id. The next release will a
 - **From MVP:** the neutral 0700 cwd and `--stack-id`-only addressing after creation; creation serialized while 2.121.0 lacks backend-port claims; `stack list` waiting for in-flight creations.
 - **From MVP:** ActionConfirmationStore one-time tokens bound to {operation, ids, removeUploads}; steering.json validated like the socket (with liveness and modes added); the enable acknowledgement dialog; rule R7, now M4, against non-pinned CLIs.
 - **From MVP:** the expected-stack-id canary on the upstream test vector, demoted to a per-worktree flag computed with native realpath; expected rows keyed by predicted id, so even creation is path-free from the renderer.
+
+## As-built notes
+
+The fixes from a repo-wide review on 2026-10-17 changed these engine behaviours after the build. Where the sections above say otherwise, these notes describe what ships.
+
+- **Needs recreate** (Error classification). `needs_recreate` is never retried automatically. A lane up, an agent up or an operator Follow (through `followBranch`) tries again. The operator's Start does not: `checkSupabaseOperation` refuses it with the recreate reason, such as "[db] major_version changed from 15 to 17. Revert it to keep this stack, or recreate it." A stack status whose `config_drift` is unchanged clears the flag, as does a start that succeeds. The failure that set the flag stays with it until it clears (`recreateError` in stacks.json, `recreateChanges` in the state). A retry that fails for another reason, such as a taken port, replaces only `lastError`. So the automatic refusal, its recovery and the tab's pill, Resume reason and notice still say whether reverting keeps the stack.
+- **Ensure flights** (Flows: Concurrency and partial failures). Ensures stay single-flight per identity, but an explicit one (the operator's, a lane's or an agent's) never joins a flight an automatic follow began, whose answer can be the refusal above. It waits for the automatic one to end and then runs its own flight. If the stack runs by then, as when the automatic flight started it, the explicit flight just attaches; otherwise it starts the stack as its own job. An automatic ensure joins whichever flight runs, including an explicit one that still waits. An agent's up that answers while its flight waits like this gives no job id: it says the up is queued and to call up again, because the automatic flight's job can fail while the up then succeeds.
+- **Turning off** (Flows: Feature disable and re-enable). Once the switch reads off, nothing new begins. An ensure (lane up, agent up, Start or a follow) asks preflight again after it waits and after its reads, and an attach, like an Adopt, checks again inside the stack's lock before it probes; one in flight answers "Local Supabase is off in RN Devtools." instead of attaching or starting. Every lifecycle job, whoever asked for it, checks the switch when its turn comes: after the creation gate, the lifecycle gate and the stack's lock, right before it begins or makes its first CLI call. Off by then, it is cancelled with that message (`feature_off`). That covers starts, restarts, stop-and-starts, Studio switches, recreates, stops, destroys, migrations, resets, bucket seeds and pre-downloads, and an export once its save dialog closes. Only the turn-off's own stops skip the check. An ensure whose restart is cancelled answers the same refusal, not a CLI mismatch, and a cancelled drift restart or container stop runs once the feature is on again. A cheap tick, a Refresh, the start-up after a turn-on or a memory measurement in flight ends at its next step, and a tick's capacity read before its memory-pressure probe; a tick in flight when the desktop quits ends the same way. A wait on another tool's start stops reading, and a CLI read (a list, a status, logs, a database read or a dump) whose turn comes once off spawns and records nothing; an agent's log read answers `supabase_disabled` then, as its reset does. Jobs already running finish first, but without those reads, so a destroy that hasn't read its fresh list yet destroys nothing. Admission never judges room from the off state, which lists no stacks: a start still in admission, or whose room-making stop the turn-off calls off, is called off too. The status read a stop or start ends with spawns nothing if the feature is off by then, and keeps nothing if it ends while off, even one that began before the turn-off; either way the stack's last status is dropped instead, so on again the stack doesn't show as it was before while its first list is read. Only those two drop it: a read that a turn-off and a turn-on both land during ends while on, so it keeps what it read, and until it ends the stack shows as it was before. A list confirms an unchanged stack's status only if that status was read or confirmed since the list before; one that list left unread (a list reads 16) is read again. With Stop managed stacks, the stacks to stop are the managed stacks the state showed running or starting, and those of the starts, restarts, stop-and-starts, Studio switches and recreates running at the switch; the state shows a stack starting only once its CLI says so. The turn-off waits until none of those jobs is queued or running, then stops the stacks one at a time. Until its last stop, Turn on is unavailable ("Local Supabase is still turning off."), so those stops never run with the feature on again.
+- **Branch follow** (Branch switches). A failed automatic follow is retried after 1 min, doubling up to 30 min, per worktree and target. A move to another branch starts over.
+- **Destroy budget** (Supabase CLI invocations). 2 min per stack, capped at the runner's 60-minute limit for one call.
+- **Progress files** (Handling CLI processes). A lifecycle child's progress file is removed once its result has been read, and `start()` prunes files that earlier runs left behind.
+- **Child adoption** (Handling CLI processes, Desktop restart). A surviving child is adopted only when its pid is alive and `ps -ww -o args=` matches the recorded command-line digest. The digest is checked only while the feature is on: while it is off nothing is spawned, so the pid check alone decides. A pid the liveness check answers with EPERM (another user's process) counts as not ours.

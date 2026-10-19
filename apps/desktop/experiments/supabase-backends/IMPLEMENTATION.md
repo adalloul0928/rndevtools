@@ -65,7 +65,7 @@ All checks below ran on 2026-10-17.
 
 **Electron e2e:**
 - 78 tests pass, among them `simulator-supabase.e2e.ts`. It walks the tab in demo mode, checks Services for the inspected stack and checks for horizontal overflow at 1040×700, including inside the virtual list. It also turns the feature off and on again.
-- `device-verify.e2e.ts` (17 tests) fails at its first test and the rest don't run. It needs a real app on a Simulator connected to the default broker port.
+- `device-verify.e2e.ts` (17 tests) failed at its first test and the rest didn't run. It targeted one specific consuming app on a Simulator connected to the default broker port, so it has since been removed.
 - A screenshot pass at 1040×700, 1220×800 and 1440×900 found two problems, both now fixed:
   - an 8 px horizontal scrollbar in every virtualized dense list;
   - metric cards that wrapped at 1040.
@@ -123,6 +123,8 @@ The consuming app's variable names stay options (default `EXPO_PUBLIC_SUPABASE_U
 - Endpoints are keyed `service.endpoint`, as the CLI reports them.
 
 **Example:** the Expo example doesn't add the `supabase` devDependency, because `minimumReleaseAge` would block 2.121.0 for now. Its README says how to add it.
+
+**Post-review fixes (2026-10-17).** After the build, the fixes from a repo-wide review changed seven Supabase engine behaviours: when a needs-recreate stack is tried again and how long it keeps what it can't adopt, which ensures share a flight, what a turn-off calls off, stops and forgets and when Turn on works again, retries of a failed branch follow, the destroy budget, progress-file cleanup and the adoption of surviving CLI children. DESIGN.md's [as-built notes](DESIGN.md#as-built-notes) list what each one now does.
 
 ## CLI behaviour found while building
 
