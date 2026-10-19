@@ -13,11 +13,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "lib/**"]
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
+      "outputs": ["dist/**"]
     },
     "lint": {},
     "typecheck": {

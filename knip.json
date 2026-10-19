@@ -18,8 +18,7 @@
 		"apps/desktop": {
 			"entry": [
 				"scripts/before-build.cjs!",
-				"scripts/after-pack.cjs!",
-				"e2e/**/*.e2e.ts!"
+				"scripts/after-pack.cjs!"
 			],
 			"project": [
 				"src/**/*.{ts,tsx}!",
@@ -27,18 +26,16 @@
 				"scripts/**/*.{cjs,mjs}!",
 				"e2e/**/*.ts!",
 				"*.ts!"
+			]
+		},
+		"examples/expo-demo": {
+			"entry": [
+				"src/lib/devtools-disabled.ts!"
 			],
-			"paths": {
-				"@/*": [
-					"./src/renderer/*"
-				],
-				"@main/*": [
-					"./src/main/*"
-				],
-				"@shared/*": [
-					"./src/shared/*"
-				]
-			}
+			"ignoreDependencies": [
+				"expo-updates",
+				"expo-system-ui"
+			]
 		}
 	}
 }

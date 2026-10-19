@@ -3,11 +3,7 @@ node_modules/
 
 # Build output
 dist/
-lib/
-# Renderer source helpers, not build output.
-!apps/desktop/src/renderer/lib/
 release/
-out/
 .turbo/
 *.tsbuildinfo
 
