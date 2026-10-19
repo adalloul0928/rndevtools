@@ -11,29 +11,26 @@ final class IndigoTransport: SimulatorInputTransport {
   private let client: AnyObject
   private let toolkit: SimulatorKitInputDriver.Toolkit
   private let queue: DispatchQueue
-  private let pause: (Int) -> Void
 
-  init(device: AnyObject, toolkit: SimulatorKitInputDriver.Toolkit, queue: DispatchQueue, pause: @escaping (Int) -> Void)
-    throws
-  {
+  init(device: AnyObject, toolkit: SimulatorKitInputDriver.Toolkit, queue: DispatchQueue) throws {
     self.client = try IndigoTransport.hidClient(for: device)
     self.toolkit = toolkit
     self.queue = queue
-    self.pause = pause
   }
 
   func deliver(_ event: SimulatorInputEvent) throws {
     switch event {
-    case let .touch(x, y, down):
+    case .touch(let x, let y, let down):
       try deliverMessage(touchMessage(SimulatorInputRequest.Point(x: x, y: y), down: down))
-    case let .key(usage, down):
+    case .key(let usage, let down):
       try deliverMessage(
         toolkit.messageForKeyboard(
           Int32(usage), down ? SimulatorKitInputDriver.eventDown : SimulatorKitInputDriver.eventUp))
-    case let .button(button, down):
+    case .button(let button, let down):
       try deliverMessage(
         toolkit.messageForButton(
-          button.indigoSource, down ? SimulatorKitInputDriver.eventDown : SimulatorKitInputDriver.eventUp,
+          button.indigoSource,
+          down ? SimulatorKitInputDriver.eventDown : SimulatorKitInputDriver.eventUp,
           SimulatorKitInputDriver.hardwareTarget))
     }
   }
@@ -47,16 +44,21 @@ final class IndigoTransport: SimulatorInputTransport {
     guard let clientClass = NSClassFromString("SimulatorKit.SimDeviceLegacyHIDClient") else {
       throw unavailable("SimulatorKit has no SimDeviceLegacyHIDClient on this Xcode.")
     }
-    guard let allocated = (clientClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
+    guard
+      let allocated = (clientClass as AnyObject).perform(NSSelectorFromString("alloc"))?
+        .takeUnretainedValue()
     else {
       throw unavailable("SimDeviceLegacyHIDClient could not be allocated.")
     }
     var error: AnyObject?
-    guard let client = unsafeBitCast(allocated, to: SimulatorKitInputDriver.HIDClientMessaging.self).initWithDevice(device, error: &error)
+    guard
+      let client = unsafeBitCast(allocated, to: SimulatorKitInputDriver.HIDClientMessaging.self)
+        .initWithDevice(device, error: &error)
     else {
       throw NativeHostError(
         code: "simulator_input_failed",
-        message: "The Simulator refused a HID session: \(SimulatorKitInputDriver.describe(error)).", retryable: true)
+        message: "The Simulator refused a HID session: \(SimulatorKitInputDriver.describe(error)).",
+        retryable: true)
     }
     return client
   }
@@ -72,14 +74,18 @@ final class IndigoTransport: SimulatorInputTransport {
       failure = error
       semaphore.signal()
     }
-    guard semaphore.wait(timeout: .now() + SimulatorKitInputDriver.acknowledgementTimeout) == .success else {
+    guard
+      semaphore.wait(timeout: .now() + SimulatorKitInputDriver.acknowledgementTimeout) == .success
+    else {
       throw NativeHostError(
-        code: "simulator_input_failed", message: "The Simulator did not acknowledge a HID message within 5s.",
+        code: "simulator_input_failed",
+        message: "The Simulator did not acknowledge a HID message within 5s.",
         retryable: true)
     }
     if let failure {
       throw NativeHostError(
-        code: "simulator_input_failed", message: "The Simulator rejected a HID message: \(failure).",
+        code: "simulator_input_failed",
+        message: "The Simulator rejected a HID message: \(failure).",
         retryable: true)
     }
   }
@@ -87,7 +93,9 @@ final class IndigoTransport: SimulatorInputTransport {
   /// A hand-enveloped single-touch Indigo message (eventType 2, 320 bytes). SimulatorKit only
   /// ships a multi-touch builder, so its digitizer contact is copied into a single-touch
   /// envelope and repeated once, marked as the second slot (field1=1, field2=2).
-  private func touchMessage(_ point: SimulatorInputRequest.Point, down: Bool) -> UnsafeMutableRawPointer {
+  private func touchMessage(_ point: SimulatorInputRequest.Point, down: Bool)
+    -> UnsafeMutableRawPointer
+  {
     var cgPoint = CGPoint(x: point.x, y: point.y)
     let source = toolkit.messageForMouse(
       &cgPoint, nil, SimulatorKitInputDriver.touchTarget,

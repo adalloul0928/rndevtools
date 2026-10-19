@@ -18,7 +18,9 @@ import Foundation
 final class SimulatorKitInputDriver: SimulatorInputDriving {
   @objc private protocol ServiceContextMessaging {
     @objc(sharedServiceContextForDeveloperDir:error:)
-    static func shared(forDeveloperDir dir: String, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?)
+    static func shared(
+      forDeveloperDir dir: String, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?
+    )
       -> AnyObject?
     @objc(defaultDeviceSetWithError:)
     func defaultDeviceSet(error: AutoreleasingUnsafeMutablePointer<AnyObject?>?) -> AnyObject?
@@ -27,23 +29,26 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     @objc var devices: [AnyObject] { get }
   }
   @objc private protocol DeviceMessaging {
-    @objc var UDID: UUID { get }
+    @objc(UDID) var udid: UUID { get }
     @objc var state: UInt64 { get }
   }
   @objc protocol HIDClientMessaging {
     @objc(initWithDevice:error:)
-    func initWithDevice(_ device: Any, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?) -> AnyObject?
+    func initWithDevice(_ device: Any, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?)
+      -> AnyObject?
     @objc(sendWithMessage:freeWhenDone:completionQueue:completion:)
     func send(
-      withMessage message: UnsafeMutableRawPointer, freeWhenDone: Bool, completionQueue: DispatchQueue,
+      withMessage message: UnsafeMutableRawPointer, freeWhenDone: Bool,
+      completionQueue: DispatchQueue,
       completion: @escaping (Error?) -> Void)
   }
 
   typealias ButtonBuilder = @convention(c) (Int32, Int32, Int32) -> UnsafeMutableRawPointer
   typealias KeyboardBuilder = @convention(c) (Int32, Int32) -> UnsafeMutableRawPointer
-  typealias MouseBuilder = @convention(c) (
-    UnsafeMutablePointer<CGPoint>?, UnsafeMutablePointer<CGPoint>?, UInt32, UInt, CGSize, UInt32
-  ) -> UnsafeMutableRawPointer
+  typealias MouseBuilder =
+    @convention(c) (
+      UnsafeMutablePointer<CGPoint>?, UnsafeMutablePointer<CGPoint>?, UInt32, UInt, CGSize, UInt32
+    ) -> UnsafeMutableRawPointer
 
   /// SimDevice.state for a booted device (SimDeviceState enum: 3 = Booted).
   private static let bootedState: UInt64 = 3
@@ -76,13 +81,23 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     let device = try bootedDevice(udid: request.udid)
     let transport = try openTransport(for: device)
     var delivered = 0
-    try SimulatorInputSequencer.run(request, pause: { self.pause(milliseconds: $0) }) { event in
-      try cancellation.check()
-      try transport.deliver(event)
-      delivered += 1
+    do {
+      try SimulatorInputSequencer.run(
+        request,
+        cancellation: cancellation,
+        pause: { self.pause(milliseconds: $0, cancellation: cancellation) },
+        deliver: { event in
+          try transport.deliver(event)
+          delivered += 1
+        })
+    } catch {
+      // Lets the lifts the sequencer sent on the way out reach the guest before exit.
+      try? transport.finish()
+      throw error
     }
     try transport.finish()
-    let elapsed = Int((DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000)
+    let elapsed = Int(
+      (DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000)
     return SimulatorInputResult(
       udid: request.udid, kind: SimulatorKitInputDriver.kindName(request), messages: delivered,
       elapsedMilliseconds: elapsed, transport: transport.kind)
@@ -96,13 +111,14 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     let override = ProcessInfo.processInfo.environment["RNDEVTOOLS_SIMULATOR_INPUT_TRANSPORT"]
       .flatMap(SimulatorInputTransportKind.init(rawValue:))
     let selected =
-      override ?? SimulatorInputTransportKind.select(coreSimulatorVersion: SimulatorKitInputDriver.loadedCoreSimulatorVersion())
+      override
+      ?? SimulatorInputTransportKind.select(
+        coreSimulatorVersion: SimulatorKitInputDriver.loadedCoreSimulatorVersion())
     switch selected {
     case .dtuhid:
       return try DTUHIDTransport(device: device)
     case .indigo:
-      return try IndigoTransport(
-        device: device, toolkit: loadToolkit(), queue: queue, pause: { [self] in pause(milliseconds: $0) })
+      return try IndigoTransport(device: device, toolkit: loadToolkit(), queue: queue)
     }
   }
 
@@ -121,16 +137,20 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
   }
 
   private func loadCoreSimulator() throws {
-    guard dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW) != nil
+    guard
+      dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW)
+        != nil
     else {
       throw unavailable("CoreSimulator.framework could not be loaded (\(dlErrorText())).")
     }
   }
 
   private func loadToolkit() throws -> Toolkit {
-    let simulatorKitPath = "\(developerDirectory)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
+    let simulatorKitPath =
+      "\(developerDirectory)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
     guard let handle = dlopen(simulatorKitPath, RTLD_NOW) else {
-      throw unavailable("SimulatorKit.framework could not be loaded from \(developerDirectory) (\(dlErrorText())).")
+      throw unavailable(
+        "SimulatorKit.framework could not be loaded from \(developerDirectory) (\(dlErrorText())).")
     }
     func symbol<T>(_ name: String, as type: T.Type) throws -> T {
       guard let pointer = dlsym(handle, name) else {
@@ -140,7 +160,8 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
     }
     return Toolkit(
       messageForButton: try symbol("IndigoHIDMessageForButton", as: ButtonBuilder.self),
-      messageForKeyboard: try symbol("IndigoHIDMessageForKeyboardArbitrary", as: KeyboardBuilder.self),
+      messageForKeyboard: try symbol(
+        "IndigoHIDMessageForKeyboardArbitrary", as: KeyboardBuilder.self),
       messageForMouse: try symbol("IndigoHIDMessageForMouseNSEvent", as: MouseBuilder.self))
   }
 
@@ -153,23 +174,32 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
       let context = unsafeBitCast(contextClass, to: ServiceContextMessaging.Type.self)
         .shared(forDeveloperDir: developerDirectory, error: &error)
     else {
-      throw unavailable("CoreSimulator refused a service context: \(SimulatorKitInputDriver.describe(error)).")
+      throw unavailable(
+        "CoreSimulator refused a service context: \(SimulatorKitInputDriver.describe(error)).")
     }
-    guard let set = unsafeBitCast(context, to: ServiceContextMessaging.self).defaultDeviceSet(error: &error)
+    guard
+      let set = unsafeBitCast(context, to: ServiceContextMessaging.self).defaultDeviceSet(
+        error: &error)
     else {
-      throw unavailable("CoreSimulator refused the default device set: \(SimulatorKitInputDriver.describe(error)).")
+      throw unavailable(
+        "CoreSimulator refused the default device set: \(SimulatorKitInputDriver.describe(error)).")
     }
     let devices = unsafeBitCast(set, to: DeviceSetMessaging.self).devices
     guard
       let device = devices.first(where: {
-        unsafeBitCast($0, to: DeviceMessaging.self).UDID.uuidString.uppercased() == udid.uppercased()
+        unsafeBitCast($0, to: DeviceMessaging.self).udid.uuidString.uppercased()
+          == udid.uppercased()
       })
     else {
-      throw NativeHostError(code: "simulator_not_found", message: "No Simulator with UDID \(udid) exists.")
-    }
-    guard unsafeBitCast(device, to: DeviceMessaging.self).state == SimulatorKitInputDriver.bootedState else {
       throw NativeHostError(
-        code: "simulator_not_booted", message: "Simulator \(udid) is not booted; input needs a running device.",
+        code: "simulator_not_found", message: "No Simulator with UDID \(udid) exists.")
+    }
+    guard
+      unsafeBitCast(device, to: DeviceMessaging.self).state == SimulatorKitInputDriver.bootedState
+    else {
+      throw NativeHostError(
+        code: "simulator_not_booted",
+        message: "Simulator \(udid) is not booted; input needs a running device.",
         retryable: true)
     }
     return device
@@ -177,8 +207,17 @@ final class SimulatorKitInputDriver: SimulatorInputDriving {
 
   // MARK: - Helpers
 
-  func pause(milliseconds: Int) {
-    if milliseconds > 0 { usleep(useconds_t(min(milliseconds, 10_000) * 1_000)) }
+  /// Holds a gesture for up to 10 s, waking within 10 ms of cancellation so the sequencer can
+  /// lift what is held before Electron follows SIGTERM with SIGKILL.
+  func pause(milliseconds: Int, cancellation: any CancellationChecking) {
+    guard milliseconds > 0 else { return }
+    let deadline =
+      DispatchTime.now().uptimeNanoseconds + UInt64(min(milliseconds, 10_000)) * 1_000_000
+    while (try? cancellation.check()) != nil {
+      let now = DispatchTime.now().uptimeNanoseconds
+      guard now < deadline else { return }
+      usleep(useconds_t(min(deadline - now, 10_000_000) / 1_000))
+    }
   }
 
   private func unavailable(_ reason: String) -> NativeHostError {
@@ -237,7 +276,6 @@ enum KeyboardLayout {
   }
 
   static let returnUsage: UInt16 = 0x28
-  static let deleteUsage: UInt16 = 0x2A
 
   private static let plain: [Character: UInt16] = {
     var table: [Character: UInt16] = [:]

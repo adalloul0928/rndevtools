@@ -6,7 +6,6 @@ enum NativeProtocol {
   static let compositionVersion = 3
   static let mutationBrokerVersion = 4
   static let simulatorInputVersion = 5
-  static let currentVersion = simulatorInputVersion
   static let supportedVersions: Set<Int> = [
     legacyVersion, inspectionVersion, compositionVersion, mutationBrokerVersion,
     simulatorInputVersion,

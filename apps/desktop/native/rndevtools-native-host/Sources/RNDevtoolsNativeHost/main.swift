@@ -3,7 +3,8 @@ import Dispatch
 import Foundation
 
 let processCancellation = CancellationToken()
-let cancellationQueue = DispatchQueue(label: "io.github.adalloul0928.rndevtools.native-host.signals")
+let cancellationQueue = DispatchQueue(
+  label: "io.github.adalloul0928.rndevtools.native-host.signals")
 let cancellationSources = [SIGINT, SIGTERM].map { signalNumber in
   Darwin.signal(signalNumber, SIG_IGN)
   let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: cancellationQueue)

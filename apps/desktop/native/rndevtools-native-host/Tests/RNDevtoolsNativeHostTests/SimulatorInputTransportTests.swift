@@ -54,12 +54,28 @@ func keyboardEnvelope() {
 func buttonEnvelope() {
   let home = DTUHIDMessages.button(usagePage: 0x0C, usageCode: 0x40, down: true)
   #expect(home.messageType == "IndigoButtonEvent")
-  #expect(home.payload == ["usagePage": .uint64(0x0C), "usageCode": .uint64(0x40), "state": .uint64(1)])
-  #expect(SimulatorInputRequest.HardwareButton.home.consumerUsage.map { [$0.page, $0.code] } == [0x0C, 0x40])
-  #expect(SimulatorInputRequest.HardwareButton.lock.consumerUsage.map { [$0.page, $0.code] } == [0x0C, 0x30])
-  #expect(SimulatorInputRequest.HardwareButton.siri.consumerUsage.map { [$0.page, $0.code] } == [0x0C, 0xCF])
-  #expect(SimulatorInputRequest.HardwareButton.volumeUp.consumerUsage.map { [$0.page, $0.code] } == [0x0C, 0xE9])
-  #expect(SimulatorInputRequest.HardwareButton.volumeDown.consumerUsage.map { [$0.page, $0.code] } == [0x0C, 0xEA])
+  #expect(
+    home.payload == ["usagePage": .uint64(0x0C), "usageCode": .uint64(0x40), "state": .uint64(1)])
+  #expect(
+    SimulatorInputRequest.HardwareButton.home.consumerUsage.map { [$0.page, $0.code] } == [
+      0x0C, 0x40,
+    ])
+  #expect(
+    SimulatorInputRequest.HardwareButton.lock.consumerUsage.map { [$0.page, $0.code] } == [
+      0x0C, 0x30,
+    ])
+  #expect(
+    SimulatorInputRequest.HardwareButton.siri.consumerUsage.map { [$0.page, $0.code] } == [
+      0x0C, 0xCF,
+    ])
+  #expect(
+    SimulatorInputRequest.HardwareButton.volumeUp.consumerUsage.map { [$0.page, $0.code] } == [
+      0x0C, 0xE9,
+    ])
+  #expect(
+    SimulatorInputRequest.HardwareButton.volumeDown.consumerUsage.map { [$0.page, $0.code] } == [
+      0x0C, 0xEA,
+    ])
   #expect(SimulatorInputRequest.HardwareButton.applePay.consumerUsage == nil)
 }
 
@@ -83,10 +99,12 @@ func envelopeKeys() {
 
 @Test("The envelope round-trips into an xpc dictionary with matching value types")
 func envelopeEncodesToXPC() {
-  let object = DTUHIDTransport.xpcObject(from: DTUHIDMessages.digitizer(x: 0.5, y: 0.125, phase: .end))
+  let object = DTUHIDTransport.xpcObject(
+    from: DTUHIDMessages.digitizer(x: 0.5, y: 0.125, phase: .end))
   #expect(xpc_get_type(object) == XPC_TYPE_DICTIONARY)
   #expect(xpc_dictionary_get_bool(object, "isBarrier") == false)
-  #expect(String(cString: xpc_dictionary_get_string(object, "messageType")!) == "IndigoDigitizerEvent")
+  #expect(
+    String(cString: xpc_dictionary_get_string(object, "messageType")!) == "IndigoDigitizerEvent")
   let payload = xpc_dictionary_get_value(object, "payload")!
   #expect(xpc_dictionary_get_uint64(payload, "eventType") == 2)
   let point = xpc_dictionary_get_value(payload, "pointOne")!
@@ -108,16 +126,21 @@ func contactTrackerPhases() {
 
 // MARK: - Sequencing shared by both transports
 
-private func events(for request: SimulatorInputRequest) throws -> (events: [SimulatorInputEvent], pauses: [Int]) {
+private func events(for request: SimulatorInputRequest) throws -> (
+  events: [SimulatorInputEvent], pauses: [Int]
+) {
   var events: [SimulatorInputEvent] = []
   var pauses: [Int] = []
-  try SimulatorInputSequencer.run(request, pause: { pauses.append($0) }) { events.append($0) }
+  try SimulatorInputSequencer.run(
+    request, cancellation: NeverCancelled(), pause: { pauses.append($0) },
+    deliver: { events.append($0) })
   return (events, pauses)
 }
 
 @Test("A tap is one contact down, the hold, and a lift at the same point")
 func tapSequence() throws {
-  let (events, pauses) = try events(for: .tap(udid: "U", point: .init(x: 0.3, y: 0.9), holdMilliseconds: 500))
+  let (events, pauses) = try events(
+    for: .tap(udid: "U", point: .init(x: 0.3, y: 0.9), holdMilliseconds: 500))
   #expect(events == [.touch(x: 0.3, y: 0.9, down: true), .touch(x: 0.3, y: 0.9, down: false)])
   #expect(pauses == [500])
 }
@@ -125,7 +148,9 @@ func tapSequence() throws {
 @Test("A swipe interpolates `steps` moves between the endpoints and lifts at the destination")
 func swipeSequence() throws {
   let (events, _) = try events(
-    for: .swipe(udid: "U", from: .init(x: 0, y: 0), to: .init(x: 1, y: 0.5), durationMilliseconds: 100, steps: 4))
+    for: .swipe(
+      udid: "U", from: .init(x: 0, y: 0), to: .init(x: 1, y: 0.5), durationMilliseconds: 100,
+      steps: 4))
   #expect(events.count == 6)
   #expect(events.first == .touch(x: 0, y: 0, down: true))
   #expect(events[2] == .touch(x: 0.5, y: 0.25, down: true))
@@ -148,4 +173,112 @@ func buttonSequence() throws {
   let (events, pauses) = try events(for: .button(udid: "U", button: .lock))
   #expect(events == [.button(.lock, down: true), .button(.lock, down: false)])
   #expect(pauses == [SimulatorInputSequencer.buttonHoldMilliseconds])
+}
+
+// MARK: - Lifting a gesture that stops part-way
+
+/// Runs `request` and records every event offered to the transport. `onDeliver` sees each
+/// attempt with its index and may throw to fail that delivery.
+private func interruptedRun(
+  _ request: SimulatorInputRequest,
+  cancellation: CancellationToken = CancellationToken(),
+  pause: (Int) -> Void = { _ in },
+  onDeliver: (Int, SimulatorInputEvent) throws -> Void = { _, _ in }
+) -> (attempts: [SimulatorInputEvent], error: NativeHostError?) {
+  var attempts: [SimulatorInputEvent] = []
+  do {
+    try SimulatorInputSequencer.run(
+      request, cancellation: cancellation, pause: pause,
+      deliver: { event in
+        attempts.append(event)
+        try onDeliver(attempts.count - 1, event)
+      })
+  } catch {
+    return (attempts, error as? NativeHostError)
+  }
+  return (attempts, nil)
+}
+
+private let wedged = NativeHostError(code: "simulator_input_failed", message: "no acknowledgement")
+
+@Test("Cancelling during a long press still lifts the finger")
+func cancelledTapLiftsTheFinger() {
+  let cancellation = CancellationToken()
+  let run = interruptedRun(
+    .tap(udid: "U", point: .init(x: 0.3, y: 0.9), holdMilliseconds: 8_000),
+    cancellation: cancellation, pause: { _ in cancellation.cancel() })
+  #expect(run.error?.code == "cancelled")
+  #expect(
+    run.attempts == [.touch(x: 0.3, y: 0.9, down: true), .touch(x: 0.3, y: 0.9, down: false)])
+}
+
+@Test("Cancelling mid-swipe lifts the finger where it last was")
+func cancelledSwipeLiftsAtTheLastPoint() {
+  let cancellation = CancellationToken()
+  let run = interruptedRun(
+    .swipe(
+      udid: "U", from: .init(x: 0, y: 0), to: .init(x: 1, y: 0.5), durationMilliseconds: 100,
+      steps: 4),
+    cancellation: cancellation,
+    onDeliver: { index, _ in
+      if index == 2 { cancellation.cancel() }
+    })
+  #expect(run.error?.code == "cancelled")
+  #expect(run.attempts.count == 4)
+  #expect(run.attempts.last == .touch(x: 0.5, y: 0.25, down: false))
+}
+
+@Test("Cancelled typing lifts the held key before the shift that modifies it")
+func cancelledTextLiftsKeyThenModifier() {
+  let cancellation = CancellationToken()
+  let run = interruptedRun(
+    .text(udid: "U", text: "AB"), cancellation: cancellation, pause: { _ in cancellation.cancel() })
+  #expect(run.error?.code == "cancelled")
+  #expect(
+    run.attempts == [
+      .key(usage: 0xE1, down: true), .key(usage: 0x04, down: true),
+      .key(usage: 0x04, down: false), .key(usage: 0xE1, down: false),
+    ])
+}
+
+@Test("A press the transport fails to acknowledge is still lifted, since it may have landed")
+func failedPressIsStillLifted() {
+  let run = interruptedRun(
+    .button(udid: "U", button: .lock),
+    onDeliver: { index, _ in
+      if index == 0 { throw wedged }
+    })
+  #expect(run.error?.code == "simulator_input_failed")
+  #expect(run.attempts == [.button(.lock, down: true), .button(.lock, down: false)])
+}
+
+@Test("The first refused lift ends the cleanup and the original error is reported")
+func refusedLiftEndsTheCleanup() {
+  let cancellation = CancellationToken()
+  let run = interruptedRun(
+    .key(udid: "U", usage: 0x28, modifiers: [.shift, .command]), cancellation: cancellation,
+    pause: { _ in cancellation.cancel() },
+    onDeliver: { index, _ in
+      if index >= 3 { throw wedged }
+    })
+  #expect(run.error?.code == "cancelled")
+  #expect(
+    run.attempts == [
+      .key(usage: 0xE1, down: true), .key(usage: 0xE3, down: true), .key(usage: 0x28, down: true),
+      .key(usage: 0x28, down: false),
+    ])
+}
+
+@Test("A gesture's pause wakes promptly once the request is cancelled")
+func pauseWakesOnCancellation() {
+  let driver = SimulatorKitInputDriver(developerDirectory: "/nonexistent")
+  let held = DispatchTime.now()
+  driver.pause(milliseconds: 30, cancellation: NeverCancelled())
+  #expect(DispatchTime.now().uptimeNanoseconds - held.uptimeNanoseconds >= 30_000_000)
+
+  let cancellation = CancellationToken()
+  DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { cancellation.cancel() }
+  let started = DispatchTime.now()
+  driver.pause(milliseconds: 5_000, cancellation: cancellation)
+  #expect(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds < 1_000_000_000)
 }

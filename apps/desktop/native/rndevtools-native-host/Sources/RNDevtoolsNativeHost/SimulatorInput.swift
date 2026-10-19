@@ -69,8 +69,8 @@ enum SimulatorInputRequest: Equatable {
 
   var udid: String {
     switch self {
-    case let .tap(udid, _, _), let .swipe(udid, _, _, _, _), let .text(udid, _),
-      let .key(udid, _, _), let .button(udid, _):
+    case .tap(let udid, _, _), .swipe(let udid, _, _, _, _), .text(let udid, _),
+      .key(let udid, _, _), .button(let udid, _):
       return udid
     }
   }
@@ -81,7 +81,8 @@ enum SimulatorInputRequest: Equatable {
         of: #"^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$"#,
         options: .regularExpression) != nil
     else {
-      throw NativeHostError(code: "invalid_payload", message: "udid must be an exact Simulator UDID.")
+      throw NativeHostError(
+        code: "invalid_payload", message: "udid must be an exact Simulator UDID.")
     }
     guard let kind = payload["kind"] as? String else {
       throw NativeHostError(code: "invalid_payload", message: "kind is required.")
@@ -91,12 +92,15 @@ enum SimulatorInputRequest: Equatable {
     switch kind {
     case "tap":
       allowed = ["kind", "udid", "x", "y", "holdMilliseconds"]
-      let hold = try optionalInt(payload, "holdMilliseconds", range: 0...maximumDurationMilliseconds) ?? 40
-      request = .tap(udid: udid.uppercased(), point: try point(payload, "x", "y"), holdMilliseconds: hold)
+      let hold =
+        try optionalInt(payload, "holdMilliseconds", range: 0...maximumDurationMilliseconds) ?? 40
+      request = .tap(
+        udid: udid.uppercased(), point: try point(payload, "x", "y"), holdMilliseconds: hold)
     case "swipe":
       allowed = ["kind", "udid", "fromX", "fromY", "toX", "toY", "durationMilliseconds", "steps"]
       let duration =
-        try optionalInt(payload, "durationMilliseconds", range: 1...maximumDurationMilliseconds) ?? 250
+        try optionalInt(payload, "durationMilliseconds", range: 1...maximumDurationMilliseconds)
+        ?? 250
       let steps = try optionalInt(payload, "steps", range: 2...maximumSwipeSteps) ?? 16
       request = .swipe(
         udid: udid.uppercased(),
@@ -111,13 +115,19 @@ enum SimulatorInputRequest: Equatable {
       }
       guard text.count <= maximumTextCharacters else {
         throw NativeHostError(
-          code: "invalid_payload", message: "text must be at most \(maximumTextCharacters) characters.")
+          code: "invalid_payload",
+          message: "text must be at most \(maximumTextCharacters) characters.")
       }
-      guard text.unicodeScalars.allSatisfy({ $0.isASCII && ($0.value >= 0x20 || $0 == "\n" || $0 == "\t") })
+      guard
+        text.unicodeScalars.allSatisfy({
+          $0.isASCII && ($0.value >= 0x20 || $0 == "\n" || $0 == "\t")
+        })
       else {
         throw NativeHostError(
           code: "invalid_payload",
-          message: "text must be printable ASCII (plus newline and tab); the Simulator keyboard has no key for other characters.")
+          message:
+            "text must be printable ASCII (plus newline and tab); the Simulator keyboard has no key for other characters."
+        )
       }
       request = .text(udid: udid.uppercased(), text: text)
     case "key":
@@ -130,7 +140,8 @@ enum SimulatorInputRequest: Equatable {
       var modifiers: [KeyModifier] = []
       if let raw = payload["modifiers"] {
         guard let names = raw as? [String], names.count <= KeyModifier.allCases.count else {
-          throw NativeHostError(code: "invalid_payload", message: "modifiers must be a short list of names.")
+          throw NativeHostError(
+            code: "invalid_payload", message: "modifiers must be a short list of names.")
         }
         for name in names {
           guard let modifier = KeyModifier(rawValue: name), !modifiers.contains(modifier) else {
@@ -144,11 +155,13 @@ enum SimulatorInputRequest: Equatable {
       request = .key(udid: udid.uppercased(), usage: UInt16(code), modifiers: modifiers)
     case "button":
       allowed = ["kind", "udid", "button"]
-      guard let name = payload["button"] as? String, let button = HardwareButton(rawValue: name) else {
+      guard let name = payload["button"] as? String, let button = HardwareButton(rawValue: name)
+      else {
         throw NativeHostError(
           code: "invalid_payload",
           message:
-            "button must be one of \(HardwareButton.allCases.map(\.rawValue).joined(separator: ", ")).")
+            "button must be one of \(HardwareButton.allCases.map(\.rawValue).joined(separator: ", "))."
+        )
       }
       request = .button(udid: udid.uppercased(), button: button)
     default:
@@ -157,12 +170,15 @@ enum SimulatorInputRequest: Equatable {
     }
     guard Set(payload.keys).isSubset(of: allowed) else {
       throw NativeHostError(
-        code: "invalid_payload", message: "The input payload has fields that \(kind) does not accept.")
+        code: "invalid_payload",
+        message: "The input payload has fields that \(kind) does not accept.")
     }
     return request
   }
 
-  private static func point(_ payload: [String: Any], _ xKey: String, _ yKey: String) throws -> Point {
+  private static func point(_ payload: [String: Any], _ xKey: String, _ yKey: String) throws
+    -> Point
+  {
     guard let x = ratio(payload[xKey]), let y = ratio(payload[yKey]) else {
       throw NativeHostError(
         code: "invalid_payload",

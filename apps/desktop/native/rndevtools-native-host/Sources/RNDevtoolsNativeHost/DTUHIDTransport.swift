@@ -20,7 +20,8 @@ final class DTUHIDTransport: SimulatorInputTransport {
     func lookup(_ service: String, error: AutoreleasingUnsafeMutablePointer<AnyObject?>?) -> UInt32
   }
 
-  private typealias EndpointFromPort = @convention(c) (mach_port_t, UInt64, UInt64) -> Unmanaged<AnyObject>?
+  private typealias EndpointFromPort =
+    @convention(c) (mach_port_t, UInt64, UInt64) -> Unmanaged<AnyObject>?
   private typealias ConnectionFromEndpoint = @convention(c) (xpc_object_t) -> Unmanaged<AnyObject>?
   private typealias EnableSim2Host = @convention(c) (xpc_connection_t) -> Void
 
@@ -71,15 +72,17 @@ final class DTUHIDTransport: SimulatorInputTransport {
   func deliver(_ event: SimulatorInputEvent) throws {
     let envelope: DTUHIDEnvelope
     switch event {
-    case let .touch(x, y, down):
+    case .touch(let x, let y, let down):
       envelope = DTUHIDMessages.digitizer(x: x, y: y, phase: contact.phase(forDown: down))
-    case let .key(usage, down):
+    case .key(let usage, let down):
       envelope = DTUHIDMessages.keyboard(usage: usage, down: down)
-    case let .button(button, down):
+    case .button(let button, let down):
       guard let usage = button.consumerUsage else {
         throw NativeHostError(
           code: "invalid_payload",
-          message: "apple-pay is a double side-button press on this Simulator; send button lock twice instead.")
+          message:
+            "apple-pay is a double side-button press on this Simulator; send button lock twice instead."
+        )
       }
       envelope = DTUHIDMessages.button(usagePage: usage.page, usageCode: usage.code, down: down)
     }
@@ -91,7 +94,8 @@ final class DTUHIDTransport: SimulatorInputTransport {
     xpc_connection_send_barrier(connection) { barrier.signal() }
     guard barrier.wait(timeout: .now() + Timing.livenessTimeout) == .success else {
       throw NativeHostError(
-        code: "simulator_input_failed", message: "dtuhidd stopped accepting messages.", retryable: true)
+        code: "simulator_input_failed", message: "dtuhidd stopped accepting messages.",
+        retryable: true)
     }
   }
 
@@ -107,7 +111,8 @@ final class DTUHIDTransport: SimulatorInputTransport {
 
   private static func connect(device: AnyObject) throws -> xpc_connection_t {
     guard let handle = dlopen(nil, RTLD_NOW) else {
-      throw NativeHostError(code: "simulator_input_unavailable", message: "libxpc could not be opened.")
+      throw NativeHostError(
+        code: "simulator_input_unavailable", message: "libxpc could not be opened.")
     }
     defer { dlclose(handle) }
     func symbol<T>(_ name: String, as type: T.Type) throws -> T {
@@ -118,15 +123,18 @@ final class DTUHIDTransport: SimulatorInputTransport {
       }
       return unsafeBitCast(pointer, to: type)
     }
-    let endpointFromPort = try symbol("xpc_endpoint_create_mach_port_4sim", as: EndpointFromPort.self)
-    let connectionFromEndpoint = try symbol("xpc_connection_create_from_endpoint", as: ConnectionFromEndpoint.self)
+    let endpointFromPort = try symbol(
+      "xpc_endpoint_create_mach_port_4sim", as: EndpointFromPort.self)
+    let connectionFromEndpoint = try symbol(
+      "xpc_connection_create_from_endpoint", as: ConnectionFromEndpoint.self)
     let enableSim2Host = try symbol("xpc_connection_enable_sim2host_4sim", as: EnableSim2Host.self)
 
     var error: AnyObject?
     let port = unsafeBitCast(device, to: DeviceLookupMessaging.self)
       .lookup(DTUHIDMessages.digitizerService, error: &error)
     guard port != MACH_PORT_NULL else {
-      let detail = (error as? NSError)?.localizedDescription ?? "the service is not registered in the guest"
+      let detail =
+        (error as? NSError)?.localizedDescription ?? "the service is not registered in the guest"
       throw NativeHostError(
         code: "simulator_input_unavailable",
         message: "The Simulator does not vend \(DTUHIDMessages.digitizerService) (\(detail)).")
@@ -135,7 +143,8 @@ final class DTUHIDTransport: SimulatorInputTransport {
       let connection = connectionFromEndpoint(endpoint)?.takeRetainedValue() as? xpc_connection_t
     else {
       throw NativeHostError(
-        code: "simulator_input_failed", message: "libxpc refused a connection to the digitizer service.",
+        code: "simulator_input_failed",
+        message: "libxpc refused a connection to the digitizer service.",
         retryable: true)
     }
     enableSim2Host(connection)
@@ -148,7 +157,9 @@ final class DTUHIDTransport: SimulatorInputTransport {
     xpc_connection_resume(connection)
     let answered = DispatchSemaphore(value: 0)
     let outcome = ReplyBox()
-    xpc_connection_send_message_with_reply(connection, xpcObject(from: DTUHIDMessages.barrier()), queue) { reply in
+    xpc_connection_send_message_with_reply(
+      connection, xpcObject(from: DTUHIDMessages.barrier()), queue
+    ) { reply in
       if xpc_get_type(reply) == XPC_TYPE_ERROR {
         outcome.failure =
           xpc_dictionary_get_string(reply, XPC_ERROR_KEY_DESCRIPTION).map { String(cString: $0) }
@@ -179,11 +190,11 @@ final class DTUHIDTransport: SimulatorInputTransport {
 
   private static func xpcObject(from value: DTUHIDValue) -> xpc_object_t {
     switch value {
-    case let .string(string): return string.withCString { xpc_string_create($0) }
-    case let .bool(bool): return xpc_bool_create(bool)
-    case let .uint64(number): return xpc_uint64_create(number)
-    case let .double(number): return xpc_double_create(number)
-    case let .dictionary(entries):
+    case .string(let string): return string.withCString { xpc_string_create($0) }
+    case .bool(let bool): return xpc_bool_create(bool)
+    case .uint64(let number): return xpc_uint64_create(number)
+    case .double(let number): return xpc_double_create(number)
+    case .dictionary(let entries):
       let dictionary = xpc_dictionary_create(nil, nil, 0)
       for (key, entry) in entries {
         key.withCString { xpc_dictionary_set_value(dictionary, $0, xpcObject(from: entry)) }

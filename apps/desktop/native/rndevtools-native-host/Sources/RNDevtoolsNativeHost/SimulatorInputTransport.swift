@@ -111,7 +111,8 @@ enum DTUHIDMessages {
   /// `IndigoKeyboardButtonEvent`: a USB HID keyboard usage. `state`: 1 down, 2 up.
   static func keyboard(usage: UInt16, down: Bool) -> DTUHIDEnvelope {
     DTUHIDEnvelope(
-      messageType: "IndigoKeyboardButtonEvent", isBarrier: false, featureIdentifier: digitizerService,
+      messageType: "IndigoKeyboardButtonEvent", isBarrier: false,
+      featureIdentifier: digitizerService,
       payload: ["usageCode": .uint64(UInt64(usage)), "state": .uint64(down ? 1 : 2)])
   }
 
@@ -131,7 +132,8 @@ enum DTUHIDMessages {
   /// it; plain events get no reply.
   static func barrier() -> DTUHIDEnvelope {
     DTUHIDEnvelope(
-      messageType: "IndigoKeyboardButtonEvent", isBarrier: true, featureIdentifier: digitizerService,
+      messageType: "IndigoKeyboardButtonEvent", isBarrier: true,
+      featureIdentifier: digitizerService,
       payload: ["usageCode": .uint64(0), "state": .uint64(2)])
   }
 

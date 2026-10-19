@@ -294,13 +294,32 @@ private struct StubMutationBroker: SimulatorMutationBrokering {
   let hash = Data((0..<20).map(UInt8.init))
   let requirement = try designatedRequirement(
     identifier: "rndevtools-sim-helper",
+    teamIdentifier: "ABCDE12345",
     codeDirectoryHash: hash
   )
   var text: CFString?
   #expect(SecRequirementCopyString(requirement, [], &text) == errSecSuccess)
   let value = try #require(text as String?)
   #expect(value.contains(#"identifier "rndevtools-sim-helper""#))
+  #expect(value.contains("certificate leaf[subject.OU] = ABCDE12345"))
   #expect(value.contains(#"cdhash H"000102030405060708090a0b0c0d0e0f10111213""#))
+}
+
+@Test func brokerTrustsOnlyTheTeamThatSignedTheNativeHost() throws {
+  let team = kSecCodeInfoTeamIdentifier as String
+  #expect(try signingTeamIdentifier(from: [team: "ABCDE12345"]) == "ABCDE12345")
+  let untrusted: [[String: Any]] = [
+    [:],
+    [team: "abcde12345"],
+    [team: "ABCDE1234"],
+    [team: #"ABCDE12345" or anchor apple"#],
+  ]
+  for information in untrusted {
+    #expect(throws: NativeHostError.self) { try signingTeamIdentifier(from: information) }
+  }
+  #expect(throws: NativeHostError.self) {
+    try designatedRequirement(identifier: "rndevtools-native-host", teamIdentifier: "")
+  }
 }
 
 @Test func processRunnerVerifiesSuspendedHelperBeforeAnyUserCodeRuns() throws {

@@ -46,7 +46,8 @@ private func decoded(_ data: Data) throws -> [String: Any] {
   #expect(
     swipe
       == .swipe(
-        udid: udid, from: .init(x: 0.5, y: 0.9), to: .init(x: 0.5, y: 0.2), durationMilliseconds: 400,
+        udid: udid, from: .init(x: 0.5, y: 0.9), to: .init(x: 0.5, y: 0.2),
+        durationMilliseconds: 400,
         steps: 20))
 
   #expect(
@@ -67,7 +68,9 @@ private func decoded(_ data: Data) throws -> [String: Any] {
     ["kind": "tap", "udid": udid, "x": 1.5, "y": 0.5],
     ["kind": "tap", "udid": udid, "x": 0.5, "y": -0.1],
     ["kind": "tap", "udid": udid, "x": 0.5, "y": 0.5, "button": "home"],
-    ["kind": "swipe", "udid": udid, "fromX": 0.5, "fromY": 0.5, "toX": 0.5, "toY": 0.5, "steps": 1],
+    [
+      "kind": "swipe", "udid": udid, "fromX": 0.5, "fromY": 0.5, "toX": 0.5, "toY": 0.5, "steps": 1,
+    ],
     ["kind": "text", "udid": udid, "text": ""],
     ["kind": "text", "udid": udid, "text": "héllo"],
     ["kind": "text", "udid": udid, "text": String(repeating: "a", count: 2_049)],
@@ -90,7 +93,8 @@ private func decoded(_ data: Data) throws -> [String: Any] {
   #expect(KeyboardLayout.stroke(for: "0") == .init(usage: 0x27, modifiers: []))
   #expect(KeyboardLayout.stroke(for: "!") == .init(usage: 0x1E, modifiers: [.shift]))
   #expect(KeyboardLayout.stroke(for: " ") == .init(usage: 0x2C, modifiers: []))
-  #expect(KeyboardLayout.stroke(for: "\n") == .init(usage: KeyboardLayout.returnUsage, modifiers: []))
+  #expect(
+    KeyboardLayout.stroke(for: "\n") == .init(usage: KeyboardLayout.returnUsage, modifiers: []))
   #expect(KeyboardLayout.stroke(for: "{") == .init(usage: 0x2F, modifiers: [.shift]))
   #expect(KeyboardLayout.stroke(for: "?") == .init(usage: 0x38, modifiers: [.shift]))
   #expect(KeyboardLayout.stroke(for: "é") == nil)
@@ -123,16 +127,20 @@ private func decoded(_ data: Data) throws -> [String: Any] {
 
   let old = host.process(
     arguments: ["rndevtools-native-host"],
-    input: inputRequest(protocolVersion: 4, payload: ["kind": "tap", "udid": udid, "x": 0.5, "y": 0.5]))
+    input: inputRequest(
+      protocolVersion: 4, payload: ["kind": "tap", "udid": udid, "x": 0.5, "y": 0.5]))
   #expect(old.exitCode == 2)
-  #expect((try decoded(old.data)["error"] as? [String: Any])?["code"] as? String == "unsupported_operation")
+  #expect(
+    (try decoded(old.data)["error"] as? [String: Any])?["code"] as? String
+      == "unsupported_operation")
   #expect(driver.requests.count == 1)
 
   let invalid = host.process(
     arguments: ["rndevtools-native-host"],
     input: inputRequest(payload: ["kind": "tap", "udid": udid, "x": 2, "y": 0.5]))
   #expect(invalid.exitCode == 1)
-  #expect((try decoded(invalid.data)["error"] as? [String: Any])?["code"] as? String == "invalid_payload")
+  #expect(
+    (try decoded(invalid.data)["error"] as? [String: Any])?["code"] as? String == "invalid_payload")
 
   driver.failure = NativeHostError(code: "simulator_not_booted", message: "off", retryable: true)
   let failed = host.process(
