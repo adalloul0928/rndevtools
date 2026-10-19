@@ -2,6 +2,7 @@ package command
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -192,12 +193,41 @@ func TestParseRejectsAmbiguityAndOversizedInput(t *testing.T) {
 		t.Fatal("expected duplicate field rejection")
 	}
 	if _, err := Parse(
-		protocol.CommandDoctor,
+		protocol.CommandSimulators,
 		nil,
 		strings.NewReader(strings.Repeat("x", protocol.MaxRequestBytes+1)),
 		true,
 	); err == nil {
 		t.Fatal("expected oversized stdin rejection")
+	}
+}
+
+// unreadable fails the test that reads it: stdin a command must not touch.
+type unreadable struct{ t *testing.T }
+
+func (reader unreadable) Read([]byte) (int, error) {
+	reader.t.Error("stdin was read")
+	return 0, io.EOF
+}
+
+func TestCommandsWithoutFieldsNeverReadStdin(t *testing.T) {
+	// `ssh host rndevtools doctor` hands the CLI an open pipe it would
+	// otherwise wait on until the user presses Ctrl-D.
+	for _, kind := range []protocol.Command{protocol.CommandDoctor, protocol.CommandAgents} {
+		parsed, err := Parse(kind, nil, unreadable{t}, true)
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if string(parsed.Command) != `{"kind":"`+string(kind)+`"}` {
+			t.Fatalf("%s: command %s", kind, parsed.Command)
+		}
+		if !strings.Contains(Usage(kind), "never reads stdin") {
+			t.Fatalf("%s usage must say it ignores stdin:\n%s", kind, Usage(kind))
+		}
+	}
+	// A command with fields still merges stdin with its flags.
+	if !strings.Contains(Usage(protocol.CommandSimulators), "JSON command object on stdin") {
+		t.Fatal("commands with fields still document stdin")
 	}
 }
 

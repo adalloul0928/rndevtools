@@ -20,7 +20,7 @@ func TestParseSteeringAcceptsTheDesktopsFile(t *testing.T) {
 	if !ok {
 		t.Fatal("the desktop's own file must parse")
 	}
-	if !state.enabled || state.desktopPID != 12345 || !state.writtenAt.Equal(time.UnixMilli(1760000000000)) {
+	if !state.enabled || !state.writtenAt.Equal(time.UnixMilli(1760000000000)) {
 		t.Fatalf("state %+v", state)
 	}
 	if len(state.roots) != 1 {

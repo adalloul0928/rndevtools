@@ -37,8 +37,7 @@ const (
 
 // steeringState is a validated steering.json v1.
 type steeringState struct {
-	writtenAt  time.Time
-	desktopPID int64
+	writtenAt time.Time
 	// enabled is the user's local Supabase setting; no Supabase rule applies
 	// while it is off.
 	enabled bool
@@ -144,6 +143,8 @@ func parseSteering(raw []byte) (steeringState, bool) {
 	if !ok {
 		return steeringState{}, false
 	}
+	// desktopPid must be a real process id for the file to be v1, though the
+	// hook never uses it: a connect to the desktop's socket proves it runs.
 	desktopPID, ok := nonNegativeInteger(document["desktopPid"])
 	if !ok || desktopPID < 1 || desktopPID > 1<<31-1 {
 		return steeringState{}, false
@@ -152,7 +153,7 @@ func parseSteering(raw []byte) (steeringState, bool) {
 	if !ok {
 		return steeringState{}, false
 	}
-	state := steeringState{writtenAt: time.UnixMilli(writtenAt), desktopPID: desktopPID}
+	state := steeringState{writtenAt: time.UnixMilli(writtenAt)}
 	if !decodeStrict(supabase["enabled"], &state.enabled) {
 		return steeringState{}, false
 	}

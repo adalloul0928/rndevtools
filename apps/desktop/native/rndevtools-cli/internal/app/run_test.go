@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -127,8 +128,8 @@ func appTestServer(t *testing.T, response func(string) string) string {
 			return
 		}
 		defer connection.Close()
-		line, err := bufio.NewReader(connection).ReadString('\n')
-		if err != nil {
+		line, ok := readRequestLikeTheDesktop(connection)
+		if !ok {
 			return
 		}
 		var request protocol.Request
@@ -138,6 +139,22 @@ func appTestServer(t *testing.T, response func(string) string) string {
 		_, _ = connection.Write([]byte(response(request.ID) + "\n"))
 	}()
 	return socketPath
+}
+
+// readRequestLikeTheDesktop reads the request line and then, as the desktop
+// does, waits for the client's half-close before anything is answered. A
+// server that answered and closed first could leave the client's CloseWrite
+// failing with ENOTCONN.
+func readRequestLikeTheDesktop(connection net.Conn) (string, bool) {
+	reader := bufio.NewReader(connection)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", false
+	}
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return "", false
+	}
+	return line, true
 }
 
 func TestRunServesMCPOverStdio(t *testing.T) {
@@ -307,8 +324,8 @@ func appTestServerCapturing(t *testing.T, captured *protocol.Request, response f
 			return
 		}
 		defer connection.Close()
-		line, err := bufio.NewReader(connection).ReadString('\n')
-		if err != nil {
+		line, ok := readRequestLikeTheDesktop(connection)
+		if !ok {
 			return
 		}
 		var request protocol.Request
@@ -375,6 +392,34 @@ func TestSupabaseCommandsCarryTheAgentOnTheEnvelopeOnly(t *testing.T) {
 	}
 	if !strings.Contains(RootUsage(), "  supabase\n") {
 		t.Fatal("root usage must list supabase")
+	}
+}
+
+func TestAHookEventThisBuildDoesNotKnowNeverBlocks(t *testing.T) {
+	// Exit status 2 is the agents' "block": a newer setup's event, or none,
+	// must let the Bash call run instead of refusing every one of them.
+	for _, arguments := range [][]string{{"hook", "pre-tool-use-v2"}, {"hook"}} {
+		var stdout, stderr bytes.Buffer
+		exitCode := Run(Config{
+			Arguments: arguments,
+			Stdin:     strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"git status"}}`),
+			Stdout:    &stdout,
+			Stderr:    &stderr,
+		})
+		if exitCode != ExitSuccess {
+			t.Fatalf("%v: exit %d", arguments, exitCode)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("%v: hooks must keep stdout empty, got %q", arguments, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "Usage: rndevtools hook <event>") {
+			t.Fatalf("%v: stderr %q", arguments, stderr.String())
+		}
+	}
+	var stderr bytes.Buffer
+	Run(Config{Arguments: []string{"hook", "pre-tool-use-v2"}, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: &stderr})
+	if !strings.Contains(stderr.String(), `unknown event "pre-tool-use-v2"`) || !strings.Contains(stderr.String(), "rerun rndevtools setup") {
+		t.Fatalf("the note must name the event and the fix: %q", stderr.String())
 	}
 }
 

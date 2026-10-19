@@ -62,10 +62,16 @@ a private local socket.
   your session in the desktop's Agents view for 30 minutes. Other agents can
   export `RNDEVTOOLS_AGENT_SESSION_ID`.
 - **A Simulator is free or held.** It is held while a lane runs on it or a
-  session has claimed it, and only the holder may boot, drive, slim, or stop
-  it. The desktop enforces this: `lane up`, `lane down`, `input`, and slimming
-  on a device another session holds fail with `device_held`, naming the
-  holder. `rndevtools agents` lists every hold (`holds`: device, holder, via
+  session has claimed it, and only the holder may boot it, send it input,
+  install on it, slim it, or stop it. The desktop enforces this: `lane up`,
+  `launch`, and `down`, `input`, `native --operation install`, slimming,
+  `recipe --operation run`, and cancelling its jobs or recordings on a device
+  another session holds fail with `device_held`, naming the holder, except
+  for a recording you started yourself: starting one needs no hold, and
+  `record --operation stop` or `jobs --operation cancel` always works on it,
+  whoever holds the device by then. `act` and `network` are not gated, so a
+  hold does not keep another session out of the app itself.
+  `rndevtools agents` lists every hold (`holds`: device, holder, via
   `lane` or `claim`, whether the holder is still alive) and the live sessions,
   so pick a device with no hold. Make your own hold explicit for work that is
   not a lane:
@@ -144,9 +150,13 @@ so a device slimmed once stays slim for every later lane.
 `auto`, the default for the `development` environment, starts the worktree's
 own stack when RN Devtools manages its Supabase project, and never fails the
 lane; `required` fails the lane when the stack cannot start; `off` skips it.
-`lane.backend` in the result says `ready`, `starting` (with a `jobId`; the app
-launches once the stack is ready), `skipped`, `shadowed` (the app's own `.env`
-files override the injected URL), `refused`, or `failed`, with the reason.
+`lane.backend` in the result says `ready`, `starting` (the app launches once
+the stack is ready), `skipped`, `shadowed` (the app's own `.env` files
+override the injected URL), `refused`, or `failed`, with the reason. A
+`starting` backend usually carries a `jobId`: wait for it with
+`rndevtools wait --condition job --job-id <jobId>`. A start queued behind RN
+Devtools' own automatic start has none: wait a few seconds, then call
+`lane up` again, which is idempotent, as for `supabase up`.
 Create your git branch before `lane up`: each branch gets its own database.
 
 If the dev client is not installed on that Simulator, `lane up` fails with

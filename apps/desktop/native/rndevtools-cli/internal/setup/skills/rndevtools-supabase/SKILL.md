@@ -70,6 +70,9 @@ wait for it.
 rndevtools wait --condition job --job-id <jobId>
 ```
 
+A start queued behind RN Devtools' own automatic start has no `jobId`: wait a
+few seconds, then call `up` again, as for `lane up`.
+
 `up` is idempotent. Call it again after a branch switch, or whenever unsure.
 
 ## Work with the database
@@ -154,7 +157,7 @@ rndevtools release --all                                           # when the wh
 | `branch_moved` | Call `up` to get the current branch's stack. |
 | `git_busy` | Finish the rebase or merge, then call `up`. |
 | `not_found` | Call `ls`, then retry with a worktree path. |
-| `needs_recreate` | Ask the user to recreate the stack in RN Devtools › Supabase; that deletes its database. |
+| `needs_recreate` | If your change caused it, revert that setting and call `up` again; the stack keeps its data. Otherwise ask the user to recreate the stack in RN Devtools › Supabase; that deletes its local database. |
 | `supabase_failed` | Retry once, then read `log`. |
 
 Every error also carries `recovery` text. Follow it before improvising.

@@ -7,8 +7,10 @@
 //
 // Everything is idempotent and additive. Existing configuration is read,
 // merged, and written back through a temporary file and rename; unknown keys
-// are preserved; files we did not create are never deleted. `Plan` reports
-// what would change so the caller can preview before `Apply`.
+// are preserved; files we did not create are never deleted. A file that is a
+// symlink, as dotfiles managers make them, is written through so the link
+// survives. `Plan` reports what would change so the caller can preview
+// before `Apply`.
 package setup
 
 import (
@@ -23,13 +25,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
+
+	"github.com/adalloul0928/rndevtools-cli/internal/mcp"
 )
 
 //go:embed skills/*/SKILL.md
 var skillFiles embed.FS
-
-// SkillName is the directory name the lanes skill installs under.
-const SkillName = "rndevtools-lanes"
 
 // skillNames lists the embedded skills by directory name, sorted, so the
 // installed copies always match this build.
@@ -57,9 +59,6 @@ const (
 	AgentCursor Agent = "cursor"
 	AgentKiro   Agent = "kiro"
 )
-
-// AllAgents lists every agent setup knows, in report order.
-var AllAgents = []Agent{AgentClaude, AgentCodex, AgentCursor, AgentKiro}
 
 // Options select what to install.
 type Options struct {
@@ -267,10 +266,16 @@ func serverEntry(executable string, extra map[string]any) map[string]any {
 	return entry
 }
 
-// readOnlyTools lists the tools Kiro may run without a prompt: everything
-// that only observes. Tools that drive a device still ask.
+// readOnlyTools lists the tools Kiro may run without a prompt: the ones the
+// MCP server marks read-only, so the two lists cannot drift. Tools that drive
+// a device, cancel a job, or slim a Simulator still ask.
 func readOnlyTools() []any {
-	return []any{"simulators", "apps", "screen", "elements", "wait", "capture", "agents", "jobs", "slimming", "doctor"}
+	names := mcp.ReadOnlyTools()
+	tools := make([]any, len(names))
+	for index, name := range names {
+		tools[index] = name
+	}
+	return tools
 }
 
 func writeJSONServers(path string, key string, executable string, extra map[string]any, write bool) (Change, error) {
@@ -280,7 +285,8 @@ func writeJSONServers(path string, key string, executable string, extra map[stri
 	switch {
 	case err == nil:
 		if len(bytes.TrimSpace(raw)) > 0 {
-			if err := json.Unmarshal(raw, &document); err != nil {
+			// A bare null decodes to a nil map, which cannot take our entry.
+			if err := json.Unmarshal(raw, &document); err != nil || document == nil {
 				change.Action = "skip"
 				change.Detail = "not valid JSON; fix it by hand, then rerun setup"
 				return change, nil
@@ -305,14 +311,11 @@ func writeJSONServers(path string, key string, executable string, extra map[stri
 	change.Detail = "register the rndevtools MCP server (" + executable + " mcp)"
 	servers["rndevtools"] = wanted
 	document[key] = servers
-	if !write {
-		return change, nil
-	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return change, err
 	}
-	return change, writeFileAtomically(path, append(encoded, '\n'), 0o600)
+	return commit(change, path, append(encoded, '\n'), 0o600, write)
 }
 
 func jsonEqual(a any, b any) bool {
@@ -332,12 +335,18 @@ const codexToolTimeoutSeconds = 240
 // `[mcp_servers.rndevtools]` table and leaves every other byte alone.
 func writeCodexServer(path string, executable string, write bool) (Change, error) {
 	change := Change{Path: path}
-	block := fmt.Sprintf("[mcp_servers.rndevtools]\ncommand = %q\nargs = [\"mcp\"]\ntool_timeout_sec = %d\n", executable, codexToolTimeoutSeconds)
+	block := fmt.Sprintf("[mcp_servers.rndevtools]\ncommand = %s\nargs = [\"mcp\"]\ntool_timeout_sec = %d\n", tomlString(executable), codexToolTimeoutSeconds)
 	raw, err := os.ReadFile(path)
 	var content string
 	switch {
 	case err == nil:
 		content = string(raw)
+		// codexServerBlock matches whole lines. Without a final newline the
+		// table's last line would survive the strip as a stray key in
+		// whatever table comes before ours.
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
 		change.Action = "update"
 	case errors.Is(err, fs.ErrNotExist):
 		change.Action = "create"
@@ -356,23 +365,59 @@ func writeCodexServer(path string, executable string, write bool) (Change, error
 		stripped += "\n\n"
 	}
 	next := stripped + block
-	if !write {
-		return change, nil
+	return commit(change, path, []byte(next), 0o600, write)
+}
+
+// tomlString quotes value as a TOML basic string. Go's %q is close but not
+// the same: it writes \a, \v, and \x escapes, which TOML does not accept.
+func tomlString(value string) string {
+	var builder strings.Builder
+	builder.WriteByte('"')
+	for _, character := range value {
+		switch {
+		case character == '"' || character == '\\':
+			builder.WriteByte('\\')
+			builder.WriteRune(character)
+		case character == '\t':
+			builder.WriteString(`\t`)
+		case character == '\n':
+			builder.WriteString(`\n`)
+		case character == '\r':
+			builder.WriteString(`\r`)
+		case character < 0x20 || character == 0x7f:
+			fmt.Fprintf(&builder, `\u%04X`, character)
+		default:
+			builder.WriteRune(character)
+		}
 	}
-	return change, writeFileAtomically(path, []byte(next), 0o600)
+	builder.WriteByte('"')
+	return builder.String()
 }
 
 // MARK: - Agent hooks
 
-// Hook commands. Both Claude Code and Codex send the same JSON on stdin
-// (`tool_name`, `tool_input.command`, `session_id`) and read exit status 2
-// with stderr as "block", so one handler serves both.
-func preToolUseHookCommand(executable string) string {
-	return executable + " hook pre-tool-use"
+// hookEvents are the `rndevtools hook` events setup has ever installed;
+// claude-pre-tool-use is the name builds before Codex support wrote.
+var hookEvents = []string{"pre-tool-use", "session-end", "claude-pre-tool-use"}
+
+// hookCommand is the command line a hook runs. Both Claude Code and Codex
+// send the same JSON on stdin (`tool_name`, `tool_input.command`,
+// `session_id`) and read exit status 2 with stderr as "block", so one handler
+// serves both. Both also hand the line to a shell, so the executable is
+// quoted when it needs it: a packaged install lives under "RN Devtools.app",
+// and an unquoted space would make the shell look for a program named "RN".
+func hookCommand(executable string, event string) string {
+	return quotePath(executable) + " hook " + event
 }
 
-func sessionEndHookCommand(executable string) string {
-	return executable + " hook session-end"
+// plainPath is a path that sh, bash, and zsh all read as one literal word.
+var plainPath = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+func quotePath(path string) string {
+	if plainPath.MatchString(path) {
+		return path
+	}
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 // hookDocument returns the PreToolUse guard and SessionEnd release entries in
@@ -382,14 +427,14 @@ func hookDocument(executable string) (preToolUse map[string]any, sessionEnd map[
 		"matcher": "Bash",
 		"hooks": []any{map[string]any{
 			"type":    "command",
-			"command": preToolUseHookCommand(executable),
+			"command": hookCommand(executable, "pre-tool-use"),
 			"timeout": 5,
 		}},
 	}
 	sessionEnd = map[string]any{
 		"hooks": []any{map[string]any{
 			"type":    "command",
-			"command": sessionEndHookCommand(executable),
+			"command": hookCommand(executable, "session-end"),
 			// Codex caps SessionEnd at 3 s; the release is one socket round trip.
 			"timeout": 3,
 		}},
@@ -398,8 +443,9 @@ func hookDocument(executable string) (preToolUse map[string]any, sessionEnd map[
 }
 
 // installHooks merges the two rndevtools hooks into a hooks document
-// (Claude Code's ~/.claude/settings.json or Codex's ~/.codex/hooks.json),
-// replacing earlier rndevtools entries and leaving everything else alone.
+// (Claude Code's ~/.claude/settings.json or Codex's ~/.codex/hooks.json). It
+// replaces the hooks earlier setups wrote and leaves everything else alone:
+// other tools' hooks, and hooks the user added to the same entry as ours.
 func installHooks(path string, executable string, write bool) (Change, error) {
 	change := Change{Path: path}
 	document := map[string]any{}
@@ -407,7 +453,8 @@ func installHooks(path string, executable string, write bool) (Change, error) {
 	switch {
 	case err == nil:
 		if len(bytes.TrimSpace(raw)) > 0 {
-			if err := json.Unmarshal(raw, &document); err != nil {
+			// A bare null decodes to a nil map, which cannot take our hooks.
+			if err := json.Unmarshal(raw, &document); err != nil || document == nil {
 				change.Action = "skip"
 				change.Detail = "not valid JSON; fix it by hand, then rerun setup"
 				return change, nil
@@ -427,22 +474,11 @@ func installHooks(path string, executable string, write bool) (Change, error) {
 	changed := false
 	for event, wanted := range map[string]map[string]any{"PreToolUse": preToolUse, "SessionEnd": sessionEnd} {
 		entries, _ := hooks[event].([]any)
-		kept := make([]any, 0, len(entries)+1)
-		already := false
-		for _, entry := range entries {
-			if isRndevtoolsHook(entry) {
-				if jsonEqual(entry, wanted) {
-					already = true
-					kept = append(kept, entry)
-				}
-				continue
-			}
-			kept = append(kept, entry)
-		}
-		if !already {
+		kept, current, removed := withoutRndevtoolsHooks(entries, wanted, executable)
+		if !current {
 			kept = append(kept, wanted)
-			changed = true
 		}
+		changed = changed || removed || !current
 		hooks[event] = kept
 	}
 	if !changed {
@@ -452,29 +488,86 @@ func installHooks(path string, executable string, write bool) (Change, error) {
 	}
 	change.Detail = "add a PreToolUse hook that redirects simctl boot/shutdown/openurl/install/launch/io and hand-started Metro to rndevtools and, while local Supabase is turned on in RN Devtools, keeps hand-run supabase commands native and off other agents' stacks, and a SessionEnd hook that releases the session's lanes, claims, and stacks"
 	document["hooks"] = hooks
-	if !write {
-		return change, nil
-	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return change, err
 	}
-	return change, writeFileAtomically(path, append(encoded, '\n'), 0o600)
+	return commit(change, path, append(encoded, '\n'), 0o600, write)
 }
 
-func isRndevtoolsHook(entry any) bool {
-	object, ok := entry.(map[string]any)
+// withoutRndevtoolsHooks takes the hooks earlier setups wrote out of one
+// event's entries. The first entry that already equals wanted stays
+// (current). An entry that also holds other hooks keeps them, and anything
+// that is not an entry with a hooks list is left exactly as it is.
+func withoutRndevtoolsHooks(entries []any, wanted map[string]any, executable string) (kept []any, current bool, removed bool) {
+	kept = make([]any, 0, len(entries)+1)
+	for _, entry := range entries {
+		object, isObject := entry.(map[string]any)
+		hooks, isList := object["hooks"].([]any)
+		if !isObject || !isList {
+			kept = append(kept, entry)
+			continue
+		}
+		if !current && jsonEqual(entry, wanted) {
+			current = true
+			kept = append(kept, entry)
+			continue
+		}
+		others := make([]any, 0, len(hooks))
+		for _, hook := range hooks {
+			if !isRndevtoolsHook(hook, executable) {
+				others = append(others, hook)
+			}
+		}
+		switch {
+		case len(others) == len(hooks):
+			kept = append(kept, entry)
+		case len(others) > 0:
+			trimmed := make(map[string]any, len(object))
+			for key, value := range object {
+				trimmed[key] = value
+			}
+			trimmed["hooks"] = others
+			kept = append(kept, trimmed)
+			removed = true
+		default:
+			removed = true
+		}
+	}
+	return kept, current, removed
+}
+
+// isRndevtoolsHook reports a hook object an earlier setup wrote: a command
+// that runs `hook <event>` for one of hookEvents with an executable named
+// rndevtools (or this one), quoted as this build writes it or raw as earlier
+// builds did, even when the raw path had a space and never ran.
+func isRndevtoolsHook(hook any, executable string) bool {
+	object, ok := hook.(map[string]any)
 	if !ok {
 		return false
 	}
-	hooks, _ := object["hooks"].([]any)
-	for _, hook := range hooks {
-		command, ok := hook.(map[string]any)["command"].(string)
-		if ok && (strings.Contains(command, " hook pre-tool-use") || strings.Contains(command, " hook session-end") || strings.Contains(command, " hook claude-pre-tool-use")) {
+	command, ok := object["command"].(string)
+	if !ok {
+		return false
+	}
+	for _, event := range hookEvents {
+		raw, found := strings.CutSuffix(command, " hook "+event)
+		if !found {
+			continue
+		}
+		if filepath.IsAbs(raw) && !strings.ContainsAny(raw, ";&|\n") && isRndevtoolsExecutable(raw, executable) {
+			return true
+		}
+		segments := splitShell(command)
+		if len(segments) == 1 && len(segments[0].words) == 3 && isRndevtoolsExecutable(segments[0].words[0], executable) {
 			return true
 		}
 	}
 	return false
+}
+
+func isRndevtoolsExecutable(path string, executable string) bool {
+	return path == executable || baseName(path) == "rndevtools"
 }
 
 // MARK: - Skill
@@ -537,13 +630,7 @@ func installSkill(skillsDirectory string, name string, write bool) (Change, erro
 	default:
 		return change, err
 	}
-	if !write {
-		return change, nil
-	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return change, err
-	}
-	return change, writeFileAtomically(filepath.Join(target, "SKILL.md"), content, 0o644)
+	return commit(change, filepath.Join(target, "SKILL.md"), content, 0o644, write)
 }
 
 // MARK: - AGENTS.md
@@ -605,7 +692,35 @@ func projectRunner(project string) string {
 	return "npx supabase"
 }
 
-var agentsBlockPattern = regexp.MustCompile(`(?s)` + regexp.QuoteMeta(agentsBlockStart) + `.*?` + regexp.QuoteMeta(agentsBlockEnd) + `\n?`)
+// agentsBlockSpan finds the block setup owns in content: a line that is the
+// start marker and, after it, a line that is the end marker. A marker quoted
+// inside other text is not a marker line. found is false when content has no
+// marker line at all; ok is false when the marker lines do not pair up as
+// one block (a second start, a start without its end), and then setup will
+// not guess which text is its own.
+func agentsBlockSpan(content string) (start int, end int, found bool, ok bool) {
+	var starts, ends [][2]int
+	for offset := 0; offset < len(content); {
+		lineEnd, next := len(content), len(content)
+		if index := strings.IndexByte(content[offset:], '\n'); index >= 0 {
+			lineEnd, next = offset+index, offset+index+1
+		}
+		switch strings.TrimRight(content[offset:lineEnd], " \t\r") {
+		case agentsBlockStart:
+			starts = append(starts, [2]int{offset, next})
+		case agentsBlockEnd:
+			ends = append(ends, [2]int{offset, next})
+		}
+		offset = next
+	}
+	switch {
+	case len(starts) == 0 && len(ends) == 0:
+		return 0, 0, false, true
+	case len(starts) == 1 && len(ends) == 1 && starts[0][0] < ends[0][0]:
+		return starts[0][0], ends[0][1], true, true
+	}
+	return 0, 0, false, false
+}
 
 func installAgentsBlock(project string, write bool) (Change, error) {
 	path := filepath.Join(project, "AGENTS.md")
@@ -627,10 +742,16 @@ func installAgentsBlock(project string, write bool) (Change, error) {
 		change.Detail = "AGENTS.md block already current"
 		return change, nil
 	}
+	start, end, found, ok := agentsBlockSpan(content)
+	if !ok {
+		change.Action = "skip"
+		change.Detail = "its rndevtools markers do not pair up as one block (one start line, then one end line); fix them by hand, then rerun setup"
+		return change, nil
+	}
 	change.Detail = "add the RN Devtools Simulator block between rndevtools markers"
 	var next string
-	if agentsBlockPattern.MatchString(content) {
-		next = agentsBlockPattern.ReplaceAllLiteralString(content, block)
+	if found {
+		next = content[:start] + block + content[end:]
 	} else {
 		next = strings.TrimRight(content, "\n")
 		if next != "" {
@@ -638,13 +759,49 @@ func installAgentsBlock(project string, write bool) (Change, error) {
 		}
 		next += block
 	}
-	if !write {
-		return change, nil
-	}
-	return change, writeFileAtomically(path, []byte(next), 0o644)
+	return commit(change, path, []byte(next), 0o644, write)
 }
 
 // MARK: - Files
+
+// commit writes content to path for Apply and only reports the change for
+// Plan. A path setup cannot write through (see writeTarget) becomes a skip
+// that says why, in both.
+func commit(change Change, path string, content []byte, mode os.FileMode, write bool) (Change, error) {
+	target, reason := writeTarget(path)
+	if reason != "" {
+		change.Action = "skip"
+		change.Detail = reason
+		return change, nil
+	}
+	if !write {
+		return change, nil
+	}
+	return change, writeFileAtomically(target, content, mode)
+}
+
+// writeAccess is W_OK for access(2).
+const writeAccess = 0x2
+
+// writeTarget is the file an edit of path lands in: path itself, or, when it
+// is a symlink (stow, chezmoi, and home-manager make them), the file the link
+// resolves to, so the link survives the rename. reason explains why setup
+// leaves a link alone instead: it dangles, or it points into a directory
+// this user cannot write, such as a read-only store.
+func writeTarget(path string) (target string, reason string) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return path, ""
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "a symlink to a file that does not exist; restore its target, then rerun setup"
+	}
+	if syscall.Access(filepath.Dir(resolved), writeAccess) != nil {
+		return "", "a symlink into a directory you cannot write; add the rndevtools settings where that file is generated, then rerun setup"
+	}
+	return resolved, ""
+}
 
 func writeFileAtomically(path string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
+	"strings"
 )
 
 // HookDecision is what a PreToolUse hook tells Claude Code.
@@ -38,11 +38,6 @@ var steeredVerbs = map[string]string{
 	"addmedia":   "ask the user before adding media to a shared Simulator",
 	"clone":      "RN Devtools' slimming and lanes manage device copies; ask the user",
 }
-
-var (
-	simctlPattern = regexp.MustCompile(`(?:^|[\s;&|(])(?:xcrun\s+)?simctl\s+([a-z_]+)`)
-	metroPattern  = regexp.MustCompile(`(?:^|[\s;&|(])(?:npx\s+|yarn\s+|pnpm\s+(?:exec\s+)?|bunx?\s+)?(?:expo\s+start|react-native\s+start)\b`)
-)
 
 // shellCall is one Bash tool call as the steering rules see it.
 type shellCall struct {
@@ -96,7 +91,9 @@ func evaluateShellCall(call shellCall) HookDecision {
 // evaluateShellCallWith judges each command of the line on its own, so a
 // harmless first command cannot carry a steered one past the rules: first the
 // Simulator and Metro rules, then the Supabase rules, which read steering.json
-// only when the line runs supabase or kills processes.
+// only when the line runs supabase or kills processes. The line is declined
+// when the word rules find a steered command, when the text rule matches and
+// is not excused, or when the Supabase rules decline it.
 func evaluateShellCallWith(call shellCall, environment supabaseEnvironment) (decision HookDecision) {
 	defer func() {
 		// A rule that breaks fails open, like a payload the hook cannot read:
@@ -106,40 +103,138 @@ func evaluateShellCallWith(call shellCall, environment supabaseEnvironment) (dec
 		}
 	}()
 	line := parseShellLine(call.command)
-	for _, segment := range line.segments {
-		// RN Devtools' own CLI may mention Metro or simctl in its arguments (a
-		// claim note, a deep link) without running them. Only that command is
-		// exempt; substitutions inside it are segments of their own.
-		if segment.program() == "rndevtools" {
-			continue
-		}
-		if decision := evaluateSegment(segment.text); decision.Block {
-			return decision
-		}
+	if decision := judgeSimulatorRules(line, 0, &scriptLedger{}); decision.Block {
+		return decision
 	}
 	rules := supabaseRules{environment: environment}
 	return rules.judge(line, call.cwd)
 }
 
-func evaluateSegment(text string) HookDecision {
-	for _, match := range simctlPattern.FindAllStringSubmatch(text, -1) {
-		verb := match[1]
-		if replacement, steered := steeredVerbs[verb]; steered {
-			return HookDecision{
-				Block: true,
-				Reason: fmt.Sprintf(
-					"Blocked `simctl %s`: Simulators on this Mac are managed by RN Devtools and shared with other agents. Use the rndevtools MCP tools or CLI instead: %s. `simctl list` and other read-only verbs are still allowed.",
-					verb, replacement),
+// judgeSimulatorRules applies the simctl and Metro rules to a line, in two
+// parts that each decline what the other may miss.
+//
+// The text rule (judgeText) reads each command's source text, quotes
+// included, as the first version of the hook did.
+//
+// The word rules read each command's words, so a command that quoting hides
+// from the text (ex""po start) is found, and so are the scripts a command
+// hands on to be run (see handedScripts), which they judge as lines of their
+// own, text rule included, up to maxNestedScripts deep and
+// maxFollowedScriptBytes in all. Here-document bodies (but for the
+// substitutions the shell expands in them), and files the line writes and
+// then runs, are text the first part never sees.
+func judgeSimulatorRules(line shellLine, nesting int, ledger *scriptLedger) HookDecision {
+	if decision := judgeText(line); decision.Block {
+		return decision
+	}
+	for index, segment := range line.segments {
+		// With nothing left after its launchers, a segment may still run a
+		// command string of theirs (env -S'cmd').
+		if _, words := segment.commandWords(); len(words) > 0 {
+			switch program := baseName(words[0]); {
+			case program == "rndevtools":
+				// RN Devtools' own CLI may mention Metro or simctl in its arguments (a
+				// claim note, a deep link) without running them. Only that command is
+				// exempt; substitutions inside it are segments of their own.
+				continue
+			case shellPrograms[program] || program == "eval":
+				// The rest is the shell's own: options, script, and parameters.
+			default:
+				if decision := evaluateWords(words); decision.Block {
+					return decision
+				}
+			}
+		}
+		if nesting >= maxNestedScripts || ledger.exhausted() {
+			continue
+		}
+		for _, script := range handedScripts(line, index) {
+			if !ledger.follow(script, "", nesting) {
+				continue
+			}
+			if decision := judgeSimulatorRules(line.parseScript(script.text), nesting+1, ledger); decision.Block {
+				return decision
 			}
 		}
 	}
-	if metroPattern.MatchString(text) {
-		return HookDecision{
-			Block:  true,
-			Reason: "Blocked starting Metro by hand: port 8081 is shared with other agents. Use the rndevtools `lane` tool (operation up, with this worktree's absolute path) and RN Devtools will start Metro on a leased port and open the dev client against it.",
+	return HookDecision{}
+}
+
+// evaluateWords finds a steered simctl verb or a Metro start among one
+// command's words: run directly, by path, or by a command that runs another
+// (xcrun simctl, xargs xcrun simctl, npx expo, timeout 60 npx expo).
+func evaluateWords(words []string) HookDecision {
+	for index, word := range words {
+		switch commandName(word) {
+		case "simctl":
+			verb := simctlVerb(words[index+1:])
+			if replacement, steered := steeredVerbs[verb]; steered {
+				return simctlDecision(verb, replacement)
+			}
+		case "expo", "react-native":
+			if firstOperand(words[index+1:]) == "start" {
+				return metroDecision()
+			}
 		}
 	}
 	return HookDecision{}
+}
+
+func simctlDecision(verb string, replacement string) HookDecision {
+	return HookDecision{
+		Block: true,
+		Reason: fmt.Sprintf(
+			"Blocked `simctl %s`: Simulators on this Mac are managed by RN Devtools and shared with other agents. Use the rndevtools MCP tools or CLI instead: %s. `simctl list` and other read-only verbs are still allowed.",
+			verb, replacement),
+	}
+}
+
+func metroDecision() HookDecision {
+	return HookDecision{
+		Block:  true,
+		Reason: "Blocked starting Metro by hand: port 8081 is shared with other agents. Use the rndevtools `lane` tool (operation up, with this worktree's absolute path) and RN Devtools will start Metro on a leased port and open the dev client against it.",
+	}
+}
+
+// commandName is the program a word names: its basename, without a version a
+// package runner pins (expo@latest).
+func commandName(word string) string {
+	name := baseName(word)
+	if at := strings.IndexByte(name, '@'); at > 0 {
+		name = name[:at]
+	}
+	return name
+}
+
+// maxSimctlOptions bounds how many arguments after simctl are read for its
+// subcommand: it takes a few global options before it, and a line of 1 MiB
+// can chain tens of thousands of simctl words, each of which would read all
+// the ones after it.
+const maxSimctlOptions = 8
+
+// simctlVerb is the subcommand among simctl's arguments, after its global
+// options (`simctl [--set <path>] [--profiles <path>] <subcommand>`).
+func simctlVerb(arguments []string) string {
+	for index := 0; index < len(arguments) && index < maxSimctlOptions; index++ {
+		switch argument := arguments[index]; {
+		case argument == "--set" || argument == "--profiles":
+			index++
+		case strings.HasPrefix(argument, "-"):
+		default:
+			return argument
+		}
+	}
+	return ""
+}
+
+// firstOperand is the first argument that is not an option.
+func firstOperand(arguments []string) string {
+	for _, argument := range arguments {
+		if !strings.HasPrefix(argument, "-") {
+			return argument
+		}
+	}
+	return ""
 }
 
 // SessionEndPayload is what both agents send a SessionEnd hook on stdin. The
@@ -148,7 +243,6 @@ func evaluateSegment(text string) HookDecision {
 // under an MCP identity it shares with other sessions.
 type SessionEndPayload struct {
 	SessionID string `json:"session_id"`
-	Reason    string `json:"reason"`
 	Cwd       string `json:"cwd"`
 }
 

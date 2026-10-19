@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,36 @@ func TestHookBlocksMutatingSimctlAndHandStartedMetro(t *testing.T) {
 			t.Fatalf("%q reason %q lacks %q", command, decision.Reason, want)
 		}
 	}
+}
+
+func TestSimctlVerbReadsTheGlobalOptionsBeforeTheSubcommand(t *testing.T) {
+	// simctl takes --set and --profiles, each with a path, before its
+	// subcommand. It is read past a few options, not past thousands: a line
+	// can chain simctl words that each take the next one as a value.
+	seven := strings.Fields("-a -b -c -d -e -f -g")
+	for _, row := range []struct {
+		arguments []string
+		want      string
+	}{
+		{nil, ""},
+		{[]string{"boot", "X"}, "boot"},
+		{[]string{"--set", "/devices", "boot", "X"}, "boot"},
+		{[]string{"--set", "/devices", "--profiles", "/p", "shutdown", "all"}, "shutdown"},
+		{[]string{"-v", "--set", "a", "--profiles", "b", "erase"}, "erase"},
+		{[]string{"--set"}, ""},
+		{[]string{"--set", "boot"}, ""},
+		{append(append([]string{}, seven...), "boot"), "boot"},
+		{append(append([]string{}, seven...), "-h", "boot"), ""},
+	} {
+		if got := simctlVerb(row.arguments); got != row.want {
+			t.Errorf("simctlVerb(%q) = %q, want %q", row.arguments, got, row.want)
+		}
+	}
+	wantBlocked(t, map[string]string{
+		"xcrun simctl --set /tmp/devices boot X":                     "simctl boot",
+		"xcrun simctl --set /tmp/devices --profiles /p shutdown all": "simctl shutdown",
+		"simctl --set simctl --set simctl boot X":                    "simctl boot",
+	})
 }
 
 func TestHookAllowsReadOnlyAndUnrelatedCommands(t *testing.T) {
@@ -101,9 +132,308 @@ func TestHookExemptsOnlyTheCommandThatRunsRndevtools(t *testing.T) {
 		`rndevtools lane --operation log --lane-id lane-1 | grep 'expo start'`,
 		`rndevtools doctor && git status`,
 		"git status # expo start comes later",
+		// The text rule leaves the command that runs rndevtools alone even
+		// when the line has commands the excuse would not cover.
+		`rndevtools claim --udid X --note 'npx expo start hung' && pnpm test`,
+		`pnpm test && ~/.local/bin/rndevtools claim --udid X --note 'xcrun simctl boot it'`,
 	} {
 		if decision := EvaluateShellCommand(command); decision.Block {
 			t.Fatalf("%q should pass, got %q", command, decision.Reason)
+		}
+	}
+}
+
+func TestHookReadsQuotedMentionsAsTextAndFindsTheCommandsThatRun(t *testing.T) {
+	// Searching for, or writing about, these commands runs none of them: a
+	// quoted string is one word, and every command on these lines looks as if
+	// it only reads or prints text (see
+	// TestHookExcusesMentionsThatNothingOnTheLineCanRun).
+	for _, command := range []string{
+		"grep -rn 'xcrun simctl boot' apps/desktop",
+		`rg "xcrun simctl boot" .`,
+		`git commit -m "docs: never run xcrun simctl boot by hand"`,
+		`git commit -m "fix: npx expo start crashes on launch"`,
+		`gh pr create --title "Stop agents calling simctl install"`,
+		`echo "Run npx expo start to begin"`,
+		`git log -S 'xcrun simctl boot'`,
+		`grep "simctl boot|simctl shutdown" device.log`,
+		"xcrun simctl list devices | grep Booted",
+		"npx expo install expo-camera",
+		"xcrun -f simctl",
+	} {
+		if decision := EvaluateShellCommand(command); decision.Block {
+			t.Errorf("%q should pass, got %q", command, decision.Reason)
+		}
+	}
+	// The commands themselves are caught however they are launched.
+	for command, want := range map[string]string{
+		"xcrun simctl --set /tmp/devices boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44": "simctl boot",
+		"xcrun simctl --profiles /tmp/profiles boot 727CE7B2":                       "simctl boot",
+		"xcrun --sdk iphonesimulator simctl boot 727CE7B2":                          "simctl boot",
+		"/Applications/Xcode.app/Contents/Developer/usr/bin/simctl shutdown all":    "simctl shutdown",
+		"xcrun simctl list devices | grep Booted | xargs xcrun simctl shutdown":     "simctl shutdown",
+		"timeout 30 xcrun simctl boot 727CE7B2":                                     "simctl boot",
+		`bash -c "xcrun simctl boot 727CE7B2"`:                                      "simctl boot",
+		"bash -lc 'simctl boot 727CE7B2'":                                           "simctl boot",
+		"eval xcrun simctl shutdown all":                                            "simctl shutdown",
+		"sh -c 'npx expo start'":                                                    "Metro",
+		"nohup npx expo start > metro.log 2>&1 &":                                   "Metro",
+		"./node_modules/.bin/expo start":                                            "Metro",
+		"npx expo@latest start --port 8082":                                         "Metro",
+		"pnpm -C apps/mobile exec expo start":                                       "Metro",
+		"sudo -E npx react-native start":                                            "Metro",
+	} {
+		decision := EvaluateShellCommand(command)
+		if !decision.Block || !strings.Contains(decision.Reason, want) {
+			t.Errorf("%q should be blocked with %q, got %+v", command, want, decision)
+		}
+	}
+}
+
+func TestHookFollowsScriptsHandedToAShellHoweverTheShellRuns(t *testing.T) {
+	// A script is one quoted word, so it is judged as the script a shell runs:
+	// behind a command that runs the shell, from a here-string, from what echo
+	// or printf pipes into it, or from a file the line writes and then runs.
+	for command, want := range map[string]string{
+		"timeout 120 sh -c 'cd apps/mobile && npx expo start'":                                  "Metro",
+		"gtimeout 120 bash -lc 'npx expo start'":                                                "Metro",
+		`timeout 60 bash -c "xcrun simctl boot 727CE7B2"`:                                       "simctl boot",
+		"timeout 120 /bin/sh -c 'npx expo start'":                                               "Metro",
+		"xcrun simctl list devices | grep Booted | xargs -I{} sh -c 'xcrun simctl shutdown {}'": "simctl shutdown",
+		`find . -name '*.app' -exec sh -c 'xcrun simctl install booted "$1"' sh {} \;`:          "simctl install",
+		"nice -n 10 sh -c 'npx expo start'":                                                     "Metro",
+		"caffeinate -i bash -c 'cd apps/mobile && npx expo start'":                              "Metro",
+		"sudo -u me bash -c 'xcrun simctl shutdown all'":                                        "simctl shutdown",
+		"env -u FOO bash -c 'npx expo start'":                                                   "Metro",
+		"/usr/bin/env bash -c 'npx expo start'":                                                 "Metro",
+		"script -q /dev/null bash -c 'npx expo start'":                                          "Metro",
+		"stdbuf -oL sh -c 'npx expo start'":                                                     "Metro",
+		"arch -arm64 bash -c 'npx expo start'":                                                  "Metro",
+		"bash -c -e 'xcrun simctl boot 727CE7B2'":                                               "simctl boot",
+		`bash -c "timeout 60 sh -c 'npx expo start'"`:                                           "Metro",
+		"bash <<< 'xcrun simctl boot 727CE7B2'":                                                 "simctl boot",
+		"sh <<<'npx expo start'":                                                                "Metro",
+		"bash -s <<< 'xcrun simctl shutdown all'":                                               "simctl shutdown",
+		"nohup bash <<< 'npx expo start' > metro.log 2>&1 &":                                    "Metro",
+		"echo 'xcrun simctl boot 727CE7B2' | sh":                                                "simctl boot",
+		`echo -e 'cd apps/mobile\nnpx expo start' | bash`:                                       "Metro",
+		`printf 'npx expo start\n' | sudo sh`:                                                   "Metro",
+		// Text piped into a shell that another command runs.
+		"echo 'xcrun simctl shutdown all' | sudo -u me sh":         "simctl shutdown",
+		"echo 'npx expo start' | sudo --user me bash":              "Metro",
+		"echo 'npx expo start' | sudo -nu me sh -s":                "Metro",
+		"echo 'npx expo start' | timeout 60 sh":                    "Metro",
+		"echo 'npx expo start' | gtimeout -s KILL 60 bash":         "Metro",
+		"echo 'npx expo start' | timeout --kill-after=5 1m sh":     "Metro",
+		"echo 'npx expo start' | nice -n 5 bash":                   "Metro",
+		"echo 'npx expo start' | nice -5 nohup bash":               "Metro",
+		"echo 'npx expo start' | env -u FOO bash":                  "Metro",
+		"echo 'npx expo start' | /usr/bin/env bash":                "Metro",
+		"echo 'npx expo start' | caffeinate -i bash":               "Metro",
+		"echo 'npx expo start' | stdbuf -oL bash":                  "Metro",
+		"echo 'npx expo start' | arch -arch arm64 bash":            "Metro",
+		"echo 'npx expo start' | script -q /dev/null bash":         "Metro",
+		"echo 'npx expo start' | sandbox-exec -n no-network bash":  "Metro",
+		"printf 'xcrun simctl boot 727CE7B2\n' | timeout 10 sh":    "simctl boot",
+		"echo 'npx expo start' | tee -a metro.log | bash":          "Metro",
+		"echo 'npx expo start' | cat | sh":                         "Metro",
+		"{ echo 'cd apps/mobile'; echo 'npx expo start'; } | bash": "Metro",
+		"(echo 'cd apps/mobile'; echo 'npx expo start') | bash":    "Metro",
+		"( echo 'xcrun simctl boot 727CE7B2' ) |& sudo -u me sh":   "simctl boot",
+		"(echo 'npx expo start') | (bash)":                         "Metro",
+		"echo 'npx expo start' | fish":                             "Metro",
+		// A script file the line writes and then runs.
+		"echo 'npx expo start' > start.sh && bash start.sh":                                 "Metro",
+		"printf 'npx expo start\n' > run.sh && chmod +x run.sh && ./run.sh":                 "Metro",
+		"echo '#!/bin/sh' > s.sh; echo 'xcrun simctl boot 727CE7B2' >> s.sh; sh s.sh":       "simctl boot",
+		"echo 'npx expo start' | tee start.sh; bash ./start.sh":                             "Metro",
+		"echo 'npx expo start' > start.sh; source start.sh":                                 "Metro",
+		"cat > /tmp/metro.sh <<'EOF'\ncd apps/mobile\nnpx expo start\nEOF\n. /tmp/metro.sh": "Metro",
+		// A here-string written against the shell's name, or read by a shell
+		// that another command runs.
+		"bash<<<'npx expo start'":                         "Metro",
+		`sh<<<"xcrun simctl boot 727CE7B2"`:               "simctl boot",
+		"bash -s<<<'npx expo start'":                      "Metro",
+		"bash 0<<<'npx expo start'":                       "Metro",
+		"timeout 60 bash <<< 'npx expo start'":            "Metro",
+		"sudo -u me bash <<< 'xcrun simctl shutdown all'": "simctl shutdown",
+		"nice -n5 sh <<< 'npx expo start'":                "Metro",
+		"cat <<< 'npx expo start' | bash":                 "Metro",
+		`bash <<< $'cd apps/mobile\nnpx expo start'`:      "Metro",
+		// What xargs builds a shell's -c string from.
+		"echo 'npx expo start' | xargs -I{} sh -c '{}'":   "Metro",
+		"echo 'npx expo start' | xargs -I % bash -c %":    "Metro",
+		"echo 'npx expo start' | xargs -0 bash -c":        "Metro",
+		`printf 'npx expo start\n' | xargs -d '\n' sh -c`: "Metro",
+		"xargs -I{} sh -c '{}' <<< 'xcrun simctl boot X'": "simctl boot",
+	} {
+		decision := EvaluateShellCommand(command)
+		if !decision.Block || !strings.Contains(decision.Reason, want) {
+			t.Errorf("%q should be blocked with %q, got %+v", command, want, decision)
+		}
+	}
+	// A shell that runs a file, and a word that only names a shell, run
+	// nothing the hook can see. Lines that name a steered command in text
+	// pass only when nothing on them can run it (see
+	// TestHookExcusesMentionsThatNothingOnTheLineCanRun); the rest keep the
+	// text in a here-document, which the text rule does not read, so that
+	// only the word rules judge them.
+	for _, command := range []string{
+		"timeout 60 bash scripts/start.sh",
+		"bash < scripts/start.sh",
+		"sh -c 'xcrun simctl list devices'",
+		"xargs -I{} sh -c 'echo {}'",
+		"echo 'npx expo start' | grep sh",
+		"grep -c bash notes.md",
+		`git commit -m "fix: run bash -c 'npx expo start' through a lane"`,
+		// Standard input is the shell's only when the shell is the command.
+		"grep sh <<< 'npx expo start'",
+		"grep -c bash <<< 'xcrun simctl boot 727CE7B2'",
+		"nice -n 5 grep sh <<< 'npx expo start'",
+		"echo 'npx expo start' | sudo -u me grep sh",
+		"echo 'npx expo start' | timeout 5 cat",
+		"echo 'npx expo start' | command -v bash",
+		"cat <<'EOF' | sudo -u me tee notes.md\nnpx expo start\nEOF",
+		"cat <<'EOF' | sudo -l bash\nnpx expo start\nEOF",
+		"tee notes.md <<'EOF'\nnpx expo start\nEOF",
+		// A shell whose input is something else.
+		"cat <<'EOF' | bash scripts/run.sh\nnpx expo start\nEOF",
+		"cat <<'EOF' | bash -c 'cat'\nnpx expo start\nEOF",
+		"cat <<'EOF' | bash < /dev/null\nnpx expo start\nEOF",
+		"cat <<'EOF' > notes.md | bash\nnpx expo start\nEOF",
+		"{ cat <<'EOF' > notes.md; echo 'echo hi'; } | bash\nnpx expo start\nEOF",
+		"(cat <<'EOF') > notes.md | sh\nnpx expo start\nEOF",
+		"(cat <<'EOF') || sh\nnpx expo start\nEOF",
+		"cat install.sh | bash",
+		"xargs -I{} echo {} <<'EOF'\nnpx expo start\nEOF",
+		"cat <<'EOF' | xargs -0 echo\nnpx expo start\nEOF",
+		// Without -0 or -d xargs splits its input at blanks: sh -c npx expo start.
+		"cat <<'EOF' | xargs sh -c\nnpx expo start\nEOF",
+		// A script file written and not run, run but not written by the line,
+		// or written over before it runs.
+		"echo 'npx expo start' > notes.md && cat notes.md",
+		"cat > start.sh <<'EOF'\nnpx expo start\nEOF\nbash other.sh",
+		"cat > start.sh <<'EOF'\nnpx expo start\nEOF\ncat > start.sh <<'EOF'\necho hi\nEOF\nsh start.sh",
+		"bash start.sh",
+	} {
+		if decision := EvaluateShellCommand(command); decision.Block {
+			t.Errorf("%q should pass, got %q", command, decision.Reason)
+		}
+	}
+}
+
+func TestHookFollowsHereDocumentsAShellReads(t *testing.T) {
+	// A here-document is input: a shell runs it, and anything else reads it
+	// as text.
+	for command, want := range map[string]string{
+		"bash <<'EOF'\nnpx expo start\nEOF":                                      "Metro",
+		"bash<<'EOF'\ncd apps/mobile\nnpx expo start\nEOF":                       "Metro",
+		"bash -s <<EOF\nxcrun simctl boot 727CE7B2\nEOF":                         "simctl boot",
+		"sh <<-EOF\n\tnpx expo start\n\tEOF":                                     "Metro",
+		"sudo -u me bash <<'EOF'\nnpx expo start\nEOF":                           "Metro",
+		"timeout 60 bash <<'EOF'\nbash -c 'npx expo start'\nEOF":                 "Metro",
+		"bash <<'A' <<'B'\nignored\nA\nnpx expo start\nB":                        "Metro",
+		"cat <<'EOF' | bash\nnpx expo start\nEOF":                                "Metro",
+		"cat <<'EOF' | sudo -u me sh; echo done\nxcrun simctl shutdown all\nEOF": "simctl shutdown",
+		"{ cat <<'EOF'; } | bash\nnpx expo start\nEOF":                           "Metro",
+		"bash -c \"$(cat <<'EOF'\nnpx expo start\nEOF\n)\"":                      "Metro",
+	} {
+		decision := EvaluateShellCommand(command)
+		if !decision.Block || !strings.Contains(decision.Reason, want) {
+			t.Errorf("%q should be blocked with %q, got %+v", command, want, decision)
+		}
+	}
+	for _, command := range []string{
+		"cat > start.sh <<'EOF'\nnpx expo start\nEOF",
+		"cat <<'EOF' | grep sh\nnpx expo start\nEOF",
+		"cat <<'EOF' | tee notes.md\nnpx expo start\nEOF",
+		"grep -c bash <<'EOF'\nnpx expo start\nEOF",
+		"git commit -F - <<'EOF'\nfix: npx expo start\nEOF",
+		"sudo -u me tee notes.md <<'EOF'\nnpx expo start\nEOF",
+		"bash <<'EOF'\necho 'npx expo start'\nEOF",
+		"bash <<'EOF'\ngit commit -m \"fix: npx expo start crash\"\nEOF",
+		"bash <<'EOF'\ncat > notes.md <<'INNER'\nnpx expo start\nINNER\nEOF",
+		"bash scripts/run.sh <<'EOF'\nnpx expo start\nEOF",
+		"sh -c 'cat >> notes.md' <<EOF\nxcrun simctl boot 727CE7B2\nEOF",
+		"cat <<'A' | bash <<'B'\nnpx expo start\nA\necho hi\nB",
+		"cat <<'EOF' > a.md; cat <<'EOF2' | bash\nnpx expo start\nEOF\necho hi\nEOF2",
+	} {
+		if decision := EvaluateShellCommand(command); decision.Block {
+			t.Errorf("%q should pass, got %q", command, decision.Reason)
+		}
+	}
+}
+
+func TestHookFollowsCommandStringsThatOtherToolsRun(t *testing.T) {
+	for command, want := range map[string]string{
+		// More shells, eval behind builtin, and a shell fed what a lone
+		// $(echo …) prints.
+		"fish -c 'npx expo start'":                    "Metro",
+		"fish --command='npx expo start'":             "Metro",
+		"csh -c 'xcrun simctl boot 727CE7B2'":         "simctl boot",
+		"tcsh -c 'npx expo start'":                    "Metro",
+		"mksh -c 'npx expo start'":                    "Metro",
+		"builtin eval 'npx expo start'":               "Metro",
+		`bash -c "$(echo 'npx expo start')"`:          "Metro",
+		`eval "$(echo 'xcrun simctl boot 727CE7B2')"`: "simctl boot",
+		"sh -c \"`echo 'npx expo start'`\"":           "Metro",
+		`bash <<<"$(printf 'npx expo start')"`:        "Metro",
+		"$(echo 'npx expo start')":                    "Metro",
+		// Launchers and package runners with a command string of their own.
+		`env -S 'bash -c "npx expo start"'`:            "Metro",
+		"env -S'npx expo start'":                       "Metro",
+		"script -q -c 'npx expo start' /dev/null":      "Metro",
+		"npx -c 'expo start'":                          "Metro",
+		"npm exec --call='npx expo start'":             "Metro",
+		"npm exec -c 'expo start'":                     "Metro",
+		"pnpm exec --shell-mode 'expo start'":          "Metro",
+		"yarn exec 'cd apps/mobile && npx expo start'": "Metro",
+		"bun exec 'npx expo start'":                    "Metro",
+		// Tools that run their own string arguments.
+		"npx concurrently 'npx expo start' 'npm run api'":                                                                  "Metro",
+		`concurrently -n metro,api "cd apps/mobile && npx expo start" "npm run api"`:                                       "Metro",
+		"pnpm exec concurrently 'npx expo start'":                                                                          "Metro",
+		"yarn concurrently 'npx expo start'":                                                                               "Metro",
+		"./node_modules/.bin/concurrently 'npx expo start'":                                                                "Metro",
+		"tmux new-session -d -s metro 'npx expo start'":                                                                    "Metro",
+		"tmux send-keys -t metro 'npx expo start' Enter":                                                                   "Metro",
+		"tmux new-window 'xcrun simctl boot 727CE7B2'":                                                                     "simctl boot",
+		"watch -n 5 'xcrun simctl io booted screenshot /tmp/a.png'":                                                        "simctl io",
+		"nodemon --exec 'npx expo start'":                                                                                  "Metro",
+		"npx nodemon -x 'npx expo start'":                                                                                  "Metro",
+		"watchexec -r 'npx expo start'":                                                                                    "Metro",
+		"ls | entr -r -s 'npx expo start'":                                                                                 "Metro",
+		"parallel 'xcrun simctl shutdown {}' ::: A B":                                                                      "simctl shutdown",
+		"su - me -c 'xcrun simctl boot 727CE7B2'":                                                                          "simctl boot",
+		`osascript -e 'tell application "Terminal" to do script "cd /w && npx expo start"'`:                                "Metro",
+		`osascript -e 'do shell script "xcrun simctl boot 727CE7B2"'`:                                                      "simctl boot",
+		`osascript -e 'tell application "iTerm" to tell current session of current window to write text "npx expo start"'`: "Metro",
+		"osascript <<'EOF'\ntell application \"Terminal\"\n  do script \"cd /w && npx expo start\"\nend tell\nEOF":         "Metro",
+	} {
+		decision := EvaluateShellCommand(command)
+		if !decision.Block || !strings.Contains(decision.Reason, want) {
+			t.Errorf("%q should be blocked with %q, got %+v", command, want, decision)
+		}
+	}
+	for _, command := range []string{
+		"npx concurrently 'npm run api' 'npm run web'",
+		"tmux new -d -s logs 'tail -f metro.log'",
+		"tmux display-message 'build finished'",
+		"watch -n 2 'xcrun simctl list devices'",
+		"su -c 'whoami'",
+		"npx -c 'echo hi'",
+		"env -S 'node build.js'",
+		"script -q /dev/null git status",
+		// Text for a tool that only shows it, in a here-document the text
+		// rule does not read.
+		"osascript <<'EOF'\ndisplay notification \"npx expo start finished\"\nEOF",
+		"osascript <<'EOF'\ndisplay dialog \"Run npx expo start?\"\nEOF",
+		"jq '.scripts.start = \"expo start\"' package.json",
+		"node <<'EOF'\nconsole.log('npx expo start')\nEOF",
+		`bash -c 'echo "$(echo npx)"'`,
+	} {
+		if decision := EvaluateShellCommand(command); decision.Block {
+			t.Errorf("%q should pass, got %q", command, decision.Reason)
 		}
 	}
 }
@@ -140,11 +470,764 @@ func TestHookReadsClaudePayloadAndFailsOpen(t *testing.T) {
 
 func TestReadSessionEnd(t *testing.T) {
 	payload := ReadSessionEnd(strings.NewReader(`{"session_id":"thr_123","transcript_path":"/x","cwd":"/w","hook_event_name":"SessionEnd","reason":"other"}`))
-	if payload.SessionID != "thr_123" || payload.Reason != "other" || payload.Cwd != "/w" {
+	if payload.SessionID != "thr_123" || payload.Cwd != "/w" {
 		t.Fatalf("payload %+v", payload)
 	}
 	if ReadSessionEnd(strings.NewReader("garbage")).SessionID != "" {
 		t.Fatal("unparseable input must yield an empty session id")
+	}
+}
+
+// MARK: - The text rule and its excuse
+
+// wantBlocked checks that each command is declined with its wanted phrase in
+// the reason.
+func wantBlocked(t *testing.T, commands map[string]string) {
+	t.Helper()
+	for command, want := range commands {
+		decision := EvaluateShellCommand(command)
+		if !decision.Block || !strings.Contains(decision.Reason, want) {
+			t.Errorf("%q should be blocked with %q, got %+v", command, want, decision)
+		}
+	}
+}
+
+// wantPassing checks that each command runs.
+func wantPassing(t *testing.T, commands []string) {
+	t.Helper()
+	for _, command := range commands {
+		if decision := EvaluateShellCommand(command); decision.Block {
+			t.Errorf("%q should pass, got %q", command, decision.Reason)
+		}
+	}
+}
+
+func TestHookDeclinesEveryLineTheFirstVersionDeclined(t *testing.T) {
+	// The first version matched the steered commands in each command's text.
+	// These 57 lines only look text-only, so the word rules alone let them
+	// through; the text rule declines every one again, because it reads what
+	// the line says whatever the shell constructs around it.
+	wantBlocked(t, map[string]string{
+		// Process substitution.
+		`bash < <(echo 'npx expo start')`: `Metro`,
+		`bash <(echo 'npx expo start')`:   `Metro`,
+		`source <(echo 'npx expo start')`: `Metro`,
+		`. <(echo 'xcrun simctl boot X')`: `simctl boot`,
+		`sh <(printf 'npx expo start\n')`: `Metro`,
+		// /dev/stdin as the script.
+		`source /dev/stdin <<< 'npx expo start'`:    `Metro`,
+		`bash /dev/stdin <<< 'npx expo start'`:      `Metro`,
+		`echo 'npx expo start' | bash /dev/stdin`:   `Metro`,
+		`echo 'npx expo start' | sh /dev/fd/0`:      `Metro`,
+		`echo 'npx expo start' | source /dev/stdin`: `Metro`,
+		// Text through any other filter.
+		`echo 'npx expo start' | sed 's/^//' | bash`: `Metro`,
+		`echo 'npx expo start' | tr -d '\r' | sh`:    `Metro`,
+		`echo 'npx expo start' | head -n 1 | bash`:   `Metro`,
+		`grep 'npx expo start' README.md | bash`:     `Metro`,
+		// A file the line wrote, run by redirect, pipe or substitution.
+		`echo 'npx expo start' > s.sh; cat s.sh | bash`:                 `Metro`,
+		`echo 'npx expo start' > s.sh; bash < s.sh`:                     `Metro`,
+		`echo 'npx expo start' > s.sh; sh -s < s.sh`:                    `Metro`,
+		`echo 'npx expo start' > s.sh; sh -c "$(cat s.sh)"`:             `Metro`,
+		`echo 'npx expo start' > m.sh; bash -c "source m.sh"`:           `Metro`,
+		`echo 'npx expo start' > /tmp/m.command && open /tmp/m.command`: `Metro`,
+		// printf with a format and several arguments: a shebang or a comment
+		// first.
+		`printf '%s\n' '#!/bin/sh' 'npx expo start' > s.sh && sh s.sh`:              `Metro`,
+		`printf '%s\n' '# start metro' 'npx expo start' | bash`:                     `Metro`,
+		`printf '%s\n' '#!/bin/bash' 'xcrun simctl boot X' > boot.sh; bash boot.sh`: `simctl boot`,
+		// trap.
+		`trap 'npx expo start' EXIT`:                     `Metro`,
+		`trap "xcrun simctl shutdown all" EXIT; sleep 1`: `simctl shutdown`,
+		// A -c script that runs its positional parameters.
+		`sh -c '"$@"' _ npx expo start`:                     `Metro`,
+		`bash -c 'cd apps/mobile && "$@"' _ npx expo start`: `Metro`,
+		`bash -c '$1' _ 'npx expo start'`:                   `Metro`,
+		`sh -c 'exec "$@"' sh xcrun simctl boot X`:          `simctl boot`,
+		// A shell inside a group that reads the pipe.
+		`echo 'npx expo start' | (cd apps && bash)`:  `Metro`,
+		`echo 'npx expo start' | { cd apps; bash; }`: `Metro`,
+		`echo 'npx expo start' | (bash)`:             `Metro`,
+		// A shell that a launcher starts without a command.
+		`echo 'npx expo start' | sudo -i`:             `Metro`,
+		`echo 'npx expo start' | sudo -s`:             `Metro`,
+		`sudo -s <<< 'npx expo start'`:                `Metro`,
+		`sudo -i <<< 'xcrun simctl boot X'`:           `simctl boot`,
+		`echo 'npx expo start' | script -q /dev/null`: `Metro`,
+		// Tools that read commands from their input, and shells within shells.
+		`echo 'npx expo start' | parallel`:            `Metro`,
+		`at now <<< 'npx expo start'`:                 `Metro`,
+		`echo 'npx expo start' | at now`:              `Metro`,
+		`echo 'npx expo start' | bash -c 'bash'`:      `Metro`,
+		`bash -c "$(echo 'npx expo start' | tr a a)"`: `Metro`,
+		// Shells outside the list.
+		`yash -c 'npx expo start'`:           `Metro`,
+		`pwsh -c 'npx expo start'`:           `Metro`,
+		`nu -c 'npx expo start'`:             `Metro`,
+		`elvish -c 'npx expo start'`:         `Metro`,
+		`xonsh -c 'npx expo start'`:          `Metro`,
+		`echo 'npx expo start' | busybox sh`: `Metro`,
+		`echo 'npx expo start' | yash`:       `Metro`,
+		// Code in another language.
+		`npx tsx -e "require('child_process').execSync('npx expo start')"`:                `Metro`,
+		`ruby -e 'system("npx expo start")'`:                                              `Metro`,
+		`perl -e 'system("npx expo start")'`:                                              `Metro`,
+		`osascript -l JavaScript -e 'Application("Terminal").doScript("npx expo start")'`: `Metro`,
+		`osascript -e 'tell application "Terminal" to do script ("npx expo start")'`:      `Metro`,
+		// xargs, also with clustered options.
+		`echo "'npx expo start'" | xargs sh -c`:          `Metro`,
+		`echo 'npx expo start' | xargs -rI{} sh -c '{}'`: `Metro`,
+		`echo 'npx expo start' | xargs -tI{} sh -c '{}'`: `Metro`,
+	})
+}
+
+func TestHookExcusesMentionsThatNothingOnTheLineCanRun(t *testing.T) {
+	// A mention is excused when the line looks as if every command on it only
+	// reads or prints text: a commit message, a PR, a search, a note.
+	wantPassing(t, []string{
+		`git commit -m 'fix: run npx expo start through a lane'`,
+		`git commit -m "docs: never run xcrun simctl boot by hand"`,
+		`git commit -am 'stop agents running npx expo start' && git push origin main`,
+		`gh pr create --title 'Stop npx expo start' --body 'Use the lane tool, not xcrun simctl boot.'`,
+		`gh issue comment 12 --body 'Metro hung after npx expo start'`,
+		`grep -rn "npx expo start" .`,
+		`rg 'xcrun simctl boot' apps/desktop | head -n 20`,
+		`git log -S 'xcrun simctl boot' --oneline`,
+		`git grep -n 'npx expo start' -- docs`,
+		`grep sh <<< 'npx expo start'`,
+		`echo 'npx expo start' > notes.md`,
+		`printf '%s\n' 'run npx expo start' >> notes.md`,
+		`rndevtools claim --udid 727CE7B2 --note 'npx expo start hung; xcrun simctl boot it'`,
+		`~/.local/bin/rndevtools claim --udid X --note 'npx expo start'`,
+		`tmux rename-window 'expo start'`,
+		`bash -n s.sh`,
+		"gh pr create --body \"$(cat <<'EOF'\nTest plan: npx expo start\nxcrun simctl boot X\nEOF\n)\"",
+		`cd apps/mobile && git commit -m 'npx expo start'`,
+		`ls docs | grep 'npx expo start'; echo done`,
+	})
+	// Every program of the list.
+	for _, program := range strings.Fields("echo printf cat grep egrep fgrep rg head tail wc sort uniq cut tr nl jq ls pwd cd mkdir touch test true false sleep date basename dirname realpath which type") {
+		wantPassing(t, []string{program + " 'npx expo start'", program + " 'xcrun simctl boot X'"})
+	}
+	wantPassing(t, []string{
+		`test -n 'npx expo start' && echo yes`,
+		`command -v 'npx expo start'`,
+		`command -V 'xcrun simctl boot X'`,
+	})
+	// The launchers that only run their operand.
+	wantPassing(t, []string{
+		`nice -n 5 git commit -m 'npx expo start'`,
+		`nice -5 grep -rn 'npx expo start' .`,
+		`nohup git push origin 'npx expo start' &`,
+		`time git log -S 'npx expo start'`,
+		`timeout 60 grep -rn 'npx expo start' .`,
+		`gtimeout -s KILL 60 git log -S 'npx expo start'`,
+		`sudo git status 'npx expo start'`,
+		`sudo -u me git log -S 'npx expo start'`,
+		`sudo -E -H git log -S 'npx expo start'`,
+		`env -i git log -S 'npx expo start'`,
+		`env -u FOO git log -S 'npx expo start'`,
+		`sudo nice -n 5 timeout 5 git log -S 'npx expo start'`,
+	})
+	// The git and gh commands of the list, also behind git's directory options.
+	for _, subcommand := range strings.Fields("add commit log show diff status tag stash push fetch branch checkout switch restore rm mv grep blame describe rev-parse ls-files") {
+		wantPassing(t, []string{
+			"git " + subcommand + " 'npx expo start'",
+			"git -C apps/mobile " + subcommand + " 'xcrun simctl boot X'",
+			"git --no-pager " + subcommand + " 'npx expo start'",
+		})
+	}
+	for _, subcommand := range strings.Fields("pr issue release api label search") {
+		wantPassing(t, []string{"gh " + subcommand + " 'npx expo start'"})
+	}
+	// gh repo only for the commands that read: view and list.
+	wantPassing(t, []string{"gh repo view 'npx expo start'", "gh repo list 'npx expo start'"})
+	// Output sent nowhere, or to another descriptor, writes no file git could
+	// run; a note written by a program that is not git or gh is no hook.
+	wantPassing(t, []string{
+		`git commit -m 'npx expo start' >/dev/null 2>&1`,
+		`git commit -m 'npx expo start' > /dev/null`,
+		`git commit -m 'npx expo start' &>/dev/null`,
+		`git log -S 'npx expo start' 2>&1 | head -n 5`,
+		`git log -S 'npx expo start' >&2`,
+		`gh pr view 12 --json body 2>&1 | grep 'npx expo start'`,
+		`cat notes.md | grep 'npx expo start' > matches.txt`,
+		`echo 'npx expo start' | tr a-z A-Z >> notes.md`,
+	})
+}
+
+func TestHookKeepsDecliningMentionsThatSomethingOnTheLineCouldRun(t *testing.T) {
+	// The excuse is one rule with no data flow, so a line that has any command
+	// outside it keeps the first version's verdict, whatever else it does.
+	wantBlocked(t, map[string]string{
+		// A mixed line.
+		`git commit -m 'npx expo start' && pnpm test`:      `Metro`,
+		`echo 'npx expo start'; xcrun simctl list devices`: `Metro`,
+		`git commit -m 'npx expo start'; ./deploy.sh`:      `Metro`,
+		// A program that is not on the list, or named by a path.
+		`sed -n '/xcrun simctl boot/p' notes.md`:                    `simctl boot`,
+		`awk '/npx expo start/' notes.md`:                           `Metro`,
+		`echo 'npx expo start' | pbcopy`:                            `Metro`,
+		`echo 'xcrun simctl boot X' | xargs echo`:                   `simctl boot`,
+		`find . -name '*.md' -exec grep 'npx expo start' {} +`:      `Metro`,
+		`echo 'npx expo start' | tee notes.md`:                      `Metro`,
+		`ssh host 'npx expo start'`:                                 `Metro`,
+		`python3 -c "print('npx expo start')"`:                      `Metro`,
+		`node -e "console.log('npx expo start')"`:                   `Metro`,
+		`osascript -e 'display notification "npx expo start done"'`: `Metro`,
+		`/usr/bin/git commit -m 'npx expo start'`:                   `Metro`,
+		`./git commit -m 'npx expo start'`:                          `Metro`,
+		`/bin/echo 'npx expo start'`:                                `Metro`,
+		`mytool --note 'npx expo start'`:                            `Metro`,
+		`$CMD 'npx expo start'`:                                     `Metro`,
+		`"${EDITOR}" 'npx expo start'`:                              `Metro`,
+		// Shells and the commands that run text, however little they do.
+		`bash -c 'echo npx expo start'`:                    `Metro`,
+		`sh -n <<< 'npx expo start'`:                       `Metro`,
+		`echo 'npx expo start' | bash -n`:                  `Metro`,
+		`eval 'echo hi' 'npx expo start'`:                  `Metro`,
+		`source notes.sh 'npx expo start'`:                 `Metro`,
+		`exec git commit -m 'npx expo start'`:              `Metro`,
+		`command git commit -m 'npx expo start'`:           `Metro`,
+		`export NOTE='npx expo start'`:                     `Metro`,
+		`alias metro='npx expo start'`:                     `Metro`,
+		`set -- 'npx expo start'`:                          `Metro`,
+		`tmux display-message 'npx expo start is running'`: `Metro`,
+		`watch -t 'echo npx expo start'`:                   `Metro`,
+		`parallel echo ::: 'npx expo start'`:               `Metro`,
+		`xargs -I{} sh -c 'echo {}' <<< 'npx expo start'`:  `Metro`,
+		`for f in a b; do echo 'npx expo start'; done`:     `Metro`,
+		// Substitution bodies are commands too, and a $ or a backtick anywhere
+		// ends the excuse, whatever the substitution runs.
+		`echo "$(npx expo start)"`:                                `Metro`,
+		"echo `xcrun simctl boot X`":                              `simctl boot`,
+		`git commit -m "$(sed 's/a/b/' notes.md) npx expo start"`: `Metro`,
+		`echo 'npx expo start' <(sed p notes.md)`:                 `Metro`,
+		`echo "$(date) npx expo start"`:                           `Metro`,
+		`echo "$(git log -1 --format=%s) npx expo start"`:         `Metro`,
+		// An assignment prefix, which GIT_PAGER and its kind run.
+		`FOO=1 git commit -m 'npx expo start'`:        `Metro`,
+		`GIT_PAGER='npx expo start' git log`:          `Metro`,
+		`env FOO=1 git log -S 'npx expo start'`:       `Metro`,
+		`FOO=1; git log -S 'npx expo start'`:          `Metro`,
+		`git log -S 'npx expo start' && BAR=2 echo x`: `Metro`,
+		// A launcher that starts a shell or runs a command string.
+		`sudo -s git log -S 'npx expo start'`:             `Metro`,
+		`sudo -i git log -S 'npx expo start'`:             `Metro`,
+		`sudo -iu me git log -S 'npx expo start'`:         `Metro`,
+		`sudo --login git log -S 'npx expo start'`:        `Metro`,
+		`sudo -l 'npx expo start'`:                        `Metro`,
+		`env -S 'git log -S "npx expo start"'`:            `Metro`,
+		`timeout 5 bash -c 'git log -S "npx expo start"'`: `Metro`,
+		// git that runs another program, or that is not on the list.
+		`git -c core.pager='npx expo start' log`:                  `Metro`,
+		`git -c core.hooksPath=/tmp/h commit -m 'npx expo start'`: `Metro`,
+		`git commit -c HEAD -m 'npx expo start'`:                  `Metro`,
+		`git --config-env=core.pager=X log -S 'npx expo start'`:   `Metro`,
+		`git --exec-path=/tmp/x log -S 'npx expo start'`:          `Metro`,
+		`git fetch --upload-pack='npx expo start' origin`:         `Metro`,
+		`git push --receive-pack='npx expo start' origin`:         `Metro`,
+		`git grep -O'npx expo start' x`:                           `Metro`,
+		`git config alias.x '!npx expo start'`:                    `Metro`,
+		`git rebase --exec 'npx expo start' main`:                 `Metro`,
+		`git bisect run sh -c 'npx expo start'`:                   `Metro`,
+		`git submodule foreach 'npx expo start'`:                  `Metro`,
+		`git clone https://example.com/x.git 'npx expo start'`:    `Metro`,
+		`git worktree add 'npx expo start'`:                       `Metro`,
+		`git reset --hard 'npx expo start'`:                       `Metro`,
+		`git 'npx expo start'`:                                    `Metro`,
+		// gh beyond its list.
+		`gh alias set metro '!npx expo start'`: `Metro`,
+		`gh extension exec 'npx expo start'`:   `Metro`,
+		`gh run list 'npx expo start'`:         `Metro`,
+		// A text program told to run another.
+		`rg --pre 'npx expo start' x .`:                     `Metro`,
+		`rg --pre='npx expo start' x .`:                     `Metro`,
+		`sort --compress-program='npx expo start' notes.md`: `Metro`,
+		// A line that writes a file and also runs git or gh: git runs hook
+		// files, and the line could have written one.
+		`echo 'npx expo start' > notes.md && git commit -am notes`: `Metro`,
+		`git commit -m 'npx expo start' > commit.log`:              `Metro`,
+		`git log -S 'npx expo start' 2> err.log`:                   `Metro`,
+		`git log -S 'npx expo start' &> log.txt`:                   `Metro`,
+		`git log -S 'npx expo start' >| log.txt`:                   `Metro`,
+		`git log -S 'npx expo start' >> log.txt`:                   `Metro`,
+		`git log -S 'npx expo start' >&log.txt`:                    `Metro`,
+		`git log -S 'npx expo start'>log.txt`:                      `Metro`,
+		`gh pr create --body 'npx expo start' > pr.txt`:            `Metro`,
+		`echo hi > a.txt; gh pr create --body 'npx expo start'`:    `Metro`,
+	})
+}
+
+func TestHookJudgesAFollowedScriptAsALineOfItsOwn(t *testing.T) {
+	// A script the word rules follow (a here-document a shell reads, a file the
+	// line writes and runs) is judged as a line of its own: by the word rules,
+	// by the text rule with its excuse, and by the Supabase rules. The
+	// here-document body is text the first pass never sees.
+	wantBlocked(t, map[string]string{
+		"bash <<'EOF'\ntrap 'npx expo start' EXIT\nEOF":                                  "Metro",
+		"bash <<'EOF'\nsed -n '/xcrun simctl boot/p' notes.md\nEOF":                      "simctl boot",
+		"bash <<'EOF'\ngit commit -m 'fix: npx expo start' && pnpm test\nEOF":            "Metro",
+		"bash <<'EOF'\necho 'npx expo start' | pbcopy\nEOF":                              "Metro",
+		"cat > run.sh <<'EOF'\nprintf '%s\\n' 'x' 'npx expo start' | sh\nEOF\nsh run.sh": "Metro",
+		"bash <<'EOF'\nex''po start\nEOF":                                                "Metro",
+		"bash <<'EOF'\nbash <<'INNER'\nnpx expo start\nINNER\nEOF":                       "Metro",
+		"bash -c \"$(cat <<'EOF'\nxcrun simctl shutdown all | cat\nEOF\n)\"":             "simctl shutdown",
+	})
+	wantPassing(t, []string{
+		"bash <<'EOF'\ngit commit -m 'fix: npx expo start'\nEOF",
+		"bash <<'EOF'\ngrep -rn 'xcrun simctl boot' docs | head -n 5\nEOF",
+		"cat > run.sh <<'EOF'\ngit log -S 'npx expo start'\nEOF\nsh run.sh",
+		"bash <<'EOF'\ngh pr create --body 'run npx expo start'\nEOF",
+	})
+	// The Supabase rules judge the same script as a line of its own, from the
+	// directory it runs in.
+	fixture := newSupabaseFixture(t)
+	fixture.expect(t, fixture.legacy, "bash <<'EOF'\ncd "+fixture.linked+"\nsupabase start\nEOF", "--runtime native")
+	fixture.expect(t, fixture.legacy, "cat > run.sh <<'EOF'\nsupabase stop --all\nEOF\nsh run.sh", "every agent's local Supabase stack")
+	fixture.expect(t, fixture.legacy, "bash <<'EOF'\ngit commit -m 'npx expo start'\nEOF")
+}
+
+// The three cases below keep their steered text where the text rule cannot
+// see it (a here-document, a command split by quotes, ex''po), so that the
+// word rules alone decide.
+
+func TestHookReadsAShellGivenNAsParsingNotRunning(t *testing.T) {
+	// A shell given -n checks the syntax of its script and runs none of it.
+	script := "cat > s.sh <<'EOF'\nnpx expo start\nEOF\n"
+	wantPassing(t, []string{
+		script + "bash -n s.sh",
+		script + "sh -n s.sh",
+		script + "bash -nx s.sh",
+		script + "bash -o noexec s.sh",
+		script + "zsh -n s.sh",
+		script + "fish --no-execute s.sh",
+		"sh -n <<'EOF'\nnpx expo start\nEOF",
+		"cat <<'EOF' | bash -n\nnpx expo start\nEOF",
+		"bash -n -c 'ex''po start'",
+		"bash -n s.sh",
+	})
+	// A shell that runs the script, or whose -n is a parameter of it, does.
+	wantBlocked(t, map[string]string{
+		script + "bash s.sh":               "Metro",
+		script + "bash -x s.sh":            "Metro",
+		script + "bash -n s.sh; bash s.sh": "Metro",
+		script + "bash +n s.sh":            "Metro",
+		"sh <<'EOF'\nnpx expo start\nEOF":  "Metro",
+		"bash -c 'ex''po start' -n":        "Metro",
+		"bash -c 'ex''po start' _ -n":      "Metro",
+	})
+}
+
+func TestHookFollowsTmuxOnlyWhereItCarriesACommand(t *testing.T) {
+	// tmux commands that rename, show, or set something handle text; the ones
+	// that start a shell command or type keys carry it.
+	wantPassing(t, []string{
+		"tmux rename-window 'expo start'",
+		"tmux display-message 'expo start'",
+		"tmux set -g status-right 'expo start'",
+		"tmux list-windows -F 'expo start'",
+		"tmux new-session -d -s 'expo start' -n 'expo start' -c apps/mobile",
+		"tmux new-window -n 'expo start' -c 'expo start'",
+		"tmux split-window -h -c 'expo start'",
+		"tmux send-keys -t 'expo start' Enter",
+		"tmux run-shell -t 'expo start' 'echo hi'",
+		"tmux display-popup -T 'expo start' 'echo hi'",
+	})
+	wantBlocked(t, map[string]string{
+		"tmux new-session -d -s metro 'ex''po start'":                    "Metro",
+		"tmux new -d -s metro \"$(cat <<'EOF'\nnpx expo start\nEOF\n)\"": "Metro",
+		"tmux new-window 'ex''po start'":                                 "Metro",
+		"tmux neww 'ex''po start'":                                       "Metro",
+		"tmux split-window -h 'ex''po start'":                            "Metro",
+		"tmux splitw -h 'ex''po start'":                                  "Metro",
+		"tmux respawn-pane -k 'ex''po start'":                            "Metro",
+		"tmux respawnp -k 'ex''po start'":                                "Metro",
+		"tmux respawn-window -k 'ex''po start'":                          "Metro",
+		"tmux respawnw -k 'ex''po start'":                                "Metro",
+		"tmux run-shell 'ex''po start'":                                  "Metro",
+		"tmux run -b 'ex''po start'":                                     "Metro",
+		"tmux if-shell true 'ex''po start'":                              "Metro",
+		"tmux if true 'ex''po start'":                                    "Metro",
+		"tmux pipe-pane -t metro 'ex''po start'":                         "Metro",
+		"tmux pipep -t metro 'ex''po start'":                             "Metro",
+		"tmux display-popup -E 'ex''po start'":                           "Metro",
+		"tmux popup -E 'ex''po start'":                                   "Metro",
+		"tmux send-keys -t metro 'ex''po start' Enter":                   "Metro",
+		"tmux send -t metro 'ex''po start' Enter":                        "Metro",
+		"tmux new-session -d -- 'ex''po start'":                          "Metro",
+		"tmux -L sock -f /dev/null new -d 'ex''po start'":                "Metro",
+		"tmux -c 'ex''po start'":                                         "Metro",
+	})
+}
+
+func TestHookReadsXargsReplacementsAsQuotedWords(t *testing.T) {
+	// xargs puts each input line where the replacement string is. In a string
+	// that does something with it (echo {}), it is one word of the command;
+	// only a string that is the replacement alone (sh -c '{}') is the command
+	// line itself.
+	wantPassing(t, []string{
+		"xargs -I{} sh -c 'echo {}' <<'EOF'\nnpx expo start\nEOF",
+		"cat <<'EOF' | xargs -I{} sh -c 'echo {} >> notes.md'\nnpx expo start\nEOF",
+		"cat <<'EOF' | xargs -I% bash -c 'printf \"%s\" % > notes.md'\nnpx expo start\nEOF",
+		"cat <<'EOF' | xargs -I{} sh -c 'grep -c {} notes.md'\nxcrun simctl boot X\nEOF",
+	})
+	// The third row above with a newline in the printf format. The script xargs
+	// fills in is a line of its own, and the backslash in its double quotes
+	// turns the excuse off for it, so its mention is declined. The first
+	// version of the hook passed this line, because it never read a
+	// here-document body; the README names this cost under "The one excuse".
+	// Without the backslash the script is text, as above.
+	wantBlocked(t, map[string]string{
+		"cat <<'EOF' | xargs -I% bash -c 'printf \"%s\\n\" % > notes.md'\nnpx expo start\nEOF": "Metro",
+	})
+	wantBlocked(t, map[string]string{
+		"xargs -I{} sh -c '{}' <<'EOF'\nnpx expo start\nEOF":          "Metro",
+		"cat <<'EOF' | xargs -I{} sh -c '{}'\nnpx expo start\nEOF":    "Metro",
+		"xargs -I % bash -c % <<'EOF'\nxcrun simctl boot X\nEOF":      "simctl boot",
+		"cat <<'EOF' | xargs -0 sh -c\nnpx expo start\nEOF":           "Metro",
+		"xargs -I{} sh -c 'ex''po start {}' <<'EOF'\na\nEOF":          "Metro",
+		"xargs -I{} sh -c 'xcrun simctl shutdown {}' <<'EOF'\nA\nEOF": "simctl shutdown",
+	})
+}
+
+func TestXargsFillQuotesInputLinesAndStopsAtTheCap(t *testing.T) {
+	for _, row := range []struct {
+		script  string
+		items   []string
+		want    []string
+		message string
+	}{
+		{"echo {}", []string{"npx expo start", "a'b", "plain"}, []string{"echo 'npx expo start'", `echo 'a'\''b'`, "echo plain"}, "an item is a word"},
+		{"{}", []string{"npx expo start", "a; b"}, []string{"npx expo start", "a; b"}, "an item alone is the command line"},
+		{" {} ", []string{"x y"}, []string{" x y "}, "so is one with blanks around it"},
+		{"cd {} && ls {}", []string{"a b"}, []string{"cd 'a b' && ls 'a b'"}, "every replacement is quoted"},
+	} {
+		if got := xargsFill(row.script, "{}", row.items); !reflect.DeepEqual(got, row.want) {
+			t.Errorf("%s: xargsFill(%q, %q) = %q, want %q", row.message, row.script, row.items, got, row.want)
+		}
+	}
+	// A long script and many lines build scripts up to the cap, not one per
+	// line.
+	items := make([]string, 50_000)
+	for index := range items {
+		items[index] = "x"
+	}
+	script := "{} " + strings.Repeat("echo a; ", 10_000)
+	filled := xargsFill(script, "{}", items)
+	total := 0
+	for _, built := range filled {
+		total += len(built)
+	}
+	if len(filled) == 0 || total > maxFollowedScriptBytes {
+		t.Fatalf("built %d scripts of %d bytes in all, want some within %d", len(filled), total, maxFollowedScriptBytes)
+	}
+}
+
+func TestScriptLedgerJudgesAWrittenFileOnceAndStopsAtTheCap(t *testing.T) {
+	file := handedScript{text: "echo a", file: fileVersion{path: "s.sh", last: 0}}
+	var ledger scriptLedger
+	if !ledger.follow(file, "/w", 0) || ledger.follow(file, "/w", 0) || ledger.follow(file, "/w", 2) {
+		t.Fatal("the text of a written file is judged once from a directory, however deep it is reached again")
+	}
+	if !ledger.follow(file, "/other", 0) {
+		t.Fatal("the same file run from another directory is judged there too")
+	}
+	if !ledger.follow(handedScript{text: "echo a", file: fileVersion{path: "s.sh", last: 1}}, "/w", 0) {
+		t.Fatal("another version of the file is another text")
+	}
+	deep := scriptLedger{}
+	if !deep.follow(file, "", 2) || deep.follow(file, "", 3) || !deep.follow(file, "", 1) {
+		t.Fatal("a file reached again shallower is judged again, because it reaches further")
+	}
+	plain := handedScript{text: "echo a"}
+	if !deep.follow(plain, "", 0) || !deep.follow(plain, "", 0) {
+		t.Fatal("scripts that are not files are all judged")
+	}
+	if deep.follow(handedScript{}, "", 0) {
+		t.Fatal("an empty script has nothing to judge")
+	}
+	capped := scriptLedger{}
+	if !capped.follow(handedScript{text: strings.Repeat("a", maxFollowedScriptBytes-10)}, "", 0) {
+		t.Fatal("a script within the cap is followed")
+	}
+	if capped.exhausted() || capped.follow(handedScript{text: strings.Repeat("a", 20)}, "", 0) || !capped.exhausted() {
+		t.Fatal("the script that passes the cap is not followed, and the ledger is spent")
+	}
+	if capped.follow(handedScript{text: "a"}, "", 0) {
+		t.Fatal("past the cap nothing more is followed")
+	}
+}
+
+func TestWrittenScriptReadsEachVersionOfAFileOnce(t *testing.T) {
+	// Segments: 0 and 1 write s.sh, 2 and 3 run it, 4 appends, 5 runs it.
+	line := parseShellLine("echo a > s.sh; echo b >> s.sh; sh s.sh; sh s.sh; echo c >> s.sh; sh s.sh")
+	first, firstVersion, ok := writtenScript(line, 2, "s.sh")
+	if !ok || first != "a\nb" {
+		t.Fatalf("the first run reads %q (%v), want the two writes before it", first, ok)
+	}
+	second, secondVersion, _ := writtenScript(line, 3, "./s.sh")
+	if secondVersion != firstVersion || second != first {
+		t.Fatalf("the second run is the same version: %+v %q, then %+v %q", secondVersion, second, firstVersion, first)
+	}
+	if line.files.pieces != 2 {
+		t.Fatalf("two runs of one version read %d writes, want the 2 of the version", line.files.pieces)
+	}
+	third, thirdVersion, _ := writtenScript(line, 5, "s.sh")
+	if thirdVersion == firstVersion || third != "a\nb\nc" {
+		t.Fatalf("an append makes another version: %+v %q", thirdVersion, third)
+	}
+	if _, _, ok := writtenScript(line, 0, "s.sh"); ok {
+		t.Fatal("a file is not read before the line writes it")
+	}
+	if _, _, ok := writtenScript(line, 5, "other.sh"); ok {
+		t.Fatal("a file the line did not write is not read")
+	}
+	// A file appended to and run thousands of times has a version per run,
+	// and each is built from up to 64 writes; the line reads 16,384 writes in
+	// all. The sizes are written out, so that a limit that is changed does not
+	// change the line this builds.
+	many := parseShellLine(strings.Repeat("echo a >> s.sh; sh s.sh; ", 1280))
+	for index, segment := range many.segments {
+		if segment.program() == "sh" {
+			writtenScript(many, index, "s.sh")
+		}
+	}
+	if many.files.pieces != 16384 {
+		t.Fatalf("read %d writes, want 16384", many.files.pieces)
+	}
+}
+
+func TestHookFollowsScriptsOnlyUpToTheCapAndRunningAFileDoesNotSpendIt(t *testing.T) {
+	steered := "xcrun simctl boot X\nEOF"
+	within := strings.Repeat("echo a\n", maxFollowedScriptBytes/2/7)
+	past := strings.Repeat("echo a\n", (maxFollowedScriptBytes+1000)/7)
+	if decision := EvaluateShellCommand("bash <<'EOF'\n" + within + steered); !decision.Block {
+		t.Fatal("a script within the cap is followed")
+	}
+	// Past the cap the rule stops following, and the text rule decides what
+	// is left: the text rule does not read here-documents.
+	if decision := EvaluateShellCommand("bash <<'EOF'\n" + past + steered); decision.Block {
+		t.Fatalf("a script past the cap is not followed: %q", decision.Reason)
+	}
+	// Running one file again is not another script: five runs of a file of
+	// 100 KB do not use up a cap of 256 KiB for the here-document after them.
+	body := strings.Repeat("echo a\n", 100_000/7)
+	line := "cat > s.sh <<'EOF'\n" + body + "EOF\n" + strings.Repeat("sh s.sh\n", 5) + "bash <<'EOF'\n" + steered
+	if decision := EvaluateShellCommand(line); !decision.Block {
+		t.Fatal("a file run five times is judged once, and the script after it is still followed")
+	}
+	// The Supabase rules keep their own account of the same limits.
+	fixture := newSupabaseFixture(t)
+	supabaseLine := "cat > s.sh <<'EOF'\n" + body + "EOF\n" + strings.Repeat("sh s.sh\n", 5) + "bash <<'EOF'\nsupabase stop --all\nEOF"
+	fixture.expect(t, fixture.legacy, supabaseLine, "every agent's local Supabase stack")
+	fixture.expect(t, fixture.legacy, "bash <<'EOF'\n"+within+"supabase stop --all\nEOF", "every agent's local Supabase stack")
+	fixture.expect(t, fixture.legacy, "bash <<'EOF'\n"+past+"supabase stop --all\nEOF")
+}
+
+// quietSupabaseEnvironment is a Mac whose local Supabase is off: none of the
+// Supabase rules applies.
+func quietSupabaseEnvironment() supabaseEnvironment {
+	return supabaseEnvironment{
+		steering:  func() (steeringState, bool) { return steeringState{}, false },
+		reachable: func() bool { return false },
+		now:       time.Now,
+		home:      func() string { return "/Users/example" },
+		getenv:    func(string) string { return "" },
+	}
+}
+
+// judgeWithin judges line with the Supabase rules off in a goroutine the test
+// can leave behind, and reports whether it answered within budget. A line
+// that is slow once is judged a second time, so that a busy machine does not
+// fail the test; a rule that grows with the square of the line fails both.
+func judgeWithin(budget time.Duration, line string) (decision HookDecision, took time.Duration, answered bool) {
+	for attempt := 0; attempt < 2 && !answered; attempt++ {
+		started := time.Now()
+		answer := make(chan HookDecision, 1)
+		go func() { answer <- evaluateShellCallWith(shellCall{command: line}, quietSupabaseEnvironment()) }()
+		select {
+		case decision = <-answer:
+			answered = true
+		case <-time.After(budget):
+		}
+		took = time.Since(started)
+	}
+	return decision, took, answered
+}
+
+func TestHookStaysFastOnLinesNearTheLimit(t *testing.T) {
+	// The payload limit is 1 MiB. A line that is quick to write can still make
+	// a rule judge one text over and over (a file run tens of thousands of
+	// times, a long xargs string filled in from thousands of lines) or walk
+	// back over every command it has read (a bare shell in each of thousands
+	// of substitutions or nested groups, a here-document operator each time).
+	// Each of these lines takes 30 to 180 ms on a Mac, and the slowest took
+	// 260 ms when other jobs loaded it. A budget must not depend on how fast
+	// the machine is, so it is more than ten times the slowest of those: five
+	// seconds, which is also what the installed hook gets. A rule that grows
+	// with the square of the line takes from ten seconds to minutes on them,
+	// which is why most of them are close to the payload limit.
+	// The race detector makes the code fifteen to twenty times slower (up to
+	// 1.8 s a line here), so under it the lines are a quarter as long and the
+	// budget is thirty seconds, sixteen times the slowest line. There it
+	// catches only the worst of the quadratic rules; the plain run is what
+	// tells the rest from a linear one.
+	budget, quarter := 5*time.Second, 1
+	if raceDetector {
+		budget, quarter = 30*time.Second, 4
+	}
+	repeat := func(unit string, count int) string { return strings.Repeat(unit, count/quarter) }
+	script := repeat("echo a; ", 40_000)
+	lines := map[string]string{
+		// Near the limit: the two lines that used to take minutes.
+		"a file written once and run tens of thousands of times": "echo '" + script + "' > s.sh" + repeat("; sh s.sh", 60_000),
+		"a file written by a here-document":                      "cat > s.sh <<'EOF'\n" + script + "\nEOF\n" + repeat("sh s.sh\n", 80_000),
+		"xargs filling a long string for each of 100,000 lines":  "printf '" + repeat("x\\n", 100_000) + "' | xargs -I{} sh -c '{} " + repeat("echo a;", 60_000) + "'",
+		// Other lines that could grow with the square of their size.
+		"a file appended to and run 15,000 times": repeat("echo 'echo a' >> s.sh; sh s.sh; ", 15_000),
+		"a file appended to from unknown sources": repeat("cat x >> s.sh; sh s.sh; ", 15_000),
+		"many small scripts":                      repeat("sh -c 'echo a'; ", 20_000),
+		"many pipes into a shell":                 repeat("echo $(a) | sh; ", 15_000),
+		// A bare shell in each of 174,000 substitutions looks for the command
+		// before it in its own scope, which is the first of its scope.
+		"substitutions that each run a shell": "echo " + repeat("$(sh) ", 174_000),
+		// 116,000 groups nested in each other, each piped into a shell, read
+		// the commands of the group, which come after those nested in it.
+		"nested groups, each piped into a shell": repeat("( ", 116_000) + "echo a" + repeat(") | sh ", 116_000),
+		// A { is a word, not a scope, so the } of each of 95,000 groups nested in
+		// each other reads back through the groups inside it, and the first
+		// command has a word for each of them.
+		"nested { } groups, each piped into a shell": repeat("{ ", 95_000) + "echo a" + repeat("; } | sh ", 95_000),
+		// A } with no { before it reads back to the start of the line, and
+		// reached every } before it that did the same, to a depth of eight.
+		"closing braces chained into a shell": "{ echo a; " + repeat("}; ", 300_000) + "} | sh",
+		// A script is a line of its own, and 90 of them fit in what the rules
+		// follow; each of these nests 280 groups, enough to use up the reading
+		// of groups that a line may do, so that reading is the call's to
+		// spend, not each script's.
+		"scripts that each nest groups": repeat("bash <<'EOF'\n"+strings.Repeat("{ ", 280)+"echo a"+strings.Repeat("; } | sh ", 280)+"\nEOF\n", 90),
+		// A here-document operator is held until the line ends, so each of
+		// 262,000 on one line is held while the next is read. A redirection
+		// alone is a command, and the shortest there is, so the most of them fit
+		// in a megabyte, and the further a rule that walks them all for each
+		// command goes past the budget.
+		"here-document operators on one line": repeat("<<A;", 262_000),
+		// Each simctl word reads the options after it for the subcommand, and
+		// --set takes the next simctl as its value.
+		"simctl options that take simctl as their value": "simctl " + repeat("--set simctl ", 80_000),
+		// A file that is a lone $(echo …) prints what it runs, which is read
+		// from its text once, however many times the line runs the file.
+		"a 200 KB file of one substitution, run 94,000 times": "echo '$(echo a #" + repeat("x", 200_000) + "\n)' > s.sh" + repeat("; sh s.sh", 94_000),
+	}
+	for name, line := range lines {
+		if len(line) > 1<<20 {
+			t.Fatalf("%s: the line is %d bytes, over the payload limit", name, len(line))
+		}
+		decision, took, answered := judgeWithin(budget, line)
+		switch {
+		case !answered:
+			t.Errorf("%s: no answer within %s", name, budget)
+		case decision.Block:
+			t.Errorf("%s: declined, %q", name, decision.Reason)
+		}
+		t.Logf("%s: %d bytes in %s", name, len(line), took.Round(time.Millisecond))
+	}
+	// A steered command at the very end of a long line is still found.
+	end := strings.Repeat("echo a; ", 100_000) + "npx expo start"
+	if !EvaluateShellCommand(end).Block {
+		t.Fatal("a steered command after a long line is declined")
+	}
+}
+
+func TestSupabaseRulesStayFastOnLongChainsAndPipelines(t *testing.T) {
+	// With local Supabase on, a command reads the commands chained or piped
+	// around it, and a cd builds the directory it runs in. A line of a few
+	// hundred KB can make each of thousands of commands read all the others.
+	// Reading around a command stops at maxChainSteps, and a directory longer
+	// than a path can be is unknown. The lines take 30 to 130 ms on a Mac, and
+	// the slowest took 200 ms when other jobs loaded it, so the budget is five
+	// seconds, as for the lines of TestHookStaysFastOnLinesNearTheLimit, which
+	// is more than twenty times the slowest. A rule that reads the whole chain,
+	// or builds every directory, takes from ten seconds on them. The race
+	// detector makes the code up to thirty times slower (1.3 s a line here), so
+	// under it the lines are a quarter as long and the budget is thirty seconds.
+	// A status --env pipeline is not timed. Each of its commands reads the
+	// project's files, so the line that would show the walk along the pipeline
+	// for a .env file to be unbounded (10,000 commands, 10 s without the limit)
+	// takes 0.8 s with it on a Mac, and can pass five seconds on a slow, busy one.
+	// TestSupabaseRulesReadAtMostMaxChainStepsAroundACommand checks where that
+	// walk stops instead.
+	budget, quarter := 5*time.Second, 1
+	if raceDetector {
+		budget, quarter = 30*time.Second, 4
+	}
+	repeat := func(unit string, count int) string { return strings.Repeat(unit, count/quarter) }
+	fixture := newSupabaseFixture(t)
+	lines := map[string]string{
+		"a native start, then declarative syncs chained with &&": "supabase start --runtime native && " + repeat("supabase db schema declarative sync --local && ", 8_000) + "true",
+		"xargs kill in one pipeline":                             "echo a" + repeat(" | xargs kill", 12_000),
+		"groups that each cd one level deeper":                   repeat("( cd a; ", 100_000) + "supabase start" + repeat(" )", 100_000),
+	}
+	for name, line := range lines {
+		for _, directory := range []string{fixture.linked, fixture.managed} {
+			started := time.Now()
+			answer := make(chan HookDecision, 1)
+			go func() { answer <- fixture.judge(directory, line) }()
+			select {
+			case <-answer:
+			case <-time.After(budget):
+				t.Errorf("%s: no answer within %s in %s", name, budget, directory)
+			}
+			t.Logf("%s: %d bytes in %s", name, len(line), time.Since(started).Round(time.Millisecond))
+		}
+	}
+}
+
+func TestSupabaseRulesReadAtMostMaxChainStepsAroundACommand(t *testing.T) {
+	fixture := newSupabaseFixture(t)
+	// A native start earlier in the && chain makes a declarative sync safe; the
+	// rule looks 32 commands back for it, which is more than any chain written
+	// by hand. The sizes are written out, so that a limit that is changed does
+	// not change the line this builds.
+	chain := func(between int) string {
+		return "supabase start --runtime native && " + strings.Repeat("true && ", between) + "supabase db schema declarative sync --local"
+	}
+	fixture.expect(t, fixture.linked, chain(0))
+	fixture.expect(t, fixture.linked, chain(30))
+	fixture.expect(t, fixture.linked, chain(34), "Blocked")
+	// A process killed by a pipeline into xargs kill is read the same way.
+	pipeline := func(between int) string {
+		return "echo postgres" + strings.Repeat(" | cat", between) + " | xargs kill"
+	}
+	fixture.expect(t, fixture.plain, pipeline(1), "Blocked")
+	fixture.expect(t, fixture.plain, pipeline(30), "Blocked")
+	fixture.expect(t, fixture.plain, pipeline(34))
+	// And so is the pipeline that tees a .env file after a status --env.
+	envPipeline := func(between int) string {
+		return "supabase status --env" + strings.Repeat(" | cat", between) + " | tee .env"
+	}
+	fixture.expect(t, fixture.linked, envPipeline(1), ".env")
+	fixture.expect(t, fixture.linked, envPipeline(30), ".env")
+	fixture.expect(t, fixture.linked, envPipeline(34))
+}
+
+func TestSupabaseRulesPlaceNoDirectoryLongerThanAPath(t *testing.T) {
+	fixture := newSupabaseFixture(t)
+	rules := &supabaseRules{environment: fixture.environment()}
+	if got := rules.resolveDirectory("/w", "a/b"); got != "/w/a/b" {
+		t.Fatalf("resolveDirectory = %q", got)
+	}
+	long := strings.Repeat("a/", maxPathLength/2)
+	if got := rules.resolveDirectory("/w", long); got != "" {
+		t.Fatalf("a directory of %d bytes is placed: %d", len("/w/"+long), len(got))
+	}
+	if got := rules.resolveDirectory("/w", strings.Repeat("a/", maxPathLength/2-4)); got == "" {
+		t.Fatal("a directory that fits is unknown")
+	}
+	if got := rules.resolveDirectory("", "/"+strings.Repeat("a/", maxPathLength)); got != "" {
+		t.Fatalf("an absolute directory of %d bytes is placed", 2*maxPathLength+1)
 	}
 }
 
@@ -200,9 +1283,8 @@ func newSupabaseFixture(t *testing.T) *supabaseFixture {
 		}
 	}
 	fixture.steering = steeringState{
-		writtenAt:  fixture.now.Add(-30 * time.Second),
-		desktopPID: 4242,
-		enabled:    true,
+		writtenAt: fixture.now.Add(-30 * time.Second),
+		enabled:   true,
 		roots: []steeringRoot{{
 			worktreeRoot:  fixture.managed,
 			projectRoot:   fixture.managed,
@@ -464,6 +1546,12 @@ func TestSupabaseRulesFollowTheCommandDirectory(t *testing.T) {
 	fixture.expect(t, fixture.linked, "bash -O extglob --norc -ec 'supabase start'", native)
 	fixture.expect(t, fixture.linked, "eval supabase start", native)
 	fixture.expect(t, fixture.linked, "bash scripts/start.sh")
+	fixture.expect(t, from, "timeout 120 bash -lc 'cd "+fixture.linked+" && supabase start'", native)
+	fixture.expect(t, fixture.linked, "bash <<< 'supabase start'", native)
+	// A package runner's shell mode runs its string in a shell too.
+	fixture.expect(t, fixture.linked, "npx -c 'supabase start'", native)
+	fixture.expect(t, fixture.linked, "pnpm exec -c 'supabase start'", native)
+	fixture.expect(t, from, "bash <<'EOF'\ncd "+fixture.linked+"\nsupabase start\nEOF", native)
 	fixture.home = fixture.linked
 	fixture.expect(t, from, "cd && supabase start", native)
 	fixture.expect(t, from, "cd ~ && supabase start", native)
@@ -509,6 +1597,38 @@ func TestSupabaseAlwaysOnRulesProtectOtherAgentsStacks(t *testing.T) {
 		"pkill -f node", "kill 1234", "pgrep postgres", "pkill oauth-proxy", "killall Simulator",
 		"ps aux | grep postgres", "pg_ctl status", "kill -0 $(cat metro.pid)", "pgrep -f supabase | wc -l",
 		"echo postgres | xargs echo",
+	} {
+		fixture.expect(t, fixture.legacy, command)
+	}
+	// So are the scripts handed to a shell, however the shell runs, and the
+	// command strings of the tools that run them.
+	for command, want := range map[string]string{
+		"timeout 60 sh -c 'supabase stop --all'":                "every agent's local Supabase stack",
+		"xargs -I{} bash -c 'supabase stop --all'":              "every agent's local Supabase stack",
+		"bash <<< 'supabase stop --all'":                        "every agent's local Supabase stack",
+		"echo 'supabase stop --all' | sh":                       "every agent's local Supabase stack",
+		"nice -n 10 bash -lc 'pkill -f supabase'":               "kills every agent's database",
+		"sudo -u me sh -c 'kill $(pgrep postgres)'":             "kills every agent's database",
+		"echo 'supabase stop --all' | sudo -u me sh":            "every agent's local Supabase stack",
+		"echo 'pkill postgres' | timeout 60 bash":               "kills every agent's database",
+		"bash<<<'supabase stop --all'":                          "every agent's local Supabase stack",
+		"bash <<'EOF'\nsupabase stop --all\nEOF":                "every agent's local Supabase stack",
+		"npx concurrently 'supabase stop --all' 'npm run api'":  "every agent's local Supabase stack",
+		"tmux new -d 'pkill -f supabase'":                       "kills every agent's database",
+		"echo 'supabase stop --all' | xargs -I{} sh -c '{}'":    "every agent's local Supabase stack",
+		`osascript -e 'do shell script "supabase stop --all"'`:  "every agent's local Supabase stack",
+		"env -S'supabase stop --all'":                           "every agent's local Supabase stack",
+		`eval "$(echo 'supabase stop --all')"`:                  "every agent's local Supabase stack",
+		"cat <<'EOF' | bash\nsupabase stack destroy --yes\nEOF": "deletes a local database",
+	} {
+		fixture.expect(t, fixture.legacy, command, want)
+	}
+	// A here-string or here-document is the shell's only when the shell is the
+	// command: grep's input is text.
+	for _, command := range []string{
+		"grep sh <<< 'supabase stop --all'",
+		"grep -c bash <<'EOF'\nsupabase stop --all\nEOF",
+		"echo 'supabase stop --all' | sudo -u me tee notes.md",
 	} {
 		fixture.expect(t, fixture.legacy, command)
 	}
@@ -776,8 +1896,8 @@ func TestSupabaseRulesFailOpen(t *testing.T) {
 	for _, command := range []string{
 		"supabase", "supabase ''", "npx", "pnpm exec", "pnpm", "yarn dlx", "npm exec --", "bun",
 		`supabase "unterminated`, "supabase $(", "cd", "kill", "xargs kill", "supabase --workdir",
-		"supabase stop --workdir", "SUPABASE_WORKDIR= supabase stop", "npx -c 'supabase start'",
-		"pnpm exec -c 'supabase start'", "supabase-cli start", "supabase.sh start",
+		"supabase stop --workdir", "SUPABASE_WORKDIR= supabase stop", "npx -c", "env -S",
+		"supabase-cli start", "supabase.sh start",
 	} {
 		fixture.expect(t, fixture.linked, command)
 	}

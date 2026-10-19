@@ -67,9 +67,6 @@ func defaultSupabaseEnvironment() supabaseEnvironment {
 	}
 }
 
-// maxNestedScripts bounds how deep `bash -c "…"` and eval are followed.
-const maxNestedScripts = 4
-
 // supabaseRules judges one Bash call. It loads steering.json and probes the
 // desktop at most once, and only when a command needs them.
 type supabaseRules struct {
@@ -79,6 +76,8 @@ type supabaseRules struct {
 	reachable   *bool
 	home        *string
 	nesting     int
+	// scripts meters the scripts the rules follow (see handedScripts).
+	scripts scriptLedger
 }
 
 func (rules *supabaseRules) enabled() bool {
@@ -134,10 +133,11 @@ func (rules *supabaseRules) judge(line shellLine, cwd string) HookDecision {
 	for index, segment := range line.segments {
 		directory := directoryOf(segment.scope)
 		_, words := segment.commandWords()
-		if len(words) == 0 {
-			continue
+		program := ""
+		if len(words) > 0 {
+			program = baseName(words[0])
 		}
-		switch baseName(words[0]) {
+		switch program {
 		case "cd", "pushd":
 			if changesDirectory(segment.terminator) {
 				directories[segment.scope] = rules.changeDirectory(directory, words[1:])
@@ -180,9 +180,21 @@ func (rules *supabaseRules) changeDirectory(current string, arguments []string) 
 	return rules.resolveDirectory(current, arguments[0])
 }
 
+// maxPathLength bounds the directories the rules follow: no path of a real
+// directory is longer, and a line of 1 MiB can nest ( cd a; groups a hundred
+// thousand deep, each building a longer path than the one before.
+const maxPathLength = 4096
+
 // resolveDirectory places target the way the shell would from base, or
 // returns "" (unknown) when it depends on something the hook cannot see.
 func (rules *supabaseRules) resolveDirectory(base string, target string) string {
+	if resolved := rules.placeDirectory(base, target); len(resolved) <= maxPathLength {
+		return resolved
+	}
+	return ""
+}
+
+func (rules *supabaseRules) placeDirectory(base string, target string) string {
 	for _, variable := range []string{"$HOME", "${HOME}"} {
 		if target == variable || strings.HasPrefix(target, variable+"/") {
 			target = "~" + strings.TrimPrefix(target, variable)
@@ -216,16 +228,22 @@ func (rules *supabaseRules) resolveDirectory(base string, target string) string 
 }
 
 func (rules *supabaseRules) judgeSegment(line shellLine, index int, directory string) HookDecision {
-	assignments, words := line.segments[index].commandWords()
-	program := baseName(words[0])
-	switch program {
-	case "bash", "sh", "zsh", "dash", "ksh":
-		if script, ok := shellScript(words[1:]); ok {
-			return rules.nested(script, directory)
+	if !rules.scripts.exhausted() {
+		for _, script := range handedScripts(line, index) {
+			if decision := rules.nested(line, script, directory); decision.Block {
+				return decision
+			}
 		}
+	}
+	assignments, words := line.segments[index].commandWords()
+	if len(words) == 0 {
+		// Only launchers, whose own command strings are judged above.
 		return HookDecision{}
-	case "eval":
-		return rules.nested(strings.Join(words[1:], " "), directory)
+	}
+	program := baseName(words[0])
+	if shellPrograms[program] || program == "eval" {
+		// The rest is the shell's own: options, script, and parameters.
+		return HookDecision{}
 	}
 	if command, kills := killsStackProcesses(line, index, program, words); kills {
 		if !rules.enabled() {
@@ -240,39 +258,15 @@ func (rules *supabaseRules) judgeSegment(line shellLine, index int, directory st
 	return rules.judgeSupabase(line, index, invocation, directory)
 }
 
-// nested judges the script of `bash -c "…"` or `eval …` from directory.
-func (rules *supabaseRules) nested(script string, directory string) HookDecision {
-	if rules.nesting >= maxNestedScripts {
+// nested judges a script that a command of line hands on (see handedScripts)
+// from directory.
+func (rules *supabaseRules) nested(line shellLine, script handedScript, directory string) HookDecision {
+	if rules.nesting >= maxNestedScripts || !rules.scripts.follow(script, directory, rules.nesting) {
 		return HookDecision{}
 	}
 	rules.nesting++
 	defer func() { rules.nesting-- }()
-	return rules.judge(parseShellLine(script), directory)
-}
-
-// shellScript finds the script a shell runs with -c (also in clusters such
-// as -lc or -ec), and reports false for a shell that reads a file or stdin.
-func shellScript(arguments []string) (string, bool) {
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		switch {
-		case argument == "-o" || argument == "+o" || argument == "-O" || argument == "+O":
-			// A named option such as -o pipefail or -O extglob.
-			index++
-		case strings.HasPrefix(argument, "--"):
-			if argument == "--" {
-				return "", false
-			}
-		case strings.HasPrefix(argument, "-") || strings.HasPrefix(argument, "+"):
-			if strings.ContainsRune(argument[1:], 'c') && index+1 < len(arguments) {
-				return arguments[index+1], true
-			}
-		default:
-			// A script file: nothing inline to judge.
-			return "", false
-		}
-	}
-	return "", false
+	return rules.judge(line.parseScript(script.text), directory)
 }
 
 func blocked(reason string) HookDecision {
@@ -287,10 +281,6 @@ var supabaseBinaryPattern = regexp.MustCompile(`(?:^|/)supabase(?:@[\w.^~-]+)?$`
 
 // supabaseInvocation is one segment that runs the Supabase CLI.
 type supabaseInvocation struct {
-	// runner is how the CLI is launched: "" for a binary, else npx, pnpm,
-	// pnpm exec, pnpm dlx, yarn, yarn dlx, yarn exec, yarn run, bunx,
-	// bun x, bun run, or npm exec.
-	runner string
 	// launcher is the words up to and including the binary, as written.
 	launcher []string
 	binary   string
@@ -410,32 +400,31 @@ func parseSupabaseInvocation(words []string, assignmentWords []string) (supabase
 		}
 		return true
 	}
-	subcommand := func(runner string, set runnerOptions) bool {
-		invocation.runner = runner
+	// subcommand takes the runner word (or its exec, dlx, x subcommand) and
+	// then that word's own options.
+	subcommand := func(set runnerOptions) bool {
 		take(1)
 		return options(set)
 	}
 	valid := true
 	switch baseName(rest[0]) {
 	case "npx":
-		valid = subcommand("npx", npxOptions)
+		valid = subcommand(npxOptions)
 	case "pnpx":
 		invocation.downloads = true
-		valid = subcommand("pnpm dlx", pnpmRunOptions)
+		valid = subcommand(pnpmRunOptions)
 	case "bunx":
-		valid = subcommand("bunx", bunxOptions)
+		valid = subcommand(bunxOptions)
 	case "pnpm":
 		take(1)
 		valid = options(pnpmOptions) && len(rest) > 0
 		if valid {
 			switch rest[0] {
 			case "exec":
-				valid = subcommand("pnpm exec", pnpmRunOptions)
+				valid = subcommand(pnpmRunOptions)
 			case "dlx":
 				invocation.downloads = true
-				valid = subcommand("pnpm dlx", pnpmRunOptions)
-			default:
-				invocation.runner = "pnpm"
+				valid = subcommand(pnpmRunOptions)
 			}
 		}
 	case "yarn":
@@ -445,24 +434,22 @@ func parseSupabaseInvocation(words []string, assignmentWords []string) (supabase
 			switch rest[0] {
 			case "dlx":
 				invocation.downloads = true
-				valid = subcommand("yarn dlx", yarnDlxOptions)
+				valid = subcommand(yarnDlxOptions)
 			case "exec", "run":
-				valid = subcommand("yarn "+rest[0], runnerOptions{})
-			default:
-				invocation.runner = "yarn"
+				valid = subcommand(runnerOptions{})
 			}
 		}
 	case "bun":
 		take(1)
 		valid = options(bunOptions) && len(rest) > 0 && (rest[0] == "x" || rest[0] == "run")
 		if valid {
-			valid = subcommand("bun "+rest[0], bunxOptions)
+			valid = subcommand(bunxOptions)
 		}
 	case "npm":
 		take(1)
 		valid = options(npmOptions) && len(rest) > 0 && (rest[0] == "exec" || rest[0] == "x")
 		if valid {
-			valid = subcommand("npm exec", npmExecOptions)
+			valid = subcommand(npmExecOptions)
 		}
 	}
 	if !valid || len(rest) == 0 || !supabaseBinaryPattern.MatchString(rest[0]) {
@@ -502,7 +489,7 @@ var (
 		"password", "lang", "env-file", "import-map",
 	)
 	supabaseShortValueFlags = names("o", "x", "s", "f", "p")
-	redirectPattern         = regexp.MustCompile(`^(?:[0-9]+|&)?(>>?\|?|<<?<?)(.*)$`)
+	redirectPattern         = regexp.MustCompile(`^([0-9]+|&)?(>>?\|?|<<?<?)(.*)$`)
 )
 
 func parseSupabaseArguments(arguments []string) supabaseArguments {
@@ -563,11 +550,18 @@ func parseSupabaseArguments(arguments []string) supabaseArguments {
 // redirection splits a redirection word (>, >>, 2>, &>, >|, <, …) into its
 // operator and the target written in the same word.
 func redirection(word string) (operator string, target string, ok bool) {
+	_, operator, target, ok = splitRedirection(word)
+	return operator, target, ok
+}
+
+// splitRedirection is redirection plus the file descriptor the operator
+// names: "2" in 2>&1, "&" in &>, "" when it names none.
+func splitRedirection(word string) (descriptor string, operator string, target string, ok bool) {
 	match := redirectPattern.FindStringSubmatch(word)
 	if match == nil {
-		return "", "", false
+		return "", "", "", false
 	}
-	return match[1], match[2], true
+	return match[1], match[2], match[3], true
 }
 
 func (args supabaseArguments) has(name string) bool {
@@ -980,7 +974,8 @@ func (rules *supabaseRules) foreignBinary(invocation supabaseInvocation, root st
 // chainedAfterNativeStart reports a native start earlier in the same `&&`
 // chain, which leaves a running native stack for the command after it.
 func chainedAfterNativeStart(line shellLine, index int) bool {
-	for previous := previousInScope(line, index); previous >= 0 && line.segments[previous].terminator == "&&"; previous = previousInScope(line, previous) {
+	steps := 0
+	for previous := previousInScope(line, index); previous >= 0 && steps < maxChainSteps && line.segments[previous].terminator == "&&"; previous, steps = previousInScope(line, previous), steps+1 {
 		assignments, words := line.segments[previous].commandWords()
 		if len(words) == 0 {
 			continue
@@ -1004,7 +999,7 @@ func writesEnvFile(line shellLine, index int, redirects []string) (string, bool)
 			return target, true
 		}
 	}
-	for current := index; isPipe(line.segments[current].terminator); {
+	for current, steps := index, 0; isPipe(line.segments[current].terminator) && steps < maxChainSteps; steps++ {
 		next := nextInScope(line, current)
 		if next < 0 {
 			break
@@ -1051,22 +1046,19 @@ func isPipe(terminator string) bool {
 	return terminator == "|" || terminator == "|&"
 }
 
+// maxChainSteps bounds how many commands of an && chain or a pipeline a rule
+// reads before or after one command: a line of 1 MiB can chain tens of
+// thousands, and each of them would read all the others.
+const maxChainSteps = 32
+
+// previousInScope and nextInScope are the segments just before and after the
+// one at index in its own command list, -1 when it is the first or the last.
 func previousInScope(line shellLine, index int) int {
-	for previous := index - 1; previous >= 0; previous-- {
-		if line.segments[previous].scope == line.segments[index].scope {
-			return previous
-		}
-	}
-	return -1
+	return line.before[index]
 }
 
 func nextInScope(line shellLine, index int) int {
-	for next := index + 1; next < len(line.segments); next++ {
-		if line.segments[next].scope == line.segments[index].scope {
-			return next
-		}
-	}
-	return -1
+	return line.after[index]
 }
 
 // MARK: - Killing stack processes
@@ -1122,7 +1114,8 @@ func killsStackProcesses(line shellLine, index int, program string, words []stri
 		if !containsProgram(words[1:], "kill", "pkill", "killall") {
 			return "", false
 		}
-		for previous := previousInScope(line, index); previous >= 0 && isPipe(line.segments[previous].terminator); previous = previousInScope(line, previous) {
+		steps := 0
+		for previous := previousInScope(line, index); previous >= 0 && steps < maxChainSteps && isPipe(line.segments[previous].terminator); previous, steps = previousInScope(line, previous), steps+1 {
 			for _, word := range line.segments[previous].words {
 				if namesStackProcess(word) {
 					return displayPath(strings.TrimSpace(line.segments[previous].text)) + " | " + short(), true

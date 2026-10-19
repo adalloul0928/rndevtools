@@ -11,8 +11,8 @@ import (
 const maxShellDepth = 16
 
 // shellSegment is one simple command of a shell line: its source text, which
-// the pattern rules match against, and its words with quoting removed, which
-// say what program it runs.
+// the text rule matches (see judgeText) and a reason may quote, and its words
+// with quoting removed, which the word rules judge.
 type shellSegment struct {
 	text  string
 	words []string
@@ -25,6 +25,30 @@ type shellSegment struct {
 	// in the scope it appears in. A `cd` changes the directory of its own
 	// scope only, which is how a subshell behaves.
 	scope int
+	// documents are the bodies of the segment's here-documents, which are
+	// input rather than commands: a rule reads one only as what the command
+	// reads (a shell runs it, cat passes it on).
+	documents []hereBody
+	// pipedGroup is the scope of the ( … ) group whose output is piped into
+	// the segment, as in (echo cmd) | sh; 0 when there is none.
+	pipedGroup int
+}
+
+// hereBody is one here-document body and the index, among its segment's
+// words, of the operator word (<<EOF) that introduced it.
+type hereBody struct {
+	word int
+	body string
+}
+
+// document is the body of the here-document whose operator is words[index].
+func (segment shellSegment) document(index int) (string, bool) {
+	for _, document := range segment.documents {
+		if document.word == index {
+			return document.body, true
+		}
+	}
+	return "", false
 }
 
 // shellLine is a split line: its segments in the order they run (a
@@ -33,6 +57,36 @@ type shellSegment struct {
 type shellLine struct {
 	segments []shellSegment
 	parents  []int
+	// source is the line as written. partial says that the splitter could not
+	// read all of it as the shell does: a quote, a substitution or a ( group
+	// ran off its end, or a substitution was nested deeper than maxShellDepth
+	// and stayed part of a word. Past any of them the splitter and the shell
+	// may no longer agree about where the commands are.
+	source  string
+	partial bool
+	// glob says that an unquoted *, ? or [ stands in a word of some command,
+	// quotes, escapes, comments and here-document bodies aside: the shell may
+	// expand it into the names of files, which are arguments (or options) that
+	// the line does not spell out.
+	glob bool
+	// plainBackslashes counts the backslashes of source that stand inside the
+	// single-quoted strings the scan read, where a backslash is an ordinary
+	// character ('%s\n', 'a\|b'). Any other backslash of source is an escape, or
+	// may be one: outside quotes, in double quotes, in a comment, or in the body
+	// of a here-document.
+	plainBackslashes int
+	// before and after hold, for each segment, the nearest segment before
+	// and after it in its own scope (-1 when there is none); last holds the
+	// last segment of each scope. A rule walks a scope by these links, not by
+	// scanning every segment in between.
+	before, after, last []int
+	// files indexes the files the line's commands write, built on first use
+	// (see writtenScript).
+	files *lineFiles
+	// groupReads counts the commands of groups that the rules have read for
+	// the text they print (see maxGroupReads); every copy of the line shares
+	// it, and so do the scripts it hands on (see parseScript).
+	groupReads *int
 }
 
 // splitShell splits a shell line into the simple commands it runs. It breaks
@@ -42,6 +96,9 @@ type shellLine struct {
 // substitution runs no matter which command it appears in. Single and double
 // quotes and backslash escapes are honoured. It is a splitter, not a parser:
 // the rules only need to know where each command starts and what it runs.
+// The text of each segment is its source as written, quotes included, with a
+// placeholder for each substitution body and nothing for a here-document
+// body; the text rule reads exactly that.
 func splitShell(line string) []shellSegment {
 	return parseShellLine(line).segments
 }
@@ -51,7 +108,45 @@ func splitShell(line string) []shellSegment {
 func parseShellLine(line string) shellLine {
 	splitter := shellSplitter{line: line, parents: []int{-1}}
 	splitter.scan(0, 0, 0, 0)
-	return shellLine{segments: splitter.segments, parents: splitter.parents}
+	parsed := shellLine{
+		segments:         splitter.segments,
+		parents:          splitter.parents,
+		source:           line,
+		partial:          splitter.partial,
+		glob:             splitter.glob,
+		plainBackslashes: splitter.plainBackslashes,
+		files:            &lineFiles{},
+		groupReads:       new(int),
+	}
+	parsed.linkScopes()
+	return parsed
+}
+
+// parseScript parses a script that a command of the line hands on to be run.
+// The script is a line of its own, but it shares the reading of groups of the
+// line it came from, so that the call as a whole is bounded, not each script.
+func (line shellLine) parseScript(text string) shellLine {
+	script := parseShellLine(text)
+	script.groupReads = line.groupReads
+	return script
+}
+
+// linkScopes fills in before, after and last.
+func (line *shellLine) linkScopes() {
+	line.before = make([]int, len(line.segments))
+	line.after = make([]int, len(line.segments))
+	line.last = make([]int, len(line.parents))
+	following := make([]int, len(line.parents))
+	for scope := range line.last {
+		line.last[scope], following[scope] = -1, -1
+	}
+	for index, segment := range line.segments {
+		line.before[index], line.last[segment.scope] = line.last[segment.scope], index
+	}
+	for index := len(line.segments) - 1; index >= 0; index-- {
+		scope := line.segments[index].scope
+		line.after[index], following[scope] = following[scope], index
+	}
 }
 
 // commandWords returns the assignments that prefix a segment's command
@@ -125,6 +220,14 @@ type shellSplitter struct {
 	line     string
 	segments []shellSegment
 	parents  []int
+	// partial is set when a quote, a substitution or a ( group runs off the end
+	// of the line, and when a substitution is too deep to split (see
+	// shellLine).
+	partial bool
+	// glob is set when an unquoted *, ? or [ stands in a word (see shellLine).
+	glob bool
+	// plainBackslashes counts the backslashes in single quotes (see shellLine).
+	plainBackslashes int
 }
 
 // newScope opens a command list nested in parent.
@@ -155,6 +258,15 @@ func (builder *segmentBuilder) endWord() {
 	}
 }
 
+// endWordBeforeInput ends the word being read where an input operator (<<<
+// or <<) starts, so `bash<<<'cmd'` is bash reading a here-string rather than
+// one word. A file descriptor number stays with its operator (0<<<'cmd').
+func (builder *segmentBuilder) endWordBeforeInput() {
+	if word := builder.word.String(); word == "" || strings.Trim(word, "0123456789") != "" {
+		builder.endWord()
+	}
+}
+
 func (builder *segmentBuilder) flush(splitter *shellSplitter, scope int, terminator string) {
 	builder.endWord()
 	if len(builder.words) > 0 {
@@ -179,29 +291,68 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 	// groups holds the scopes of the ( … ) groups open here, innermost last.
 	groups := []int{scope}
 	inner := func() int { return groups[len(groups)-1] }
-	flush := func(terminator string) { current.flush(splitter, inner(), terminator) }
+	// documents are the here-documents whose bodies start after this line;
+	// claimed is how many of them a flushed segment already reads.
+	var documents []hereDocument
+	claimed := 0
+	// closedGroup is the scope of the ( … ) group that closed just before
+	// the current character, with nothing but blanks since; pipedGroup is the
+	// one piped into the next segment.
+	closedGroup, pipedGroup := 0, 0
+	flush := func(terminator string) {
+		before := len(splitter.segments)
+		current.flush(splitter, inner(), terminator)
+		if len(splitter.segments) == before {
+			return
+		}
+		// The segment just flushed is the command that reads the bodies of the
+		// here-documents read since the last one, and the group piped into it.
+		// Those are the documents after the claimed ones, so a line of
+		// thousands of operators does not walk them all at every flush.
+		for ; claimed < len(documents); claimed++ {
+			documents[claimed].segment = before
+		}
+		splitter.segments[before].pipedGroup, pipedGroup = pipedGroup, 0
+	}
 	next := func(index int) byte {
 		if index+1 < len(line) {
 			return line[index+1]
 		}
 		return 0
 	}
-	// documents are the here-documents whose bodies start after this line.
-	var documents []hereDocument
+	// operatorAt is where the last `<` or `>` stood as an operator: not quoted,
+	// not escaped. A `|` or `&` right after it belongs to it (>|, >&, <&); after
+	// a quoted or escaped one it is a pipe or a background operator, whatever
+	// the character before it is.
+	operatorAt := -1
+	afterOperator := func(index int) byte {
+		if operatorAt >= 0 && operatorAt == index-1 {
+			return line[operatorAt]
+		}
+		return 0
+	}
 	index := start
 	for index < len(line) {
 		character := line[index]
+		if character != ' ' && character != '\t' && character != ')' && character != '|' {
+			closedGroup = 0
+		}
 		switch {
 		case closer != 0 && character == closer && (closer != ')' || len(groups) == 1):
 			flush("")
 			return index + 1
 		case character == '<' && strings.HasPrefix(line[index:], "<<<"):
 			// A here-string is one word of input.
+			current.endWordBeforeInput()
 			current.literal("<<<")
 			index += 3
 		case character == '<' && next(index) == '<':
 			if end, document, ok := readHereDocument(line, index); ok {
-				current.literal(line[index:end])
+				current.endWordBeforeInput()
+				document.word = len(current.words)
+				// A line continuation inside the operator and its delimiter is
+				// not part of the word the shell reads.
+				current.literal(strings.ReplaceAll(line[index:end], "\\\n", ""))
 				documents = append(documents, document)
 				index = end
 			} else {
@@ -228,6 +379,9 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 			if end := strings.IndexByte(body, '\''); end >= 0 {
 				body = body[:end]
 				stop = index + 1 + end + 1
+				splitter.plainBackslashes += strings.Count(body, "\\")
+			} else {
+				splitter.partial = true
 			}
 			current.word.WriteString(body)
 			current.text.WriteString(line[index:stop])
@@ -254,7 +408,9 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 			index++
 		case character == ')':
 			flush("")
+			closedGroup = 0
 			if len(groups) > 1 {
+				closedGroup = inner()
 				groups = groups[:len(groups)-1]
 			}
 			index++
@@ -262,11 +418,12 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 			flush(string(character))
 			index++
 			if character == '\n' && len(documents) > 0 {
-				// Here-document bodies are the command's input, not commands.
-				index = skipHereDocuments(line, index, documents)
-				documents = nil
+				// Here-document bodies are the command's input, not commands,
+				// except for the substitutions the shell expands in them.
+				index = splitter.readHereDocuments(index, documents, inner(), depth)
+				documents, claimed = nil, 0
 			}
-		case character == '|' && current.inWord && index > start && line[index-1] == '>':
+		case character == '|' && afterOperator(index) == '>':
 			// `>|` redirects despite noclobber; it is not a pipe.
 			current.literal("|")
 			index++
@@ -275,6 +432,11 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 			if next(index) == '|' || next(index) == '&' {
 				terminator = line[index : index+2]
 			}
+			if terminator != "||" && closedGroup > 0 && !current.inWord && len(current.words) == 0 {
+				// (echo cmd) | sh: the group's output is the next command's input.
+				pipedGroup = closedGroup
+			}
+			closedGroup = 0
 			flush(terminator)
 			index += len(terminator)
 		case character == '&':
@@ -282,7 +444,7 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 			case next(index) == '&':
 				flush("&&")
 				index += 2
-			case next(index) == '>' || (index > start && (line[index-1] == '>' || line[index-1] == '<')):
+			case next(index) == '>' || afterOperator(index) != 0:
 				// A redirection (&>, 2>&1, <&3), not a background job.
 				current.literal("&")
 				index++
@@ -291,11 +453,23 @@ func (splitter *shellSplitter) scan(start int, closer byte, depth int, scope int
 				index++
 			}
 		default:
+			// What reaches here is unquoted and unescaped.
+			switch character {
+			case '<', '>':
+				operatorAt = index
+			case '*', '?', '[':
+				splitter.glob = true
+			}
 			current.literal(line[index : index+1])
 			index++
 		}
 	}
 	flush("")
+	if closer != 0 || len(groups) > 1 {
+		// The body of a substitution, or a ( group, ran off the end of the
+		// line. A shell calls that a syntax error, or in zsh a pattern.
+		splitter.partial = true
+	}
 	return index
 }
 
@@ -328,16 +502,17 @@ func (splitter *shellSplitter) doubleQuoted(current *segmentBuilder, start int, 
 			index++
 		}
 	}
+	splitter.partial = true
 	return index
 }
 
 // substitution splits the body of a command, process, or backtick
 // substitution into segments of its own scope, nested in scope, and keeps
-// its source as part of the word it appears in. The segment's text, which
-// the pattern rules read, holds only a placeholder: the body's commands are
-// judged as segments of their own, and its here-documents not at all. Past
+// its source as part of the word it appears in. The segment's text, which the
+// text rule reads, holds only a placeholder: the body's commands are judged
+// as segments of their own, and its here-documents not at all. Past
 // maxShellDepth the body is only skipped over, to its matching closer, and
-// stays plain text.
+// stays plain text, which makes the line partial.
 func (splitter *shellSplitter) substitution(current *segmentBuilder, open int, body int, closer byte, depth int, scope int) int {
 	line := splitter.line
 	end := body
@@ -348,6 +523,7 @@ func (splitter *shellSplitter) substitution(current *segmentBuilder, open int, b
 		current.inWord = true
 		return end
 	}
+	splitter.partial = true
 	for nesting := 0; end < len(line); {
 		character := line[end]
 		end++
@@ -370,13 +546,23 @@ type hereDocument struct {
 	delimiter string
 	// stripTabs is <<-, whose delimiter line may be indented with tabs.
 	stripTabs bool
+	// quoted is a delimiter with any quoting in it ('EOF', "EOF", \EOF),
+	// which leaves the body as literal text; the shell expands the body of
+	// any other.
+	quoted bool
+	// segment is the index of the segment whose command reads the body, -1
+	// until that segment is complete; word is its operator word's index.
+	segment int
+	word    int
 }
 
 // readHereDocument reads the operator and delimiter word at line[index:]
 // (quoted or not) and returns the index just past them. Only a name-like
-// delimiter counts, so arithmetic such as $(( 1 << 2 )) is left alone.
+// delimiter counts, so arithmetic such as $(( 1 << 2 )) is left alone, and so
+// is a word whose escaped blank or metacharacter (<<E\ F) is part of the
+// delimiter the shell reads.
 func readHereDocument(line string, index int) (int, hereDocument, bool) {
-	document := hereDocument{}
+	document := hereDocument{segment: -1}
 	position := index + 2
 	if position < len(line) && line[position] == '-' {
 		document.stripTabs = true
@@ -395,8 +581,24 @@ func readHereDocument(line string, index int) (int, hereDocument, bool) {
 			}
 			delimiter.WriteString(line[position+1 : position+1+end])
 			position += end + 2
+			document.quoted = true
 		case '\\':
+			if position+1 < len(line) && line[position+1] == '\n' {
+				// A line continuation joins what follows, from the next line,
+				// to the delimiter: `<<EOF\` and `hi` is the delimiter EOFhi.
+				position += 2
+				continue
+			}
+			// Any other backslash quotes the character after it, a blank, a
+			// metacharacter or another backslash included, and the delimiter is
+			// the word without the backslash: <<E\ F is "E F", which is no name,
+			// so the << is left alone. A backslash that ends the line is itself.
+			if position+1 < len(line) {
+				position++
+			}
+			delimiter.WriteByte(line[position])
 			position++
+			document.quoted = true
 		default:
 			delimiter.WriteByte(character)
 			position++
@@ -411,25 +613,93 @@ func readHereDocument(line string, index int) (int, hereDocument, bool) {
 
 var hereDocumentDelimiter = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// skipHereDocuments returns the index just past the bodies of documents,
-// which follow one another from line[start:]. A body without its delimiter
-// line runs to the end of the input.
-func skipHereDocuments(line string, start int, documents []hereDocument) int {
+// readHereDocuments reads the bodies of documents, which follow one another
+// from line[start:], onto the segments whose commands read them, and returns
+// the index just past them. A body without its delimiter line runs to the
+// end of the input. The shell runs the substitutions in the body of a
+// document whose delimiter is unquoted, so those become segments of their
+// own, in scopes nested in the scope of the command that reads the body.
+func (splitter *shellSplitter) readHereDocuments(start int, documents []hereDocument, scope int, depth int) int {
+	line := splitter.line
 	index := start
 	for _, document := range documents {
+		var body strings.Builder
 		for index < len(line) {
-			text, next := line[index:], len(line)
-			if end := strings.IndexByte(line[index:], '\n'); end >= 0 {
-				text, next = line[index:index+end], index+end+1
-			}
-			index = next
+			var text string
+			text, index = hereDocumentLine(line, index, !document.quoted)
 			if document.stripTabs {
 				text = strings.TrimLeft(text, "\t")
 			}
 			if text == document.delimiter {
 				break
 			}
+			body.WriteString(text)
+			body.WriteByte('\n')
+		}
+		reader := scope
+		if document.segment >= 0 {
+			segment := &splitter.segments[document.segment]
+			segment.documents = append(segment.documents, hereBody{word: document.word, body: body.String()})
+			reader = segment.scope
+		}
+		if !document.quoted {
+			splitter.expandHereDocument(body.String(), reader, depth)
 		}
 	}
 	return index
+}
+
+// hereDocumentLine reads the line of a here-document body that starts at
+// line[start:], and returns its text and the index of the line after it. In
+// the body of a document whose delimiter is unquoted, which the shell expands,
+// a backslash and a newline join two lines into one, so a line that ends in
+// one is not a delimiter line, and the line that follows it may be (EOF\ and
+// an empty line is EOF). A backslash also quotes the character after it, a
+// backslash included. In any other body every line stands as written.
+func hereDocumentLine(line string, start int, expanded bool) (string, int) {
+	if !expanded {
+		if end := strings.IndexByte(line[start:], '\n'); end >= 0 {
+			return line[start : start+end], start + end + 1
+		}
+		return line[start:], len(line)
+	}
+	var text strings.Builder
+	for index := start; index < len(line); {
+		switch character := line[index]; {
+		case character == '\\' && index+1 < len(line) && line[index+1] == '\n':
+			index += 2
+		case character == '\\' && index+1 < len(line):
+			text.WriteString(line[index : index+2])
+			index += 2
+		case character == '\n':
+			return text.String(), index + 1
+		default:
+			text.WriteByte(character)
+			index++
+		}
+	}
+	return text.String(), len(line)
+}
+
+// expandHereDocument splits out the command and backtick substitutions in
+// the body of a here-document the shell expands. A backslash quotes the
+// character after it ($, `, \ and a newline), and a quote means nothing.
+func (splitter *shellSplitter) expandHereDocument(body string, scope int, depth int) {
+	inner := shellSplitter{line: body, segments: splitter.segments, parents: splitter.parents}
+	var unused segmentBuilder
+	for index := 0; index < len(body); {
+		switch {
+		case body[index] == '\\':
+			index += 2
+		case body[index] == '`':
+			index = inner.substitution(&unused, index, index+1, '`', depth, scope)
+		case body[index] == '$' && index+1 < len(body) && body[index+1] == '(':
+			index = inner.substitution(&unused, index, index+2, ')', depth, scope)
+		default:
+			index++
+		}
+	}
+	splitter.segments, splitter.parents = inner.segments, inner.parents
+	splitter.partial = splitter.partial || inner.partial
+	splitter.glob = splitter.glob || inner.glob
 }

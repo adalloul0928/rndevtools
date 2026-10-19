@@ -61,8 +61,22 @@ var requiredFields = map[protocol.Command][]string{
 type meta struct {
 	title       string
 	description string
+	// readOnly means every operation of the tool only observes. It becomes
+	// the readOnlyHint, and setup lets Kiro run these tools without asking.
 	readOnly    bool
 	destructive bool
+}
+
+// ReadOnlyTools names the tools whose every operation only observes, in list
+// order: the ones a client may run without asking the user.
+func ReadOnlyTools() []string {
+	var names []string
+	for _, kind := range toolOrder {
+		if toolMeta[kind].readOnly {
+			names = append(names, string(kind))
+		}
+	}
+	return names
 }
 
 // toolMeta is the agent-facing text for each tool. These descriptions do the
@@ -86,7 +100,8 @@ var toolMeta = map[protocol.Command]meta{
 			"and the device is free or yours); lane.slim in the result says applied, skipped (with why), or failed. " +
 			"Optional backend (auto, off, required): with auto, the development default, lane up also starts this " +
 			"worktree's local Supabase and passes its URL and publishable key to Metro, so never start Supabase by hand " +
-			"for a lane; lane.backend reports ready, starting (jobId; the app launches when it is ready), skipped, " +
+			"for a lane; lane.backend reports ready, starting (the app launches when it is ready; if the result has a " +
+			"jobId, call wait (condition job), and without one call lane up again in a few seconds), skipped, " +
 			"shadowed (the app's own .env files override the injected URL), refused, or failed, with the reason.",
 	},
 	protocol.CommandSupabase: {
@@ -98,7 +113,8 @@ var toolMeta = map[protocol.Command]meta{
 			"and returns its status, API and database ports, the CLI to run from the worktree (cli.run, e.g. pnpm " +
 			"exec supabase), and next steps; a lane on the worktree gets Metro restarted with the stack's URL and " +
 			"publishable key. A first start downloads services once: if the result has a jobId, call wait " +
-			"(condition job). lane up already does this for its worktree; call up yourself only for database work " +
+			"(condition job), and without one (the start is queued behind RN Devtools' own automatic start) call " +
+			"up again in a few seconds. lane up already does this for its worktree; call up yourself only for database work " +
 			"without a lane, after creating your git branch (each branch gets its own database). \"down\" releases " +
 			"your hold (the stack stops once unused, data kept); \"ls\" lists every stack with lanes and holders; " +
 			"\"status\" shows services; \"env\" returns the URLs and the publishable and anon keys (never secret keys " +
@@ -170,7 +186,7 @@ var toolMeta = map[protocol.Command]meta{
 	},
 	protocol.CommandClaim: {
 		title:       "Claim a Simulator for this session",
-		description: "Mark a Simulator as in use by this agent session so other agents and the desktop see it. note explains why. Claims are advisory; release when finished.",
+		description: "Mark a Simulator as held by this agent session. A claim is a hold: claiming a device someone else holds fails with device_held, and while you hold it, other sessions' lane up, launch, and down, input, native install, slimming, recipe runs, and job or recording cancels on it fail with device_held too, except that a session can always stop or cancel a recording it started itself. act and network are not gated: any session can still act in the app on a held device or change its network profile. note explains why; release when finished.",
 	},
 	protocol.CommandRelease: {
 		title:       "Release a claimed Simulator",
@@ -196,7 +212,7 @@ var toolMeta = map[protocol.Command]meta{
 	protocol.CommandJobs: {
 		title:       "Inspect background jobs",
 		description: "list, get (job-id), or cancel (job-id) the desktop's background jobs such as captures and recordings.",
-		readOnly:    true,
+		// cancel aborts a job, possibly another session's, so jobs is not read-only.
 	},
 	protocol.CommandSlimming: {
 		title: "Slim Simulators (SimSlim)",

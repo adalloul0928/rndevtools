@@ -115,7 +115,7 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "preferred-port", path: []string{"preferredPort"}, kind: fieldInteger, usage: "Specific Metro port inside the environment range (up)."},
 		{flagName: "launch", path: []string{"launch"}, kind: fieldBoolean, usage: "Open the dev client once Metro is ready (up; default true)."},
 		{flagName: "slim", path: []string{"slimProfileId"}, kind: fieldString, usage: "SimSlim profile to apply to the Simulator before Metro starts (up). Applied when SimSlim is enabled in RN Devtools and the device is free or yours; otherwise lane.slim says why it was skipped."},
-		{flagName: "backend", path: []string{"backend"}, kind: fieldString, usage: "This worktree's local Supabase (up): auto (the development default) starts it when RN Devtools manages the worktree's Supabase project and hands Metro its URL and publishable key; required fails the lane when it cannot start; off skips it. lane.backend in the result says ready, starting (with a jobId; the app launches once it is ready), skipped, shadowed (the app's own .env files override the URL), refused, or failed, and why."},
+		{flagName: "backend", path: []string{"backend"}, kind: fieldString, usage: "This worktree's local Supabase (up): auto (the development default) starts it when RN Devtools manages the worktree's Supabase project and hands Metro its URL and publishable key; required fails the lane when it cannot start; off skips it. lane.backend in the result says ready, starting (the app launches once it is ready; follow its jobId with wait when it has one, otherwise call lane up again in a few seconds), skipped, shadowed (the app's own .env files override the URL), refused, or failed, and why."},
 		{flagName: "lane-id", path: []string{"laneId"}, kind: fieldString, usage: "Lane identifier (down, launch, log)."},
 		{flagName: "url", path: []string{"url"}, kind: fieldString, usage: "Path or full URL to open through the lane scheme (launch)."},
 		{flagName: "max-characters", path: []string{"maxCharacters"}, kind: fieldInteger, usage: "Log tail size (log; 256..64000)."},
@@ -124,7 +124,7 @@ var commandFields = map[protocol.Command][]fieldSpec{
 		{flagName: "operation", path: []string{"operation"}, kind: fieldString, usage: "up: create or resume this worktree's local Supabase (native runtime, 127.0.0.1) and return its status, ports, the CLI to run from the worktree, and next steps. down: release your hold; the stack stops once nobody else uses it, data kept. ls: every stack on this Mac with its lanes and holders. status: its services and health. env: its API, REST, Functions and Mailpit URLs and the publishable and anon keys (never secret keys). reset: drop its data and re-run the migrations and seed. log: recent service logs. destroy: ask the user to delete its database."},
 		{flagName: "worktree", path: []string{"worktreePath"}, kind: fieldString, usage: "Absolute path of the git worktree (or the app directory inside it) whose stack to use. Every operation but ls takes exactly one of worktree or stack-id; prefer worktree.", cwdRelative: true},
 		{flagName: "stack-id", path: []string{"stackId"}, kind: fieldString, usage: "A stack id from ls (8-64 lowercase hex; a unique prefix is enough), instead of worktree."},
-		{flagName: "wait-ms", path: []string{"waitMs"}, kind: fieldInteger, usage: "up only: how long to wait for the stack to be ready (0..45000, default 30000). If it is still starting (a first start downloads services once), the result has a jobId: call wait with condition job and that job-id."},
+		{flagName: "wait-ms", path: []string{"waitMs"}, kind: fieldInteger, usage: "up only: how long to wait for the stack to be ready (0..45000, default 30000). If it is still starting (a first start downloads services once), the result has a jobId unless the start is queued behind RN Devtools' own: call wait with condition job and that job-id, or without one call up again in a few seconds."},
 		{flagName: "seed", path: []string{"seed"}, kind: fieldBoolean, usage: "reset only: re-run the seed after the migrations (default true; false resets to the migrations only)."},
 		{flagName: "service", path: []string{"services"}, kind: fieldList, usage: "log only: a service to read: database, rest, auth, realtime, storage, imgproxy, functions, studio, pgmeta, mail, analytics, pooler, gateway, or an instance id. Repeat it for several (at most 16); default every service."},
 		{flagName: "tail", path: []string{"tail"}, kind: fieldInteger, usage: "log only: how many lines to return (1..1000, default 200)."},
@@ -242,7 +242,10 @@ func ParseWithEnvironment(
 	}
 
 	command := map[string]any{}
-	if stdinAvailable {
+	// A command with no fields (doctor, agents) has nothing to read, so it
+	// never waits for stdin to end: `ssh host rndevtools doctor`, or a parent
+	// that leaves the pipe open, would otherwise hang.
+	if stdinAvailable && len(specs) > 0 {
 		input, err := readInputObject(stdin)
 		if err != nil {
 			return Parsed{}, err
@@ -308,8 +311,12 @@ func resolveAgainstWorkingDirectory(value any) any {
 func Usage(kind protocol.Command) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Usage: rndevtools %s [flags]\n", kind)
-	builder.WriteString("Accepts an optional JSON command object on stdin. Flags and stdin may\n")
-	builder.WriteString("supply different fields; defining the same field twice is rejected.\n\nFlags:\n")
+	if len(commandFields[kind]) == 0 {
+		builder.WriteString("Takes no fields, so it never reads stdin.\n\nFlags:\n")
+	} else {
+		builder.WriteString("Accepts an optional JSON command object on stdin. Flags and stdin may\n")
+		builder.WriteString("supply different fields; defining the same field twice is rejected.\n\nFlags:\n")
+	}
 	for _, spec := range commandFields[kind] {
 		fmt.Fprintf(&builder, "  --%-22s %s\n", spec.flagName, spec.usage)
 	}

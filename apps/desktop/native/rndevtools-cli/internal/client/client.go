@@ -94,11 +94,26 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		return protocol.Response{}, classifyNetworkError("connect to desktop app", err)
 	}
 	defer connection.Close()
+	// A caller that gives up (an MCP client cancelling a tool call) closes
+	// the connection, which ends the read at once. The desktop, which has
+	// already read this side's EOF, sees the close at its next liveness
+	// probe (a space it writes about once a second ahead of a slow answer)
+	// and aborts the handler; a desktop job the handler started keeps
+	// running. The deadline below still bounds everything else.
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	failed := func(operation string, err error) error {
+		if cause := ctx.Err(); cause != nil {
+			// The closed connection is only the symptom; report why.
+			return classifyNetworkError(operation, cause)
+		}
+		return classifyNetworkError(operation, err)
+	}
 	if err := connection.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return protocol.Response{}, &ClientError{Kind: ErrorTransport, Op: "set socket deadline", Cause: err}
 	}
 	if err := writeAll(connection, append(encoded, '\n')); err != nil {
-		return protocol.Response{}, classifyNetworkError("write request", err)
+		return protocol.Response{}, failed("write request", err)
 	}
 	unixConnection, ok := connection.(*net.UnixConn)
 	if !ok {
@@ -109,7 +124,7 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		}
 	}
 	if err := unixConnection.CloseWrite(); err != nil {
-		return protocol.Response{}, classifyNetworkError("finish request", err)
+		return protocol.Response{}, failed("finish request", err)
 	}
 
 	limited := &io.LimitedReader{R: connection, N: protocol.MaxResponseBytes + 1}
@@ -123,7 +138,7 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 				Cause: fmt.Errorf("response exceeds %d bytes", protocol.MaxResponseBytes),
 			}
 		}
-		return protocol.Response{}, classifyNetworkError("read response", err)
+		return protocol.Response{}, failed("read response", err)
 	}
 	if len(line) > protocol.MaxResponseBytes {
 		return protocol.Response{}, &ClientError{

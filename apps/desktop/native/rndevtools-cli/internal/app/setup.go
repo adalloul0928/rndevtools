@@ -167,6 +167,8 @@ func setupDoctor(config Config) map[string]any {
 // runHook dispatches `rndevtools hook <event>`, the entry point the installed
 // agent hooks call. Decisions are communicated the way each agent expects:
 // Claude Code reads exit status 2 as "block" and shows stderr to the model.
+// Only a block decision exits 2; nothing else here may, or a hook this build
+// cannot run would refuse every Bash call.
 func runHook(config Config) int {
 	event := ""
 	if len(config.Arguments) >= 2 {
@@ -187,8 +189,13 @@ func runHook(config Config) int {
 		fmt.Fprint(config.Stdout, hookUsage)
 		return ExitSuccess
 	default:
-		fmt.Fprint(config.Stdout, hookUsage)
-		return ExitUsage
+		// An event from a newer setup, or none: say so where a person can see
+		// it, keep stdout empty for the agent, and let the call run.
+		if event != "" {
+			fmt.Fprintf(config.Stderr, "rndevtools hook: unknown event %q; rerun rndevtools setup so the installed hooks match this build.\n\n", event)
+		}
+		fmt.Fprint(config.Stderr, hookUsage)
+		return ExitSuccess
 	}
 }
 
@@ -211,6 +218,8 @@ JSON payload on stdin.
   session-end    Release everything the ending session holds: stop its lanes,
                  drop its claims, release its stacks. Devices return to the
                  pool at once instead of after the grace period.
+
+Any other event exits 0 with a note on stderr: only a block exits 2.
 `
 
 // maxSessionCwdLength matches the desktop's absolute-path bound.

@@ -1,12 +1,17 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,10 +29,15 @@ type recorded struct {
 func newTestServer(t *testing.T, respond func(protocol.Request) (protocol.Response, error), files map[string][]byte, env map[string]string) (*Server, *[]recorded) {
 	t.Helper()
 	var calls []recorded
+	// Calls run on their own goroutines; Serve has returned, and every call
+	// with it, before a test reads the slice.
+	var lock sync.Mutex
 	server := New(Config{
 		Version: "test",
 		Transport: func(_ context.Context, request protocol.Request, timeout time.Duration) (protocol.Response, error) {
+			lock.Lock()
 			calls = append(calls, recorded{request: request, timeout: timeout})
+			lock.Unlock()
 			return respond(request)
 		},
 		Lookup: func(name string) string { return env[name] },
@@ -41,14 +51,22 @@ func newTestServer(t *testing.T, respond func(protocol.Request) (protocol.Respon
 	return server, &calls
 }
 
+// exchange sends messages and returns the responses ordered by id, with the
+// id-less ones (parse errors) first: calls run concurrently, so they may
+// finish in any order.
 func exchange(t *testing.T, server *Server, messages ...string) []map[string]any {
 	t.Helper()
 	var output bytes.Buffer
 	if err := server.Serve(context.Background(), strings.NewReader(strings.Join(messages, "\n")+"\n"), &output); err != nil {
 		t.Fatal(err)
 	}
+	return decodeResponses(t, output.String())
+}
+
+func decodeResponses(t *testing.T, output string) []map[string]any {
+	t.Helper()
 	var responses []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line == "" {
 			continue
 		}
@@ -58,7 +76,26 @@ func exchange(t *testing.T, server *Server, messages ...string) []map[string]any
 		}
 		responses = append(responses, decoded)
 	}
+	order := func(response map[string]any) float64 {
+		if id, ok := response["id"].(float64); ok {
+			return id
+		}
+		return -1
+	}
+	sort.SliceStable(responses, func(a, b int) bool { return order(responses[a]) < order(responses[b]) })
 	return responses
+}
+
+// callWith is the recorded socket call whose command contains fragment.
+func callWith(t *testing.T, calls []recorded, fragment string) recorded {
+	t.Helper()
+	for _, call := range calls {
+		if strings.Contains(string(call.request.Command), fragment) {
+			return call
+		}
+	}
+	t.Fatalf("no socket call carries %s", fragment)
+	return recorded{}
 }
 
 func okResponse(request protocol.Request, result string) (protocol.Response, error) {
@@ -247,18 +284,19 @@ func TestResources(t *testing.T) {
 	if lanes["text"] != `{"lanes":[]}` {
 		t.Fatalf("lanes resource: %v", lanes)
 	}
-	if !strings.Contains(string((*calls)[0].request.Command), `"operation":"ls"`) {
-		t.Fatalf("lanes resource must run lane ls: %s", (*calls)[0].request.Command)
+	if lane := callWith(t, *calls, `"kind":"lane"`); !strings.Contains(string(lane.request.Command), `"operation":"ls"`) {
+		t.Fatalf("lanes resource must run lane ls: %s", lane.request.Command)
 	}
 	screen := responses[3]["result"].(map[string]any)["contents"].([]any)[0].(map[string]any)
 	if screen["mimeType"] != "image/png" || screen["blob"] != base64.StdEncoding.EncodeToString(png) {
 		// The fixture capture reports PNG, so the resource echoes that mime type.
 		t.Fatalf("screen resource: %v", screen)
 	}
-	if !strings.Contains(string((*calls)[1].request.Command), strings.ToUpper(udid)) {
+	capture := callWith(t, *calls, `"kind":"capture"`)
+	if !strings.Contains(string(capture.request.Command), strings.ToUpper(udid)) {
 		t.Fatal("screen resource must canonicalise the UDID")
 	}
-	if !strings.Contains(string((*calls)[1].request.Command), `"format":"jpeg"`) {
+	if !strings.Contains(string(capture.request.Command), `"format":"jpeg"`) {
 		t.Fatal("screen resource must request JPEG to keep the frame small")
 	}
 	if responses[4]["error"] == nil {
@@ -315,15 +353,15 @@ func TestSupabaseToolFollowsLaneAndSpeaksTheWireContract(t *testing.T) {
 	if len(*calls) != 2 {
 		t.Fatalf("%d socket calls; the invalid ls must not reach the socket", len(*calls))
 	}
-	up := (*calls)[0]
+	up := callWith(t, *calls, `"operation":"up"`)
 	if string(up.request.Command) != `{"kind":"supabase","operation":"up","waitMs":5000,"worktreePath":"/Users/dev/app"}` {
 		t.Fatalf("up command: %s", up.request.Command)
 	}
 	if up.request.Agent["sessionId"] != "sess-1" || up.timeout != 20*time.Second {
 		t.Fatalf("up attribution %v, timeout %v", up.request.Agent, up.timeout)
 	}
-	if string((*calls)[1].request.Command) != `{"kind":"supabase","operation":"ls"}` {
-		t.Fatalf("the supabase resource must run ls: %s", (*calls)[1].request.Command)
+	if ls := callWith(t, *calls, `"operation":"ls"`); string(ls.request.Command) != `{"kind":"supabase","operation":"ls"}` {
+		t.Fatalf("the supabase resource must run ls: %s", ls.request.Command)
 	}
 	contents := responses[1]["result"].(map[string]any)["contents"].([]any)[0].(map[string]any)
 	if contents["uri"] != "rndevtools://supabase" || contents["mimeType"] != "application/json" {
@@ -346,4 +384,323 @@ func TestMalformedInputIsAnsweredNotFatal(t *testing.T) {
 	if responses[2]["error"].(map[string]any)["code"].(float64) != codeMethodNotFound {
 		t.Fatalf("method not found code: %v", responses[2])
 	}
+}
+
+// liveSession runs Serve over pipes so a test can send one message at a time
+// and see each response as it is written.
+type liveSession struct {
+	t         *testing.T
+	input     *io.PipeWriter
+	responses chan map[string]any
+	served    chan error
+}
+
+func startSession(t *testing.T, server *Server) *liveSession {
+	t.Helper()
+	in, input := io.Pipe()
+	fromServer, out := io.Pipe()
+	session := &liveSession{t: t, input: input, responses: make(chan map[string]any, 16), served: make(chan error, 1)}
+	go func() {
+		session.served <- server.Serve(context.Background(), in, out)
+		_ = out.Close()
+	}()
+	go func() {
+		defer close(session.responses)
+		scanner := bufio.NewScanner(fromServer)
+		for scanner.Scan() {
+			var decoded map[string]any
+			if json.Unmarshal(scanner.Bytes(), &decoded) == nil {
+				session.responses <- decoded
+			}
+		}
+	}()
+	return session
+}
+
+// send writes one message; a server that stops reading fails fast.
+func (session *liveSession) send(message string) {
+	session.t.Helper()
+	written := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(session.input, message+"\n")
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			session.t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		session.t.Fatal("the server stopped reading within 5 s: something held up the session")
+	}
+}
+
+// receive is the next response; a session that stops answering fails fast.
+func (session *liveSession) receive() map[string]any {
+	session.t.Helper()
+	select {
+	case response, ok := <-session.responses:
+		if !ok {
+			session.t.Fatal("the server stopped writing responses")
+		}
+		return response
+	case <-time.After(5 * time.Second):
+		session.t.Fatal("no response within 5 s: something held up the session")
+	}
+	return nil
+}
+
+// close ends the input and waits for Serve, which must write nothing more.
+func (session *liveSession) close() {
+	session.t.Helper()
+	_ = session.input.Close()
+	select {
+	case err := <-session.served:
+		if err != nil {
+			session.t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		session.t.Fatal("Serve did not return after EOF")
+	}
+	for response := range session.responses {
+		session.t.Fatalf("unexpected response after the last call: %v", response)
+	}
+}
+
+func within(t *testing.T, done <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+const otherUDID = "BBBBBBBB-CCCC-4DDD-8EEE-FFFFFFFFFFFF"
+
+func TestALongCallHoldsUpNothingAndACancelStopsIt(t *testing.T) {
+	waiting := make(chan struct{})
+	cancelled := make(chan struct{})
+	server := New(Config{
+		Version: "test",
+		Transport: func(ctx context.Context, request protocol.Request, _ time.Duration) (protocol.Response, error) {
+			if strings.Contains(string(request.Command), `"kind":"wait"`) {
+				// The desktop never answers this one; only the client's cancel ends it.
+				close(waiting)
+				<-ctx.Done()
+				close(cancelled)
+				return protocol.Response{}, ctx.Err()
+			}
+			return okResponse(request, `{}`)
+		},
+		Lookup: func(string) string { return "" },
+	})
+	session := startSession(t, server)
+	session.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait","arguments":{"udid":"` + udid + `","condition":"element","element-id":"e1","timeout-ms":600000}}}`)
+	within(t, waiting, "the wait to reach the desktop")
+	session.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+	if id := session.receive()["id"]; id != float64(2) {
+		t.Fatalf("ping answered as %v", id)
+	}
+	// A read-only wait holds up nothing, not even a tap on the device it watches.
+	session.send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"input","arguments":{"udid":"` + udid + `","kind":"button","button":"home"}}}`)
+	if response := session.receive(); response["id"] != float64(3) || response["result"].(map[string]any)["isError"] != false {
+		t.Fatalf("input while the wait runs: %v", response)
+	}
+	session.send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1,"reason":"user pressed Esc"}}`)
+	within(t, cancelled, "the cancel to reach the in-flight wait")
+	// The cancelled call gets no response.
+	session.close()
+}
+
+func TestCallsNamingOneSimulatorKeepTheAgentsOrder(t *testing.T) {
+	tapping := make(chan struct{})
+	release := make(chan struct{})
+	captured := make(chan string, 2)
+	server := New(Config{
+		Version: "test",
+		Transport: func(_ context.Context, request protocol.Request, _ time.Duration) (protocol.Response, error) {
+			command := string(request.Command)
+			switch {
+			case strings.Contains(command, `"kind":"input"`):
+				close(tapping)
+				<-release
+			case strings.Contains(command, `"kind":"capture"`):
+				var sent struct {
+					UDID string `json:"udid"`
+				}
+				_ = json.Unmarshal(request.Command, &sent)
+				captured <- sent.UDID
+			}
+			return okResponse(request, `{}`)
+		},
+		Lookup:   func(string) string { return "" },
+		ReadFile: func(string) ([]byte, error) { return nil, errors.New("no file") },
+	})
+	session := startSession(t, server)
+	session.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"input","arguments":{"udid":"` + udid + `","kind":"tap","x":0.5,"y":0.5}}}`)
+	within(t, tapping, "the tap to reach the desktop")
+	session.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"capture","arguments":{"udid":"` + udid + `"}}}`)
+	session.send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"capture","arguments":{"udid":"` + otherUDID + `"}}}`)
+	// Another Simulator is not held up by the tap.
+	if response := session.receive(); response["id"] != float64(3) {
+		t.Fatalf("the other device's capture must finish first: %v", response)
+	}
+	if first := <-captured; first != otherUDID {
+		t.Fatalf("captured %s before the tap finished", first)
+	}
+	// The screenshot of the tapped device waits for the tap.
+	select {
+	case early := <-captured:
+		t.Fatalf("captured %s while its tap was still running", early)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	answered := map[float64]bool{}
+	for range 2 {
+		answered[session.receive()["id"].(float64)] = true
+	}
+	if !answered[1] || !answered[2] {
+		t.Fatalf("answered %v, want the tap and its screenshot", answered)
+	}
+	if second := <-captured; second != udid {
+		t.Fatalf("captured %s, want %s after its tap", second, udid)
+	}
+	session.close()
+}
+
+func TestACancelledCallKeepsItsSlotAndItsPlaceUntilTheDesktopLetsGo(t *testing.T) {
+	// Cancelling closes the call's socket, and the desktop sees that only at
+	// its next liveness probe, so for a moment it still runs the call on a
+	// connection of its own. Until then the call counts against the session's
+	// slots and stays ahead of later calls on its device.
+	const linger = 300 * time.Millisecond
+	reached := make(chan string, 16)
+	server := New(Config{
+		Version: "test",
+		Transport: func(ctx context.Context, request protocol.Request, _ time.Duration) (protocol.Response, error) {
+			var sent struct {
+				Kind string `json:"kind"`
+			}
+			_ = json.Unmarshal(request.Command, &sent)
+			reached <- sent.Kind
+			if sent.Kind == "wait" || sent.Kind == "input" {
+				// The desktop is still working on these when the client gives up.
+				<-ctx.Done()
+				return protocol.Response{}, ctx.Err()
+			}
+			return okResponse(request, `{}`)
+		},
+		Lookup:   func(string) string { return "" },
+		ReadFile: func(string) ([]byte, error) { return nil, errors.New("no file") },
+	})
+	server.linger = linger
+	session := startSession(t, server)
+	reachedAt := func(want string) time.Time {
+		t.Helper()
+		select {
+		case kind := <-reached:
+			if kind != want {
+				t.Fatalf("%s reached the desktop, want %s", kind, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s never reached the desktop", want)
+		}
+		return time.Now()
+	}
+	cancel := func(id int) {
+		session.send(fmt.Sprintf(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":%d}}`, id))
+	}
+
+	session.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"input","arguments":{"udid":"` + udid + `","kind":"tap","x":0.5,"y":0.5}}}`)
+	reachedAt("input")
+	cancelled := time.Now()
+	cancel(1)
+	session.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"capture","arguments":{"udid":"` + udid + `"}}}`)
+	if waited := reachedAt("capture").Sub(cancelled); waited < linger {
+		t.Fatalf("the screenshot reached the desktop %s after its tap was cancelled, while the desktop may still run the tap", waited)
+	}
+	if response := session.receive(); response["id"] != float64(2) {
+		t.Fatalf("the screenshot was answered as %v", response)
+	}
+
+	// Four waits fill the session's slots, and a cancelled one keeps its own.
+	for id := 3; id <= 6; id++ {
+		session.send(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"wait","arguments":{"udid":"%s","condition":"element","element-id":"e%d","timeout-ms":600000}}}`, id, otherUDID, id))
+		reachedAt("wait")
+	}
+	cancelled = time.Now()
+	cancel(3)
+	session.send(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"simulators","arguments":{}}}`)
+	if waited := reachedAt("simulators").Sub(cancelled); waited < linger {
+		t.Fatalf("a fifth call reached the desktop %s after a cancel, while the desktop may still hold four", waited)
+	}
+	if response := session.receive(); response["id"] != float64(7) {
+		t.Fatalf("the fifth call was answered as %v", response)
+	}
+	for id := 4; id <= 6; id++ {
+		cancel(id)
+	}
+	session.close()
+}
+
+func TestOnlyToolsThatOnlyObserveAreReadOnly(t *testing.T) {
+	readOnly := map[string]bool{}
+	for _, tool := range Tools() {
+		readOnly[tool.Name] = tool.Annotations["readOnlyHint"] == true
+	}
+	// jobs can cancel another session's job; slimming applies profiles.
+	for _, name := range []string{"jobs", "slimming", "lane", "input", "act", "claim", "release", "record", "network", "recipe", "native", "supabase"} {
+		if readOnly[name] {
+			t.Errorf("%s changes state but is marked read-only", name)
+		}
+	}
+	listed := ReadOnlyTools()
+	for _, name := range listed {
+		if !readOnly[name] {
+			t.Errorf("ReadOnlyTools lists %s, whose readOnlyHint is false", name)
+		}
+	}
+	count := 0
+	for _, isReadOnly := range readOnly {
+		if isReadOnly {
+			count++
+		}
+	}
+	if len(listed) != count || len(listed) == 0 {
+		t.Fatalf("ReadOnlyTools %v must name every read-only tool (%d)", listed, count)
+	}
+}
+
+func TestClaimIsDescribedAsTheHoldTheDesktopEnforces(t *testing.T) {
+	// The desktop refuses a claim on a device someone else holds and keeps
+	// other agents' lanes, input, installs, slimming, recipe runs, and cancels
+	// off a held one, so the text must not undersell a hold. It does not gate
+	// act or network, which reach the app on the device, nor a session
+	// stopping or cancelling a recording it started, so the text must not
+	// promise those either.
+	const ownRecording = "a session can always stop or cancel a recording it started itself"
+	for _, tool := range Tools() {
+		if tool.Name != "claim" {
+			continue
+		}
+		for _, phrase := range []string{"A claim is a hold", "device_held", "release when finished", "act and network are not gated", ownRecording} {
+			if !strings.Contains(tool.Description, phrase) {
+				t.Fatalf("claim description lacks %q: %s", phrase, tool.Description)
+			}
+		}
+		for _, overclaim := range []string{"advisory", "cannot drive", "drive or change"} {
+			if strings.Contains(strings.ToLower(tool.Description), overclaim) {
+				t.Fatalf("claim description says %q, which the desktop does not enforce: %s", overclaim, tool.Description)
+			}
+		}
+		if strings.Contains(instructions, "only the holder may boot, drive") || !strings.Contains(instructions, "act and network are not gated") {
+			t.Fatalf("the instructions must say what a hold gates and that act and network are not: %s", instructions)
+		}
+		if !strings.Contains(instructions, ownRecording) {
+			t.Fatalf("the instructions must say a session can always stop its own recording: %s", instructions)
+		}
+		return
+	}
+	t.Fatal("no claim tool is listed")
 }

@@ -10,7 +10,7 @@ and is intentionally fixed to `rndevtools/1`. The Go module has no external
 module dependency: `go list -m all` must return only
 `github.com/adalloul0928/rndevtools-cli`. Its only incorporated
 third-party material is the Go runtime and standard library; the applicable BSD
-notice is reproduced in `apps/devtools-desktop/THIRD_PARTY_NOTICES.md` and is packaged
+notice is reproduced in `apps/desktop/THIRD_PARTY_NOTICES.md` and is packaged
 with the application.
 
 Release binaries are built from this directory with `CGO_ENABLED=0`,
