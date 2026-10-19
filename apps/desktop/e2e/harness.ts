@@ -21,8 +21,6 @@ const LOOPBACK = '127.0.0.1';
  * modules), so the smoke spec checks these lists against the built bundle:
  * each id must open the panel named in `panelHeadings`, and each sidebar must
  * offer exactly as many tools.
- *
- * @public
  */
 export const connectedToolIds = [
 	'network',
@@ -41,9 +39,9 @@ export const connectedToolIds = [
 	'diagnostics',
 ] as const;
 
-/** Simulator tool ids, mirrored from `src/renderer/simulator/simulator-config.ts`.
- *
- * @public
+/**
+ * Simulator tool ids, mirrored from
+ * `src/renderer/simulator/simulator-config.ts`.
  */
 export const simulatorToolIds = [
 	'fleet',
@@ -57,17 +55,11 @@ export const simulatorToolIds = [
 	'settings',
 ] as const;
 
-/** @public */
-export type ConnectedToolId = (typeof connectedToolIds)[number];
-/** @public */
-export type SimulatorToolId = (typeof simulatorToolIds)[number];
-/** @public */
+type ConnectedToolId = (typeof connectedToolIds)[number];
+type SimulatorToolId = (typeof simulatorToolIds)[number];
 export type PanelId = ConnectedToolId | `simulator/${SimulatorToolId}`;
 
-/** Every panel the harness knows how to open, in navigation order.
- *
- * @public
- */
+/** Every panel the harness knows how to open, in navigation order. */
 export const allPanelIds: PanelId[] = [
 	...connectedToolIds,
 	...simulatorToolIds.map((id): PanelId => `simulator/${id}`),
@@ -77,8 +69,6 @@ export const allPanelIds: PanelId[] = [
  * The heading each panel renders, mirrored from its panel header. A hash the
  * app does not know silently falls back to the Simulators panel, so the smoke
  * spec checks that every id opens the panel with this heading.
- *
- * @public
  */
 export const panelHeadings: Record<PanelId, string> = {
 	network: 'Network',
@@ -132,11 +122,8 @@ function freeLoopbackPort(): Promise<number> {
 	});
 }
 
-/** Build the app if the renderer or main bundle is missing.
- *
- * @public
- */
-export function ensureBuilt(): void {
+/** Build the app if the renderer or main bundle is missing. */
+function ensureBuilt(): void {
 	if (existsSync(rendererEntry) && existsSync(mainEntry)) return;
 	execFileSync('pnpm', ['--filter', '@rndevtools/desktop', 'build'], {
 		cwd: resolve(appRoot, '..', '..'),
@@ -144,7 +131,6 @@ export function ensureBuilt(): void {
 	});
 }
 
-/** @public */
 export class DesktopHarness {
 	private constructor(
 		readonly app: ElectronApplication,
