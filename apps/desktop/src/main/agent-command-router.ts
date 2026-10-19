@@ -1717,7 +1717,14 @@ function createRoutes({
 						).some((app) => app.bundleIdentifier.toLowerCase() === wanted);
 					}
 				}
-				const buildCommand = `npx expo run:ios --configuration ${plan.configuration}${target ? ` --device ${target.udid}` : ''} --no-bundler`;
+				// Debug is run:ios's default, and Expo CLI starts its own Metro (on
+				// 8081, on every interface) whenever --configuration Debug is passed,
+				// --no-bundler or not. Name the configuration only when it is another.
+				const configurationFlag =
+					plan.configuration === 'Debug'
+						? ''
+						: ` --configuration ${plan.configuration}`;
+				const buildCommand = `npx expo run:ios${configurationFlag}${target ? ` --device ${target.udid}` : ''} --no-bundler`;
 				const recommendation =
 					installed === true
 						? 'installed: the Simulator already has this native build; start or launch a lane.'

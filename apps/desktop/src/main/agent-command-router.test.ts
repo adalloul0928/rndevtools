@@ -1500,9 +1500,37 @@ describe('agent command router', () => {
 			expect(result).not.toHaveProperty('installed');
 			expect(String(result.recommendation)).toMatch(/^build: /);
 			expect(String(result.recommendation)).toMatch(
-				/expo run:ios --configuration Debug --no-bundler/
+				/expo run:ios --no-bundler/
 			);
+			// Expo CLI starts its own Metro for an explicit Debug configuration,
+			// even with --no-bundler, so the Debug advice leaves the flag out.
+			expect(String(result.recommendation)).not.toMatch(/--configuration/);
 			expect(actions).toHaveLength(0);
+		});
+
+		it('names a configuration other than Debug in the build advice', async () => {
+			const { dependencies } = fixture();
+			const { port } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: async () => ({
+					...(await plan('miss')()),
+					configuration: 'Release',
+				}),
+			});
+			const result = (await handler(
+				{
+					kind: 'native',
+					operation: 'plan',
+					configuration: 'Release',
+					worktreePath: '/Users/dev/app',
+				},
+				context
+			)) as Record<string, unknown>;
+			expect(String(result.recommendation)).toMatch(
+				/expo run:ios --configuration Release --no-bundler/
+			);
 		});
 
 		it('plans with a device and reports installed state from the Simulator app list', async () => {
