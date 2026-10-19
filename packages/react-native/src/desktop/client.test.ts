@@ -1,29 +1,81 @@
-import type { DesktopDeviceAction } from '@rndevtools/core/desktop-protocol';
+import {
+	type DesktopDeviceAction,
+	type DesktopDeviceInfoSnapshot,
+	type DesktopDeviceToolsSnapshot,
+	RNDEVTOOLS_SNAPSHOT_LIMITS,
+} from '@rndevtools/core/desktop-protocol';
+import { utf8ByteLength } from '@rndevtools/core/serialize';
 import {
 	disableDevtoolsAuthorization,
 	getDevtoolsAuthorization,
 	setDevtoolsAuthorization,
 } from '../authorization';
-import type { DesktopClientHost } from './client';
+import type {
+	DesktopClientHandle,
+	DesktopClientHost,
+	DesktopDiagnostic,
+} from './client';
 import {
 	DesktopActionAdmissionController,
 	DesktopActionReplayCache,
 	desktopBrokerCandidates,
+	limitDesktopProjection,
 	shouldStartDesktopClient,
+	simulatorUdidFromPath,
 	startDesktopClient,
 } from './client';
 
-const mockRunDesktopAction = jest.fn<Promise<void>, [DesktopDeviceAction]>();
-const mockCaptureDesktopTools = jest.fn(() => ({}) as never);
+// `./desktop` is the entry point a headless host module imports. It must not
+// load the core plugins barrel, which pulls in the panel UI, or the camera's
+// optional peers; either factory throws if anything reaches it.
+jest.mock('@rndevtools/core/plugins', () => {
+	throw new Error('The ./desktop entry point loaded @rndevtools/core/plugins.');
+});
+jest.mock('expo-file-system', () => {
+	throw new Error('The ./desktop entry point loaded expo-file-system.');
+});
+// A pass-through spy, so a test can tell which strings the client walked to
+// count their UTF-8 bytes.
+jest.mock('@rndevtools/core/serialize', () => {
+	const actual = jest.requireActual<
+		typeof import('@rndevtools/core/serialize')
+	>('@rndevtools/core/serialize');
+	return { ...actual, utf8ByteLength: jest.fn(actual.utf8ByteLength) };
+});
+
+const mockUtf8ByteLength = jest.mocked(utf8ByteLength);
+// The client's private size limits.
+const MAX_INCOMING_BYTES = 600 * 1024;
+const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+
+const mockRunDesktopAction = jest.fn<
+	Promise<void>,
+	Parameters<DesktopClientHost['runAction']>
+>();
+const mockCaptureDesktopTools = jest.fn<
+	DesktopDeviceToolsSnapshot,
+	[readonly DesktopDiagnostic[]]
+>(() => ({}) as never);
+
+const testDevice: DesktopDeviceInfoSnapshot = {
+	id: 'device-1',
+	name: 'Test device',
+	platform: 'ios',
+	capabilities: ['console.clear'],
+};
 
 // The client is host-agnostic, so the suite injects a host rather than mocking
 // a module. Anything a real app would supply is a plain function here.
 const testHost: DesktopClientHost = {
 	captureTools: mockCaptureDesktopTools,
-	createDeviceInfo: () => ({ id: 'device-1' }) as never,
+	createDeviceInfo: () => testDevice,
 	runAction: mockRunDesktopAction,
 	getAuthorization: getDevtoolsAuthorization,
 };
+
+const BROKER_URL = 'ws://localhost:47931/device';
+
+type CloseEvent = { code?: number; reason?: string };
 
 class FakeWebSocket {
 	static instances: FakeWebSocket[] = [];
@@ -33,11 +85,11 @@ class FakeWebSocket {
 	onopen: (() => void) | null = null;
 	onmessage: ((event: { data: unknown }) => void) | null = null;
 	onerror: (() => void) | null = null;
-	onclose: (() => void) | null = null;
+	onclose: ((event?: CloseEvent) => void) | null = null;
 	send = jest.fn();
-	close = jest.fn(() => {
+	close = jest.fn((code?: number, reason?: string) => {
 		this.readyState = 3;
-		this.onclose?.();
+		this.onclose?.({ code: code ?? 1005, reason: reason ?? '' });
 	});
 
 	constructor(readonly url: string) {
@@ -52,10 +104,71 @@ class FakeWebSocket {
 	receive(value: unknown): void {
 		this.onmessage?.({ data: JSON.stringify(value) });
 	}
+
+	/** Delivers a frame exactly as given, without serializing it. */
+	receiveFrame(data: string): void {
+		this.onmessage?.({ data });
+	}
+
+	/** The broker ends the connection, as it does for a policy violation. */
+	serverClose(code: number, reason: string): void {
+		this.readyState = 3;
+		this.onclose?.({ code, reason });
+	}
+}
+
+function latestSocket(): FakeWebSocket {
+	const socket = FakeWebSocket.instances.at(-1);
+	if (!socket) throw new Error('Expected the client to open a socket.');
+	return socket;
+}
+
+function sentMessages(socket: FakeWebSocket): Record<string, unknown>[] {
+	return socket.send.mock.calls.map(
+		([message]) => JSON.parse(String(message)) as Record<string, unknown>,
+	);
+}
+
+function actionResults(socket: FakeWebSocket): Record<string, unknown>[] {
+	return sentMessages(socket).filter(
+		(message) => message.type === 'action-result',
+	);
+}
+
+function consoleClear(actionId: string, deviceId = 'device-1') {
+	return {
+		type: 'action',
+		action: {
+			actionId,
+			deviceId,
+			tool: 'console',
+			command: 'clear',
+			payload: {},
+		},
+	};
+}
+
+/** The diagnostics array the client hands to every snapshot capture. */
+function clientDiagnosticMessages(): string[] {
+	const diagnostics = mockCaptureDesktopTools.mock.calls[0]?.[0] ?? [];
+	return diagnostics.map((diagnostic) => diagnostic.message);
 }
 
 async function flushPromises(): Promise<void> {
-	for (let index = 0; index < 8; index += 1) await Promise.resolve();
+	for (let index = 0; index < 20; index += 1) await Promise.resolve();
+}
+
+/** Advances fake time until the client opens its next socket. */
+async function reconnectDelayMs(): Promise<number> {
+	const before = FakeWebSocket.instances.length;
+	const start = Date.now();
+	while (
+		FakeWebSocket.instances.length === before &&
+		Date.now() - start < 60_000
+	) {
+		await jest.advanceTimersByTimeAsync(100);
+	}
+	return Date.now() - start;
 }
 
 describe('desktop devtools broker discovery', () => {
@@ -235,6 +348,31 @@ describe('DesktopActionReplayCache', () => {
 		});
 	});
 
+	it('tells a replay from a conflict by fingerprint for large payloads', () => {
+		const cache = new DesktopActionReplayCache();
+		const fixture = (dataBase64: string): DesktopDeviceAction => ({
+			actionId: 'fixture-1',
+			deviceId: 'device-1',
+			tool: 'camera',
+			command: 'setFixture',
+			payload: { kind: 'qr', dataBase64 },
+		});
+		const large = 'A'.repeat(64 * 1024);
+		const result = {
+			type: 'action-result' as const,
+			actionId: 'fixture-1',
+			ok: true,
+		};
+
+		cache.remember(fixture(large), result);
+
+		expect(cache.lookup(fixture(large))).toEqual({ kind: 'replay', result });
+		expect(cache.lookup(fixture(`${large.slice(0, -1)}B`))).toEqual({
+			kind: 'conflict',
+		});
+		expect(cache.lookup(fixture(`${large}A`))).toEqual({ kind: 'conflict' });
+	});
+
 	it('bounds retained results and validates its limit', () => {
 		const cache = new DesktopActionReplayCache(1);
 		cache.remember(action, {
@@ -254,7 +392,7 @@ describe('DesktopActionReplayCache', () => {
 	});
 });
 
-describe('desktop action authorization', () => {
+describe('desktop client', () => {
 	const runtime = globalThis as typeof globalThis & {
 		WebSocket: typeof WebSocket;
 	};
@@ -271,6 +409,7 @@ describe('desktop action authorization', () => {
 	afterEach(() => {
 		disableDevtoolsAuthorization();
 		runtime.WebSocket = originalWebSocket;
+		jest.useRealTimers();
 	});
 
 	it('rechecks the authorized owner before queued actions execute', async () => {
@@ -284,47 +423,23 @@ describe('desktop action authorization', () => {
 		setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
 		const client = startDesktopClient({
 			host: testHost,
-			candidates: ['ws://localhost:47931/device'],
+			candidates: [BROKER_URL],
 		});
 
 		try {
-			const socket = FakeWebSocket.instances[0];
-			expect(socket).toBeDefined();
-			socket?.open();
-			socket?.receive({
-				type: 'action',
-				action: {
-					actionId: 'first',
-					deviceId: 'device-1',
-					tool: 'console',
-					command: 'clear',
-					payload: {},
-				},
-			});
+			const socket = latestSocket();
+			socket.open();
+			socket.receive(consoleClear('first'));
 			await flushPromises();
 			expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
 
-			socket?.receive({
-				type: 'action',
-				action: {
-					actionId: 'second',
-					deviceId: 'device-1',
-					tool: 'console',
-					command: 'clear',
-					payload: {},
-				},
-			});
+			socket.receive(consoleClear('second'));
 			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-b' });
 			finishFirstAction?.();
 			await flushPromises();
 
 			expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
-			const results = (socket?.send.mock.calls ?? [])
-				.map(
-					([message]) => JSON.parse(String(message)) as Record<string, unknown>,
-				)
-				.filter((message) => message.type === 'action-result');
-			expect(results).toContainEqual(
+			expect(actionResults(socket)).toContainEqual(
 				expect.objectContaining({
 					actionId: 'second',
 					ok: false,
@@ -336,26 +451,360 @@ describe('desktop action authorization', () => {
 		}
 	});
 
-	it('refuses to send a snapshot above the aggregate wire budget', () => {
-		mockCaptureDesktopTools.mockReturnValueOnce({
-			diagnostics: [{ message: 'x'.repeat(8 * 1024 * 1024) }],
-		} as never);
+	it.each([
+		// Over in UTF-16 code units, so the client never counts its bytes.
+		['in UTF-16 code units', 'x'.repeat(MAX_SNAPSHOT_BYTES), false],
+		// Two bytes per character: within the budget in code units, over in bytes.
+		['in UTF-8 bytes alone', 'é'.repeat(MAX_SNAPSHOT_BYTES / 2), true],
+	])(
+		'refuses to send a snapshot over the aggregate wire budget %s',
+		(_case, message, counted) => {
+			mockCaptureDesktopTools.mockReturnValueOnce({
+				diagnostics: [{ message }],
+			} as never);
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+
+			try {
+				const socket = latestSocket();
+				mockUtf8ByteLength.mockClear();
+				socket.open();
+				expect(sentMessages(socket).map((sent) => sent.type)).toEqual([
+					'hello',
+				]);
+				expect(clientDiagnosticMessages()).toContain(
+					'Desktop snapshot exceeded the 8 MiB wire budget and was not sent.',
+				);
+				expect(
+					mockUtf8ByteLength.mock.calls.some(([text]) =>
+						text.startsWith('{"type":"snapshot"'),
+					),
+				).toBe(counted);
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it.each([
+		// Over in UTF-16 code units, so the client never counts its bytes.
+		['in UTF-16 code units', 'x'.repeat(MAX_INCOMING_BYTES + 1), false],
+		// Two bytes per character: within the limit in code units, over in bytes.
+		['in UTF-8 bytes alone', 'é'.repeat(MAX_INCOMING_BYTES / 2 + 1), true],
+	])(
+		'closes on an incoming frame over the size limit %s',
+		(_case, frame, counted) => {
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+
+			try {
+				const socket = latestSocket();
+				socket.open();
+				mockUtf8ByteLength.mockClear();
+				socket.receiveFrame(frame);
+
+				expect(socket.close).toHaveBeenCalledWith(
+					1009,
+					'desktop action too large',
+				);
+				expect(clientDiagnosticMessages()).toContain(
+					'Rejected an oversized desktop action.',
+				);
+				expect(
+					mockUtf8ByteLength.mock.calls.some(([text]) => text === frame),
+				).toBe(counted);
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it.each([
+		['one-byte', 'x'.repeat(MAX_INCOMING_BYTES)],
+		['two-byte', 'é'.repeat(MAX_INCOMING_BYTES / 2)],
+	])(
+		'reads an incoming frame of %s characters exactly at the size limit',
+		(_case, frame) => {
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receiveFrame(frame);
+
+				expect(socket.close).not.toHaveBeenCalled();
+				expect(clientDiagnosticMessages()).toContain(
+					'Ignored malformed desktop action JSON.',
+				);
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it.each([
+		[
+			'a capability the device does not advertise',
+			{ deviceId: 'device-1', tool: 'network', command: 'clear' },
+			'Device does not advertise network.clear.',
+			'desktop action not advertised',
+		],
+		[
+			'another device',
+			{ deviceId: 'device-2', tool: 'console', command: 'clear' },
+			'Desktop action targets a different device.',
+			'desktop action for another device',
+		],
+	])(
+		'refuses an action for %s without running it',
+		async (_case, target, error, closeReason) => {
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive({
+					type: 'action',
+					action: { actionId: 'forged', payload: {}, ...target },
+				});
+				await flushPromises();
+
+				expect(mockRunDesktopAction).not.toHaveBeenCalled();
+				expect(actionResults(socket)).toEqual([
+					{ type: 'action-result', actionId: 'forged', ok: false, error },
+				]);
+				expect(socket.close).toHaveBeenCalledWith(1008, closeReason);
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it('times out a host action that never settles and serves the next one', async () => {
+		jest.useFakeTimers();
+		let hungSignal: AbortSignal | undefined;
+		mockRunDesktopAction
+			.mockImplementationOnce((_action, { signal }) => {
+				hungSignal = signal;
+				return new Promise<void>(() => undefined);
+			})
+			.mockResolvedValueOnce(undefined);
+		setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
 		const client = startDesktopClient({
 			host: testHost,
-			candidates: ['ws://localhost:47931/device'],
+			candidates: [BROKER_URL],
+			actionTimeoutMs: 1_000,
 		});
 
 		try {
-			const socket = FakeWebSocket.instances[0];
-			expect(socket).toBeDefined();
-			socket?.open();
-			const sentTypes = (socket?.send.mock.calls ?? []).map(
-				([message]) => (JSON.parse(String(message)) as { type?: string }).type,
-			);
-			expect(sentTypes).toEqual(['hello']);
+			const socket = latestSocket();
+			socket.open();
+			socket.receive(consoleClear('hung'));
+			socket.receive(consoleClear('next'));
+			await jest.advanceTimersByTimeAsync(999);
+			expect(actionResults(socket)).toEqual([]);
+			expect(hungSignal?.aborted).toBe(false);
+
+			await jest.advanceTimersByTimeAsync(2_000);
+
+			expect(hungSignal?.aborted).toBe(true);
+			expect(mockRunDesktopAction).toHaveBeenCalledTimes(2);
+			expect(actionResults(socket)).toEqual([
+				{
+					type: 'action-result',
+					actionId: 'hung',
+					ok: false,
+					error:
+						'Desktop action timed out after 1000 ms; its outcome is unknown.',
+				},
+				{ type: 'action-result', actionId: 'next', ok: true },
+			]);
 		} finally {
 			client.stop();
 		}
+	});
+
+	it('rejects an action timeout a timer cannot represent', () => {
+		let client: DesktopClientHandle | undefined;
+		try {
+			expect(() => {
+				client = startDesktopClient({
+					host: testHost,
+					candidates: [BROKER_URL],
+					actionTimeoutMs: 0,
+				});
+			}).toThrow('actionTimeoutMs');
+			expect(FakeWebSocket.instances).toEqual([]);
+		} finally {
+			client?.stop();
+		}
+	});
+
+	it('paces a burst of quick actions under the broker frame limit without dropping a result', async () => {
+		jest.useFakeTimers();
+		mockRunDesktopAction.mockResolvedValue(undefined);
+		setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			const sentAt: number[] = [];
+			socket.send.mockImplementation(() => {
+				sentAt.push(Date.now());
+			});
+			socket.open();
+			const actionIds = Array.from(
+				{ length: 6 },
+				(_, index) => `burst-${index}`,
+			);
+			for (const actionId of actionIds) socket.receive(consoleClear(actionId));
+			await jest.advanceTimersByTimeAsync(10_000);
+
+			expect(socket.close).not.toHaveBeenCalled();
+			expect(actionResults(socket)).toEqual(
+				actionIds.map((actionId) => ({
+					type: 'action-result',
+					actionId,
+					ok: true,
+				})),
+			);
+			// The broker closes a device socket once one second holds 9 frames.
+			const busiestSecond = Math.max(
+				...sentAt.map(
+					(start) =>
+						sentAt.filter((at) => at >= start && at < start + 1_000).length,
+				),
+			);
+			expect(busiestSecond).toBeLessThanOrEqual(8);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('trims collections to the desktop row limits, keeping the newest rows', async () => {
+		jest.useFakeTimers();
+		const limit = RNDEVTOOLS_SNAPSHOT_LIMITS.network;
+		mockCaptureDesktopTools.mockReturnValue({
+			network: Array.from({ length: limit + 1 }, (_, index) => ({
+				id: `request-${index}`,
+			})),
+		} as never);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			socket.open();
+			await jest.advanceTimersByTimeAsync(3_000);
+
+			const snapshots = sentMessages(socket).filter(
+				(message) => message.type === 'snapshot',
+			);
+			expect(snapshots.length).toBeGreaterThan(1);
+			const [first] = snapshots;
+			if (!first) throw new Error('Expected a snapshot.');
+			const { network } = first.tools as { network: { id: string }[] };
+			expect(network).toHaveLength(limit);
+			expect(network[0]).toEqual({ id: 'request-1' });
+			expect(network.at(-1)).toEqual({ id: `request-${limit}` });
+			expect(
+				clientDiagnosticMessages().filter((message) =>
+					message.startsWith('Trimmed network to 2000 rows'),
+				),
+			).toHaveLength(1);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('backs off after consecutive broker rejections and reports why', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const delays: number[] = [];
+			for (let attempt = 0; attempt < 4; attempt += 1) {
+				const socket = latestSocket();
+				socket.open();
+				socket.serverClose(1008, 'invalid protocol message');
+				delays.push(await reconnectDelayMs());
+			}
+			expect(delays).toEqual([2_500, 5_000, 10_000, 20_000]);
+			expect(clientDiagnosticMessages()).toContain(
+				`Disconnected from ${BROKER_URL} (1008: invalid protocol message); retrying in 20 s.`,
+			);
+
+			// A connection that stayed up long enough proves the device recovered.
+			const healthy = latestSocket();
+			healthy.open();
+			await jest.advanceTimersByTimeAsync(10_000);
+			healthy.serverClose(1008, 'device message rate limit exceeded');
+			expect(await reconnectDelayMs()).toBe(2_500);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('does not back off after closing a connection itself', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const delays: number[] = [];
+			for (let attempt = 0; attempt < 3; attempt += 1) {
+				const socket = latestSocket();
+				socket.open();
+				// Unauthorized, so the client refuses and closes with 1008 itself.
+				socket.receive(consoleClear(`unauthorized-${attempt}`));
+				expect(socket.close).toHaveBeenCalledWith(
+					1008,
+					'internal tools authorization required',
+				);
+				delays.push(await reconnectDelayMs());
+			}
+			expect(delays).toEqual([2_500, 2_500, 2_500]);
+		} finally {
+			client.stop();
+		}
+	});
+});
+
+describe('desktop entry point', () => {
+	it('gives a headless host its helpers without the plugins barrel', () => {
+		expect(
+			simulatorUdidFromPath(
+				'/Users/dev/Library/Developer/CoreSimulator/Devices/0A1B2C3D-4E5F-6789-ABCD-EF0123456789/data/Documents',
+			),
+		).toBe('0A1B2C3D-4E5F-6789-ABCD-EF0123456789');
+		expect(
+			limitDesktopProjection([1, 2, 3], {
+				maxItems: 2,
+				maxBytes: 1_024,
+				keepNewest: true,
+			}),
+		).toEqual({ items: [2, 3], omitted: 1 });
 	});
 });
 

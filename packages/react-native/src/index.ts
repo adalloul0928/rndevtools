@@ -11,6 +11,7 @@ export {
 	type AsyncStorageLike,
 	createAsyncStorageDevtoolsAdapter,
 	createSecureStoreDevtoolsAdapter,
+	type DevtoolsStorageAdapterOptions,
 	type SecureStoreLike,
 	type SecureStoreManifestEntry,
 } from './adapters/storage';

@@ -3,7 +3,8 @@
  * typed `require` rather than adding @types/node to a React Native package.
  */
 declare const require: (id: string) => unknown;
-declare const process: { pid: number; ppid: number };
+declare const __dirname: string;
+declare const process: { pid: number; ppid: number; execPath: string };
 
 type Fs = {
 	mkdtempSync: (prefix: string) => string;
@@ -15,10 +16,21 @@ type Fs = {
 	writeFileSync: (p: string, data: string) => void;
 	existsSync: (p: string) => boolean;
 	readFileSync: (p: string, encoding: 'utf8') => string;
+	readdirSync: (p: string) => string[];
 	statSync: (p: string) => { isDirectory: () => boolean };
+	utimesSync: (p: string, atime: Date, mtime: Date) => void;
 };
 type Path = { join: (...parts: string[]) => string; sep: string };
 type Os = { tmpdir: () => string };
+type ChildProcess = {
+	spawn: (
+		command: string,
+		args: readonly string[],
+	) => {
+		stdout: { on: (event: 'data', listener: (chunk: string) => void) => void };
+		on: (event: 'close', listener: () => void) => void;
+	};
+};
 type RunOptions = { configuration?: string; variant?: string };
 type Context = {
 	fingerprintHash: string;
@@ -56,6 +68,8 @@ type BuildCacheModule = Provider & {
 const fs = require('node:fs') as Fs;
 const os = require('node:os') as Os;
 const path = require('node:path') as Path;
+const { spawn } = require('node:child_process') as ChildProcess;
+const PROVIDER = path.join(__dirname, '..', 'build-cache.js');
 const {
 	createBuildCacheProvider,
 	defaultCacheRoot,
@@ -77,7 +91,9 @@ const {
 	writeFileSync,
 	existsSync,
 	readFileSync,
+	readdirSync,
 	statSync,
+	utimesSync,
 } = fs;
 
 const HASH = 'a'.repeat(40);
@@ -290,6 +306,124 @@ describe('build cache provider', () => {
 		).toBe(process.pid);
 	});
 
+	it('treats a lock whose owner is not written yet as held, not abandoned', async () => {
+		let clock = 0;
+		const context = {
+			fingerprintHash: HASH,
+			platform: 'ios',
+			runOptions: {},
+			projectRoot: work,
+		};
+		const entry = entryDirectory(context, { cacheDirectory });
+		const provider = createBuildCacheProvider({
+			now: () => clock,
+			sleep: async (ms: number) => {
+				clock += ms;
+				// The claimant finishes while this worktree waits.
+				if (clock === 2_000) {
+					await uploadBuildCache(
+						{ ...context, buildPath: makeApp(work) },
+						{ cacheDirectory },
+					);
+				}
+			},
+		});
+		mkdirSync(entry, { recursive: true });
+		writeFileSync(path.join(entry, 'build.lock'), '');
+		expect(await provider.resolveBuildCache(context, { cacheDirectory })).toBe(
+			path.join(entry, 'ExampleApp.app'),
+		);
+		// The waiter never replaced the claim with its own.
+		expect(readFileSync(path.join(entry, 'build.lock'), 'utf8')).toBe('');
+	});
+
+	it('reclaims a lock that stays unreadable past the grace period', async () => {
+		const context = {
+			fingerprintHash: HASH,
+			platform: 'ios',
+			runOptions: {},
+			projectRoot: work,
+		};
+		const entry = entryDirectory(context, { cacheDirectory });
+		mkdirSync(entry, { recursive: true });
+		const lockPath = path.join(entry, 'build.lock');
+		writeFileSync(lockPath, '{"pid":');
+		const anHourAgo = new Date(Date.now() - 60 * 60 * 1_000);
+		utimesSync(lockPath, anHourAgo, anHourAgo);
+		expect(await resolveBuildCache(context, { cacheDirectory })).toBeNull();
+		expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid);
+		expect(readdirSync(entry)).toEqual(['build.lock']);
+	});
+
+	it('gives exactly one of several racing processes the claim on an abandoned lock', async () => {
+		const context = {
+			fingerprintHash: HASH,
+			platform: 'ios',
+			runOptions: {},
+			projectRoot: work,
+		};
+		const worker = path.join(work, 'contender.cjs');
+		// Each contender resolves once at a shared instant; the one that claims
+		// uploads straight away, so a slow starter sees the artifact, not a lock
+		// left by an exited claimant.
+		writeFileSync(
+			worker,
+			`const fs = require('node:fs');
+const path = require('node:path');
+const [provider, cacheDirectory, startAt, work] = process.argv.slice(2);
+const { createBuildCacheProvider } = require(provider);
+const cache = createBuildCacheProvider({ sleep: () => new Promise((resolve) => setTimeout(resolve, 20)) });
+const context = ${JSON.stringify(context)};
+while (Date.now() < Number(startAt)) {}
+cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
+	if (hit === null) {
+		const app = path.join(fs.mkdtempSync(path.join(work, 'build-')), 'ExampleApp.app');
+		fs.mkdirSync(app);
+		fs.writeFileSync(path.join(app, 'Info.plist'), '<plist/>');
+		await cache.uploadBuildCache({ ...context, buildPath: app }, { cacheDirectory });
+	}
+	process.stdout.write(hit === null ? 'claimed' : 'hit');
+});
+`,
+		);
+		const entry = entryDirectory(context, { cacheDirectory });
+		for (let trial = 0; trial < 3; trial += 1) {
+			rmSync(entry, { recursive: true, force: true });
+			mkdirSync(entry, { recursive: true });
+			writeFileSync(
+				path.join(entry, 'build.lock'),
+				JSON.stringify({ pid: 4_194_303, startedAt: 0 }),
+			);
+			const startAt = String(Date.now() + 300);
+			const outcomes = await Promise.all(
+				Array.from(
+					{ length: 4 },
+					() =>
+						new Promise<string>((resolve) => {
+							const child = spawn(process.execPath, [
+								worker,
+								PROVIDER,
+								cacheDirectory,
+								startAt,
+								work,
+							]);
+							let output = '';
+							child.stdout.on('data', (chunk) => {
+								output += chunk;
+							});
+							child.on('close', () => resolve(output));
+						}),
+				),
+			);
+			expect(outcomes.sort()).toEqual(['claimed', 'hit', 'hit', 'hit']);
+			// No private lock, staging or record files are left behind.
+			expect(readdirSync(entry).sort()).toEqual([
+				'ExampleApp.app',
+				'artifact.json',
+			]);
+		}
+	});
+
 	it('gives up waiting after the timeout with a message naming the owner', async () => {
 		let clock = 0;
 		const provider = createBuildCacheProvider({
@@ -362,6 +496,68 @@ describe('build cache provider', () => {
 			),
 		);
 		expect(await resolveBuildCache(context, { cacheDirectory })).toBe(stored);
+	});
+
+	it('never replaces a published artifact, which a worktree may be installing', async () => {
+		const context = {
+			fingerprintHash: HASH,
+			platform: 'ios',
+			runOptions: {},
+			projectRoot: work,
+		};
+		const first = makeApp(mkdtempSync(path.join(work, 'first-')));
+		const stored = await uploadBuildCache(
+			{ ...context, buildPath: first },
+			{ cacheDirectory },
+		);
+		const record = readFileSync(
+			path.join(entryDirectory(context, { cacheDirectory }), 'artifact.json'),
+			'utf8',
+		);
+		// A build that raced the lock uploads the same fingerprint again.
+		const second = makeApp(mkdtempSync(path.join(work, 'second-')));
+		writeFileSync(path.join(second, 'ExampleApp'), 'rebuilt binary');
+		expect(
+			await uploadBuildCache(
+				{ ...context, buildPath: second, projectRoot: '/Users/dev/app-b' },
+				{ cacheDirectory },
+			),
+		).toBe(stored);
+		expect(
+			readFileSync(path.join(stored as string, 'ExampleApp'), 'utf8'),
+		).toBe('binary');
+		expect(
+			readFileSync(
+				path.join(entryDirectory(context, { cacheDirectory }), 'artifact.json'),
+				'utf8',
+			),
+		).toBe(record);
+	});
+
+	it('keeps a complete copy that a concurrent upload moved in first', async () => {
+		const context = {
+			fingerprintHash: HASH,
+			platform: 'ios',
+			runOptions: {},
+			projectRoot: work,
+		};
+		const entry = entryDirectory(context, { cacheDirectory });
+		// The other upload renamed its copy into place but has not recorded it.
+		const theirs = makeApp(entry);
+		writeFileSync(path.join(theirs, 'ExampleApp'), 'their binary');
+		const stored = await uploadBuildCache(
+			{ ...context, buildPath: makeApp(work) },
+			{ cacheDirectory },
+		);
+		expect(stored).toBe(theirs);
+		expect(readFileSync(path.join(theirs, 'ExampleApp'), 'utf8')).toBe(
+			'their binary',
+		);
+		expect(await resolveBuildCache(context, { cacheDirectory })).toBe(theirs);
+		expect(readdirSync(entry).sort()).toEqual([
+			'ExampleApp.app',
+			'artifact.json',
+		]);
 	});
 
 	it('ignores a tampered artifact record that points outside the entry', async () => {

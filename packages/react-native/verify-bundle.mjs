@@ -12,19 +12,20 @@
  * service-role JWTs, and the local stack's default JWTs.
  *
  * Usage:
- *   npx rndevtools-verify-bundle <bundle-directory> [--marker "Extra String"]
- *     [--forbid-loopback-urls] [--preset supabase-local]
+ *   npx rndevtools-verify-bundle <bundle-directory-or-file>
+ *     [--marker "Extra String"] [--forbid-loopback-urls]
+ *     [--preset supabase-local]
  */
 import { Buffer } from 'node:buffer';
 import { realpathSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Strings that only appear when devtools code is present. These are panel
- * copy and internal identifiers, not import specifiers, because a bundler
- * rewrites specifiers but keeps string literals intact.
+ * copy and internal identifiers, not import specifiers, because a production
+ * bundle drops specifiers and module paths but keeps string literals intact.
  */
 export const DEFAULT_MARKERS = Object.freeze([
 	'@rndevtools/core',
@@ -34,10 +35,38 @@ export const DEFAULT_MARKERS = Object.freeze([
 	'rndevtools-restore-points',
 	'rndevtools-scenarios',
 	'Registered application storage adapters',
+
+	// Each marker below sits on the runtime path of an entry point that the
+	// ones above cannot see. `src/verify-bundle.test.ts` pins each to its
+	// source and runs that source through Expo's production transform.
+
+	// `@rndevtools/react-native/desktop`
+	'Desktop diagnostics client started.',
+	// The scope of the errors these two entry points throw, a string literal in
+	// their own code rather than the import specifier it matches.
+	'@rndevtools/react-native/authorization',
+	'@rndevtools/react-native/adapters/storage',
+	// `@rndevtools/core/desktop-protocol`
+	'scenarios.discardRecovery',
+	// `@rndevtools/core/plugins/images`
+	'Clear image diagnostics',
+	// `@rndevtools/core/plugins/image-overlay`, which the react-native image
+	// overlay builds its controller on.
+	'Reference image dimensions exceed the safe decode budget.',
+	// `@rndevtools/core/redact`, which `/serialize` loads too: the label for a
+	// property whose getter the sanitizer does not run.
+	'[Accessor omitted]',
+	// `@rndevtools/core/plugins/network-presentation`
+	'[URL omitted: export limit]',
 ]);
 
 const USAGE =
-	'Usage: rndevtools-verify-bundle <bundle-directory> [--marker "Extra String"] [--forbid-loopback-urls] [--preset supabase-local]';
+	'Usage: rndevtools-verify-bundle <bundle-directory-or-file> [--marker "Extra String"] [--forbid-loopback-urls] [--preset supabase-local]';
+
+// Exported web and Hermes output (`.js`, `.hbc`), and the embedded bundles
+// that Xcode, Gradle and `expo export:embed` write (`main.jsbundle`,
+// `index.android.bundle`).
+const BUNDLE_FILE = /\.(?:[cm]?js|hbc|bundle|jsbundle)$/i;
 
 // Literal loopback hosts, including `*.localhost` (RFC 6761) and JSON-escaped
 // slashes. Hostnames that merely start with `localhost.` are not loopback.
@@ -135,35 +164,50 @@ function optionalChecks(options) {
 	return checks;
 }
 
-async function javascriptFiles(root) {
+async function bundleFilesIn(directory) {
 	const files = [];
 	// Sorted, so a failing report lists files in the same order on every run.
-	for (const entry of (await readdir(root)).sort()) {
-		const absolute = path.join(root, entry);
+	for (const entry of (await readdir(directory)).sort()) {
+		const absolute = path.join(directory, entry);
 		const details = await stat(absolute);
-		if (details.isDirectory()) files.push(...(await javascriptFiles(absolute)));
-		else if (/\.(?:js|hbc)$/.test(entry)) files.push(absolute);
+		if (details.isDirectory()) files.push(...(await bundleFilesIn(absolute)));
+		else if (BUNDLE_FILE.test(entry)) files.push(absolute);
+	}
+	return files;
+}
+
+async function bundleFiles(root) {
+	// A file named directly is checked whatever its extension.
+	const files = (await stat(root)).isDirectory()
+		? await bundleFilesIn(root)
+		: [root];
+	// An empty or mistyped output directory must not pass as a clean bundle.
+	if (files.length === 0) {
+		throw new Error(
+			`No bundle files (.js, .hbc, .bundle, .jsbundle, .mjs, .cjs) found in ${root}.`,
+		);
 	}
 	return files;
 }
 
 /**
- * @param {string} root Directory holding an exported bundle.
- * @param {readonly string[]} markers Strings that must not appear.
+ * @param {string} root Exported bundle directory, or a single bundle file.
+ * @param {readonly string[]} [markers] Strings that must not appear, checked
+ *   in addition to `DEFAULT_MARKERS`.
  * @param {{ forbidLoopbackUrls?: boolean, presets?: readonly string[] }} [options]
  *   Opt-in checks: literal loopback URLs, and named presets such as
  *   `supabase-local`.
- * @throws when any check finds something, naming every file and finding.
+ * @returns {Promise<string[]>} The files that were checked.
+ * @throws when there is no bundle file to check, or when any check finds
+ *   something, naming every file and finding.
  */
-export async function verifyPrunedBundle(
-	root,
-	markers = DEFAULT_MARKERS,
-	options = {},
-) {
-	const results = [markerCheck(markers), ...optionalChecks(options)].map(
-		(check) => ({ check, lines: [] }),
-	);
-	for (const file of await javascriptFiles(root)) {
+export async function verifyPrunedBundle(root, markers = [], options = {}) {
+	const results = [
+		markerCheck([...new Set([...DEFAULT_MARKERS, ...markers])]),
+		...optionalChecks(options),
+	].map((check) => ({ check, lines: [] }));
+	const files = await bundleFiles(root);
+	for (const file of files) {
 		const contents = await readFile(file, 'utf8');
 		for (const { check, lines } of results) {
 			for (const finding of new Set(check.find(contents))) {
@@ -175,6 +219,7 @@ export async function verifyPrunedBundle(
 		.filter(({ lines }) => lines.length)
 		.map(({ check, lines }) => `${check.title}:\n${lines.join('\n')}`);
 	if (sections.length) throw new Error(sections.join('\n'));
+	return files;
 }
 
 function parseArguments(argv) {
@@ -209,11 +254,14 @@ function parseArguments(argv) {
 
 function isInvokedAsCli() {
 	if (!process.argv[1]) return false;
-	// Package managers expose this file through a `node_modules/.bin` symlink;
-	// compare real paths or the guard never fires and the check silently passes.
+	// Package managers expose this file through a `node_modules/.bin` symlink,
+	// and `--preserve-symlinks-main` keeps that symlink in `import.meta.url`.
+	// Compare real paths on both sides, or the guard never fires and the check
+	// silently passes.
 	try {
 		return (
-			import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+			realpathSync(fileURLToPath(import.meta.url)) ===
+			realpathSync(process.argv[1])
 		);
 	} catch {
 		return false;
@@ -228,16 +276,17 @@ if (isInvokedAsCli()) {
 		console.log(USAGE);
 	} else {
 		if (!root) throw new Error(USAGE);
-		await verifyPrunedBundle(
+		const files = await verifyPrunedBundle(
 			path.resolve(root),
-			[...DEFAULT_MARKERS, ...markers],
+			markers,
 			options,
 		);
+		const checked = `${root} (${files.length} ${files.length === 1 ? 'file' : 'files'})`;
 		const extras = optionalChecks(options).map((check) => check.label);
 		console.log(
 			extras.length
-				? `No devtools markers found in ${root}; also checked: ${extras.join(', ')}`
-				: `No devtools markers found in ${root}`,
+				? `No devtools markers found in ${checked}; also checked: ${extras.join(', ')}`
+				: `No devtools markers found in ${checked}`,
 		);
 	}
 }

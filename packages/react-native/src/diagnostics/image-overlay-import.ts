@@ -1,11 +1,11 @@
 import type {
 	ImageOverlayLimits,
 	ImageOverlaySource,
-} from '@rndevtools/core/plugins';
+} from '@rndevtools/core/plugins/image-overlay';
 import {
 	validateImageOverlayRemoteUrl,
 	validateImageOverlaySource,
-} from '@rndevtools/core/plugins';
+} from '@rndevtools/core/plugins/image-overlay';
 import { fetch as expoFetch } from 'expo/fetch';
 import { File, Paths } from 'expo-file-system';
 

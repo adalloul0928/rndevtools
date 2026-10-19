@@ -1,7 +1,15 @@
-import type { ImageOverlaySourceInput } from '@rndevtools/core/plugins';
+import type { ImageOverlaySourceInput } from '@rndevtools/core/plugins/image-overlay';
 import { fetch as expoFetch } from 'expo/fetch';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+// The overlay and its import helper take their controller and validators from
+// the overlay's own core subpath. The plugins barrel pulls in every panel, so
+// this factory throws if either module reaches it.
+jest.mock('@rndevtools/core/plugins', () => {
+	throw new Error(
+		'./diagnostics/image-overlay loaded the @rndevtools/core/plugins barrel.',
+	);
+});
 
 type ImageOverlayModule = typeof import('./image-overlay');
 
@@ -95,5 +103,23 @@ describe('image overlay remote hosts', () => {
 		expect(overlay.RNDEVTOOLS_IMAGE_OVERLAY_LIMITS.allowedRemoteHosts).toEqual(
 			[],
 		);
+	});
+});
+
+describe('image overlay entry point', () => {
+	it('drives the overlay without the core plugins barrel', () => {
+		const overlay = loadImageOverlay();
+		overlay.setLocalImageOverlaySource({
+			kind: 'file',
+			uri: 'file:///cache/reference.png',
+			mimeType: 'image/png',
+			bytes: 1_024,
+			width: 390,
+			height: 844,
+		});
+		expect(overlay.imageOverlay.getSnapshot().source?.kind).toBe('file');
+
+		overlay.clearImageOverlay();
+		expect(overlay.imageOverlay.getSnapshot().source).toBeUndefined();
 	});
 });

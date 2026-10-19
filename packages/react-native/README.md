@@ -43,10 +43,11 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
     host: {
       // Project your registered diagnostics into a snapshot payload.
       captureTools: (diagnostics) => buildToolsSnapshot(diagnostics),
-      // Identify this device and build.
+      // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
-      // Apply one desktop-issued action. Throw to reject it.
-      runAction: async (action) => applyAction(action),
+      // Apply one desktop-issued action. Throw to reject it. `signal` aborts
+      // when the client stops waiting for the action.
+      runAction: async (action, { signal }) => applyAction(action, signal),
       // The client refuses actions while this reports disabled.
       getAuthorization: getDevtoolsAuthorization,
     },
@@ -59,6 +60,38 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
 `isDevelopmentBuild: false` for anything that reaches a tester's device:
 the broker socket is unauthenticated and belongs only on a machine the
 developer controls.
+
+Any local process can answer on the broker's port, so the client enforces
+the broker's contract itself:
+
+- It runs an action only when the action's `deviceId` is the `id` that
+  `createDeviceInfo()` returned and its capability is in that info's
+  `capabilities`. Any other action is refused and the connection is closed.
+- Each action has `actionTimeoutMs` to settle, 45 seconds unless you pass
+  `startDesktopClient` another positive number of milliseconds that a timer
+  can hold; any other value throws. When an action runs out of time, the
+  desktop is told it timed out and that its outcome is unknown, the action's
+  `signal` aborts, and the next queued action runs. A host that holds an
+  on-device prompt for an action, such as a confirmation sheet, should
+  dismiss it and reject when the signal aborts.
+- Outgoing frames are paced under the broker's per-connection rate limit.
+  Action results go first, and snapshots coalesce, so the next one sent
+  carries the latest state.
+- A snapshot collection with more rows than its limit in
+  `RNDEVTOOLS_SNAPSHOT_LIMITS` (from `@rndevtools/core/desktop-protocol`) is
+  trimmed to its newest rows, and the client records a warning in its
+  diagnostics. The broker rejects a whole snapshot that is over any limit.
+
+The root barrel imported above also loads the camera provider and the image
+overlay, and with them the optional `expo-file-system` peer. A headless host
+module, such as the one that starts this client, can import from
+`@rndevtools/react-native/desktop`, `/authorization` and `/adapters/storage`
+instead, which load neither the optional peers nor core's plugins barrel.
+`/desktop` also exports `simulatorUdidFromPath`, which reads a Simulator's
+UDID from a container path for `createDeviceInfo().simulatorUdid`, and the
+projection helpers for building snapshots: `desktopProjectionId`,
+`projectDesktopHeaders`, `projectDesktopQueryKey` and
+`limitDesktopProjection`.
 
 ## Authorization
 
@@ -78,6 +111,15 @@ bindDevtoolsAuthorizationOwnerSource({
 
 setDevtoolsAuthorization({ enabled: isStaff, ownerId: session.userId });
 ```
+
+While a source is bound, a grant applies only when its `ownerId` is the
+source's live owner. A grant your app computed for a user who has since
+signed out is ignored, rather than enabling tools for whoever signed in next.
+A failed owner read revokes. So does a source whose `subscribe` throws, and
+grants are then refused until a working source is bound, because nothing
+could revoke them when its owner changed. Granting again after any
+revocation is your app's explicit call. `setDevtoolsAuthorization` called
+without an authorization object revokes, then throws.
 
 ## Keeping devtools out of production
 
@@ -102,6 +144,14 @@ module.exports = withDevtoolsPruning(config, {
 ```
 
 Each stub must export the same shape as the real module with no-op bodies.
+`path` is the file `module` resolves to, with or without its extension.
+Imports are matched by the file they resolve to, so the alias, the relative
+path `babel-plugin-module-resolver` rewrites it to, an explicit extension and
+an `/index` import all get the stub. Leave `path` out only when `module` is
+itself a project-relative path or an installed package. A `path` or stub that
+names no file fails the config load, so a moved module cannot silently stay in
+the bundle.
+
 Then prove it over a real export, in CI:
 
 ```sh
@@ -109,9 +159,26 @@ npx expo export --platform ios --output-dir ./build
 npx rndevtools-verify-bundle ./build --marker "My Debug Panel"
 ```
 
-The verifier greps for devtools markers in the emitted JavaScript and fails the
-build if any survive. The `--marker` flag adds strings specific to your own
-panels.
+The verifier reads every `.js`, `.mjs`, `.cjs`, Hermes `.hbc`, `.bundle` and
+`.jsbundle` file in the directory, or the single bundle file you name (such as
+an embedded `main.jsbundle`), and fails the build if a devtools marker
+survives. It prints how many files it checked and fails when it finds none, so
+a mistyped or empty output directory cannot pass. The built-in markers are
+strings that minified production code keeps: panel copy and identifiers, plus
+one on the runtime path of each entry point those cannot see, so that
+importing it alone still fails the check. Those entry points are this
+package's `/desktop`, `/authorization` and `/adapters/storage`, and core's
+`/desktop-protocol`, `/plugins/images`, `/plugins/image-overlay` (which this
+package's image overlay builds on), `/plugins/network-presentation`, `/redact`
+and `/serialize` (which loads `/redact`). The one exception is core's
+`/format`: its three formatters hold no string specific enough to look for,
+so importing it alone goes unnoticed. Expo's experimental tree shaking
+(`EXPO_UNSTABLE_TREE_SHAKING`) removes a marker together with the code that
+holds it, so there an import goes unnoticed when the code it keeps holds
+none, as `getDevtoolsAuthorization` on its own does. The `--marker` flag adds
+strings specific to your own panels; `verifyPrunedBundle(root, markers)` from
+`@rndevtools/react-native/verify-bundle` checks the built-in markers as well
+as the ones you pass.
 
 Two opt-in checks catch a release bundle that was built against a developer's
 machine, for example after a local backend's URL and keys were copied into a
@@ -166,8 +233,11 @@ installed from
 Entries are split by platform, build configuration, and toolchain (CPU
 architecture plus, for iOS, the `xcodebuild -version` output), so a Release
 binary is never installed for a Debug run and an Xcode upgrade never serves a
-build from the old SDK. Delete the directory to start clean; there is no
-eviction.
+build from the old SDK. The build lock is claimed in one step, and when a
+builder dies only one waiter takes its lock over. An entry's binary is never
+replaced once stored, so a second upload of the same fingerprint cannot
+remove an app that another worktree is installing. Delete the directory to
+start clean; there is no eviction.
 
 `@expo/fingerprint` decides what counts as a native change. If your project
 has native inputs outside the usual places, configure them in
@@ -177,9 +247,48 @@ rather than here; this provider only stores what Expo hands it.
 ## Adapters
 
 `createAsyncStorageDevtoolsAdapter` and `createSecureStoreDevtoolsAdapter`
-wire your storage into the storage panel. The secure-store adapter takes an
-explicit key manifest: it never enumerates the keychain, so only keys you list
-are ever readable. `devtoolsCameraProvider` serves desktop-pushed image
+wire your storage into the storage panel:
+
+```ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { createStoragePlugin } from '@rndevtools/core/plugins/storage';
+import {
+  createAsyncStorageDevtoolsAdapter,
+  createSecureStoreDevtoolsAdapter,
+} from '@rndevtools/react-native/adapters/storage';
+
+const storage = createStoragePlugin({
+  adapters: [
+    createAsyncStorageDevtoolsAdapter(AsyncStorage),
+    createSecureStoreDevtoolsAdapter(SecureStore, [
+      { key: 'session-token', description: 'Signed-in session' },
+      { key: 'region-override', description: 'Region override', revealable: true },
+    ]),
+  ],
+  rules: [{ adapterId: 'async-storage', key: 'onboarding-complete', required: true }],
+});
+```
+
+Each factory takes an optional `{ id, title, description }` as its last
+argument. The ids default to `async-storage` and `secure-store`. Earlier
+versions used `example-async-storage` and `example-secure-store`, so update
+any storage rule whose `adapterId` names one of those. The storage plugin
+rejects two adapters with one id, so a second store of the same kind needs an
+id of its own:
+
+```ts
+createAsyncStorageDevtoolsAdapter(offlineCache, {
+  id: 'offline-cache',
+  title: 'Offline cache',
+});
+```
+
+The secure-store adapter takes an explicit key manifest: it never enumerates
+the keychain, so only keys you list are ever readable, and it reads a value
+only when its key is marked `revealable` and someone reveals it. Either
+factory throws when it is given no store, instead of returning an adapter
+whose every read fails. `devtoolsCameraProvider` serves desktop-pushed image
 fixtures to an instrumented development camera.
 
 ## Image overlays

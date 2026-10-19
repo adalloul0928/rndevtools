@@ -2,8 +2,10 @@ import {
 	type DesktopDeviceAction,
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
+	desktopActionCapability,
 	parseDesktopActionEnvelope,
 	RNDEVTOOLS_PROTOCOL_VERSION,
+	RNDEVTOOLS_SNAPSHOT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import {
 	diagnosticErrorText,
@@ -14,6 +16,17 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import type { DevtoolsAuthorization } from '../authorization';
+import { desktopProjectionId } from './projection';
+
+// A headless host can build its device info and snapshot projections from this
+// entry point alone, without the root barrel's diagnostics and optional peers.
+export {
+	desktopProjectionId,
+	limitDesktopProjection,
+	projectDesktopHeaders,
+	projectDesktopQueryKey,
+} from './projection';
+export { simulatorUdidFromPath } from './simulator-identity';
 
 /** A bounded diagnostic line published alongside each snapshot. */
 export type DesktopDiagnostic = {
@@ -26,9 +39,10 @@ export type DesktopDiagnostic = {
 
 /**
  * Everything the client needs from the host app. The client owns discovery,
- * framing, replay protection, and admission control; the host owns what its own
- * state looks like and what an action is allowed to do. Keeping that boundary
- * explicit is what makes this client reusable across apps.
+ * framing, pacing, replay protection, and admission control, and runs only the
+ * actions the device advertises; the host owns what its own state looks like
+ * and what an action is allowed to do. Keeping that boundary explicit is what
+ * makes this client reusable across apps.
  */
 export type DesktopClientHost = {
 	/** Projects the host's registered diagnostics into a snapshot payload. */
@@ -37,8 +51,15 @@ export type DesktopClientHost = {
 	) => DesktopDeviceToolsSnapshot;
 	/** Identifies this device and build to the desktop. */
 	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
-	/** Applies one desktop-issued action. Rejecting throws. */
-	runAction: (action: DesktopDeviceAction) => Promise<void>;
+	/**
+	 * Applies one desktop-issued action. Rejecting throws. `signal` aborts when
+	 * the client stops waiting for the action; a host holding an on-device
+	 * prompt should dismiss it and reject.
+	 */
+	runAction: (
+		action: DesktopDeviceAction,
+		context: Readonly<{ signal: AbortSignal }>,
+	) => Promise<void>;
 	/** Current authorization. The client refuses actions while disabled. */
 	getAuthorization: () => DevtoolsAuthorization;
 };
@@ -49,11 +70,25 @@ const CONNECT_TIMEOUT_MS = 3_500;
 const SNAPSHOT_INTERVAL_MS = 1_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 2_500;
+const MAX_RETRY_DELAY_MS = 30_000;
+const HEALTHY_CONNECTION_MS = 10_000;
+// Outlasts the broker's longest acknowledgement window (30 s), so the client
+// never gives up on an action the desktop is still waiting for.
+const DEFAULT_ACTION_TIMEOUT_MS = 45_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_DIAGNOSTICS = 200;
 const MAX_PROCESSED_ACTIONS = 200;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 const MAX_INCOMING_MESSAGE_BYTES = 600 * 1024;
 const MAX_OUTGOING_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+// The broker closes a device socket once one second of its frames holds more
+// than 8 frames or 24 MiB. The client spends less than that over a longer
+// window, so delivery jitter, or a broker busy parsing a large snapshot, cannot
+// fold the client's frames into one broker window over the limit.
+const MAX_OUTGOING_FRAMES_PER_WINDOW = 6;
+const MAX_OUTGOING_BYTES_PER_WINDOW = 16 * 1024 * 1024;
+const OUTGOING_RATE_WINDOW_MS = 1_500;
+const MAX_CLOSE_REASON_BYTES = 256;
 const MAX_BROKER_URL_LENGTH = 8 * 1024;
 const MAX_BROKER_CANDIDATES = 100;
 const MAX_BROKER_TOKEN_LENGTH = 512;
@@ -61,6 +96,7 @@ const MIN_REMOTE_BROKER_TOKEN_LENGTH = 16;
 const MAX_PENDING_DESKTOP_ACTIONS = 16;
 const MAX_DESKTOP_ACTIONS_PER_WINDOW = 60;
 const DESKTOP_ACTION_RATE_WINDOW_MS = 10_000;
+const SNAPSHOT_ROW_LIMITS = Object.entries(RNDEVTOOLS_SNAPSHOT_LIMITS);
 
 type ActionResultMessage = {
 	type: 'action-result';
@@ -79,6 +115,17 @@ type ActionReplayLookup =
 	| { kind: 'replay'; result: ActionResultMessage }
 	| { kind: 'conflict' };
 
+/**
+ * The length and hash of an action's JSON. Retaining only this keeps the
+ * replay cache small however large the payloads were. A collision could only
+ * turn a conflict into a replay of the stored result, which never runs the
+ * action.
+ */
+function actionFingerprint(action: DesktopDeviceAction): string {
+	const serialized = JSON.stringify(action);
+	return `${serialized.length}:${desktopProjectionId('action', serialized)}`;
+}
+
 export class DesktopActionReplayCache {
 	readonly #maxEntries: number;
 	readonly #entries = new Map<string, ProcessedAction>();
@@ -93,14 +140,14 @@ export class DesktopActionReplayCache {
 	lookup(action: DesktopDeviceAction): ActionReplayLookup {
 		const processed = this.#entries.get(action.actionId);
 		if (!processed) return { kind: 'new' };
-		return processed.fingerprint === JSON.stringify(action)
+		return processed.fingerprint === actionFingerprint(action)
 			? { kind: 'replay', result: processed.result }
 			: { kind: 'conflict' };
 	}
 
 	remember(action: DesktopDeviceAction, result: ActionResultMessage): void {
 		this.#entries.set(action.actionId, {
-			fingerprint: JSON.stringify(action),
+			fingerprint: actionFingerprint(action),
 			result,
 		});
 		while (this.#entries.size > this.#maxEntries) {
@@ -174,6 +221,115 @@ export class DesktopActionAdmissionController {
 			},
 		};
 	}
+}
+
+/**
+ * The UTF-8 byte length of `text`, or undefined when it exceeds `maxBytes`.
+ * A string's UTF-16 length is a lower bound on its UTF-8 bytes, so text that
+ * is already longer than the limit is refused without walking it.
+ */
+function utf8ByteLengthWithin(
+	text: string,
+	maxBytes: number,
+): number | undefined {
+	if (text.length > maxBytes) return undefined;
+	const bytes = utf8ByteLength(text);
+	return bytes > maxBytes ? undefined : bytes;
+}
+
+/** Meters one connection's outgoing frames and their UTF-8 bytes. */
+class DesktopFrameBudget {
+	readonly #sent: { at: number; bytes: number }[] = [];
+	#bytes = 0;
+
+	fits(bytes: number): boolean {
+		this.#expire(Date.now());
+		return (
+			this.#sent.length < MAX_OUTGOING_FRAMES_PER_WINDOW &&
+			this.#bytes + bytes <= MAX_OUTGOING_BYTES_PER_WINDOW
+		);
+	}
+
+	trySpend(bytes: number): boolean {
+		if (!this.fits(bytes)) return false;
+		this.#sent.push({ at: Date.now(), bytes });
+		this.#bytes += bytes;
+		return true;
+	}
+
+	/** Milliseconds until the oldest spent frame leaves the window. */
+	retryDelayMs(): number {
+		const oldest = this.#sent[0];
+		return oldest
+			? Math.max(1, oldest.at + OUTGOING_RATE_WINDOW_MS - Date.now())
+			: 1;
+	}
+
+	#expire(now: number): void {
+		const newest = this.#sent[this.#sent.length - 1];
+		if (newest && newest.at > now) {
+			// The wall clock moved backwards; restart the window rather than stall.
+			this.#sent.length = 0;
+			this.#bytes = 0;
+			return;
+		}
+		let oldest = this.#sent[0];
+		while (oldest && oldest.at <= now - OUTGOING_RATE_WINDOW_MS) {
+			this.#sent.shift();
+			this.#bytes -= oldest.bytes;
+			oldest = this.#sent[0];
+		}
+	}
+}
+
+/** What one open connection still has to send, in priority order. */
+type DesktopOutbox = {
+	readonly target: WebSocket;
+	readonly budget: DesktopFrameBudget;
+	/** Serialized action results. The broker waits on each, so they only wait. */
+	readonly results: string[];
+	/** Snapshots coalesce: the next one sent carries the latest state. */
+	snapshotDue: boolean;
+	lastSnapshotAt: number;
+	lastSnapshotBytes: number;
+	flushTimer: ReturnType<typeof setTimeout> | undefined;
+};
+
+/**
+ * Trims every top-level collection to the row limit the desktop schema
+ * enforces. The broker rejects a whole snapshot that is over any limit and
+ * closes the socket, so one oversized projection would otherwise leave the
+ * device reconnecting in a loop. The newest rows are kept: core's event stores
+ * append, so those are last.
+ */
+function trimToSnapshotLimits(tools: DesktopDeviceToolsSnapshot): {
+	tools: DesktopDeviceToolsSnapshot;
+	trimmed: readonly string[];
+} {
+	const fields: Readonly<Record<string, unknown>> = tools;
+	let trimmedFields: Record<string, unknown> | undefined;
+	const trimmed: string[] = [];
+	for (const [name, limit] of SNAPSHOT_ROW_LIMITS) {
+		const rows = fields[name];
+		if (!Array.isArray(rows) || rows.length <= limit) continue;
+		trimmedFields ??= { ...fields };
+		trimmedFields[name] = rows.slice(-limit);
+		trimmed.push(`${name} to ${limit} rows`);
+	}
+	return trimmedFields
+		? { tools: trimmedFields as DesktopDeviceToolsSnapshot, trimmed }
+		: { tools, trimmed };
+}
+
+function closeDetail(
+	event: { code?: number; reason?: string } | undefined,
+): string {
+	if (typeof event?.code !== 'number') return '';
+	const reason =
+		typeof event.reason === 'string'
+			? truncateText(event.reason, MAX_CLOSE_REASON_BYTES).text.trim()
+			: '';
+	return ` (${event.code}${reason ? `: ${reason}` : ''})`;
 }
 
 function hostFromUri(value: string | undefined): string | undefined {
@@ -335,12 +491,31 @@ export type DesktopClientOptions = {
 	host: DesktopClientHost;
 	/** Explicit broker URLs. Defaults to the discovered loopback candidates. */
 	candidates?: readonly string[];
+	/**
+	 * How long one host action may run before the client tells the desktop it
+	 * timed out, aborts the action's signal, and moves on to the next queued
+	 * action. Defaults to 45 seconds.
+	 */
+	actionTimeoutMs?: number;
 };
 
 export function startDesktopClient(
 	options: DesktopClientOptions,
 ): DesktopClientHandle {
-	const { host, candidates } = options;
+	const {
+		host,
+		candidates,
+		actionTimeoutMs = DEFAULT_ACTION_TIMEOUT_MS,
+	} = options;
+	if (
+		!Number.isFinite(actionTimeoutMs) ||
+		actionTimeoutMs <= 0 ||
+		actionTimeoutMs > MAX_TIMER_DELAY_MS
+	) {
+		throw new Error(
+			'actionTimeoutMs must be a positive number of milliseconds.',
+		);
+	}
 	const allowAndroidEmulatorAlias =
 		candidates === undefined &&
 		!process.env.EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL &&
@@ -362,7 +537,10 @@ export function startDesktopClient(
 	let candidateIndex = 0;
 	let sequence = 0;
 	let diagnosticSequence = 0;
+	let brokerRejections = 0;
+	let reportedTrim = '';
 	let socket: WebSocket | undefined;
+	let outbox: DesktopOutbox | undefined;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let connectTimer: ReturnType<typeof setTimeout> | undefined;
 	let snapshotTimer: ReturnType<typeof setInterval> | undefined;
@@ -373,6 +551,12 @@ export function startDesktopClient(
 	const processedActions = new DesktopActionReplayCache();
 	const actionAdmission = new DesktopActionAdmissionController();
 	const device = host.createDeviceInfo();
+	// The broker keys this session by the trimmed identifier, and the action
+	// parser trims too, so actions for this device carry the trimmed form.
+	const deviceId = typeof device.id === 'string' ? device.id.trim() : '';
+	const advertisedCapabilities = new Set<string>(
+		Array.isArray(device.capabilities) ? device.capabilities : [],
+	);
 
 	const record = (
 		level: DesktopDiagnostic['level'],
@@ -398,9 +582,11 @@ export function startDesktopClient(
 		if (connectTimer) clearTimeout(connectTimer);
 		if (snapshotTimer) clearInterval(snapshotTimer);
 		if (heartbeatTimer) clearInterval(heartbeatTimer);
+		if (outbox?.flushTimer) clearTimeout(outbox.flushTimer);
 		connectTimer = undefined;
 		snapshotTimer = undefined;
 		heartbeatTimer = undefined;
+		outbox = undefined;
 	};
 
 	const sendSerialized = (serialized: string, target = socket): boolean => {
@@ -433,8 +619,42 @@ export function startDesktopClient(
 		}
 	};
 
-	const sendSnapshot = (target = socket) => {
-		if (!target || socket !== target || target.readyState !== 1) return;
+	/** Sends one frame now if the connection's frame budget has room for it. */
+	const sendWithinBudget = (message: unknown, target: WebSocket): boolean => {
+		const current = outbox;
+		if (current?.target !== target) return false;
+		let serialized: string;
+		try {
+			serialized = JSON.stringify(message);
+		} catch (error) {
+			record(
+				'warn',
+				'transport',
+				`Failed to serialize desktop message: ${diagnosticErrorText(error)}`,
+			);
+			return false;
+		}
+		return (
+			current.budget.trySpend(utf8ByteLength(serialized)) &&
+			sendSerialized(serialized, target)
+		);
+	};
+
+	const reportTrim = (trimmed: readonly string[]) => {
+		const summary = trimmed.join(', ');
+		if (summary === reportedTrim) return;
+		reportedTrim = summary;
+		if (!summary) return;
+		record(
+			'warn',
+			'snapshot',
+			`Trimmed ${summary} in the desktop snapshot to fit its row limits; the newest rows were kept.`,
+		);
+	};
+
+	const serializeSnapshot = (
+		target: WebSocket,
+	): { serialized: string; bytes: number } | undefined => {
 		if (target.bufferedAmount > MAX_BUFFERED_BYTES) {
 			if (!backpressureReported) {
 				backpressureReported = true;
@@ -444,34 +664,119 @@ export function startDesktopClient(
 					'Desktop snapshot skipped while the socket send buffer drains.',
 				);
 			}
-			return;
+			return undefined;
 		}
 		backpressureReported = false;
-		const nextSequence = sequence + 1;
 		try {
+			const captured = trimToSnapshotLimits(host.captureTools(diagnostics));
+			reportTrim(captured.trimmed);
 			const serialized = JSON.stringify({
 				type: 'snapshot',
-				sequence: nextSequence,
+				sequence: sequence + 1,
 				sentAt: Date.now(),
-				tools: host.captureTools(diagnostics),
+				tools: captured.tools,
 			});
-			if (utf8ByteLength(serialized) > MAX_OUTGOING_SNAPSHOT_BYTES) {
+			const bytes = utf8ByteLengthWithin(
+				serialized,
+				MAX_OUTGOING_SNAPSHOT_BYTES,
+			);
+			if (bytes === undefined) {
 				record(
 					'error',
 					'snapshot',
 					'Desktop snapshot exceeded the 8 MiB wire budget and was not sent.',
 				);
-				return;
+				return undefined;
 			}
-			if (sendSerialized(serialized, target)) {
-				sequence = nextSequence;
-			}
+			return { serialized, bytes };
 		} catch (error) {
 			record(
 				'error',
 				'snapshot',
 				`Snapshot capture failed: ${diagnosticErrorText(error)}`,
 			);
+			return undefined;
+		}
+	};
+
+	/**
+	 * Sends what fits the connection's frame budget: queued action results
+	 * first, then the coalesced snapshot. Whatever is left waits until the
+	 * oldest spent frame leaves the window.
+	 */
+	const flushOutbox = () => {
+		const current = outbox;
+		if (!current) return;
+		if (current.flushTimer) clearTimeout(current.flushTimer);
+		current.flushTimer = undefined;
+		const { target, budget, results } = current;
+		while (active && socket === target && target.readyState === 1) {
+			const result = results[0];
+			if (result !== undefined) {
+				if (!budget.trySpend(utf8ByteLength(result))) break;
+				results.shift();
+				sendSerialized(result, target);
+				continue;
+			}
+			if (!current.snapshotDue) return;
+			// Capture only once there is room, so a deferred snapshot carries the
+			// latest state rather than the state when it was requested.
+			if (!budget.fits(current.lastSnapshotBytes)) break;
+			const snapshot = serializeSnapshot(target);
+			if (!snapshot) {
+				current.snapshotDue = false;
+				return;
+			}
+			current.lastSnapshotBytes = snapshot.bytes;
+			if (!budget.trySpend(snapshot.bytes)) break;
+			current.snapshotDue = false;
+			if (sendSerialized(snapshot.serialized, target)) {
+				sequence += 1;
+				current.lastSnapshotAt = Date.now();
+			}
+			return;
+		}
+		if (active && socket === target && target.readyState === 1) {
+			current.flushTimer = setTimeout(flushOutbox, budget.retryDelayMs());
+		}
+	};
+
+	const requestSnapshot = (target: WebSocket) => {
+		const current = outbox;
+		if (current?.target !== target) return;
+		current.snapshotDue = true;
+		flushOutbox();
+	};
+
+	const queueResult = (result: ActionResultMessage, target: WebSocket) => {
+		const current = outbox;
+		// A result for a socket that has closed is moot: the broker failed that
+		// action when the device disconnected.
+		if (current?.target !== target) return;
+		current.results.push(JSON.stringify(result));
+		flushOutbox();
+	};
+
+	/** Runs one host action, giving up after `actionTimeoutMs`. */
+	const runHostAction = async (
+		action: DesktopDeviceAction,
+	): Promise<'completed' | 'timed-out'> => {
+		const controller = new AbortController();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([
+				Promise.resolve(
+					host.runAction(action, { signal: controller.signal }),
+				).then(() => 'completed' as const),
+				new Promise<'timed-out'>((resolve) => {
+					timer = setTimeout(() => {
+						controller.abort();
+						resolve('timed-out');
+					}, actionTimeoutMs);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
 		}
 	};
 
@@ -483,18 +788,20 @@ export function startDesktopClient(
 		if (!active || socket !== target || target.readyState !== 1) return;
 		const authorization = host.getAuthorization();
 		if (!authorization.enabled || authorization.ownerId !== expectedOwnerId) {
-			const result: ActionResultMessage = {
-				type: 'action-result',
-				actionId: action.actionId,
-				ok: false,
-				error: 'Internal tools authorization changed before execution.',
-			};
-			send(result, target);
+			queueResult(
+				{
+					type: 'action-result',
+					actionId: action.actionId,
+					ok: false,
+					error: 'Internal tools authorization changed before execution.',
+				},
+				target,
+			);
 			return;
 		}
 		const processed = processedActions.lookup(action);
 		if (processed.kind !== 'new') {
-			send(
+			queueResult(
 				processed.kind === 'replay'
 					? processed.result
 					: {
@@ -509,17 +816,33 @@ export function startDesktopClient(
 		}
 		let result: ActionResultMessage;
 		try {
-			await host.runAction(action);
-			record(
-				'info',
-				action.tool,
-				`Desktop action completed: ${action.command}.`,
-			);
-			result = {
-				type: 'action-result',
-				actionId: action.actionId,
-				ok: true,
-			};
+			const outcome = await runHostAction(action);
+			if (outcome === 'timed-out') {
+				// The queue moves on: one action that never settles, such as a prompt
+				// nobody answers, must not block every later one.
+				record(
+					'warn',
+					action.tool,
+					`Desktop action timed out: ${action.command}.`,
+				);
+				result = {
+					type: 'action-result',
+					actionId: action.actionId,
+					ok: false,
+					error: `Desktop action timed out after ${actionTimeoutMs} ms; its outcome is unknown.`,
+				};
+			} else {
+				record(
+					'info',
+					action.tool,
+					`Desktop action completed: ${action.command}.`,
+				);
+				result = {
+					type: 'action-result',
+					actionId: action.actionId,
+					ok: true,
+				};
+			}
 		} catch (error) {
 			const message = truncateText(diagnosticErrorText(error), 4_096).text;
 			record('warn', action.tool, `Desktop action rejected: ${message}`);
@@ -531,8 +854,8 @@ export function startDesktopClient(
 			};
 		}
 		processedActions.remember(action, result);
-		send(result, target);
-		sendSnapshot(target);
+		queueResult(result, target);
+		requestSnapshot(target);
 	};
 
 	const scheduleReconnect = (delay: number) => {
@@ -564,6 +887,28 @@ export function startDesktopClient(
 		}
 		socket = nextSocket;
 		let opened = false;
+		let openedAt = 0;
+		let closedByClient = false;
+
+		const closeConnection = (code: number, reason: string) => {
+			closedByClient = true;
+			try {
+				nextSocket.close(code, reason);
+			} catch {
+				// The transport may already be closing after the policy violation.
+			}
+		};
+
+		/**
+		 * Answers an action this device will not run, then closes the connection
+		 * as a policy violation. The answer skips the frame budget: the
+		 * connection ends with it, so going over can only end it a frame sooner.
+		 */
+		const refuse = (actionId: string, error: string, closeReason: string) => {
+			send({ type: 'action-result', actionId, ok: false, error }, nextSocket);
+			closeConnection(1008, closeReason);
+		};
+
 		connectTimer = setTimeout(() => {
 			if (!opened && socket === nextSocket) {
 				socket = undefined;
@@ -599,11 +944,22 @@ export function startDesktopClient(
 				return;
 			}
 			opened = true;
+			openedAt = Date.now();
 			if (connectTimer) clearTimeout(connectTimer);
 			connectTimer = undefined;
 			candidateIndex = currentCandidateIndex;
 			record('info', 'transport', `Connected to ${urlLabel}.`);
-			const sentHello = send(
+			// The broker meters each connection on its own, so each gets a budget.
+			outbox = {
+				target: nextSocket,
+				budget: new DesktopFrameBudget(),
+				results: [],
+				snapshotDue: false,
+				lastSnapshotAt: 0,
+				lastSnapshotBytes: 0,
+				flushTimer: undefined,
+			};
+			const sentHello = sendWithinBudget(
 				{
 					type: 'hello',
 					protocolVersion: RNDEVTOOLS_PROTOCOL_VERSION,
@@ -612,28 +968,37 @@ export function startDesktopClient(
 				nextSocket,
 			);
 			if (!sentHello) {
-				nextSocket.close(1011, 'hello could not be sent');
+				closeConnection(1011, 'hello could not be sent');
 				return;
 			}
-			sendSnapshot(nextSocket);
-			snapshotTimer = setInterval(
-				() => sendSnapshot(nextSocket),
-				SNAPSHOT_INTERVAL_MS,
-			);
+			requestSnapshot(nextSocket);
+			snapshotTimer = setInterval(() => {
+				const current = outbox;
+				// A post-action snapshot that just went out already covers this tick.
+				if (
+					current?.target === nextSocket &&
+					Date.now() - current.lastSnapshotAt < SNAPSHOT_INTERVAL_MS / 2
+				) {
+					return;
+				}
+				requestSnapshot(nextSocket);
+			}, SNAPSHOT_INTERVAL_MS);
 			heartbeatTimer = setInterval(() => {
-				send({ type: 'heartbeat', sentAt: Date.now() }, nextSocket);
+				// Any frame keeps the broker's session fresh, so a heartbeat is only
+				// worth the budget while no action result is waiting for it.
+				if (outbox?.target !== nextSocket || outbox.results.length > 0) return;
+				sendWithinBudget({ type: 'heartbeat', sentAt: Date.now() }, nextSocket);
 			}, HEARTBEAT_INTERVAL_MS);
 		};
 
 		nextSocket.onmessage = (event) => {
 			if (typeof event.data !== 'string') return;
-			if (utf8ByteLength(event.data) > MAX_INCOMING_MESSAGE_BYTES) {
+			if (
+				utf8ByteLengthWithin(event.data, MAX_INCOMING_MESSAGE_BYTES) ===
+				undefined
+			) {
 				record('warn', 'protocol', 'Rejected an oversized desktop action.');
-				try {
-					nextSocket.close(1009, 'desktop action too large');
-				} catch {
-					// The transport may already be closing after the oversized message.
-				}
+				closeConnection(1009, 'desktop action too large');
 				return;
 			}
 			let parsed: unknown;
@@ -648,22 +1013,44 @@ export function startDesktopClient(
 				record('warn', 'protocol', 'Ignored an invalid desktop action.');
 				return;
 			}
+			// Only the genuine broker filters actions by what the device advertised,
+			// and any local process can answer on its port, so the device enforces
+			// its own declaration too.
+			if (action.deviceId !== deviceId) {
+				record(
+					'warn',
+					'protocol',
+					'Refused a desktop action addressed to another device.',
+				);
+				refuse(
+					action.actionId,
+					'Desktop action targets a different device.',
+					'desktop action for another device',
+				);
+				return;
+			}
+			const capability = desktopActionCapability(action.tool, action.command);
+			if (!capability || !advertisedCapabilities.has(capability)) {
+				const name = capability ?? `${action.tool}.${action.command}`;
+				record(
+					'warn',
+					'protocol',
+					`Refused ${name}, which this device does not advertise.`,
+				);
+				refuse(
+					action.actionId,
+					`Device does not advertise ${name}.`,
+					'desktop action not advertised',
+				);
+				return;
+			}
 			const authorization = host.getAuthorization();
 			if (!authorization.enabled) {
-				send(
-					{
-						type: 'action-result',
-						actionId: action.actionId,
-						ok: false,
-						error: 'Internal tools are not authorized.',
-					},
-					nextSocket,
+				refuse(
+					action.actionId,
+					'Internal tools are not authorized.',
+					'internal tools authorization required',
 				);
-				try {
-					nextSocket.close(1008, 'internal tools authorization required');
-				} catch {
-					// The transport may already be closing after the policy violation.
-				}
 				return;
 			}
 			const admission = actionAdmission.admit();
@@ -676,22 +1063,13 @@ export function startDesktopClient(
 						? 'Rejected a desktop action because the pending queue is full.'
 						: 'Rejected a desktop action because the rate limit was exceeded.',
 				);
-				send(
-					{
-						type: 'action-result',
-						actionId: action.actionId,
-						ok: false,
-						error: queueFull
-							? 'Desktop action queue is full; retry later.'
-							: 'Desktop action rate limit exceeded; retry later.',
-					},
-					nextSocket,
+				refuse(
+					action.actionId,
+					queueFull
+						? 'Desktop action queue is full; retry later.'
+						: 'Desktop action rate limit exceeded; retry later.',
+					'desktop action admission limit exceeded',
 				);
-				try {
-					nextSocket.close(1008, 'desktop action admission limit exceeded');
-				} catch {
-					// The transport may already be closing after the policy violation.
-				}
 				return;
 			}
 			actionQueue = actionQueue
@@ -712,14 +1090,35 @@ export function startDesktopClient(
 				record('warn', 'transport', `Desktop socket error at ${urlLabel}.`);
 		};
 
-		nextSocket.onclose = () => {
+		nextSocket.onclose = (event?: { code?: number; reason?: string }) => {
 			if (socket !== nextSocket) return;
 			clearConnectionTimers();
 			socket = undefined;
 			if (!active) return;
-			if (opened) record('warn', 'transport', `Disconnected from ${urlLabel}.`);
 			if (opened) {
-				scheduleReconnect(RETRY_DELAY_MS);
+				// 1008 and 1009 mean the broker rejected what this device sent.
+				// Reconnecting at the usual pace would only repeat the rejection, so
+				// consecutive rejections back off until a connection stays healthy.
+				const rejected =
+					!closedByClient && (event?.code === 1008 || event?.code === 1009);
+				if (Date.now() - openedAt >= HEALTHY_CONNECTION_MS) {
+					brokerRejections = 0;
+				}
+				brokerRejections = rejected ? brokerRejections + 1 : 0;
+				const delay = Math.min(
+					MAX_RETRY_DELAY_MS,
+					RETRY_DELAY_MS * 2 ** Math.max(0, brokerRejections - 1),
+				);
+				record(
+					'warn',
+					'transport',
+					`Disconnected from ${urlLabel}${closeDetail(event)}${
+						delay > RETRY_DELAY_MS
+							? `; retrying in ${Math.round(delay / 1_000)} s`
+							: ''
+					}.`,
+				);
+				scheduleReconnect(delay);
 				return;
 			}
 			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;

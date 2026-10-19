@@ -8,13 +8,43 @@ export type AsyncStorageLike = {
 	clear: () => Promise<void>;
 };
 
+/**
+ * Names this module in its errors. A release bundle keeps string literals but
+ * drops comments and import paths, so `rndevtools-verify-bundle` looks for
+ * this one, and both factories use it so a minifier cannot drop it.
+ */
+const STORAGE_ADAPTERS_MODULE = '@rndevtools/react-native/adapters/storage';
+
+/** A missing store would otherwise only surface as failed reads in the panel. */
+function assertStorage(storage: unknown, factory: string): void {
+	if (storage == null) {
+		throw new TypeError(
+			`${STORAGE_ADAPTERS_MODULE}: ${factory} needs a storage object.`,
+		);
+	}
+}
+
+/**
+ * How an adapter is identified in the storage panel. Each registered adapter
+ * needs its own `id`, so a host that registers two stores of one kind, such as
+ * two AsyncStorage databases, names at least one of them.
+ */
+export type DevtoolsStorageAdapterOptions = Readonly<{
+	id?: string;
+	title?: string;
+	description?: string;
+}>;
+
 export function createAsyncStorageDevtoolsAdapter(
 	storage: AsyncStorageLike,
+	options: DevtoolsStorageAdapterOptions = {},
 ): DevToolsStorageAdapter {
+	assertStorage(storage, 'createAsyncStorageDevtoolsAdapter');
 	return {
-		id: 'example-async-storage',
-		title: 'AsyncStorage',
-		description: 'React Native asynchronous key-value storage',
+		id: options.id ?? 'async-storage',
+		title: options.title ?? 'AsyncStorage',
+		description:
+			options.description ?? 'React Native asynchronous key-value storage',
 		capabilities: {
 			enumerable: true,
 			readable: true,
@@ -51,12 +81,15 @@ export type SecureStoreLike = {
 export function createSecureStoreDevtoolsAdapter(
 	storage: SecureStoreLike,
 	manifest: readonly SecureStoreManifestEntry[],
+	options: DevtoolsStorageAdapterOptions = {},
 ): DevToolsStorageAdapter {
+	assertStorage(storage, 'createSecureStoreDevtoolsAdapter');
 	const entries = new Map(manifest.map((entry) => [entry.key, entry]));
 	return {
-		id: 'example-secure-store',
-		title: 'SecureStore',
+		id: options.id ?? 'secure-store',
+		title: options.title ?? 'SecureStore',
 		description:
+			options.description ??
 			'Explicitly registered keychain metadata; values stay on device',
 		capabilities: {
 			enumerable: false,

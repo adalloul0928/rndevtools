@@ -25,7 +25,10 @@ const path = require('node:path');
  *
  * Concurrency: the first worktree to miss claims a lock file for the entry and
  * builds; later worktrees with the same fingerprint wait for it rather than
- * building a duplicate. A lock whose owner process has died is reclaimed.
+ * building a duplicate. The claim appears with its owner already written, and
+ * a lock whose owner process has died is reclaimed by one waiter only. Once an
+ * entry holds a binary it is never replaced, so a duplicate upload cannot pull
+ * an app out from under a worktree that is installing it.
  *
  * Wire it up in `app.config.js` (plugins must be loaded by Node, so a static
  * `app.json` cannot reference one):
@@ -49,8 +52,16 @@ const path = require('node:path');
 
 const DEFAULT_WAIT_TIMEOUT_MS = 20 * 60 * 1_000;
 const LOCK_POLL_INTERVAL_MS = 1_000;
+/**
+ * How long a lock whose owner cannot be read still counts as held. This
+ * provider writes a claim in one step, but on a filesystem without hard links
+ * (or from an older version) the file exists for a moment before its owner.
+ */
+const UNREADABLE_LOCK_GRACE_MS = 10_000;
 const LOCK_FILE = 'build.lock';
 const ARTIFACT_FILE = 'artifact.json';
+// What `link` fails with where a filesystem has no hard links.
+const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 
 function defaultCacheRoot(env = process.env, homedir = os.homedir()) {
 	if (env.RNDEVTOOLS_BUILD_CACHE_DIR) return env.RNDEVTOOLS_BUILD_CACHE_DIR;
@@ -144,6 +155,13 @@ function expectedArtifactExtension(platform) {
 	return platform === 'android' ? '.apk' : '.app';
 }
 
+/** An `.app` is a bundle directory and an `.apk` a file. */
+function hasArtifactShape(artifactPath, stat) {
+	if (artifactPath.endsWith('.app')) return stat.isDirectory();
+	if (artifactPath.endsWith('.apk')) return stat.isFile();
+	return true;
+}
+
 function readArtifact(entry) {
 	try {
 		const metadata = JSON.parse(
@@ -153,12 +171,73 @@ function readArtifact(entry) {
 		// The recorded name is a bare file name; refuse anything else.
 		if (metadata.artifact !== path.basename(metadata.artifact)) return null;
 		const artifactPath = path.join(entry, metadata.artifact);
-		const stat = fs.statSync(artifactPath);
-		if (artifactPath.endsWith('.app') && !stat.isDirectory()) return null;
-		if (artifactPath.endsWith('.apk') && !stat.isFile()) return null;
-		return artifactPath;
+		return hasArtifactShape(artifactPath, fs.statSync(artifactPath))
+			? artifactPath
+			: null;
 	} catch {
 		return null;
+	}
+}
+
+function uniqueSuffix() {
+	return `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+}
+
+/**
+ * Creates `target` holding `contents` unless something is already there,
+ * with no moment where it exists but is empty: the contents go to a private
+ * file that is hard-linked into place, and linking fails if the target exists.
+ */
+function createExclusive(target, contents) {
+	const temporary = `${target}.${uniqueSuffix()}.tmp`;
+	fs.writeFileSync(temporary, contents, { flag: 'wx' });
+	try {
+		fs.linkSync(temporary, target);
+		return true;
+	} catch (error) {
+		if (error && error.code === 'EEXIST') return false;
+		if (!(error && NO_HARD_LINKS.has(error.code))) throw error;
+	} finally {
+		fs.rmSync(temporary, { force: true });
+	}
+	// No hard links here: create in place. UNREADABLE_LOCK_GRACE_MS covers the
+	// moment before the contents land.
+	try {
+		fs.writeFileSync(target, contents, { flag: 'wx' });
+		return true;
+	} catch (error) {
+		if (error && error.code === 'EEXIST') return false;
+		throw error;
+	}
+}
+
+/** Replaces `file` in one step, so a reader never sees it half-written. */
+function writeFileAtomically(file, contents) {
+	const temporary = `${file}.${uniqueSuffix()}.tmp`;
+	try {
+		fs.writeFileSync(temporary, contents);
+		fs.renameSync(temporary, file);
+	} finally {
+		fs.rmSync(temporary, { force: true });
+	}
+}
+
+/**
+ * Renames a finished copy into place. A complete copy that is already there,
+ * from another upload of this fingerprint, is kept: a worktree may be
+ * installing from it. Only something readers would reject is cleared.
+ */
+function moveIntoPlace(staging, finalPath) {
+	const existing = fs.statSync(finalPath, { throwIfNoEntry: false });
+	if (existing && !hasArtifactShape(finalPath, existing)) {
+		fs.rmSync(finalPath, { recursive: true, force: true });
+	}
+	try {
+		fs.renameSync(staging, finalPath);
+	} catch (error) {
+		if (!(error && (error.code === 'ENOTEMPTY' || error.code === 'EEXIST'))) {
+			throw error;
+		}
 	}
 }
 
@@ -173,27 +252,81 @@ function processAlive(pid) {
 	}
 }
 
-function readLockOwner(lockPath) {
+/** The PID a lock names, or 0 when its contents cannot be read as one. */
+function lockOwner(text) {
 	try {
-		return Number(JSON.parse(fs.readFileSync(lockPath, 'utf8')).pid);
+		const pid = Number(JSON.parse(text).pid);
+		return Number.isInteger(pid) && pid > 0 ? pid : 0;
 	} catch {
 		return 0;
 	}
 }
 
-function tryClaimLock(lockPath) {
+function readLockOwner(lockPath) {
 	try {
-		const handle = fs.openSync(lockPath, 'wx');
-		fs.writeFileSync(
-			handle,
-			`${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`,
-		);
-		fs.closeSync(handle);
-		return true;
+		return lockOwner(fs.readFileSync(lockPath, 'utf8'));
+	} catch {
+		return 0;
+	}
+}
+
+/** The lock's text, owner and write time, or null when there is no lock. */
+function readLock(lockPath) {
+	let handle;
+	try {
+		handle = fs.openSync(lockPath, 'r');
 	} catch (error) {
-		if (error && error.code === 'EEXIST') return false;
+		if (error && error.code === 'ENOENT') return null;
 		throw error;
 	}
+	try {
+		const text = fs.readFileSync(handle, 'utf8');
+		return {
+			text,
+			owner: lockOwner(text),
+			writtenAt: fs.fstatSync(handle).mtimeMs,
+		};
+	} finally {
+		fs.closeSync(handle);
+	}
+}
+
+function isAbandoned(lock) {
+	if (lock.owner) return !processAlive(lock.owner);
+	// No readable owner yet: a claim mid-write, until it is too old to be one.
+	// File times are wall-clock, so this uses Date.now(), not the injectable
+	// clock.
+	return Date.now() - lock.writtenAt > UNREADABLE_LOCK_GRACE_MS;
+}
+
+/**
+ * Removes the abandoned lock `observed`, and only that one. It is renamed
+ * aside first, so of several waiters that judged it abandoned only one moves
+ * it. A waiter that finds it moved a different lock, a claim made since it
+ * looked, puts that claim back; if a third process claimed in that instant,
+ * the result is one duplicate build, which uploads tolerate.
+ */
+function reclaimAbandonedLock(lockPath, observed) {
+	const aside = `${lockPath}.${uniqueSuffix()}.abandoned`;
+	try {
+		fs.renameSync(lockPath, aside);
+	} catch (error) {
+		if (error && error.code === 'ENOENT') return;
+		throw error;
+	}
+	try {
+		const moved = fs.readFileSync(aside, 'utf8');
+		if (moved !== observed.text) createExclusive(lockPath, moved);
+	} finally {
+		fs.rmSync(aside, { force: true });
+	}
+}
+
+function tryClaimLock(lockPath) {
+	return createExclusive(
+		lockPath,
+		`${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`,
+	);
 }
 
 function sleep(ms) {
@@ -213,15 +346,17 @@ async function claimOrWait(entry, { waitTimeoutMs, now, sleep: wait }) {
 		const hit = readArtifact(entry);
 		if (hit) return hit;
 		if (tryClaimLock(lockPath)) return null;
-		const owner = readLockOwner(lockPath);
-		if (!owner || !processAlive(owner)) {
-			// Abandoned lock: the builder died without uploading. Take it over.
-			fs.rmSync(lockPath, { force: true });
+		const lock = readLock(lockPath);
+		// Released since the claim attempt: try again straight away.
+		if (!lock) continue;
+		if (isAbandoned(lock)) {
+			// The builder died without uploading. Take it over.
+			reclaimAbandonedLock(lockPath, lock);
 			continue;
 		}
 		if (now() >= deadline) {
 			throw new Error(
-				`build-cache: timed out after ${Math.round(waitTimeoutMs / 1_000)}s waiting for PID ${owner} to finish building this fingerprint (${lockPath}).`,
+				`build-cache: timed out after ${Math.round(waitTimeoutMs / 1_000)}s waiting for ${lock.owner ? `PID ${lock.owner}` : 'another process'} to finish building this fingerprint (${lockPath}).`,
 			);
 		}
 		await wait(LOCK_POLL_INTERVAL_MS);
@@ -265,16 +400,20 @@ function createBuildCacheProvider(internals = {}) {
 				);
 			}
 			fs.mkdirSync(entry, { recursive: true });
-			// Copy to a sibling and rename so a reader never sees a half-written
-			// artifact: `artifact.json` is only written once the copy is complete.
-			const staging = path.join(entry, `${name}.uploading-${process.pid}`);
+			// An entry is written once. A second build of this fingerprint, from a
+			// worktree that raced the lock, leaves the published copy alone: another
+			// worktree may be installing from it.
+			const published = readArtifact(entry);
+			if (published) return published;
+			// Copy to a private sibling and rename so a reader never sees a
+			// half-written artifact: `artifact.json` is only written once the copy
+			// is complete.
+			const staging = path.join(entry, `${name}.uploading-${uniqueSuffix()}`);
 			const finalPath = path.join(entry, name);
 			try {
-				fs.rmSync(staging, { recursive: true, force: true });
 				fs.cpSync(buildPath, staging, { recursive: true });
-				fs.rmSync(finalPath, { recursive: true, force: true });
-				fs.renameSync(staging, finalPath);
-				fs.writeFileSync(
+				moveIntoPlace(staging, finalPath);
+				writeFileAtomically(
 					path.join(entry, ARTIFACT_FILE),
 					`${JSON.stringify(
 						{

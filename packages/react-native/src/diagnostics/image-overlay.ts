@@ -1,7 +1,7 @@
 import {
 	createImageOverlayController,
 	type ImageOverlaySourceInput,
-} from '@rndevtools/core/plugins';
+} from '@rndevtools/core/plugins/image-overlay';
 import {
 	deletePreparedRemoteImage,
 	type PreparedRemoteImage,

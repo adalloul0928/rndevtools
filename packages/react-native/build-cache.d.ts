@@ -45,7 +45,10 @@ export function resolveBuildCache(
 	options?: BuildCacheProviderOptions,
 ): Promise<string | null>;
 
-/** Copies a finished build into the cache and releases this process's claim. */
+/**
+ * Copies a finished build into the cache and releases this process's claim.
+ * An entry that already holds a binary keeps it, and that path is returned.
+ */
 export function uploadBuildCache(
 	props: UploadBuildCacheProps,
 	options?: BuildCacheProviderOptions,
