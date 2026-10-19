@@ -23,10 +23,11 @@ operation and CLI flag is explicitly allowlisted and bounded.
   Protocol v3 also performs bounded, nondestructive PNG/JPEG Capture Design Studio
   compositions inside a helper-owned private workspace. Inputs and outputs are staged by
   Electron main; the renderer and helper protocol never exchange application paths.
-  Protocol v4 is the sole mutation broker for the Go simulator helper. It authenticates
-  the live production-signed Electron parent against the build's pinned Apple Team ID,
-  validates the exact manifest bytes against the parent app's resource seal, binds both
-  native executables to the same build, and verifies the suspended helper's exact live
+  Protocol v4 is the sole mutation broker for the Go simulator helper. It requires the
+  live production-signed Electron parent to carry the native host's own Apple Team ID
+  (the Go helper pins that team at build time from `APPLE_TEAM_ID`), validates the
+  exact manifest bytes against the parent app's resource seal, binds both native
+  executables to the same build, and verifies the suspended helper's exact live
   CodeDirectory identity before delivering an operation/UDID/exact-request-bound one-shot
   authorization on inherited FD 3. A separately marked private control pipe on FD 4
   requests graceful cancellation and gives helper rollback its full bounded grace period.
@@ -71,21 +72,21 @@ cannot perform real mutations.
 Build the current architecture:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:build
-pnpm --dir apps/devtools-desktop native:verify
-pnpm --dir apps/devtools-desktop native:verify:capabilities
+pnpm --filter @rndevtools/desktop native:build
+pnpm --filter @rndevtools/desktop native:verify
+pnpm --filter @rndevtools/desktop native:verify:capabilities
 ```
 
 Build both supported macOS architectures:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:build:all
+pnpm --filter @rndevtools/desktop native:build:all
 ```
 
 Run source checks:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:check
+pnpm --filter @rndevtools/desktop native:check
 ```
 
 The Go gate runs formatting, vet, race tests, a hermetic two-module dependency

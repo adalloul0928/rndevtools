@@ -170,12 +170,14 @@ directly cannot use them to mutate a simulator.
 
 Electron sends the exact helper request to the signed Swift native host over
 protocol v4. The native host authenticates its live parent as the
-production-signed desktop application using the build's pinned Apple Team ID,
-validates the exact helper-manifest bytes against that application's resource
-seal, reads the helper SHA-256 and build commit from the validated manifest,
-verifies the packaged sibling Go helper against the pinned designated
+production-signed desktop application signed by the native host's own Apple
+Team ID, validates the exact helper-manifest bytes against that application's
+resource seal, reads the helper SHA-256 and build commit from the validated
+manifest, verifies the packaged sibling Go helper against the pinned designated
 requirement, starts it suspended, binds the live process to the exact verified
-CodeDirectory hash, and only then resumes it and sends input. A
+CodeDirectory hash, and only then resumes it and sends input. The native host
+pins no team of its own: the Go helper's build-time `APPLE_TEAM_ID` pin, which
+it checks against the native host as described below, anchors the chain. A
 15-second, random, one-shot authorization travels only on inherited file
 descriptor 3. It binds the request ID, operation, canonical Simulator UDID,
 SHA-256 of every exact helper-request byte (therefore the complete profile,
@@ -187,7 +189,10 @@ process satisfy pinned designated requirements. It reads each process's
 kernel-attached CodeDirectory hash through `csops(2)` and binds that hash into a
 static `codesign` requirement on the executable, because `codesign`'s `+pid`
 form cannot evaluate an explicit requirement against a process on current
-macOS. It also requires the authorization
+macOS. It compares the authorized UDID with the one the operation itself
+decodes from the payload, where JSON field names match case-insensitively, so
+keys that differ only by case cannot authorize one Simulator and act on
+another. It also requires the authorization
 to name its exact build commit, consumes the descriptor exactly once, watches
 the broker parent for the operation lifetime, and rejects replay, mismatch,
 expiry, downgrade, missing FD, parent death, or untrusted-parent cases before
@@ -199,11 +204,14 @@ confirmation and the compatibility/checkpoint checks described below remain
 mandatory on top of this process boundary.
 
 Both direct read-only execution and Swift-brokered mutation execution also
-provide a private inherited control pipe on FD 4, explicitly marked by
-`RNDEVTOOLS_HELPER_CONTROL_FD=4`. Closing the pipe cancels the Go context and allows
+provide a private inherited control channel on FD 4, explicitly marked by
+`RNDEVTOOLS_HELPER_CONTROL_FD=4`. Electron's direct runs pass a Unix socketpair
+(Node's `'pipe'` stdio) and the broker passes a pipe. Closing or half-closing the
+parent's end cancels the Go context and allows
 independently bounded boot-state restoration or mutation rollback to finish;
 the parent escalates only to SIGKILL after the operation-specific grace period.
-Unmarked descriptors are never opened. The helper intentionally does not use
+Unmarked descriptors are never opened, and a marked descriptor that is neither a
+pipe nor a socket is ignored. The helper intentionally does not use
 `os/signal` while supervising Simulator child processes.
 
 Every mutation uses a two-phase prepare/persist/commit contract. Preparation is
@@ -269,7 +277,10 @@ commit-time roots, rather than the earlier preparation snapshot, must all be
 absent after the reboot. Missing, duplicated, or ambiguous PID/program/tree
 mappings fail before mutation. This proof is deliberately scoped to managed
 jobs observed running at commit; jobs already not running are covered by the
-independent launchd-registration absence proof.
+independent launchd-registration absence proof. Every successful commit,
+undo included, ends in the boot state the Simulator had when that commit
+started: undo returns the managed services to the target checkpoint, not to the
+boot state recorded with it.
 
 The helper also proves that both the checkpoint and requested target can be
 represented by SimSlim's public profile API before mutation. A pre-existing
@@ -357,7 +368,8 @@ unverified state retains a private emergency token, blocks other mutations,
 and exposes checkpoint-bound Undo recovery. No-op and proven-rolled-back
 attempts never replace the prior successful restore point.
 
-Sending SIGINT or SIGTERM requests graceful cancellation. A mutation failure
+Closing the FD 4 control channel requests graceful cancellation; the helper
+installs no signal handler, so a signal ends it without cleanup. A mutation failure
 then enters an independent bounded rollback/boot-restoration context before
 responding. Electron's operation-specific timeout and forced-kill grace always
 reserve that cleanup budget; ungraceful termination is not routine
@@ -484,6 +496,10 @@ links no private framework, it `dlopen`s CoreSimulator and SimulatorKit from
 the active developer directory and resolves `SimServiceContext`,
 `SimDeviceLegacyHIDClient`, and the `IndigoHIDMessageFor*` builders by name);
 `simulator_input_failed` when a message is refused or unacknowledged within 5 s.
+A gesture that is cancelled or fails part-way first lifts whatever it still
+holds (the finger, keys and modifiers, or a button) before the host reports the
+error, so a shared Simulator is not left with input held down. Holds wake on
+cancellation, so the lifts go out before Electron's forced kill.
 
 The result also names the `transport` that carried the events. Two exist, and
 the host picks one from the CoreSimulator version actually loaded in process
