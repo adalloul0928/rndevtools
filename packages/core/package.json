@@ -36,6 +36,7 @@
 		"./serialize": "./src/core/serialize.ts",
 		"./plugins": "./src/plugins/index.ts",
 		"./plugins/images": "./src/plugins/images.tsx",
+		"./plugins/image-overlay": "./src/plugins/image-overlay.ts",
 		"./plugins/storage": "./src/plugins/storage.tsx",
 		"./plugins/network-presentation": "./src/plugins/network-presentation.ts",
 		"./package.json": "./package.json"

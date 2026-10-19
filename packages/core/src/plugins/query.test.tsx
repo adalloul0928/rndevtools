@@ -1,17 +1,17 @@
 import { QueryClient } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Platform } from 'react-native';
+import { formatRelativeTime } from '../core/format';
 import {
 	createMutationSnapshot,
 	createQueryPlugin,
 	createQuerySimulationController,
-	createQuerySnapshot,
 	formatQueryKey,
 	formatQueryKeyRemainder,
-	formatRelativeTime,
 	type QueryPlugin,
 	summarizeError,
 } from './query';
+import { createQuerySnapshot } from './query-model';
 
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');

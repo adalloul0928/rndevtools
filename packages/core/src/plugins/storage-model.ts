@@ -1,5 +1,6 @@
 import {
 	diagnosticErrorText,
+	isSensitiveDiagnosticKey,
 	sanitizeDiagnosticValueWithMetadata,
 } from '../core/redact';
 import {
@@ -33,6 +34,11 @@ export type DevToolsStorageAdapter = {
 	capabilities?: Partial<StorageAdapterCapabilities>;
 	registeredKeys?: readonly StorageRegisteredKey[];
 	sensitive?: boolean;
+	/**
+	 * Shows the values of a sensitive adapter, which are otherwise never read,
+	 * and values stored under a key whose name marks it sensitive
+	 * (`refreshToken`, `session`), which are otherwise redacted.
+	 */
 	revealValues?: boolean;
 	getAllKeys?: () => readonly string[] | Promise<readonly string[]>;
 	getValue?: (key: string) => unknown | Promise<unknown>;
@@ -716,7 +722,8 @@ export async function snapshotStorageAdapter(
 		const keys = [...new Set(validKeys)].sort((left, right) =>
 			left.localeCompare(right),
 		);
-		const valueHidden = capabilities.sensitive && adapter.revealValues !== true;
+		const revealsValues = adapter.revealValues === true;
+		const valueHidden = capabilities.sensitive && !revealsValues;
 		const candidateKeys = keys.slice(0, limits.maxEntries);
 		const entries: StorageEntrySnapshot[] = [];
 		let estimatedBytes = 0;
@@ -752,9 +759,13 @@ export async function snapshotStorageAdapter(
 						1,
 						Math.min(maxValueBytes, remainingBytes - metadataBytes),
 					);
+					// An opaque token has no shape the value rules recognize, so a
+					// sensitive key name alone redacts it, as it redacts an object field.
 					const sanitized = binary
 						? undefined
-						: sanitizeDiagnosticValueWithMetadata(value);
+						: !revealsValues && isSensitiveDiagnosticKey(key)
+							? { value: '[REDACTED]', truncated: false, redacted: true }
+							: sanitizeDiagnosticValueWithMetadata(value);
 					const serialized = binary
 						? truncateText('[Binary value omitted]', valueBudget)
 						: typeof sanitized?.value === 'string'

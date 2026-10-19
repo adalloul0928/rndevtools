@@ -35,9 +35,9 @@ import {
 	summarizeNetworkInsights,
 } from './network';
 import {
+	captureHeaders,
 	defaultRedactBody,
 	defaultRedactUrl,
-	headersRecord,
 	parseContentLength,
 } from './network-capture';
 
@@ -189,7 +189,7 @@ describe('createNetworkPlugin', () => {
 	});
 
 	it('replaces encoded sensitive header names as well as their values', () => {
-		const headers = headersRecord(
+		const { headers } = captureHeaders(
 			new Headers([
 				['pass%77ord', 'hunter2'],
 				['to%256ben%253dhunter2', 'still-secret'],
@@ -1442,7 +1442,8 @@ describe('createNetworkPlugin', () => {
 		const redactHeader = jest.fn((_name: string, value: string) => value);
 
 		expect(
-			headersRecord(iterableHeaders as unknown as HeadersInit, redactHeader),
+			captureHeaders(iterableHeaders as unknown as HeadersInit, redactHeader)
+				.headers,
 		).toEqual({});
 		expect(pulls).toBe(0);
 		expect(redactHeader).not.toHaveBeenCalled();
@@ -1461,7 +1462,7 @@ describe('createNetworkPlugin', () => {
 		const headers = new Proxy(headerTarget, { ownKeys });
 		const redactHeader = jest.fn((_name: string, value: string) => value);
 
-		expect(headersRecord(headers, redactHeader)).toEqual({});
+		expect(captureHeaders(headers, redactHeader).headers).toEqual({});
 		expect(ownKeys).toHaveBeenCalledTimes(1);
 		expect(redactHeader).not.toHaveBeenCalled();
 	});

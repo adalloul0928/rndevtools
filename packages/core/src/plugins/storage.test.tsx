@@ -792,7 +792,7 @@ describe('createStoragePlugin', () => {
 		const adapter = {
 			id: 'standard',
 			title: 'Standard',
-			getAllKeys: () => ['session'],
+			getAllKeys: () => ['profile'],
 			getValue: () => ({ accessToken: 'private-token', ready: true }),
 			setValue: jest.fn(),
 		};
@@ -804,6 +804,77 @@ describe('createStoragePlugin', () => {
 		expect(entry?.value).not.toContain('private-token');
 		expect(entry?.redacted).toBe(true);
 		expect(entry && isStorageEntryEditable(adapter, entry)).toBe(false);
+	});
+
+	it('redacts an opaque value stored under a sensitive key name', async () => {
+		let token = 'r1.first-opaque';
+		const keys = ['refreshToken', 'theme'];
+		const adapter = {
+			id: 'standard',
+			title: 'Standard',
+			getAllKeys: () => keys,
+			getValue: (key: string) => (key === 'theme' ? 'dark' : token),
+			setValue: jest.fn(),
+		};
+		const storage = createStoragePlugin({ adapters: [adapter] });
+
+		await storage.refresh();
+		token = 'r1.second-opaque';
+		keys.push('session_id');
+		await storage.refresh();
+
+		const [refreshToken, , theme] =
+			storage.getSnapshot().adapters[0]?.entries ?? [];
+		expect(refreshToken).toMatchObject({
+			key: 'refreshToken',
+			value: '[REDACTED]',
+			valueType: 'string',
+			redacted: true,
+			valueHidden: false,
+		});
+		expect(refreshToken && isStorageEntryEditable(adapter, refreshToken)).toBe(
+			false,
+		);
+		expect(theme).toMatchObject({ key: 'theme', value: 'dark' });
+		expect(storage.getEvents()).toEqual([
+			expect.objectContaining({
+				key: 'session_id',
+				type: 'added',
+				value: '[REDACTED]',
+			}),
+		]);
+		expect(
+			JSON.stringify([storage.getSnapshot(), storage.getEvents()]),
+		).not.toContain('opaque');
+		// The value's type is still known, so its checks still run.
+		expect(
+			validateStorageSnapshot(storage.getSnapshot(), [
+				{ adapterId: 'standard', key: 'refreshToken', expectedType: 'string' },
+			])[0]?.status,
+		).toBe('valid');
+	});
+
+	it('shows values under sensitive key names when the adapter reveals values', async () => {
+		const storage = createStoragePlugin({
+			adapters: [
+				{
+					id: 'standard',
+					title: 'Standard',
+					revealValues: true,
+					getAllKeys: () => ['sessionCount'],
+					getValue: () => 3,
+				},
+			],
+		});
+
+		await storage.refresh();
+
+		expect(storage.getSnapshot().adapters[0]?.entries[0]).toMatchObject({
+			key: 'sessionCount',
+			value: '3',
+			valueType: 'number',
+			redacted: false,
+		});
 	});
 
 	it('never invokes accessors returned as storage values or key-list items', async () => {
@@ -1361,7 +1432,7 @@ describe('storage adapter capabilities and history', () => {
 				{
 					id: 'settings',
 					title: 'Settings',
-					getAllKeys: () => ['session'],
+					getAllKeys: () => ['profile'],
 					getValue: () => value,
 					setValue,
 				},

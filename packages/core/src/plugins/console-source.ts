@@ -41,33 +41,45 @@ export function createConsoleMethodSource(
 	const wrappers = new Map<ConsoleMethodName, ConsoleMethod>();
 	const active = options.enabled === true && options.development === true;
 	const now = options.now ?? Date.now;
+	let emitting = false;
 
 	const emit = (level: ConsoleLogLevel, args: readonly unknown[]): void => {
-		const first = args[0];
-		const message =
-			typeof first === 'string' ? first : serializeValue(first, 4 * 1024).text;
-		const serializedArguments =
-			args.length > 1 ? serializeValue(args.slice(1), 8 * 1024) : undefined;
-		const event: ConsoleLogInput = {
-			at: now(),
-			level,
-			message,
-			scope: 'console',
-			...(serializedArguments
-				? {
-						attributes: {
-							argumentsText: serializedArguments.text,
-							argumentsTruncated: serializedArguments.truncated,
-						},
-					}
-				: {}),
-		};
-		for (const listener of [...listeners]) {
-			try {
-				listener(event);
-			} catch {
-				// A diagnostics listener must never alter console behavior.
+		// A listener that logs, or React warning about an update the listener
+		// caused, calls back into a wrapper. Capturing that call would recurse
+		// until the stack overflows, so it still prints but is not captured.
+		if (emitting) return;
+		emitting = true;
+		try {
+			const first = args[0];
+			const message =
+				typeof first === 'string'
+					? first
+					: serializeValue(first, 4 * 1024).text;
+			const serializedArguments =
+				args.length > 1 ? serializeValue(args.slice(1), 8 * 1024) : undefined;
+			const event: ConsoleLogInput = {
+				at: now(),
+				level,
+				message,
+				scope: 'console',
+				...(serializedArguments
+					? {
+							attributes: {
+								argumentsText: serializedArguments.text,
+								argumentsTruncated: serializedArguments.truncated,
+							},
+						}
+					: {}),
+			};
+			for (const listener of [...listeners]) {
+				try {
+					listener(event);
+				} catch {
+					// A diagnostics listener must never alter console behavior.
+				}
 			}
+		} finally {
+			emitting = false;
 		}
 	};
 

@@ -114,6 +114,141 @@ describe('DevtoolsEventStore', () => {
 		expect(observed[0]).toBe(retained);
 	});
 
+	it('redacts and bounds attribute keys as the other walks do', () => {
+		const event = acceptedEvent(createStore(), {
+			...eventInput('keys'),
+			attributes: {
+				'bob@example.org': 'second',
+				'alice@example.com': 'first',
+				'token=abc': 'opaque',
+				[`${'k'.repeat(600)}a`]: 1,
+				[`${'k'.repeat(600)}b`]: 2,
+				' padded ': true,
+			},
+		});
+		// An address names no sensitive field, so its value stays readable, where
+		// the redacted key was tested and hid it. Keys that redaction or the cut
+		// make equal are numbered, where all but one were dropped.
+		expect(Object.entries(event.attributes ?? {})).toEqual([
+			['(2) [REDACTED EMAIL]', 'first'],
+			[`(2) ${'k'.repeat(505)}…`, 2],
+			['[REDACTED EMAIL]', 'second'],
+			[`${'k'.repeat(509)}…`, 1],
+			['padded', true],
+			['token=[REDACTED]', '[REDACTED]'],
+		]);
+		expect(event).toMatchObject({ redacted: true, truncated: true });
+	});
+
+	it('flags an attribute key that it redacts or numbers', () => {
+		const store = createStore();
+		const redacted = acceptedEvent(store, {
+			...eventInput('email key'),
+			attributes: { 'alice@example.com': 1 },
+		});
+		expect(redacted).toMatchObject({
+			attributes: { '[REDACTED EMAIL]': 1 },
+			redacted: true,
+			truncated: false,
+		});
+		// Trimming made these equal, and the second was numbered with neither
+		// flag set, where it was dropped and the event marked truncated.
+		const trimmed = acceptedEvent(store, {
+			...eventInput('trimmed keys'),
+			attributes: { ' padded ': true, padded: false },
+		});
+		expect(trimmed).toMatchObject({
+			attributes: { padded: true, '(2) padded': false },
+			redacted: false,
+			truncated: true,
+		});
+		// Trimming alone sets neither flag.
+		const padded = acceptedEvent(store, {
+			...eventInput('padded key'),
+			attributes: { ' padded ': true },
+		});
+		expect(Object.keys(padded.attributes ?? {})).toEqual(['padded']);
+		expect(padded).toMatchObject({ redacted: false, truncated: false });
+	});
+
+	it('charges the attribute budget for every key it lists', () => {
+		// Listing 200,000 keys spends the 2 Mi units, so a string among the 64
+		// kept is omitted.
+		const attributes: Record<string, string | number> = { note: 'visible' };
+		for (let index = 0; index < 200_000; index += 1) {
+			attributes[`k${index}`] = index;
+		}
+		const event = acceptedEvent(createStore(), {
+			...eventInput('wide'),
+			attributes,
+		});
+		expect(event.attributes).toMatchObject({
+			note: '[Value omitted: input limit]',
+			k0: 0,
+		});
+		expect(event.truncated).toBe(true);
+	});
+
+	it('reads and sorts only the attributes it keeps', () => {
+		const attributes = Object.fromEntries(
+			Array.from({ length: 200_000 }, (_, index) => [`k${index}`, index]),
+		);
+		const sort = jest.spyOn(Array.prototype, 'sort');
+		const descriptors = jest.spyOn(Object, 'getOwnPropertyDescriptors');
+		let event: DevtoolsEvent;
+		try {
+			event = acceptedEvent(createStore(), {
+				...eventInput('wide'),
+				attributes,
+			});
+			// Every descriptor was read and every key sorted before the cap.
+			expect(
+				descriptors.mock.calls.some(([value]) => value === attributes),
+			).toBe(false);
+			const longestSort = sort.mock.contexts.reduce<number>(
+				(longest, array) => Math.max(longest, (array as unknown[]).length),
+				0,
+			);
+			expect(longestSort).toBeLessThanOrEqual(64);
+		} finally {
+			sort.mockRestore();
+			descriptors.mockRestore();
+		}
+		expect(Object.keys(event.attributes ?? {})).toHaveLength(64);
+		expect(event.truncated).toBe(true);
+	});
+
+	it('redacts a bounded window of long event text', () => {
+		// Every text was redacted whole: a title, a summary and 64 attributes of
+		// 12 Mi each took seconds on this Mac.
+		const long = 'x'.repeat(12 * 1024 * 1024);
+		const replace = jest.spyOn(String.prototype, 'replace');
+		let event: DevtoolsEvent;
+		try {
+			event = acceptedEvent(createStore({ maxBytes: 1024 * 1024 }), {
+				...eventInput(`token=abc ${long}`),
+				summary: long,
+				attributes: Object.fromEntries(
+					Array.from({ length: 64 }, (_, index) => [`note${index}`, long]),
+				),
+			});
+			const scanned = replace.mock.contexts.reduce<number>(
+				(longest, text) => Math.max(longest, String(text).length),
+				0,
+			);
+			expect(scanned).toBeLessThanOrEqual(512 * 1024);
+		} finally {
+			replace.mockRestore();
+		}
+		expect(event.title.startsWith('token=[REDACTED] xxx')).toBe(true);
+		// The attributes share one budget, and what is past it is omitted.
+		const values = Object.values(event.attributes ?? {});
+		expect(values).toHaveLength(64);
+		expect(values).toContain(`${'x'.repeat(4 * 1024 - 3)}…`);
+		expect(values).toContain('[Value omitted: input limit]');
+		expect(event.truncated).toBe(true);
+	});
+
 	it('evicts oldest events deterministically by count and reports drops', () => {
 		const store = createStore({ maxEvents: 2 });
 		acceptedEvent(store, eventInput('one'));

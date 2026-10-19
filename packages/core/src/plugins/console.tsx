@@ -33,9 +33,21 @@ import {
 } from '../components/android-panel-ui';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
+import {
+	createKeyWalker,
+	type KeyWalker,
+	redactWithinWindow,
+	stringObjectText,
+	VALUE_OMITTED,
+	VALUE_UNITS,
+} from '../core/bounded-redaction';
 import { BoundedEventStore, ExternalStore } from '../core/external-store';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
-import { redactDiagnosticText } from '../core/redact';
+import {
+	isSensitiveDiagnosticKey,
+	redactDiagnosticText,
+	sanitizeDiagnosticValue,
+} from '../core/redact';
 import { createRefCountedInstaller } from '../core/ref-counted-installer';
 import { serializeValue, truncateText } from '../core/serialize';
 import { shareDiagnosticContent } from '../core/share';
@@ -157,44 +169,114 @@ const MAX_CONSOLE_MESSAGE_BYTES = 64 * 1024;
 const MAX_CONSOLE_ATTRIBUTES_BYTES = 1024 * 1024;
 const MAX_CONSOLE_STACK_BYTES = 64 * 1024;
 const MAX_GROUPING_WINDOW_MS = 60_000;
+// The work that the attributes of one event share, in code units: every code
+// unit of a string or key tested or redacted, or of a key copied again, and
+// `VALUE_UNITS` for every value, hole and accessor read and for every key
+// listed, so a wide tree of values without text runs out too. Once it is
+// spent, the strings and objects still reached are omitted, and so are the
+// keys of more than 1 Ki code units.
+const MAX_ATTRIBUTE_REDACTION_UNITS = 2 * MAX_CONSOLE_ATTRIBUTES_BYTES;
+// The most entries of one array and keys of one object that attributes keep.
+const MAX_ATTRIBUTE_ARRAY_ENTRIES = 50;
+const MAX_ATTRIBUTE_OBJECT_KEYS = 100;
 
 function isConsoleLogLevel(value: unknown): value is ConsoleLogLevel {
 	return typeof value === 'string' && LOG_LEVELS.has(value as ConsoleLogLevel);
 }
 
-export function redactConsoleText(value: string): string {
-	return redactDiagnosticText(value)
+function consoleMarkers(text: string): string {
+	return text
 		.replaceAll('[REDACTED EMAIL]', '[REDACTED_EMAIL]')
-		.replaceAll('[REDACTED JWT]', '[REDACTED_TOKEN]')
-		.replace(UUID, '[REDACTED_ID]');
+		.replaceAll('[REDACTED JWT]', '[REDACTED_TOKEN]');
+}
+
+export function redactConsoleText(value: string): string {
+	// Markers already in the text are renamed first, so the rules see what a
+	// second redaction would: dropping the space can let a URL password run on.
+	return consoleMarkers(redactDiagnosticText(consoleMarkers(value))).replace(
+		UUID,
+		'[REDACTED_ID]',
+	);
+}
+
+/** What one event's attributes may still redact, and whether any was cut. */
+type AttributeRedaction = {
+	units: number;
+	maxBytes: number;
+	truncated: boolean;
+	walkKey: KeyWalker;
+};
+
+/**
+ * The Console's own key names, and the shared ones: `serializeValue` replaces
+ * the value of every key `isSensitiveDiagnosticKey` flags, so testing those
+ * here too spares the walk, and the truncated flag, values it would replace
+ * anyway.
+ */
+function isSensitiveConsoleKey(key: string): boolean {
+	return (
+		SENSITIVE_KEY.test(key) ||
+		SENSITIVE_KEY.test(separatorNormalizedKey(key)) ||
+		isSensitiveDiagnosticKey(key)
+	);
+}
+
+function redactAttributeText(
+	text: string,
+	redaction: AttributeRedaction,
+): string {
+	try {
+		const bounded = redactWithinWindow(
+			text,
+			redaction.maxBytes,
+			redactConsoleText,
+			redaction,
+		);
+		if (bounded.truncated) redaction.truncated = true;
+		return bounded.text;
+	} catch {
+		// An engine with a smaller regexp stack than V8 can fail on one window.
+		// The value is left out rather than kept unredacted.
+		redaction.truncated = true;
+		return '[Value omitted: redaction failed]';
+	}
 }
 
 function redactConsoleValue(
 	value: unknown,
-	key: string,
 	depth: number,
 	seen: WeakSet<object>,
+	redaction: AttributeRedaction,
 ): unknown {
-	if (
-		SENSITIVE_KEY.test(key) ||
-		SENSITIVE_KEY.test(separatorNormalizedKey(key))
-	) {
-		return '[REDACTED]';
-	}
-	if (typeof value === 'string') return redactConsoleText(value);
+	// A value without text costs a value too, so that an array of them runs
+	// out. It is kept even once the budget is spent: no object is opened after
+	// that, so only the ones already open can list more.
 	if (
 		value === null ||
 		typeof value === 'number' ||
 		typeof value === 'boolean'
 	) {
+		redaction.units -= VALUE_UNITS;
 		return value;
 	}
-	if (typeof value !== 'object') return undefined;
+	if (typeof value !== 'string' && typeof value !== 'object') {
+		// Undefined, a function, a symbol or a bigint, which are left out.
+		redaction.units -= VALUE_UNITS;
+		return undefined;
+	}
+	if (redaction.units <= 0) {
+		redaction.truncated = true;
+		return VALUE_OMITTED;
+	}
+	redaction.units -= VALUE_UNITS;
+	if (typeof value === 'string') return redactAttributeText(value, redaction);
+	const text = stringObjectText(value);
+	if (text !== undefined) return redactAttributeText(text, redaction);
 	if (depth >= 6) return '[Max depth]';
 	if (seen.has(value)) return '[Circular]';
 	seen.add(value);
 	try {
-		return redactConsoleObject(value, depth, seen);
+		return redactConsoleObject(value, depth, seen, redaction);
 	} finally {
 		// `seen` is the ancestor path, not a visited-set: leaving entries behind
 		// would report a value referenced twice in a tree as a cycle.
@@ -206,39 +288,57 @@ function redactConsoleObject(
 	value: object,
 	depth: number,
 	seen: WeakSet<object>,
+	redaction: AttributeRedaction,
 ): unknown {
-	let descriptors: Record<string, PropertyDescriptor>;
+	// A typed array has an own property per element; the shared sanitizer
+	// summarizes it rather than walking a multi-megabyte buffer.
+	if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value)) {
+		return sanitizeDiagnosticValue(value);
+	}
+	// Descriptors are read one at a time, and only for entries within the caps:
+	// collecting them all first cost time and memory in proportion to the size
+	// of the logged value. Nested levels catch their own read failures.
+	const redactedEntry = (key: string, sensitive: boolean): unknown => {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor && 'value' in descriptor && !sensitive) {
+			return redactConsoleValue(descriptor.value, depth + 1, seen, redaction);
+		}
+		// A hole, an accessor and a hidden value cost a value each too.
+		redaction.units -= VALUE_UNITS;
+		if (!descriptor || !('value' in descriptor)) return '[Accessor omitted]';
+		return '[REDACTED]';
+	};
 	try {
-		descriptors = Object.getOwnPropertyDescriptors(value);
+		if (Array.isArray(value)) {
+			const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+			const length =
+				lengthDescriptor &&
+				'value' in lengthDescriptor &&
+				typeof lengthDescriptor.value === 'number'
+					? lengthDescriptor.value
+					: 0;
+			if (length > MAX_ATTRIBUTE_ARRAY_ENTRIES) redaction.truncated = true;
+			return Array.from(
+				{ length: Math.min(length, MAX_ATTRIBUTE_ARRAY_ENTRIES) },
+				(_unused, index) => redactedEntry(String(index), false),
+			);
+		}
+		const keys = Object.keys(value);
+		// Listing costs time for every key, however few are kept.
+		redaction.units -= keys.length * VALUE_UNITS;
+		if (keys.length > MAX_ATTRIBUTE_OBJECT_KEYS) redaction.truncated = true;
+		const output = Object.create(null) as Record<string, unknown>;
+		for (const key of keys.slice(0, MAX_ATTRIBUTE_OBJECT_KEYS)) {
+			const stored = redaction.walkKey(key, output, redaction);
+			if (stored.truncated) redaction.truncated = true;
+			output[stored.key] = stored.omitted
+				? VALUE_OMITTED
+				: redactedEntry(key, stored.sensitive);
+		}
+		return output;
 	} catch {
 		return '[Unreadable object]';
 	}
-	if (Array.isArray(value)) {
-		const lengthDescriptor = descriptors.length;
-		const length =
-			lengthDescriptor &&
-			'value' in lengthDescriptor &&
-			typeof lengthDescriptor.value === 'number'
-				? lengthDescriptor.value
-				: 0;
-		return Array.from({ length: Math.min(length, 50) }, (_unused, index) => {
-			const descriptor = descriptors[String(index)];
-			return descriptor && 'value' in descriptor
-				? redactConsoleValue(descriptor.value, '', depth + 1, seen)
-				: '[Accessor omitted]';
-		});
-	}
-	return Object.fromEntries(
-		Object.entries(descriptors)
-			.filter(([, descriptor]) => descriptor.enumerable)
-			.slice(0, 100)
-			.map(([nestedKey, descriptor]) => [
-				nestedKey,
-				'value' in descriptor
-					? redactConsoleValue(descriptor.value, nestedKey, depth + 1, seen)
-					: '[Accessor omitted]',
-			]),
-	);
 }
 
 function matchesFilter(level: ConsoleLogLevel, filter: ConsoleFilter): boolean {
@@ -266,12 +366,22 @@ function eventSearchText(event: ConsoleLogEvent): string {
 	return `${event.level} ${event.scope ?? ''} ${event.message} ${event.errorName ?? ''} ${event.errorStack ?? ''} ${event.attributesText ?? ''}`.toLowerCase();
 }
 
+/**
+ * An own data property, read without running a getter. Fields are read one at
+ * a time: listing every descriptor costs time in proportion to the object,
+ * such as a String object, which lists every index.
+ */
+function dataProperty(value: object, key: string): unknown {
+	const descriptor = Object.getOwnPropertyDescriptor(value, key);
+	return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+}
+
 function boundedConsoleText(
 	value: unknown,
 	maxBytes: number,
 ): { text?: string; truncated: boolean } {
 	if (typeof value !== 'string' || !value.trim()) return { truncated: false };
-	const result = truncateText(redactConsoleText(value.trim()), maxBytes);
+	const result = redactWithinWindow(value.trim(), maxBytes, redactConsoleText);
 	return { text: result.text, truncated: result.truncated };
 }
 
@@ -288,18 +398,16 @@ function consoleErrorFields(
 	maxStackBytes: number,
 ): { name?: string; stack?: string; truncated: boolean } {
 	if (!value || typeof value !== 'object') return { truncated: false };
-	let descriptors: Record<string, PropertyDescriptor>;
+	let rawName: unknown;
+	let rawStack: unknown;
 	try {
-		descriptors = Object.getOwnPropertyDescriptors(value);
+		rawName = dataProperty(value, 'name');
+		rawStack = dataProperty(value, 'stack');
 	} catch {
 		return { truncated: false };
 	}
-	const data = (key: string): unknown => {
-		const descriptor = descriptors[key];
-		return descriptor && 'value' in descriptor ? descriptor.value : undefined;
-	};
-	const name = boundedConsoleText(data('name'), 256);
-	const stack = boundedConsoleText(data('stack'), maxStackBytes);
+	const name = boundedConsoleText(rawName, 256);
+	const stack = boundedConsoleText(rawStack, maxStackBytes);
 	return {
 		...(name.text ? { name: name.text } : {}),
 		...(stack.text ? { stack: stack.text } : {}),
@@ -311,20 +419,18 @@ function consoleSourceLocation(
 	value: unknown,
 ): ConsoleLogEvent['sourceLocation'] | undefined {
 	if (!value || typeof value !== 'object') return undefined;
-	let descriptors: Record<string, PropertyDescriptor>;
+	let rawFile: unknown;
+	let line: unknown;
+	let column: unknown;
 	try {
-		descriptors = Object.getOwnPropertyDescriptors(value);
+		rawFile = dataProperty(value, 'file');
+		line = dataProperty(value, 'line');
+		column = dataProperty(value, 'column');
 	} catch {
 		return undefined;
 	}
-	const data = (key: string): unknown => {
-		const descriptor = descriptors[key];
-		return descriptor && 'value' in descriptor ? descriptor.value : undefined;
-	};
-	const file = boundedConsoleText(data('file'), 2 * 1024).text;
+	const file = boundedConsoleText(rawFile, 2 * 1024).text;
 	if (!file) return undefined;
-	const line = data('line');
-	const column = data('column');
 	return Object.freeze({
 		file,
 		...(typeof line === 'number' && Number.isSafeInteger(line) && line > 0
@@ -429,28 +535,31 @@ export function createConsolePlugin(
 			return;
 		}
 		if (!hostSanitized || typeof hostSanitized !== 'object') return;
-		let descriptors: Record<string, PropertyDescriptor>;
-		try {
-			descriptors = Object.getOwnPropertyDescriptors(hostSanitized);
-		} catch {
-			return;
-		}
-		const field = (key: string): unknown => {
-			const descriptor = descriptors[key];
-			return descriptor && 'value' in descriptor ? descriptor.value : undefined;
-		};
+		const sanitized: object = hostSanitized;
+		// A read that throws drops the event, as the source subscription catches.
+		const field = (key: keyof ConsoleLogInput): unknown =>
+			dataProperty(sanitized, key);
 		const level = field('level');
 		const rawMessage = field('message');
 		if (!isConsoleLogLevel(level) || typeof rawMessage !== 'string') return;
-		const message = truncateText(
-			redactConsoleText(rawMessage),
+		const message = redactWithinWindow(
+			rawMessage,
 			maxMessageBytes,
+			redactConsoleText,
 		);
+		const attributeRedaction: AttributeRedaction = {
+			units: MAX_ATTRIBUTE_REDACTION_UNITS,
+			// Two bytes over, so a string cut here still overflows the serialized
+			// attributes, which then cut it where they would cut the whole string.
+			maxBytes: maxAttributesBytes + 2,
+			truncated: false,
+			walkKey: createKeyWalker(redactConsoleText, isSensitiveConsoleKey),
+		};
 		const redactedAttributes = redactConsoleValue(
 			field('attributes') ?? {},
-			'',
 			0,
 			new WeakSet(),
+			attributeRedaction,
 		);
 		const attributes = serializeValue(redactedAttributes, maxAttributesBytes);
 		const hasAttributes =
@@ -498,8 +607,13 @@ export function createConsolePlugin(
 			reconcileBookmarks();
 			return;
 		}
+		// Reserve the id first: store subscribers run inside append, and one that
+		// logs (React warns about a render-phase update) re-enters ingest, which
+		// would otherwise reuse this id and give the panel duplicate row keys.
+		const eventId = nextEventId;
+		nextEventId += 1;
 		eventStore.append({
-			id: nextEventId,
+			id: eventId,
 			at,
 			firstAt: at,
 			lastAt: at,
@@ -507,7 +621,8 @@ export function createConsolePlugin(
 			message: message.text,
 			messageTruncated: message.truncated,
 			attributesText: hasAttributes ? attributes.text : undefined,
-			attributesTruncated: attributes.truncated || error.truncated,
+			attributesTruncated:
+				attributes.truncated || attributeRedaction.truncated || error.truncated,
 			...(scope ? { scope } : {}),
 			...(correlationId ? { correlationId } : {}),
 			groupId,
@@ -517,7 +632,6 @@ export function createConsolePlugin(
 			...(sourceLocation ? { sourceLocation } : {}),
 		});
 		reconcileBookmarks();
-		nextEventId += 1;
 	};
 	const install = createRefCountedInstaller(({ addCleanup }) => {
 		let active = true;

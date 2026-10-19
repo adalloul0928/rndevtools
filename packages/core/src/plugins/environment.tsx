@@ -58,7 +58,7 @@ type EnvironmentValueType =
 	| 'object'
 	| 'array';
 
-export type EnvironmentValueRule = {
+type EnvironmentValueRule = {
 	key: string;
 	section?: string;
 	description?: string;
@@ -73,13 +73,13 @@ type EnvironmentValidationStatus =
 	| 'typeMismatch'
 	| 'valueMismatch';
 
-export type EnvironmentValidationResult = EnvironmentValueRule & {
+type EnvironmentValidationResult = EnvironmentValueRule & {
 	status: EnvironmentValidationStatus;
 	actualValue?: unknown;
 	actualType?: string;
 };
 
-export type EnvironmentSection = {
+type EnvironmentSection = {
 	title: string;
 	values: Readonly<Record<string, unknown>>;
 };
@@ -97,18 +97,6 @@ export type EnvironmentPluginOptions = {
 };
 
 const MAX_ENVIRONMENT_ENTRIES_PER_SECTION = 5_000;
-const MAX_ENVIRONMENT_COMPARISON_DEPTH = 32;
-const MAX_ENVIRONMENT_COMPARISON_ENTRIES = 10_000;
-
-function valueType(value: unknown): string {
-	if (Array.isArray(value)) return 'array';
-	if (value === null) return 'null';
-	return typeof value;
-}
-
-function isMissing(value: unknown): boolean {
-	return value === undefined || value === null || value === '';
-}
 
 function environmentSectionEntries(
 	section: EnvironmentSection,
@@ -137,134 +125,6 @@ function environmentSectionEntries(
 				key,
 				'value' in descriptor ? descriptor.value : '[Accessor omitted]',
 			] as const,
-	);
-}
-
-type EnvironmentComparisonState = {
-	remaining: number;
-	seen: WeakMap<object, WeakSet<object>>;
-};
-
-function environmentValuesEqual(
-	left: unknown,
-	right: unknown,
-	state: EnvironmentComparisonState = {
-		remaining: MAX_ENVIRONMENT_COMPARISON_ENTRIES,
-		seen: new WeakMap<object, WeakSet<object>>(),
-	},
-	depth = 0,
-): boolean {
-	if (Object.is(left, right)) return true;
-	if (depth >= MAX_ENVIRONMENT_COMPARISON_DEPTH || state.remaining <= 0) {
-		return false;
-	}
-	state.remaining -= 1;
-	if (
-		!left ||
-		!right ||
-		typeof left !== 'object' ||
-		typeof right !== 'object' ||
-		Array.isArray(left) !== Array.isArray(right)
-	) {
-		return false;
-	}
-	try {
-		if (left instanceof Date || right instanceof Date) {
-			return (
-				left instanceof Date &&
-				right instanceof Date &&
-				Date.prototype.getTime.call(left) === Date.prototype.getTime.call(right)
-			);
-		}
-		if (!Array.isArray(left)) {
-			const leftPrototype = Object.getPrototypeOf(left);
-			const rightPrototype = Object.getPrototypeOf(right);
-			const leftIsPlain =
-				leftPrototype === Object.prototype || leftPrototype === null;
-			const rightIsPlain =
-				rightPrototype === Object.prototype || rightPrototype === null;
-			if (!leftIsPlain || !rightIsPlain) return false;
-		}
-	} catch {
-		return false;
-	}
-	const matched = state.seen.get(left);
-	if (matched?.has(right)) return true;
-	if (matched) matched.add(right);
-	else state.seen.set(left, new WeakSet([right]));
-
-	let leftDescriptors: Record<string, PropertyDescriptor>;
-	let rightDescriptors: Record<string, PropertyDescriptor>;
-	try {
-		leftDescriptors = Object.getOwnPropertyDescriptors(left);
-		rightDescriptors = Object.getOwnPropertyDescriptors(right);
-	} catch {
-		return false;
-	}
-	if (Array.isArray(left) && Array.isArray(right)) {
-		const leftLength = leftDescriptors.length;
-		const rightLength = rightDescriptors.length;
-		if (
-			!leftLength ||
-			!rightLength ||
-			!('value' in leftLength) ||
-			!('value' in rightLength) ||
-			leftLength.value !== rightLength.value ||
-			typeof leftLength.value !== 'number' ||
-			leftLength.value > MAX_ENVIRONMENT_COMPARISON_ENTRIES
-		) {
-			return false;
-		}
-		for (let index = 0; index < leftLength.value; index += 1) {
-			const leftDescriptor = leftDescriptors[String(index)];
-			const rightDescriptor = rightDescriptors[String(index)];
-			if (
-				!leftDescriptor ||
-				!rightDescriptor ||
-				!('value' in leftDescriptor) ||
-				!('value' in rightDescriptor) ||
-				!environmentValuesEqual(
-					leftDescriptor.value,
-					rightDescriptor.value,
-					state,
-					depth + 1,
-				)
-			) {
-				return false;
-			}
-		}
-		return true;
-	}
-	const leftKeys = Object.entries(leftDescriptors)
-		.filter(([, descriptor]) => descriptor.enumerable)
-		.map(([key]) => key);
-	const rightKeys = Object.entries(rightDescriptors)
-		.filter(([, descriptor]) => descriptor.enumerable)
-		.map(([key]) => key);
-	if (
-		leftKeys.length > MAX_ENVIRONMENT_COMPARISON_ENTRIES ||
-		rightKeys.length > MAX_ENVIRONMENT_COMPARISON_ENTRIES
-	) {
-		return false;
-	}
-	return (
-		leftKeys.length === rightKeys.length &&
-		leftKeys.every((key) => {
-			const leftDescriptor = leftDescriptors[key];
-			const rightDescriptor = rightDescriptors[key];
-			return (
-				leftDescriptor !== undefined &&
-				rightDescriptor !== undefined &&
-				'value' in leftDescriptor &&
-				'value' in rightDescriptor &&
-				environmentValuesEqual(
-					leftDescriptor.value,
-					rightDescriptor.value,
-					state,
-					depth + 1,
-				)
-			);
-		})
 	);
 }
 
@@ -340,55 +200,6 @@ function assertEnvironmentRules(
 			}
 		}
 	}
-}
-
-export function validateEnvironmentValues(
-	sections: readonly EnvironmentSection[],
-	rules: readonly EnvironmentValueRule[],
-): readonly EnvironmentValidationResult[] {
-	return rules.map((rule) => {
-		const candidates = rule.section
-			? sections.filter((section) => section.title === rule.section)
-			: sections;
-		const sectionEntry = candidates
-			.flatMap((entry) =>
-				environmentSectionEntries(entry).map(([key, value]) => ({
-					key,
-					value,
-				})),
-			)
-			.find((entry) => entry.key === rule.key);
-		const actualValue = sectionEntry?.value;
-		const actualType = valueType(actualValue);
-		if (isMissing(actualValue)) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: rule.required === false ? 'valid' : 'missing',
-			};
-		}
-		if (rule.expectedType && actualType !== rule.expectedType) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: 'typeMismatch',
-			};
-		}
-		if (
-			Object.hasOwn(rule, 'expectedValue') &&
-			!environmentValuesEqual(actualValue, rule.expectedValue)
-		) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: 'valueMismatch',
-			};
-		}
-		return { ...rule, actualValue, actualType, status: 'valid' };
-	});
 }
 
 /**

@@ -555,13 +555,6 @@ export function isTextualNetworkContentType(
 	);
 }
 
-export function headersRecord(
-	headersInit: HeadersInit | undefined,
-	redact: (name: string, value: string) => string,
-): Record<string, string> {
-	return captureHeaders(headersInit, redact).headers;
-}
-
 /**
  * Projects only bounded, descriptor-backed header forms. Arbitrary iterables
  * are never consumed merely to build diagnostics.

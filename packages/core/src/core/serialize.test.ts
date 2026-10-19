@@ -61,6 +61,45 @@ describe('truncateText', () => {
 		});
 	});
 
+	it('counts UTF-8 bytes at each encoding boundary and for lone surrogates', () => {
+		const widths: readonly (readonly [string, number])[] = [
+			['\u007f', 1],
+			['\u0080', 2],
+			['\u07ff', 2],
+			['\u0800', 3],
+			['\uffff', 3],
+			['😀', 4],
+			['\ud83d', 3],
+			['\ude00', 3],
+			['a\ud83d', 4],
+			['\ude00\ud83d', 6],
+		];
+		for (const [text, bytes] of widths) {
+			expect(utf8ByteLength(text)).toBe(bytes);
+		}
+		// A surrogate pair is kept or dropped whole.
+		expect(truncateText('a😀b', 7)).toEqual({
+			text: 'a😀b',
+			truncated: false,
+			estimatedBytes: 6,
+		});
+		expect(truncateText('a😀b', 5)).toEqual({
+			text: 'a…',
+			truncated: true,
+			estimatedBytes: 4,
+		});
+		expect(truncateText('ab😀', 9)).toEqual({
+			text: 'ab😀',
+			truncated: false,
+			estimatedBytes: 6,
+		});
+		expect(truncateText('ab😀c', 6)).toEqual({
+			text: 'ab…',
+			truncated: true,
+			estimatedBytes: 5,
+		});
+	});
+
 	it('treats positive infinity as an unbounded byte budget', () => {
 		expect(truncateText('unbounded', Number.POSITIVE_INFINITY)).toEqual({
 			text: 'unbounded',

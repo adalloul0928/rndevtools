@@ -129,8 +129,6 @@ export function groupQueriesByRoot(
 	}));
 }
 
-export { formatRelativeTime } from '../core/format';
-
 function firstLine(text: string): string {
 	const index = text.indexOf('\n');
 	return index === -1 ? text : text.slice(0, index);
