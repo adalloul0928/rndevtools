@@ -94,6 +94,7 @@ import { LaneStore } from './lane-store';
 import { verifyAgentCli } from './native-helper-trust';
 import { NativeHostClient } from './native-host-client';
 import { runNativePlan } from './native-plan';
+import { stopForQuit } from './quit-sequence';
 import { createRecipeIpcHandlers } from './recipe-ipc';
 import { RecipeService } from './recipe-service';
 import { RecipeStore } from './recipe-store';
@@ -481,10 +482,9 @@ async function confirmSimulatorAction(
 
 async function confirmSlimmingTarget(
 	event: IpcMainInvokeEvent,
-	target: SlimmingConfirmationTarget,
-	profileName?: string
+	target: SlimmingConfirmationTarget
 ): Promise<boolean> {
-	const copy = slimmingConfirmationCopy(target, profileName);
+	const copy = slimmingConfirmationCopy(target);
 	if (!copy) return true;
 	const options: Electron.MessageBoxOptions = {
 		type: 'warning',
@@ -1298,20 +1298,14 @@ function registerIpc(
 					error: 'Confirmation requests cannot reuse an existing token.',
 				});
 			}
-			const profileName =
-				'profileId' in target
-					? slimming
-							.getState()
-							.profiles.find((profile) => profile.id === target.profileId)?.name
-					: undefined;
-			if (!slimmingConfirmationCopy(target, profileName)) {
+			if (!slimmingConfirmationCopy(target)) {
 				return slimmingConfirmationResultSchema.parse({
 					actionId: target.actionId,
 					required: false,
 					confirmed: true,
 				});
 			}
-			if (!(await confirmSlimmingTarget(event, target, profileName))) {
+			if (!(await confirmSlimmingTarget(event, target))) {
 				return slimmingConfirmationResultSchema.parse({
 					actionId: target.actionId,
 					required: true,
@@ -1689,6 +1683,11 @@ if (!app.requestSingleInstanceLock()) {
 				// The agent service is constructed next; it knows which sessions are
 				// alive, which is what decides whether a lane's owner is gone.
 				holds: () => agentService?.holds() ?? new Map(),
+				// Resolved late for the same reason. A queued lane up asks it when its
+				// turn comes, so it resumes the app's lane only for a session that
+				// lane's holder lets in.
+				deviceAccess: (simulatorUdid, requester) =>
+					agentService?.access(simulatorUdid, requester) ?? { allowed: true },
 				// The Supabase service is constructed after the agent service, and
 				// before any lane can start.
 				backends: {
@@ -1727,7 +1726,7 @@ if (!app.requestSingleInstanceLock()) {
 					laneService?.getState().lanes.map((lane) => ({
 						id: lane.id,
 						simulatorUdid: lane.simulatorUdid,
-						appDirectory: lane.appPath ?? lane.worktreePath,
+						worktreePath: lane.worktreePath,
 						agent: lane.agent,
 						metro: lane.metro,
 						startedAt: lane.startedAt,
@@ -1868,25 +1867,28 @@ app.on('before-quit', (event) => {
 	event.preventDefault();
 	if (shutdownStarted) return;
 	shutdownStarted = true;
-	const simulatorShutdown = simulatorService?.stop();
-	const certificateShutdown = simulatorShutdown
-		? simulatorShutdown.finally(() => stagedCertificateStore?.stop())
-		: stagedCertificateStore?.stop();
 	supabaseStatePublisher.dispose();
-	void Promise.allSettled([
-		broker.stop(),
-		simulatorShutdown,
-		slimmingService?.stop(),
-		recipeService?.stop(),
-		buildInsightsService?.stop(),
-		laneService?.stop(),
-		agentService?.stop(),
-		// Stopping the service never stops a stack; they outlive the app.
-		supabaseService?.stop(),
-		simulatorStreamService?.stop(),
-		agentCliService?.stop(),
-		certificateShutdown,
-	]).finally(() => {
+	// Running recipes cancel first: their teardown still needs the Simulator,
+	// slimming, and broker services, which stop once it has finished.
+	void stopForQuit(recipeService?.stop(), () => {
+		const simulatorShutdown = simulatorService?.stop();
+		const certificateShutdown = simulatorShutdown
+			? simulatorShutdown.finally(() => stagedCertificateStore?.stop())
+			: stagedCertificateStore?.stop();
+		return [
+			broker.stop(),
+			simulatorShutdown,
+			slimmingService?.stop(),
+			buildInsightsService?.stop(),
+			laneService?.stop(),
+			agentService?.stop(),
+			// Stopping the service never stops a stack; they outlive the app.
+			supabaseService?.stop(),
+			simulatorStreamService?.stop(),
+			agentCliService?.stop(),
+			certificateShutdown,
+		];
+	}).finally(() => {
 		brokerStopped = true;
 		app.quit();
 	});

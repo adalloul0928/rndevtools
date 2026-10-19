@@ -46,6 +46,7 @@ import {
 	supabaseInlineConfirmation,
 	supabaseJobLabel,
 	supabaseRequestActionAvailability,
+	supabaseRevertKeepsStack,
 	supabaseStackTitle,
 	visibleStackFlags,
 } from '../../shared/supabase-protocol';
@@ -137,7 +138,6 @@ export function supabaseActiveJob(
 // ---------------------------------------------------------------------------
 // Tab state, header meta and metrics
 
-/** @public */
 export type SupabaseTabState =
 	| 'bridge-missing'
 	| 'loading'
@@ -211,7 +211,6 @@ export function supabaseHeaderMeta(
 	return parts.length > 0 ? parts.join(' · ') : 'No stacks';
 }
 
-/** @public */
 export type SupabaseMetric = Readonly<{
 	id: 'running' | 'slots' | 'memory' | 'disk';
 	label: string;
@@ -395,8 +394,7 @@ export function supabaseAttentionByStack(
 // ---------------------------------------------------------------------------
 // Stack rows
 
-/** @public */
-export type SupabaseRowGroup =
+type SupabaseRowGroup =
 	| 'attention'
 	| 'in-flight'
 	| 'running-lane'
@@ -417,19 +415,16 @@ const GROUP_ORDER: Readonly<Record<SupabaseRowGroup, number>> = {
 	'not-created': 7,
 };
 
-/** @public */
-export type SupabaseRowPart = Readonly<{ text: string; tone: SupabaseTone }>;
+type SupabaseRowPart = Readonly<{ text: string; tone: SupabaseTone }>;
 
 /**
  * The row's trailing badge: who holds it, else Pinned, else External.
- * @public
  */
-export type SupabaseRowHolder =
+type SupabaseRowHolder =
 	| Readonly<{ kind: 'agent'; label: string; agent: AgentRef }>
 	| Readonly<{ kind: 'pinned'; label: string }>
 	| Readonly<{ kind: 'origin'; label: string }>;
 
-/** @public */
 export type SupabaseStackRow = Readonly<{
 	id: string;
 	stack: SupabaseStackSummary;
@@ -878,8 +873,7 @@ export function supabaseConfirmationKind(
 		: { kind: 'none' };
 }
 
-/** @public */
-export type SupabaseDetailActionId =
+type SupabaseDetailActionId =
 	| 'start'
 	| 'try-again'
 	| 'resume'
@@ -893,7 +887,6 @@ export type SupabaseDetailActionId =
 	| 'open-lane'
 	| 'open-logs';
 
-/** @public */
 export type SupabaseDetailAction = Readonly<{
 	id: SupabaseDetailActionId;
 	label: string;
@@ -1059,7 +1052,6 @@ export function supabaseDetailActions(
 // ---------------------------------------------------------------------------
 // Bulk selection
 
-/** @public */
 export type SupabaseBulkAction = Readonly<{
 	stackIds: readonly string[];
 	label: string;
@@ -1191,7 +1183,6 @@ export type SupabaseChainLink = Readonly<{
 	open?: Readonly<{ text: string; label: string; target: SupabaseOpenTarget }>;
 }>;
 
-/** @public */
 export type SupabaseOtherHolder = Readonly<{
 	key: string;
 	label: string;
@@ -1455,7 +1446,6 @@ export function supabaseStackForLane(
 	);
 }
 
-/** @public */
 export type SupabaseSessionBackend = Readonly<{
 	stack: SupabaseStackSummary;
 	via: 'lane' | 'session' | 'worktree' | 'cwd';
@@ -1501,7 +1491,6 @@ export function supabaseBackendsForSession(
 // ---------------------------------------------------------------------------
 // Repositories
 
-/** @public */
 export type SupabaseRepositoryRow = Readonly<{
 	id: string;
 	repository: SupabaseRepositorySummary;
@@ -1517,7 +1506,6 @@ export type SupabaseRepositoryRow = Readonly<{
 
 /**
  * Display names for the repository checks.
- * @public
  */
 export const SUPABASE_CHECK_LABELS: Readonly<
 	Record<SupabaseRepositorySummary['checks'][number]['id'], string>
@@ -1606,8 +1594,7 @@ export type SupabaseRepositoryFilter =
 	| 'observed'
 	| 'no-supabase';
 
-/** @public */
-export const SUPABASE_REPOSITORY_FILTERS: readonly Readonly<{
+const SUPABASE_REPOSITORY_FILTERS: readonly Readonly<{
 	id: SupabaseRepositoryFilter;
 	label: string;
 }>[] = [
@@ -1692,7 +1679,6 @@ export function supabaseRepositoryWorktrees(
 // ---------------------------------------------------------------------------
 // Agent requests
 
-/** @public */
 export type SupabaseRequestCard = Readonly<{
 	id: string;
 	request: SupabaseAgentRequest;
@@ -1879,12 +1865,10 @@ export function buildSupabaseRequestCards(
 // ---------------------------------------------------------------------------
 // Clean up
 
-/** @public */
-export type SupabasePruneGroupId = SupabasePruneSummary['groups'][number]['id'];
+type SupabasePruneGroupId = SupabasePruneSummary['groups'][number]['id'];
 
 /**
  * A clean-up selection is only valid for the prune revision it was made on.
- * @public
  */
 export type SupabasePruneSelection = Readonly<{
 	revision: number;
@@ -1956,35 +1940,6 @@ export function toggleSupabasePruneStack(
 	return { ...reviewed, stackIds: [...reviewed.stackIds, stackId] };
 }
 
-/** Selects a whole group, or clears it when it is already fully selected. */
-export function toggleSupabasePruneGroup(
-	selection: SupabasePruneSelection,
-	prune: SupabasePruneSummary,
-	groupId: SupabasePruneGroupId
-): SupabasePruneSelection {
-	const reviewed = reviewSupabasePruneSelection(selection, prune);
-	const group = prune.groups.find((candidate) => candidate.id === groupId);
-	if (!group?.selectable) return reviewed;
-	const members = new Set(group.stackIds);
-	const allSelected = group.stackIds.every((id) =>
-		reviewed.stackIds.includes(id)
-	);
-	if (allSelected) {
-		return {
-			...reviewed,
-			stackIds: reviewed.stackIds.filter((id) => !members.has(id)),
-		};
-	}
-	return {
-		...reviewed,
-		stackIds: [
-			...reviewed.stackIds,
-			...group.stackIds.filter((id) => !reviewed.stackIds.includes(id)),
-		].slice(0, SUPABASE_MAX_DESTROY_IDS),
-	};
-}
-
-/** @public */
 export type SupabasePruneGroupView = Readonly<{
 	id: SupabasePruneGroupId;
 	label: string;
@@ -2146,8 +2101,7 @@ export function supabaseCleanUpOperation(
 // ---------------------------------------------------------------------------
 // Job steps
 
-/** @public */
-export type SupabaseStepStatus =
+type SupabaseStepStatus =
 	| 'success'
 	| 'current'
 	| 'muted'
@@ -3065,13 +3019,20 @@ export function supabaseDetailNotices(
 		});
 	}
 	if (stack.state === 'needs-recreate') {
-		const changes = error?.details.stackChanges;
+		// Kept until the state clears: a later failure for another reason
+		// replaces lastError, which then gets a notice of its own.
+		const changes = stack.recreateChanges;
 		push(
 			{
 				id: 'needs-recreate',
 				tone: 'danger',
 				title: 'Needs recreate.',
-				text: "The saved stack can't adopt this configuration. Recreating destroys its data and starts a fresh, migrated, seeded database.",
+				// Main clears this state once the configuration matches the saved
+				// stack again, so reverting helps when every listed change is
+				// editable, as the Resume reason and the status pill also say.
+				text: supabaseRevertKeepsStack(changes)
+					? "The saved stack can't adopt this configuration. Revert the listed settings to keep it and its data, or destroy and recreate it for a fresh, migrated, seeded database."
+					: "The saved stack can't adopt this configuration. Recreating destroys its data and starts a fresh, migrated, seeded database.",
 				controls: [controls.recreate('recreate', 'Destroy and recreate…')],
 				...(changes && changes.length > 0 ? { changes } : {}),
 			},

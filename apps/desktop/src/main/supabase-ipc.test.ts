@@ -243,6 +243,57 @@ describe('Supabase IPC', () => {
 		expect(showConfirmationDialog).not.toHaveBeenCalled();
 	});
 
+	it('makes room only by stopping a stack the capacity request offers', async () => {
+		const base = liveState();
+		const [template] = base.requests;
+		if (!template) throw new Error('missing demo request');
+		const request = {
+			...template,
+			id: 'supabase-request-00000000-0000-4000-8000-0000000000aa',
+			kind: 'start-capacity' as const,
+			capacity: {
+				running: 12,
+				cap: 12,
+				candidates: [
+					{
+						stackId: ids.featPayments,
+						branch: 'feat-payments',
+						liveHolder: true,
+					},
+				],
+			},
+		};
+		const { handlers, service, showConfirmationDialog } = fixture({
+			state: { ...base, requests: [request] },
+		});
+		// An external stack is stopped only from its detail, behind the dialog.
+		for (const stopStackId of [ids.legacyMain, 'f'.repeat(64)]) {
+			await expect(
+				handlers.runOperation(
+					SENDER,
+					op({ kind: 'request.approve', requestId: request.id, stopStackId })
+				)
+			).resolves.toMatchObject({
+				completed: false,
+				error: {
+					code: 'refused',
+					message: "That stack isn't one to stop to make room. Choose another.",
+				},
+			});
+		}
+		expect(service.runOperation).not.toHaveBeenCalled();
+		const offered = op({
+			kind: 'request.approve',
+			requestId: request.id,
+			stopStackId: ids.featPayments,
+		});
+		await expect(handlers.runOperation(SENDER, offered)).resolves.toMatchObject(
+			{ completed: true }
+		);
+		expect(service.runOperation).toHaveBeenCalledTimes(1);
+		expect(showConfirmationDialog).not.toHaveBeenCalled();
+	});
+
 	it('runs what needs no dialog as the operator, unconfirmed', async () => {
 		const { handlers, service, showConfirmationDialog } = fixture();
 		const stop = op({ kind: 'stop', stackIds: [ids.featPayments] });

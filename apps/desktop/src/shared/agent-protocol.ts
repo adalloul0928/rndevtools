@@ -9,17 +9,21 @@ import { deviceHoldSchema, isPathInside } from './device-hold';
  *   released or until the session is no longer live;
  * - a **touch**: any device-targeted CLI command that carried the session id,
  *   expiring after 30 minutes of silence;
- * - a **lane** whose app directory is the session's working directory.
+ * - a **lane** whose checkout the session works in. The checkout root counts:
+ *   in a monorepo the lane's app is a subdirectory of it.
  *
  * Live sessions are discovered from the agents' own local state, so nothing
- * has to be installed into Claude Code or Codex. Claims are a convention
- * agents follow, not a lock the desktop enforces; the skill tells agents to
- * stay off a device another live session has claimed.
+ * has to be installed into Claude Code or Codex. A claim is also a hold (see
+ * `device-hold.ts`): until it is released, or abandoned past its grace
+ * period, the desktop refuses other agents' claims and mutations on the
+ * device.
  */
 
 const MAX_TEXT = 4 * 1024;
 const MAX_SESSIONS = 200;
 const MAX_DEVICES = 200;
+/** Agents listed per Simulator; the weakest attachments beyond it are left out. */
+const MAX_AGENTS_PER_DEVICE = 32;
 
 export const AGENT_TOUCH_TTL_MS = 30 * 60 * 1_000;
 /** Codex threads share one app-server process; recency is their liveness. */
@@ -83,7 +87,10 @@ export const agentStateSchema = z.strictObject({
 	updatedAt: timestampSchema,
 	sessions: z.array(agentSessionSchema).max(MAX_SESSIONS),
 	/** Attached agents per Simulator, strongest signal first. */
-	byDevice: z.record(udidSchema, z.array(deviceAgentSchema).max(32)),
+	byDevice: z.record(
+		udidSchema,
+		z.array(deviceAgentSchema).max(MAX_AGENTS_PER_DEVICE)
+	),
 	claims: z.array(agentClaimSchema).max(MAX_DEVICES),
 	/**
 	 * The hold on every held Simulator: who has it, through a lane or a claim,
@@ -137,7 +144,8 @@ export function agentSessionKey(
  * Attributes live sessions to Simulators from claims, touches, and lanes.
  * Pure, so the service and the renderer tests agree on the ordering: claims
  * first, then touches, then lane cwd matches, newest within each tier; a
- * session appears at most once per device.
+ * session appears at most once per device, and a device lists at most
+ * {@link MAX_AGENTS_PER_DEVICE} agents, the strongest.
  */
 export function attributeAgents({
 	sessions,
@@ -149,7 +157,8 @@ export function attributeAgents({
 	sessions: readonly AgentSession[];
 	claims: readonly AgentClaim[];
 	touches: readonly AgentTouch[];
-	lanes: readonly { simulatorUdid: string; appDirectory: string }[];
+	/** Each lane's device and checkout (its worktree root). */
+	lanes: readonly { simulatorUdid: string; worktreePath: string }[];
 	now: number;
 }): Record<string, DeviceAgent[]> {
 	const live = new Map(
@@ -162,6 +171,8 @@ export function attributeAgents({
 		if (seen.has(key)) return;
 		seen.add(key);
 		const list = byDevice.get(udid.toUpperCase()) ?? [];
+		// Pushed strongest first, so a full list already holds the ones to keep.
+		if (list.length >= MAX_AGENTS_PER_DEVICE) return;
 		list.push(agent);
 		byDevice.set(udid.toUpperCase(), list);
 	};
@@ -196,7 +207,7 @@ export function attributeAgents({
 	for (const lane of lanes) {
 		for (const session of sessions) {
 			// The same rule decides whether a synthetic holder is live on a lane.
-			if (session.cwd && isPathInside(session.cwd, lane.appDirectory)) {
+			if (session.cwd && isPathInside(session.cwd, lane.worktreePath)) {
 				push(lane.simulatorUdid, {
 					...session,
 					via: 'lane',

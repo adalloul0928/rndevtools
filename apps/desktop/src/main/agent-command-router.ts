@@ -17,6 +17,7 @@ import {
 	isSyntheticHolder,
 } from '../shared/device-hold';
 import {
+	type Lane,
 	type LaneOperation,
 	type LaneOperationReceipt,
 	type LaneState,
@@ -28,7 +29,10 @@ import type {
 	DesktopState,
 	DeviceSession,
 } from '../shared/protocol';
-import { desktopActionSchema } from '../shared/protocol';
+import {
+	desktopActionCapability,
+	desktopActionSchema,
+} from '../shared/protocol';
 import type {
 	SimulatorInput,
 	SimulatorInputResult,
@@ -80,6 +84,19 @@ const TERMINAL_JOB_STATUSES = new Set([
 ]);
 const CONNECTED_WAIT_SLICE_MS = 5_000;
 /**
+ * The connected-action contract's shortest wait (a `timeoutMs` of at least
+ * 50 ms); a wait with less time left than this is over.
+ */
+const MIN_CONNECTED_WAIT_SLICE_MS = 50;
+/**
+ * Connected-app wait attempts start at least this far apart. The broker
+ * answers some failures at once (the session is offline while the app
+ * reloads, or another action is in flight), and retrying those back to back
+ * would run on microtasks alone and starve the main process's event loop,
+ * the request's abort included.
+ */
+const CONNECTED_WAIT_RETRY_MS = 250;
+/**
  * How long `release --all` waits for its lane stops and for the Supabase
  * service to drop the session's stack holds. The session-end hook's client
  * gives up after 2 s, so stops still running then continue on their own and
@@ -88,6 +105,12 @@ const CONNECTED_WAIT_SLICE_MS = 5_000;
 const RELEASE_STOP_BUDGET_MS = 1_500;
 /** The contract's bound on one log line, kept after redacting it again. */
 const MAX_SUPABASE_LOG_LINE = 2_000;
+/**
+ * How many recordings' starters are remembered. Only recordings still under
+ * way are kept, and the simulator service holds at most 200 jobs without
+ * ever dropping one under way, so this bound never forgets a live one.
+ */
+const MAX_RECORDING_STARTERS = 200;
 const ALL_DOCTOR_CAPABILITIES = [
 	'push-notifications',
 	'storekit',
@@ -163,8 +186,14 @@ type AgentPort = {
 		simulatorUdid: string
 	) => void;
 	/**
-	 * Whether `requester` may boot, drive, slim, or stop the device. A device is
-	 * free or held (by a lane or a claim); only the holder may touch a held one.
+	 * Whether `requester` may claim the device, start, launch or stop a lane on
+	 * it, send it input, install on it, slim it (apply, undo or restore), run a
+	 * recipe on it, cancel its jobs, or stop its recordings. A device is free
+	 * or held (by a lane or a claim); on a held one only the holder may, and an
+	 * abandoned hold is still enforced until its releaseAt. The router does not
+	 * ask when a session stops or cancels a recording it started, which it may
+	 * always do, even on a device another session holds. Not gated at all: act,
+	 * network set and clear, record start, recipe cancel, and the reads.
 	 */
 	access?: (
 		simulatorUdid: string,
@@ -313,19 +342,61 @@ async function dispatchConnectedAction(
 	return result;
 }
 
+type ConnectedWaitAction = {
+	tool: 'components';
+	command: 'waitForElement' | 'waitForScreenChange';
+	payload: Record<string, unknown>;
+};
+
+/**
+ * Ends a connected wait that retrying cannot help: the app session is gone
+ * from the broker, or it does not advertise the wait. An offline session is
+ * waited out instead, since an app that reloads comes back as the same one.
+ */
+function assertWaitable(
+	broker: BrokerPort,
+	deviceId: string,
+	action: ConnectedWaitAction
+): void {
+	const session = broker
+		.getState()
+		.devices.find((candidate) => candidate.info.id === deviceId);
+	if (!session) {
+		throw new AgentCliError({
+			code: 'target_not_found',
+			message: 'The app session ended while waiting.',
+			retryable: true,
+			recovery:
+				'Run rndevtools doctor and retry with a connectedSessions deviceId or reported Simulator UDID.',
+		});
+	}
+	const capability = desktopActionCapability(action.tool, action.command);
+	if (capability && session.info.capabilities.includes(capability)) return;
+	const name = capability ?? `${action.tool}.${action.command}`;
+	throw new AgentCliError({
+		code: 'capability_missing',
+		message: `The connected app does not advertise ${name}, so it cannot wait for this condition.`,
+		retryable: false,
+		recovery: `Poll elements or screen until the condition holds, or have the app's desktop client advertise ${name}.`,
+	});
+}
+
 async function dispatchConnectedWait(
 	broker: BrokerPort,
 	device: DeviceSession,
 	requestId: string,
-	action: { tool: string; command: string; payload: Record<string, unknown> },
+	action: ConnectedWaitAction,
 	timeoutMs: number,
 	signal: AbortSignal
 ): Promise<DesktopActionResult> {
 	const deadline = Date.now() + timeoutMs;
 	let lastError: unknown;
-	do {
+	for (;;) {
 		if (signal.aborted) throw abortError();
-		const remainingMs = Math.max(1, deadline - Date.now());
+		assertWaitable(broker, device.info.id, action);
+		const startedAt = Date.now();
+		const remainingMs = deadline - startedAt;
+		if (remainingMs < MIN_CONNECTED_WAIT_SLICE_MS) break;
 		try {
 			return await dispatchConnectedAction(broker, device, requestId, {
 				...action,
@@ -340,7 +411,10 @@ async function dispatchConnectedWait(
 			}
 			lastError = error;
 		}
-	} while (Date.now() < deadline);
+		const pauseMs =
+			Math.min(startedAt + CONNECTED_WAIT_RETRY_MS, deadline) - Date.now();
+		if (pauseMs > 0) await delay(pauseMs, signal);
+	}
 	throw (
 		lastError ??
 		new AgentCliError({
@@ -356,6 +430,27 @@ function abortError(): AgentCliError {
 		code: 'cancelled',
 		message: 'The agent request was cancelled.',
 		retryable: true,
+	});
+}
+
+/** Resolves after `ms`, or rejects with {@link abortError} once `signal` aborts. */
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		if (signal.aborted) {
+			reject(abortError());
+			return;
+		}
+		const cleanup = () => signal.removeEventListener('abort', onAbort);
+		const timer = setTimeout(() => {
+			cleanup();
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			clearTimeout(timer);
+			cleanup();
+			reject(abortError());
+		};
+		signal.addEventListener('abort', onAbort, { once: true });
 	});
 }
 
@@ -471,26 +566,29 @@ type SessionIdentity = { kind: AgentKind; sessionId: string };
 /**
  * Which holds `release --all` may drop for `agent`. A session's own holds
  * match by id. A shared MCP identity (`mcp-*`) says nothing about which of
- * its sessions is asking, so its holds match only when `sessionCwd`, where
- * the ending session worked, lies inside the held directory. That holds
- * whether the caller is the shared id itself or, from the session-end hook,
- * the session's own id.
+ * its sessions is asking, so its holds match only through a lane, when
+ * `sessionCwd`, where the ending session worked, lies inside the lane's
+ * checkout and in the lane's app or above it. A session at a monorepo
+ * checkout's root so releases every app lane in it, and one inside an app
+ * only that app's, never a sibling app's that another session may be using.
+ * That holds whether the caller is the shared id itself or, from the
+ * session-end hook, the session's own id.
  */
 function releaseMatcher(agent: SessionIdentity, sessionCwd?: string) {
 	const cwd = sessionCwd === undefined ? undefined : posix.resolve(sessionCwd);
 	return (
 		holder: SessionIdentity | undefined,
-		directory: string | undefined
+		lane: Pick<Lane, 'worktreePath' | 'appPath'> | undefined
 	): boolean => {
 		if (!holder) return false;
 		if (!isSyntheticHolder(holder)) {
 			return holder.kind === agent.kind && holder.sessionId === agent.sessionId;
 		}
+		if (holder.kind !== agent.kind || cwd === undefined || !lane) return false;
+		const app = laneAppDirectory(lane);
 		return (
-			holder.kind === agent.kind &&
-			cwd !== undefined &&
-			directory !== undefined &&
-			isPathInside(cwd, directory)
+			isPathInside(cwd, lane.worktreePath) &&
+			(isPathInside(cwd, app) || isPathInside(app, cwd))
 		);
 	};
 }
@@ -675,8 +773,8 @@ async function releaseEverything(
 
 	for (const claim of agents.getState().claims) {
 		const holder = { kind: claim.kind, sessionId: claim.sessionId };
-		// A claim has no directory of its own; a shared identity's claim takes
-		// the directory of its lane on the same device, when it runs one.
+		// A claim has no directory of its own; a shared identity's claim goes
+		// with its lane on the same device, when it runs one.
 		const lane = laneList.find(
 			(candidate) =>
 				candidate.simulatorUdid.toUpperCase() ===
@@ -684,9 +782,7 @@ async function releaseEverything(
 				candidate.agent?.kind === claim.kind &&
 				candidate.agent.sessionId === claim.sessionId
 		);
-		if (!callerHolds(holder, lane ? laneAppDirectory(lane) : undefined)) {
-			continue;
-		}
+		if (!callerHolds(holder, lane)) continue;
 		try {
 			await agents.runOperation({
 				kind: 'agent.release',
@@ -700,7 +796,7 @@ async function releaseEverything(
 	}
 
 	const laneIds = laneList
-		.filter((lane) => callerHolds(lane.agent, laneAppDirectory(lane)))
+		.filter((lane) => callerHolds(lane.agent, lane))
 		.map((lane) => lane.id);
 	const outcome =
 		lanes && laneIds.length > 0
@@ -821,6 +917,64 @@ function assertDeviceAccess(
 	});
 }
 
+/**
+ * Which agent session started each recording, so that session can always
+ * stop it. Starting one needs no hold, since it only watches the screen, and
+ * the device can be claimed or get another session's lane before the
+ * recording ends, up to an hour later; the hold check that guards stopping
+ * anyone else's recording would then strand it. A recording a shared MCP
+ * identity started is any of its sessions' to stop: the identity cannot tell
+ * them apart.
+ */
+function recordingStarters(simulator: SimulatorPort) {
+	const starters = new Map<string, SessionIdentity>();
+	return {
+		add(jobId: string, agent: SessionIdentity): void {
+			const underWay = new Set(
+				simulator
+					.getState()
+					.jobs.filter((job) => !TERMINAL_JOB_STATUSES.has(job.status))
+					.map((job) => job.id)
+			);
+			for (const id of starters.keys()) {
+				if (!underWay.has(id)) starters.delete(id);
+			}
+			starters.set(jobId, { kind: agent.kind, sessionId: agent.sessionId });
+			for (const id of starters.keys()) {
+				if (starters.size <= MAX_RECORDING_STARTERS) break;
+				starters.delete(id);
+			}
+		},
+		/** Whether `agent` started recording `jobId`; never the operator. */
+		startedBy(jobId: string, agent: SessionIdentity | undefined): boolean {
+			const starter = starters.get(jobId);
+			return (
+				starter !== undefined &&
+				agent !== undefined &&
+				starter.kind === agent.kind &&
+				starter.sessionId === agent.sessionId
+			);
+		},
+	};
+}
+
+/** The Simulators a simulator or slimming job works on. */
+function jobSimulators(
+	simulatorState: SimulatorState,
+	slimmingState: SlimmingState,
+	jobId: string
+): string[] {
+	const simulatorJob = simulatorState.jobs.find((job) => job.id === jobId);
+	if (simulatorJob) {
+		return simulatorJob.deviceUdid ? [simulatorJob.deviceUdid] : [];
+	}
+	return (
+		slimmingState.jobs
+			.find((job) => job.id === jobId)
+			?.targets.map((target) => target.simulatorUdid) ?? []
+	);
+}
+
 function captureForJob(
 	state: SimulatorState,
 	job: SimulatorJob
@@ -909,22 +1063,7 @@ async function waitForNetworkIdle(
 		} else if (Date.now() - quietSince >= quietMs) {
 			return { idleAt: Date.now() };
 		}
-		await new Promise<void>((resolve, reject) => {
-			const cleanup = () => signal.removeEventListener('abort', onAbort);
-			const timer = setTimeout(
-				() => {
-					cleanup();
-					resolve();
-				},
-				Math.min(quietMs, 250)
-			);
-			const onAbort = () => {
-				clearTimeout(timer);
-				cleanup();
-				reject(abortError());
-			};
-			signal.addEventListener('abort', onAbort, { once: true });
-		});
+		await delay(Math.min(quietMs, 250), signal);
 	}
 	throw abortError();
 }
@@ -1379,6 +1518,7 @@ function createRoutes({
 	simulatorInput,
 	supabase,
 }: AgentCommandRouterDependencies): AgentCliHandler {
+	const recordings = recordingStarters(simulator);
 	return async (command, context) => {
 		switch (command.kind) {
 			case 'supabase': {
@@ -1511,6 +1651,12 @@ function createRoutes({
 					await simulator.refresh(),
 					command.udid ?? required('release requires udid or all.')
 				);
+				// A claim is a hold, so a device someone else holds is refused.
+				// Nothing is awaited between this check and the claim, so two
+				// sessions racing for a free device cannot both get it.
+				if (command.kind === 'claim') {
+					assertDeviceAccess(agents, target.udid, context.agent);
+				}
 				const state = await agents.runOperation(
 					command.kind === 'claim'
 						? {
@@ -1591,6 +1737,9 @@ function createRoutes({
 					};
 				}
 				if (!target) required('native install requires udid.');
+				// Installing can replace the dev client a lane runs, so only the
+				// device's holder may.
+				assertDeviceAccess(agents, target.udid, context.agent);
 				if (installed) {
 					return {
 						...plan,
@@ -1772,7 +1921,7 @@ function createRoutes({
 						context.signal
 					);
 				}
-				const action =
+				const action: ConnectedWaitAction =
 					command.condition.kind === 'element'
 						? {
 								tool: 'components',
@@ -1828,7 +1977,7 @@ function createRoutes({
 				if (command.operation === 'start') {
 					const state = await simulator.refresh();
 					const target = simulatorByUdid(state, command.udid);
-					return await runSimulatorAction(
+					const receipt = (await runSimulatorAction(
 						simulator,
 						{
 							actionId: actionId(context.requestId),
@@ -1840,29 +1989,37 @@ function createRoutes({
 						},
 						context.signal,
 						false
-					);
+					)) as SimulatorActionReceipt;
+					if (context.agent && receipt.jobId) {
+						recordings.add(receipt.jobId, context.agent);
+					}
+					return receipt;
 				}
 				const target = simulatorByUdid(await simulator.refresh(), command.udid);
-				const candidate = command.jobId
-					? simulator
-							.getState()
-							.jobs.find((candidate) => candidate.id === command.jobId)
-					: simulator
-							.getState()
-							.jobs.find(
-								(candidate) =>
-									candidate.kind === 'capture.video' &&
-									candidate.deviceUdid === target.udid &&
-									!TERMINAL_JOB_STATUSES.has(candidate.status)
-							);
-				const job =
-					candidate?.kind === 'capture.video' &&
+				const isActiveRecording = (candidate: SimulatorJob) =>
+					candidate.kind === 'capture.video' &&
 					candidate.deviceUdid === target.udid &&
-					!TERMINAL_JOB_STATUSES.has(candidate.status)
-						? candidate
-						: undefined;
+					!TERMINAL_JOB_STATUSES.has(candidate.status);
+				const jobs = simulator.getState().jobs;
+				// Without a jobId the caller's own recording goes first, so a stop
+				// never reaches for someone else's while the caller has one going.
+				const job = command.jobId
+					? jobs.find(
+							(candidate) =>
+								candidate.id === command.jobId && isActiveRecording(candidate)
+						)
+					: (jobs.find(
+							(candidate) =>
+								isActiveRecording(candidate) &&
+								recordings.startedBy(candidate.id, context.agent)
+						) ?? jobs.find(isActiveRecording));
 				if (!job)
 					required('No active recording matches this target and jobId.');
+				// A session may always stop a recording it started. Anyone else's
+				// recording on a held device is for the holder to stop.
+				if (!recordings.startedBy(job.id, context.agent)) {
+					assertDeviceAccess(agents, target.udid, context.agent);
+				}
 				if (!simulator.cancelJob(job.id))
 					required('The recording is no longer active.');
 				const finished = await waitForSimulatorJob(
@@ -1938,6 +2095,18 @@ function createRoutes({
 				const job = jobs.find((candidate) => candidate.id === command.jobId);
 				if (!job) unavailable('The requested job was not found.');
 				if (command.operation === 'get') return job;
+				// A session may always cancel a recording it started. Cancelling
+				// any other boot, recording, or slim on a held device breaks the
+				// holder's work as surely as driving it would.
+				if (!recordings.startedBy(command.jobId, context.agent)) {
+					for (const udid of jobSimulators(
+						simulator.getState(),
+						slimming.getState(),
+						command.jobId
+					)) {
+						assertDeviceAccess(agents, udid, context.agent);
+					}
+				}
 				return {
 					cancelled:
 						simulator.cancelJob(command.jobId) ||
@@ -2005,12 +2174,17 @@ function createRoutes({
 							command.udids ??
 							required('recipe run requires one or more udids.');
 						const recipeInventory = await simulator.refresh();
-						return await recipes.run(
-							command.recipeId ?? required('recipe run requires recipeId.'),
-							recipeUdids.map(
-								(udid) => simulatorByUdid(recipeInventory, udid).udid
-							)
+						const recipeId =
+							command.recipeId ?? required('recipe run requires recipeId.');
+						const targetUdids = recipeUdids.map(
+							(udid) => simulatorByUdid(recipeInventory, udid).udid
 						);
+						// A recipe can shut down, boot, relaunch, and reconfigure every
+						// target, so each must be free or the caller's.
+						for (const udid of targetUdids) {
+							assertDeviceAccess(agents, udid, context.agent);
+						}
+						return await recipes.run(recipeId, targetUdids);
 					}
 					case 'cancel':
 						return await recipes.cancel(
@@ -2047,20 +2221,28 @@ function createRoutes({
 						};
 					}
 					case 'up': {
-						// A named device another agent holds is refused before anything
-						// boots. Without a udid the lane service picks a free device
-						// itself, so there is nothing to check here; the lane service's
-						// one-lane-per-device rule still applies for races.
-						if (command.udid) {
-							assertDeviceAccess(agents, command.udid, laneAgent);
-						}
+						const worktreePath =
+							command.worktreePath ??
+							required('lane up requires worktreePath.');
+						// A device another agent holds is refused before anything boots:
+						// the named one or, without a udid, the device of the app's
+						// existing lane, which the lane service resumes. With neither,
+						// the lane service picks a free device itself. It checks the
+						// resumed lane again in turn, for a lane that a start queued
+						// ahead of this one creates.
+						const appDirectory = posix.resolve(worktreePath);
+						const udid =
+							command.udid ??
+							lanes
+								.getState()
+								.lanes.find((lane) => laneAppDirectory(lane) === appDirectory)
+								?.simulatorUdid;
+						if (udid) assertDeviceAccess(agents, udid, laneAgent);
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
 								kind: 'lane.start',
-								worktreePath:
-									command.worktreePath ??
-									required('lane up requires worktreePath.'),
+								worktreePath,
 								...(command.udid ? { simulatorUdid: command.udid } : {}),
 								environment: command.environment ?? 'development',
 								launch: command.launch ?? true,

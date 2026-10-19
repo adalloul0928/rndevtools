@@ -26,6 +26,7 @@ import {
 	laneStateSchema,
 } from '../shared/lane-protocol';
 import {
+	createDesktopStateParser,
 	type DesktopAction,
 	type DesktopActionResult,
 	type DesktopBootstrap,
@@ -34,7 +35,6 @@ import {
 	desktopActionResultSchema,
 	desktopActionSchema,
 	desktopBootstrapSchema,
-	desktopStateSchema,
 } from '../shared/protocol';
 import {
 	type RecipeBridge,
@@ -138,6 +138,73 @@ import {
 	supabaseStateSchema,
 } from '../shared/supabase-protocol';
 
+type StateParseResult<T> =
+	| { success: true; data: T }
+	| {
+			success: false;
+			error: {
+				issues: readonly { path: readonly PropertyKey[]; code: string }[];
+			};
+	  };
+
+const MAX_REPORTED_ISSUES = 5;
+
+// A path can hold keys the app chose, such as header names. Anything but a
+// short plain name prints as `?`, so URLs, emails and other text stay out.
+function issuePath(path: readonly PropertyKey[]): string {
+	return (
+		path
+			.map((segment) =>
+				typeof segment === 'number' ||
+				(typeof segment === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(segment))
+					? String(segment)
+					: '?'
+			)
+			.join('.') || '(root)'
+	);
+}
+
+/**
+ * Forwards each pushed state that validates. Main sends whole states, so one
+ * that fails would otherwise freeze a panel without a trace: the first of a
+ * run of rejected updates is reported with its issue paths and codes, never
+ * the values.
+ */
+function subscribeToState<T>(
+	channel: string,
+	label: string,
+	parse: (value: unknown) => StateParseResult<T>,
+	listener: (state: T) => void
+): () => void {
+	if (typeof listener !== 'function') {
+		throw new TypeError(`${label} listener must be a function.`);
+	}
+	let rejecting = false;
+	const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
+		const parsed = parse(state);
+		if (!parsed.success) {
+			if (!rejecting) {
+				rejecting = true;
+				const issues = parsed.error.issues
+					.slice(0, MAX_REPORTED_ISSUES)
+					.map((issue) => `${issuePath(issue.path)} (${issue.code})`);
+				console.warn(
+					`Ignoring ${label.toLowerCase()} updates that fail validation: ${issues.join(', ')}`
+				);
+			}
+			return;
+		}
+		rejecting = false;
+		try {
+			listener(parsed.data);
+		} catch {
+			// A renderer callback must not break the isolated IPC event handler.
+		}
+	};
+	ipcRenderer.on(channel, wrapped);
+	return () => ipcRenderer.removeListener(channel, wrapped);
+}
+
 const bridge: DesktopBridge &
 	SimulatorBridge &
 	SlimmingBridge &
@@ -152,22 +219,13 @@ const bridge: DesktopBridge &
 		desktopBootstrapSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getBootstrap)
 		) as DesktopBootstrap,
-	subscribe: (listener: (state: DesktopState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Desktop state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = desktopStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.stateChanged, wrapped);
-		return () => ipcRenderer.removeListener(IPC_CHANNELS.stateChanged, wrapped);
-	},
+	subscribe: (listener: (state: DesktopState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.stateChanged,
+			'Desktop state',
+			createDesktopStateParser(),
+			listener
+		),
 	runAction: async (action: DesktopAction) => {
 		const validatedAction = desktopActionSchema.parse(action);
 		return desktopActionResultSchema.parse(
@@ -178,23 +236,13 @@ const bridge: DesktopBridge &
 		simulatorStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getSimulatorState)
 		) as SimulatorState,
-	subscribeSimulatorState: (listener: (state: SimulatorState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Simulator state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = simulatorStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.simulatorStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.simulatorStateChanged, wrapped);
-	},
+	subscribeSimulatorState: (listener: (state: SimulatorState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.simulatorStateChanged,
+			'Simulator state',
+			(value) => simulatorStateSchema.safeParse(value),
+			listener
+		),
 	refreshSimulators: async () =>
 		simulatorStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.refreshSimulators)
@@ -260,23 +308,13 @@ const bridge: DesktopBridge &
 		slimmingStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getSlimmingState)
 		) as SlimmingState,
-	subscribeSlimmingState: (listener: (state: SlimmingState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Slimming state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = slimmingStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.slimmingStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.slimmingStateChanged, wrapped);
-	},
+	subscribeSlimmingState: (listener: (state: SlimmingState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.slimmingStateChanged,
+			'Slimming state',
+			(value) => slimmingStateSchema.safeParse(value),
+			listener
+		),
 	refreshSlimming: async () =>
 		slimmingStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.refreshSlimming)
@@ -323,23 +361,13 @@ const bridge: DesktopBridge &
 		recipeStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getRecipeState)
 		) as RecipeState,
-	subscribeRecipeState: (listener: (state: RecipeState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Recipe state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = recipeStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.recipeStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.recipeStateChanged, wrapped);
-	},
+	subscribeRecipeState: (listener: (state: RecipeState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.recipeStateChanged,
+			'Recipe state',
+			(value) => recipeStateSchema.safeParse(value),
+			listener
+		),
 	getRecipe: async (recipeId: string) => {
 		const result = await ipcRenderer.invoke(
 			IPC_CHANNELS.getRecipe,
@@ -399,26 +427,13 @@ const bridge: DesktopBridge &
 		) as BuildInsightsState,
 	subscribeBuildInsightsState: (
 		listener: (state: BuildInsightsState) => void
-	) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Build Insights state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = buildInsightsStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.buildInsightsStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(
-				IPC_CHANNELS.buildInsightsStateChanged,
-				wrapped
-			);
-	},
+	) =>
+		subscribeToState(
+			IPC_CHANNELS.buildInsightsStateChanged,
+			'Build Insights state',
+			(value) => buildInsightsStateSchema.safeParse(value),
+			listener
+		),
 	runBuildInsightsOperation: async (operation: BuildInsightsOperation) => {
 		const validated = buildInsightsOperationSchema.parse(operation);
 		return buildInsightsOperationReceiptSchema.parse(
@@ -432,23 +447,13 @@ const bridge: DesktopBridge &
 		laneStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getLaneState)
 		) as LaneState,
-	subscribeLaneState: (listener: (state: LaneState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Lane state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = laneStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.laneStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.laneStateChanged, wrapped);
-	},
+	subscribeLaneState: (listener: (state: LaneState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.laneStateChanged,
+			'Lane state',
+			(value) => laneStateSchema.safeParse(value),
+			listener
+		),
 	runLaneOperation: async (operation: LaneOperation) => {
 		const validated = laneOperationSchema.parse(operation);
 		return laneOperationReceiptSchema.parse(
@@ -465,23 +470,13 @@ const bridge: DesktopBridge &
 		agentStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getAgentState)
 		) as AgentState,
-	subscribeAgentState: (listener: (state: AgentState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Agent state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = agentStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.agentStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.agentStateChanged, wrapped);
-	},
+	subscribeAgentState: (listener: (state: AgentState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.agentStateChanged,
+			'Agent state',
+			(value) => agentStateSchema.safeParse(value),
+			listener
+		),
 	runAgentOperation: async (operation: AgentOperation) => {
 		const validated = agentOperationSchema.parse(operation);
 		return agentStateSchema.parse(
@@ -528,44 +523,24 @@ const bridge: DesktopBridge &
 	},
 	subscribeSimulatorStreamStatus: (
 		listener: (status: SimulatorStreamStatus) => void
-	) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Stream status listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, status: unknown) => {
-			const parsed = simulatorStreamStatusSchema.safeParse(status);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.simulatorStreamStatus, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.simulatorStreamStatus, wrapped);
-	},
+	) =>
+		subscribeToState(
+			IPC_CHANNELS.simulatorStreamStatus,
+			'Stream status',
+			(value) => simulatorStreamStatusSchema.safeParse(value),
+			listener
+		),
 	getSupabaseState: async () =>
 		supabaseStateSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getSupabaseState)
 		) as SupabaseState,
-	subscribeSupabaseState: (listener: (state: SupabaseState) => void) => {
-		if (typeof listener !== 'function') {
-			throw new TypeError('Supabase state listener must be a function.');
-		}
-		const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
-			const parsed = supabaseStateSchema.safeParse(state);
-			if (!parsed.success) return;
-			try {
-				listener(parsed.data);
-			} catch {
-				// A renderer callback must not break the isolated IPC event handler.
-			}
-		};
-		ipcRenderer.on(IPC_CHANNELS.supabaseStateChanged, wrapped);
-		return () =>
-			ipcRenderer.removeListener(IPC_CHANNELS.supabaseStateChanged, wrapped);
-	},
+	subscribeSupabaseState: (listener: (state: SupabaseState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.supabaseStateChanged,
+			'Supabase state',
+			(value) => supabaseStateSchema.safeParse(value),
+			listener
+		),
 	runSupabaseOperation: async (operation: SupabaseOperation) => {
 		const validated = supabaseOperationSchema.parse(operation);
 		return supabaseOperationReceiptSchema.parse(

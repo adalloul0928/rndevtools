@@ -42,7 +42,6 @@ export function supabaseRunningCap(
 
 /**
  * A running managed or adopted stack nothing holds, which admission may stop.
- * @public
  */
 export type SupabaseAdmissionCandidate = Readonly<{
 	stackId: string;
@@ -112,10 +111,8 @@ export type SupabaseAdmissionInput = Readonly<{
 	candidates: readonly SupabaseAdmissionCandidate[];
 }>;
 
-/** @public */
-export type SupabaseAdmissionWarning = 'memory-warning' | 'sysv-unknown';
+type SupabaseAdmissionWarning = 'memory-warning' | 'sysv-unknown';
 
-/** @public */
 export type SupabaseAdmissionDecision =
 	| Readonly<{
 			kind: 'allow';

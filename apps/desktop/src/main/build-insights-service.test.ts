@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -237,6 +244,112 @@ describe('BuildInsightsService', () => {
 		expect(watchFactory).toHaveBeenCalledTimes(2);
 		expect(retried.sources[0]?.status).toBe('ready');
 		await service.stop();
+	});
+
+	describe('watched roots', () => {
+		async function watchedRoot() {
+			const root = await mkdtemp(
+				path.join(tmpdir(), 'rndevtools-build-watch-scan-')
+			);
+			temporaryRoots.push(root);
+			const derivedData = path.join(root, 'DerivedData');
+			const result = path.join(derivedData, 'Logs', 'Test', 'Run.xcresult');
+			await mkdir(result, { recursive: true });
+			let release: () => void = () => undefined;
+			let gate: Promise<void> = Promise.resolve();
+			const runXcresult = vi.fn(async () => {
+				await gate;
+				return {
+					actionTitle: 'Test ExampleApp',
+					startTime: '2026-08-30T17:59:42.000Z',
+					endTime: '2026-08-30T18:00:00.000Z',
+					status: 'succeeded',
+				};
+			});
+			const listeners: Array<(filename: string | null) => void> = [];
+			const service = new BuildInsightsService({
+				store: new BuildInsightsStore(path.join(root, 'store')),
+				runXcresult,
+				watchFactory: (_sourcePath, listener) => {
+					listeners.push(listener);
+					return Object.assign(new EventEmitter(), {
+						close: vi.fn(),
+					}) as unknown as FSWatcher;
+				},
+			});
+			await service.start();
+			let scans = 0;
+			service.subscribe((state) => {
+				if (state.sources[0]?.status === 'scanning') scans += 1;
+			});
+			const state = await service.addWatchRoot(derivedData);
+			return {
+				result,
+				runXcresult,
+				service,
+				sourceId: state.sources[0]?.id as string,
+				scans: () => scans,
+				changed: (filename: string | null) => {
+					for (const listener of listeners) listener(filename);
+				},
+				hold: () => {
+					gate = new Promise<void>((resolve) => {
+						release = resolve;
+					});
+				},
+				release: () => release(),
+			};
+		}
+
+		it('reads a build result again only once it changed', async () => {
+			const { result, runXcresult, service, sourceId } = await watchedRoot();
+			expect(runXcresult).toHaveBeenCalledTimes(1);
+			await service.refresh(sourceId);
+			expect(runXcresult).toHaveBeenCalledTimes(1);
+			await writeFile(path.join(result, 'Info.plist'), 'root moved');
+			await service.refresh(sourceId);
+			expect(runXcresult).toHaveBeenCalledTimes(2);
+			expect(service.getState().builds).toHaveLength(1);
+			await service.stop();
+		});
+
+		it('scans a source one pass at a time, and once more for refreshes asked meanwhile', async () => {
+			const { result, runXcresult, service, sourceId, scans, hold, release } =
+				await watchedRoot();
+			await writeFile(path.join(result, 'Info.plist'), 'changed');
+			hold();
+			const first = service.refresh(sourceId);
+			await vi.waitFor(() => expect(runXcresult).toHaveBeenCalledTimes(2));
+			const asked = [service.refresh(sourceId), service.refresh(sourceId)];
+			// No second scan overlaps the first, so xcresulttool runs once.
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(runXcresult).toHaveBeenCalledTimes(2);
+			const before = scans();
+			release();
+			await Promise.all([first, ...asked]);
+			expect(scans() - before).toBe(1);
+			expect(runXcresult).toHaveBeenCalledTimes(2);
+			await service.stop();
+		});
+
+		it('schedules a scan only for a change to a build result', async () => {
+			const { service, changed } = await watchedRoot();
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			try {
+				changed('ExampleApp/Index.noindex/DataStore/v5/records/AB/record');
+				changed('ExampleApp/Build/Intermediates.noindex/App.build/x.o');
+				expect(vi.getTimerCount()).toBe(0);
+				changed('ExampleApp/Logs/Test/Run.xcresult/Info.plist');
+				expect(vi.getTimerCount()).toBe(1);
+				vi.clearAllTimers();
+				changed(null);
+				expect(vi.getTimerCount()).toBe(1);
+				vi.clearAllTimers();
+			} finally {
+				vi.useRealTimers();
+			}
+			await service.stop();
+		});
 	});
 
 	it('keeps a scan visibly unhealthy when discovered build results cannot be parsed', async () => {

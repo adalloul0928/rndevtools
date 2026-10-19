@@ -210,15 +210,17 @@ export async function supabaseRealpath(
 	}
 }
 
-/** Whether `pid` names a live process this user may signal. */
+/**
+ * Whether `pid` names a live process this user may signal. EPERM means it
+ * belongs to someone else, so it is never a child this desktop started.
+ */
 export function supabaseProcessAlive(pid: number): boolean {
 	if (!Number.isSafeInteger(pid) || pid <= 1) return false;
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch (error) {
-		// EPERM means it exists but belongs to someone else.
-		return (error as NodeJS.ErrnoException).code === 'EPERM';
+	} catch {
+		return false;
 	}
 }
 
@@ -250,7 +252,6 @@ function isStrictlyInside(root: string, candidate: string): boolean {
 // ---------------------------------------------------------------------------
 // Filesystem walks
 
-/** @public */
 export type SupabaseDirectorySize = Readonly<{
 	bytes: number;
 	/** The walk stopped at its entry cap or deadline; `bytes` is a floor. */
@@ -322,7 +323,6 @@ export function supabaseUploadsPath(
 	return path.join(projectRoot, 'supabase', '.temp', 'stack-uploads', stackId);
 }
 
-/** @public */
 export type SupabaseUploadsRemoval =
 	| Readonly<{ removed: true }>
 	| Readonly<{ removed: false; reason: 'missing' | 'unsafe' | 'failed' }>;

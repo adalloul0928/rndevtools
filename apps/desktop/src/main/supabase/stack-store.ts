@@ -131,7 +131,6 @@ const storedHoldSchema = z.strictObject({
 	agent: agentSchema.extend({ synthetic: z.boolean() }),
 	since: timestampSchema,
 });
-/** @public */
 export type SupabaseStoredHold = z.infer<typeof storedHoldSchema>;
 
 /**
@@ -142,7 +141,6 @@ const clockSchema = z.union([
 	z.strictObject({ missingSince: timestampSchema }),
 	z.strictObject({ pausedElapsedMs: z.number().int().nonnegative() }),
 ]);
-/** @public */
 export type SupabaseHolderClock = z.infer<typeof clockSchema>;
 
 /** `holderClockKey` output: `kind:session`, plus `@<dir>` for synthetic ones. */
@@ -227,6 +225,12 @@ const recordSchema = z.strictObject({
 	/** The operator enabled Studio for this stack; the choice persists. */
 	studioEnabled: z.boolean(),
 	lastError: supabaseErrorSchema.optional(),
+	/**
+	 * The needs_recreate failure that set flags.needsRecreate: what the saved
+	 * stack can't adopt. It goes when the flag does, so a later failure for
+	 * another reason replaces lastError but not this.
+	 */
+	recreateError: supabaseErrorSchema.optional(),
 	flags: recordFlagsSchema,
 	/**
 	 * Simulators a lane ran this stack's app on, newest first. An app keeps
@@ -377,6 +381,20 @@ export function redactSupabaseErrorView(
 	};
 }
 
+/**
+ * What a needs-recreate stack can't adopt: the failure behind its flag.
+ * Records saved before `recreateError` existed have it only as lastError.
+ */
+export function supabaseRecreateError(
+	record: SupabaseStackRecord
+): StoredErrorView | undefined {
+	if (!record.flags.needsRecreate) return undefined;
+	return (
+		record.recreateError ??
+		(record.lastError?.code === 'needs_recreate' ? record.lastError : undefined)
+	);
+}
+
 /** The sha256 fingerprint stored for a public key, so a change is noticed. */
 export function supabaseKeyFingerprint(value: string): string {
 	return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -461,7 +479,6 @@ function upsertInto(draft: StoredStacks, record: SupabaseStackRecord): void {
 	draft.records.push(record);
 }
 
-/** @public */
 export type SupabaseStackStoreHealth = 'ok' | 'quarantined';
 
 /**
@@ -834,6 +851,8 @@ export class SupabaseStackStore {
 			for (const record of draft.records) {
 				if (record.lastError)
 					record.lastError = redactSupabaseErrorView(record.lastError);
+				if (record.recreateError)
+					record.recreateError = redactSupabaseErrorView(record.recreateError);
 			}
 			for (const request of draft.requests) {
 				if (request.error)

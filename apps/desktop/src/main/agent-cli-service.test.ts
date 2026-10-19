@@ -27,7 +27,8 @@ afterEach(async () => {
 async function fixture(
 	handler: ConstructorParameters<typeof AgentCliService>[0]['handler'] = async (
 		command
-	) => ({ command })
+	) => ({ command }),
+	{ livenessProbeMs }: { livenessProbeMs?: number } = {}
 ): Promise<{ service: AgentCliService; socketPath: string }> {
 	const directory = await mkdtemp(path.join(tmpdir(), 'rndevtools-agent-cli-'));
 	temporaryDirectories.push(directory);
@@ -36,6 +37,7 @@ async function fixture(
 		socketPath,
 		handler,
 		platform: 'darwin',
+		...(livenessProbeMs === undefined ? {} : { livenessProbeMs }),
 	});
 	services.push(service);
 	expect(await service.start()).toMatchObject({
@@ -49,24 +51,44 @@ async function request(
 	socketPath: string,
 	body: unknown
 ): Promise<AgentCliResponse> {
+	return JSON.parse(
+		(await exchangeRaw(socketPath, body)).toString('utf8')
+	) as AgentCliResponse;
+}
+
+/** Sends one request the way the Go CLI does (write, then half-close). */
+async function exchangeRaw(socketPath: string, body: unknown): Promise<Buffer> {
 	return await new Promise((resolve, reject) => {
 		const socket = connect(socketPath);
 		const chunks: Buffer[] = [];
 		socket.once('error', reject);
 		socket.on('data', (chunk: Buffer) => chunks.push(chunk));
-		socket.once('end', () => {
-			try {
-				resolve(
-					JSON.parse(Buffer.concat(chunks).toString('utf8')) as AgentCliResponse
-				);
-			} catch (error) {
-				reject(error);
-			}
-		});
+		socket.once('end', () => resolve(Buffer.concat(chunks)));
 		socket.once('connect', () => {
 			socket.end(`${JSON.stringify(body)}\n`);
 		});
 	});
+}
+
+async function within<T>(
+	promise: Promise<T>,
+	milliseconds: number,
+	what: string
+): Promise<T> {
+	let timer: NodeJS.Timeout | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`timed out waiting for ${what}`)),
+					milliseconds
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 describe('agent CLI service', () => {
@@ -374,6 +396,124 @@ describe('agent CLI service', () => {
 			command: { kind: 'doctor' },
 		});
 		expect(response).toMatchObject({
+			ok: false,
+			error: { code: 'response_too_large', retryable: false },
+		});
+	});
+
+	it('aborts the handler and frees its connection when a client that half-closed hangs up', async () => {
+		// The Go CLI writes its request, half-closes, and closes the socket when
+		// its caller gives up (an MCP client cancelling a tool call). The socket
+		// has read its EOF by then, so only a write can show the hang-up.
+		const connectionLimit = 8;
+		const started = new Set<string>();
+		const aborted = new Set<string>();
+		let allStarted: () => void = () => undefined;
+		let allAborted: () => void = () => undefined;
+		const everyHandlerStarted = new Promise<void>((resolve) => {
+			allStarted = resolve;
+		});
+		const everyHandlerAborted = new Promise<void>((resolve) => {
+			allAborted = resolve;
+		});
+		const { socketPath } = await fixture(
+			async (command, context) => {
+				if (!context.requestId.startsWith('abandoned-')) {
+					return { kind: command.kind };
+				}
+				started.add(context.requestId);
+				if (started.size === connectionLimit) allStarted();
+				await new Promise<void>((resolve) => {
+					context.signal.addEventListener('abort', () => resolve(), {
+						once: true,
+					});
+				});
+				aborted.add(context.requestId);
+				if (aborted.size === connectionLimit) allAborted();
+				throw new AgentCliError({
+					code: 'cancelled',
+					message: 'The agent request was cancelled.',
+				});
+			},
+			{ livenessProbeMs: 20 }
+		);
+		// As many as the desktop accepts from all its clients together.
+		const sockets = Array.from({ length: connectionLimit }, (_, index) => {
+			const socket = connect(socketPath);
+			socket.on('error', () => undefined);
+			socket.once('connect', () => {
+				socket.end(
+					`${JSON.stringify({
+						protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+						id: `abandoned-${index}`,
+						command: { kind: 'doctor' },
+					})}\n`
+				);
+			});
+			return socket;
+		});
+		await within(everyHandlerStarted, 2_000, 'every handler to start');
+		for (const socket of sockets) socket.destroy();
+		await within(everyHandlerAborted, 2_000, 'the hang-ups to abort them');
+		// Their connections are free for the next client at once, not when the
+		// handlers' own budgets run out.
+		expect(
+			await request(socketPath, {
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+				id: 'after-the-hang-ups',
+				command: { kind: 'doctor' },
+			})
+		).toMatchObject({ ok: true, result: { kind: 'doctor' } });
+	});
+
+	it('leads a slow answer with probe spaces and counts them toward the response limit', async () => {
+		const limit = 512 * 1024;
+		const bigId = 'request-big';
+		// The answer line to this is exactly the limit, so it fits only when
+		// nothing goes ahead of it.
+		const overhead = Buffer.byteLength(
+			`${JSON.stringify({
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+				id: bigId,
+				ok: true,
+				result: { value: '' },
+			})}\n`
+		);
+		const big = { value: 'x'.repeat(limit - overhead) };
+		let delayMs = 0;
+		const { socketPath } = await fixture(
+			async (_command, context) => {
+				await new Promise((resolve) => setTimeout(resolve, delayMs));
+				return context.requestId === bigId ? big : { small: true };
+			},
+			{ livenessProbeMs: 20 }
+		);
+		const send = (id: string) =>
+			exchangeRaw(socketPath, {
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+				id,
+				command: { kind: 'doctor' },
+			});
+
+		const quick = await send(bigId);
+		expect(quick.byteLength).toBe(limit);
+		expect(JSON.parse(quick.toString('utf8'))).toMatchObject({ ok: true });
+
+		delayMs = 150;
+		const slow = (await send('request-small')).toString('utf8');
+		// Still one line: spaces, then the JSON, then its LF.
+		expect(slow).toMatch(/^ +\{[^\n]*\}\n$/);
+		expect(JSON.parse(slow)).toEqual({
+			protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+			id: 'request-small',
+			ok: true,
+			result: { small: true },
+		});
+
+		const slowBig = await send(bigId);
+		expect(slowBig.byteLength).toBeLessThanOrEqual(limit);
+		expect(slowBig.toString('utf8')).toMatch(/^ +\{/);
+		expect(JSON.parse(slowBig.toString('utf8'))).toMatchObject({
 			ok: false,
 			error: { code: 'response_too_large', retryable: false },
 		});

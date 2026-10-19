@@ -688,6 +688,22 @@ export class SlimmingService {
 		);
 	}
 
+	/**
+	 * Drops the oldest finished jobs until one more fits, as the Simulator
+	 * service does, so a long session never fills the queue with history.
+	 * False only when every listed job is still active.
+	 */
+	#makeJobRoom(): boolean {
+		while (this.#jobs.length >= MAX_JOBS) {
+			const index = this.#jobs.findIndex(
+				(job) => !ACTIVE_JOB_STATUSES.has(job.public.status)
+			);
+			if (index < 0) return false;
+			this.#jobs.splice(index, 1);
+		}
+		return true;
+	}
+
 	cancelJob(jobId: string): boolean {
 		const job = this.#jobs.find((candidate) => candidate.public.id === jobId);
 		if (!job || !ACTIVE_JOB_STATUSES.has(job.public.status)) return false;
@@ -786,7 +802,7 @@ export class SlimmingService {
 				'A Slimming action with this identifier already exists.'
 			);
 		}
-		if (this.#jobs.length >= MAX_JOBS) {
+		if (!this.#makeJobRoom()) {
 			return this.#reject(
 				action,
 				`The ${MAX_JOBS}-job Slimming queue is full.`

@@ -139,6 +139,47 @@ describe('classifySupabaseError: recorded envelopes', () => {
 		expect(classified.retry).toBe('none');
 	});
 
+	it('advises reverting only when every listed change is editable', () => {
+		const fixture = loadSupabaseCliFixture('start-needs-recreate');
+		// The recorded refusal, listing these changes instead.
+		const recoveryWith = (stackChanges: readonly object[]) =>
+			classifySupabaseError({
+				envelope: parseSupabaseErrorEnvelope({
+					...(fixture.stdout as Record<string, unknown>),
+					stack_changes: stackChanges,
+				}),
+				exitCode: fixture.exitCode,
+				stderrLines: fixture.stderr,
+			}).recovery;
+		const majorVersion = {
+			service: 'database',
+			path: 'config.version',
+			key: '[db] major_version',
+			saved: '15',
+			requested: '17',
+			editable: true,
+		};
+		// What a CLI upgrade reports: no setting controls the pinned build.
+		const postgresBuild = {
+			service: 'database',
+			key: 'Postgres build',
+			saved: '17.4.1',
+			requested: '17.6.1',
+			editable: false,
+		};
+		const recreateOnly =
+			'This configuration needs a new stack. Destroy and recreate it from RN Devtools; that deletes its local database.';
+		expect(recoveryWith([majorVersion])).toContain(
+			'Revert the listed settings'
+		);
+		expect(recoveryWith([postgresBuild])).toBe(recreateOnly);
+		// A change no setting controls blocks the start whatever else changed.
+		expect(recoveryWith([majorVersion, postgresBuild])).toBe(recreateOnly);
+		expect(recoveryWith([postgresBuild, majorVersion])).toBe(recreateOnly);
+		// With none listed there is nothing to revert.
+		expect(recoveryWith([])).toBe(recreateOnly);
+	});
+
 	it('flags a container stack on a native identity and drops advice to use auto', () => {
 		const classified = classifyFixture('start-runtime-mismatch');
 		expect(classified.details).toMatchObject({

@@ -832,6 +832,42 @@ describe('slimming service', () => {
 		await service.stop();
 	});
 
+	it('makes room for new work by dropping the oldest finished jobs, and refuses only while 100 are active', async () => {
+		const { service } = await createService();
+		const preview = (actionId: string) =>
+			service.runAction(
+				action({
+					actionId,
+					kind: 'profile.preview',
+					simulatorUdids: [UDID],
+					profileId: PROFILE,
+				})
+			);
+		// Read-only jobs run one at a time, so 100 accepted at once are all active.
+		const active = Array.from({ length: 100 }, (_, index) =>
+			preview(`preview-${index}`)
+		);
+		expect(active.every((receipt) => receipt.accepted)).toBe(true);
+		expect(preview('preview-overflow')).toMatchObject({
+			accepted: false,
+			error: 'The 100-job Slimming queue is full.',
+		});
+		for (const receipt of active)
+			await waitForJob(service, receipt.jobId ?? '');
+
+		// A session that already ran 100 jobs keeps working.
+		const next = preview('preview-after');
+		expect(next.accepted).toBe(true);
+		expect((await waitForJob(service, next.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		const actionIds = service.getState().jobs.map((job) => job.actionId);
+		expect(actionIds).toHaveLength(100);
+		expect(actionIds).not.toContain('preview-0');
+		expect(actionIds.at(-1)).toBe('preview-after');
+		await service.stop();
+	});
+
 	it('does not auto-boot shutdown targets during refresh but supports preview, acknowledgement, and mutation', async () => {
 		const helper = new FakeHelper();
 		helper.deviceState = 'Shutdown';

@@ -41,23 +41,25 @@ import type {
 
 /**
  * Whether each agent kind's sessions can be read right now.
- * @public
  */
-export type SupabaseSessionDiscovery = Readonly<{
+type SupabaseSessionDiscovery = Readonly<{
 	claude: 'ok' | 'unavailable';
 	codex: 'ok' | 'unavailable';
 }>;
 
 /**
  * A lane attached to the stack.
- * @public
  */
 export type SupabaseHoldLane = Readonly<{
 	laneId: string;
 	/** The agent driving the lane; absent for a lane the operator started. */
 	agent?: DeviceHolder | undefined;
-	/** The lane's app directory; a synthetic lane agent is judged against it. */
-	appDirectory: string;
+	/**
+	 * The lane's checkout, which a synthetic lane agent is judged against, as
+	 * its device hold is. Not the app directory inside it: in a monorepo the
+	 * agent's session works from the checkout root, above the app.
+	 */
+	worktreePath: string;
 	since: number;
 }>;
 
@@ -99,9 +101,8 @@ export type SupabaseHoldsInput = Readonly<{
 
 /**
  * A live session working inside the worktree.
- * @public
  */
-export type SupabaseCwdKeeper = Readonly<{
+type SupabaseCwdKeeper = Readonly<{
 	agent: SupabaseHoldAgent;
 	/** Main only; the state shows a label. */
 	cwd: string;
@@ -270,7 +271,7 @@ export function resolveSupabaseHolds(
 	}
 	for (const lane of input.lanes) {
 		const liveness = lane.agent
-			? holderLiveness(lane.agent, lane.appDirectory, input, liveKeys, clocks)
+			? holderLiveness(lane.agent, lane.worktreePath, input, liveKeys, clocks)
 			: ({ live: true } as const);
 		if (!liveness.live && liveness.paused) paused = true;
 		holds.push(
@@ -420,7 +421,6 @@ export function resolveSupabaseHolds(
 /**
  * The `stack` part of the holds input for a stored record: where its
  * sessions work, its pin, stored holds, release period and clocks.
- * @public
  */
 export function supabaseHoldsStack(
 	record: Pick<

@@ -63,7 +63,6 @@ export function supabaseRepositoryId(realRoot: string): string {
 
 /**
  * Who owns a worktree's stack lifecycle, and why it is not managed.
- * @public
  */
 export type SupabaseWorktreeMode = Readonly<{
 	value: 'managed' | 'observed' | 'off';
@@ -190,7 +189,6 @@ export type SupabaseRepositoryFacts = Readonly<{
 	checkedAt: number;
 }>;
 
-/** @public */
 export type SupabaseRepositoryScanInput = Readonly<{
 	/** Tracked repository roots (SupabaseLanePort.repositories()). */
 	repositories: readonly string[];
@@ -213,7 +211,6 @@ export type SupabaseRepositoryScanInput = Readonly<{
 
 /**
  * Filesystem and probe seams, defaulting to the real ones.
- * @public
  */
 export type SupabaseRepositoryScanDeps = Readonly<{
 	detect?: typeof detectSupabaseProject;
@@ -558,7 +555,6 @@ function checkLines(
 
 /**
  * What a stack looks like to a repository summary.
- * @public
  */
 export type SupabaseRepositoryStack = Readonly<{
 	id: string;

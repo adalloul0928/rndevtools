@@ -145,7 +145,6 @@ const MAX_APP_ENV = 8;
 const MAX_LOG_RECORDS = 5_000;
 /**
  * The newest 64 KiB of redacted log lines main keeps per read.
- * @public
  */
 export const SUPABASE_MAX_LOG_CHARACTERS = 64 * 1_024;
 const MAX_LOG_LINE_LENGTH = 2_000;
@@ -153,12 +152,10 @@ const MAX_TOP_TABLES = 10;
 const MAX_MIGRATION_ROWS = 500;
 /**
  * Bulk Stop and Destroy act on at most 20 selected stacks.
- * @public
  */
 export const SUPABASE_MAX_BATCH = 20;
 /**
  * One destroy call names at most 32 stacks (the dialect's limit).
- * @public
  */
 export const SUPABASE_MAX_DESTROY_IDS = 32;
 const MAX_NOTE_LENGTH = 240;
@@ -234,23 +231,19 @@ const absolutePathSchema = z
 
 /**
  * A stack's full id: sha256 over its project root, branch and name.
- * @public
  */
 export const supabaseStackIdSchema = z.string().regex(/^[0-9a-f]{64}$/);
 /**
  * Issued by main for a tracked repository; never a path.
- * @public
  */
 export const supabaseRepositoryIdSchema = z
 	.string()
 	.regex(/^repo-[0-9a-f]{12}$/);
-/** @public */
 export const supabaseJobIdSchema = z
 	.string()
 	.regex(
 		/^supabase-job-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 	);
-/** @public */
 export const supabaseRequestIdSchema = z
 	.string()
 	.regex(
@@ -349,8 +342,7 @@ export const SUPABASE_PREPARABLE_CAPABILITIES = [
 export const SUPABASE_DEFAULT_EXCLUSIONS: readonly SupabaseExcludableCapability[] =
 	Object.freeze(['studio', 'analytics']);
 
-/** @public */
-export const SUPABASE_SERVICE_KINDS = [
+const SUPABASE_SERVICE_KINDS = [
 	'database',
 	'rest',
 	'auth',
@@ -365,13 +357,11 @@ export const SUPABASE_SERVICE_KINDS = [
 	'pooler',
 	'unknown',
 ] as const;
-/** @public */
 export type SupabaseServiceKind = (typeof SUPABASE_SERVICE_KINDS)[number];
 /**
  * Service states in the CLI's own words.
- * @public
  */
-export const SUPABASE_MEMBER_STATES = [
+const SUPABASE_MEMBER_STATES = [
 	'unavailable',
 	'unhealthy',
 	'exited',
@@ -428,7 +418,6 @@ const gitOperationSchema = z.enum([
 
 /**
  * How main maps git's in-progress markers onto {@link SupabaseStackSummary.currentHead}.
- * @public
  */
 export const SUPABASE_GIT_OPERATION_BY_MARKER = Object.freeze({
 	'rebase-merge': 'rebase',
@@ -444,9 +433,8 @@ export const SUPABASE_GIT_OPERATION_BY_MARKER = Object.freeze({
 /**
  * Lifecycle states a row can be in. Exposure, a CLI release mismatch and an
  * unresponsive owner are separate fields, because each can overlay any state.
- * @public
  */
-export const SUPABASE_STACK_STATES = [
+const SUPABASE_STACK_STATES = [
 	/** An expected row: this worktree's stack for its HEAD does not exist yet. */
 	'not-created',
 	/** Registered with an empty composition (prepared, or downloaded only). */
@@ -470,10 +458,8 @@ export const SUPABASE_STACK_STATES = [
 	/** Not known yet: at boot, or after an in-flight job was lost. */
 	'unknown',
 ] as const;
-/** @public */
 export type SupabaseStackState = (typeof SUPABASE_STACK_STATES)[number];
 
-/** @public */
 export const SUPABASE_STACK_FLAGS = [
 	/** The worktree directory is gone. */
 	'worktree-deleted',
@@ -506,7 +492,6 @@ export const SUPABASE_STACK_FLAGS = [
 	/** Agent sessions can't be read, so its abandonment clocks are frozen. */
 	'clocks-paused',
 ] as const;
-/** @public */
 export type SupabaseStackFlag = (typeof SUPABASE_STACK_FLAGS)[number];
 
 // ---------------------------------------------------------------------------
@@ -532,14 +517,11 @@ export const SUPABASE_CLI_ERROR_CODES = [
 	'flag_misuse',
 	'failed',
 ] as const;
-/** @public */
-export type SupabaseCliErrorCode = (typeof SUPABASE_CLI_ERROR_CODES)[number];
 
 /**
  * Refusals the desktop raises itself, before or instead of a CLI call.
- * @public
  */
-export const SUPABASE_DESKTOP_ERROR_CODES = [
+const SUPABASE_DESKTOP_ERROR_CODES = [
 	/** A precondition failed; the message is the visible disabled reason. */
 	'refused',
 	'feature_off',
@@ -559,8 +541,6 @@ const errorCodeSchema = z.enum([
 	...SUPABASE_CLI_ERROR_CODES,
 	...SUPABASE_DESKTOP_ERROR_CODES,
 ]);
-/** @public */
-export type SupabaseErrorViewCode = z.infer<typeof errorCodeSchema>;
 
 const stackChangeSchema = z.strictObject({
 	service: plainText(64).optional(),
@@ -570,8 +550,23 @@ const stackChangeSchema = z.strictObject({
 	requested: plainText(256).optional(),
 	editable: z.boolean(),
 });
-/** @public */
 export type SupabaseStackChangeView = z.infer<typeof stackChangeSchema>;
+
+/**
+ * Whether reverting the listed settings lets the saved stack start again
+ * with its data. The CLI refuses the stack while any change is one no
+ * setting controls, such as a new Postgres build, so every listed change
+ * must be editable; with none listed there is nothing to revert.
+ */
+export function supabaseRevertKeepsStack(
+	changes: readonly Readonly<{ editable: boolean }>[] | undefined
+): boolean {
+	return (
+		changes !== undefined &&
+		changes.length > 0 &&
+		changes.every((change) => change.editable)
+	);
+}
 
 const errorDetailsSchema = z.strictObject({
 	upstreamCode: z
@@ -706,7 +701,6 @@ const holdAgentSchema = z.strictObject({
 	/** A shared MCP identity (`mcp-*`) that stands for several sessions. */
 	synthetic: z.boolean(),
 });
-/** @public */
 export type SupabaseHoldAgent = z.infer<typeof holdAgentSchema>;
 
 const holdTimes = {
@@ -720,7 +714,6 @@ const holdTimes = {
  * Who keeps a stack running: a lane (with the agent driving it, if any), an
  * agent session's `supabase up`, a synthetic MCP caller held by worktree, or
  * the operator (a pin, or a start from the Supabase tab).
- * @public
  */
 export const supabaseHoldSchema = z
 	.discriminatedUnion('holder', [
@@ -763,9 +756,8 @@ export type SupabaseHold = z.infer<typeof supabaseHoldSchema>;
 
 /**
  * Names one agent hold, for Release. Lane holds end with their lane.
- * @public
  */
-export const supabaseHoldRefSchema = z.discriminatedUnion('holder', [
+const supabaseHoldRefSchema = z.discriminatedUnion('holder', [
 	z.strictObject({
 		holder: z.literal('session'),
 		agentKind: agentKindSchema,
@@ -809,7 +801,6 @@ const stackLaneSchema = z.strictObject({
 	/** Metro started before the stack attached, or its ports moved since. */
 	needsMetroRestart: z.boolean(),
 });
-/** @public */
 export type SupabaseStackLane = z.infer<typeof stackLaneSchema>;
 
 const cwdKeeperSchema = z.strictObject({
@@ -861,7 +852,6 @@ const currentHeadSchema = z.strictObject({
 
 /**
  * Names Metro may carry: upper case, digits and underscores.
- * @public
  */
 export const supabaseAppEnvNameSchema = z
 	.string()
@@ -873,13 +863,11 @@ const appEnvSourceSchema = z.enum([
 	'PUBLISHABLE_KEY',
 	'ANON_KEY',
 ]);
-/** @public */
 export type SupabaseAppEnvSource = z.infer<typeof appEnvSourceSchema>;
 const appEnvEntrySchema = z.strictObject({
 	name: supabaseAppEnvNameSchema,
 	source: appEnvSourceSchema,
 });
-/** @public */
 export type SupabaseAppEnvEntry = z.infer<typeof appEnvEntrySchema>;
 
 export const supabaseStackSummarySchema = z
@@ -994,6 +982,12 @@ export const supabaseStackSummarySchema = z
 			.strictObject({ reenabled: capabilityListSchema })
 			.optional(),
 		lastError: supabaseErrorSchema.optional(),
+		/**
+		 * Needs recreate: what the saved stack can't adopt, as the start that
+		 * set the state listed it. It stays until the state clears, so a later
+		 * failure for another reason replaces lastError but not this.
+		 */
+		recreateChanges: z.array(stackChangeSchema).max(64).optional(),
 		/** Whether main holds each value in memory; the values never come here. */
 		known: z.strictObject({
 			publishableKey: z.boolean(),
@@ -1031,9 +1025,8 @@ export type SupabaseStackSummary = z.infer<typeof supabaseStackSummarySchema>;
 
 /**
  * Live member detail, pushed only while a stack is inspected and visible.
- * @public
  */
-export const supabaseInspectionSchema = z.strictObject({
+const supabaseInspectionSchema = z.strictObject({
 	stackId: supabaseStackIdSchema,
 	/** `stale`: the last good read, kept while status fails or mismatches. */
 	status: z.enum(['live', 'stale', 'unavailable']),
@@ -1063,14 +1056,12 @@ export const supabaseInspectionSchema = z.strictObject({
 	checkedAt: timestampSchema,
 	error: supabaseErrorSchema.optional(),
 });
-/** @public */
 export type SupabaseInspection = z.infer<typeof supabaseInspectionSchema>;
 
 // ---------------------------------------------------------------------------
 // Repositories, requests, jobs, clean up
 
-/** @public */
-export const SUPABASE_REPOSITORY_CHECK_IDS = [
+const SUPABASE_REPOSITORY_CHECK_IDS = [
 	'platform',
 	'project',
 	'stack-flag',
@@ -1105,7 +1096,6 @@ const repositoryCheckSchema = z.strictObject({
 		.optional(),
 });
 
-/** @public */
 export const supabaseRepositorySummarySchema = z.strictObject({
 	id: supabaseRepositoryIdSchema,
 	label: labelSchema,
@@ -1154,9 +1144,8 @@ export type SupabaseRepositorySummary = z.infer<
  * An agent asked for something only the user may approve: destroying a
  * stack, resetting a database others hold, or (P5) a start parked because
  * every slot is in use. Requests expire after 30 minutes.
- * @public
  */
-export const supabaseAgentRequestSchema = z.strictObject({
+const supabaseAgentRequestSchema = z.strictObject({
 	id: supabaseRequestIdSchema,
 	kind: z.enum(['destroy', 'reset', 'start-capacity']),
 	status: z.enum([
@@ -1224,8 +1213,7 @@ export const supabaseAgentRequestSchema = z.strictObject({
 });
 export type SupabaseAgentRequest = z.infer<typeof supabaseAgentRequestSchema>;
 
-/** @public */
-export const SUPABASE_JOB_KINDS = [
+const SUPABASE_JOB_KINDS = [
 	'create',
 	'resume',
 	'stop',
@@ -1242,10 +1230,8 @@ export const SUPABASE_JOB_KINDS = [
 	'studio',
 	'disable',
 ] as const;
-/** @public */
 export type SupabaseJobKind = (typeof SUPABASE_JOB_KINDS)[number];
 
-/** @public */
 export const supabaseJobSchema = z.strictObject({
 	id: supabaseJobIdSchema,
 	kind: z.enum(SUPABASE_JOB_KINDS),
@@ -1317,14 +1303,12 @@ const ACTIVE_JOB_STATUSES: ReadonlySet<SupabaseJob['status']> = new Set([
 
 /**
  * Whether a job is still queued or running.
- * @public
  */
 export function isActiveSupabaseJob(job: Pick<SupabaseJob, 'status'>): boolean {
 	return ACTIVE_JOB_STATUSES.has(job.status);
 }
 
-/** @public */
-export const SUPABASE_PRUNE_GROUPS = [
+const SUPABASE_PRUNE_GROUPS = [
 	'worktree-deleted',
 	'stale-branch',
 	'retention',
@@ -1332,7 +1316,6 @@ export const SUPABASE_PRUNE_GROUPS = [
 	'unreadable',
 ] as const;
 
-/** @public */
 export const supabasePruneSummarySchema = z.strictObject({
 	/** A clean-up selection is valid only for the revision it was made on. */
 	revision: countSchema,
@@ -1367,7 +1350,6 @@ export const supabasePruneSummarySchema = z.strictObject({
 		})
 		.optional(),
 });
-/** @public */
 export type SupabasePruneSummary = z.infer<typeof supabasePruneSummarySchema>;
 
 // ---------------------------------------------------------------------------
@@ -1375,25 +1357,22 @@ export type SupabasePruneSummary = z.infer<typeof supabasePruneSummarySchema>;
 
 /**
  * Names Metro sets itself on every lane; a mapping may not use them.
- * @public
  */
-export const SUPABASE_METRO_RESERVED_ENV_NAMES: readonly string[] =
-	Object.freeze([
-		'NODE_ENV',
-		'RCT_METRO_PORT',
-		'EXPO_NO_DOTENV',
-		'EXPO_NO_INTERACTIVE',
-		'EXPO_NO_DEV_MENU',
-		'CI',
-		'NODE_OPTIONS',
-	]);
+const SUPABASE_METRO_RESERVED_ENV_NAMES: readonly string[] = Object.freeze([
+	'NODE_ENV',
+	'RCT_METRO_PORT',
+	'EXPO_NO_DOTENV',
+	'EXPO_NO_INTERACTIVE',
+	'EXPO_NO_DEV_MENU',
+	'CI',
+	'NODE_OPTIONS',
+]);
 /** Metro refuses lane variables named like credentials (lane-metro.ts). */
 const SECRET_LIKE_ENV_NAME =
 	/(?:SECRET|SERVICE_ROLE|PASSWORD|PASSWD|PRIVATE_KEY|ROOT_KEY|DB_URL|DATABASE_URL)/;
 
 /**
  * The Supabase + Expo preset for app variables.
- * @public
  */
 export const SUPABASE_APP_ENV_PRESET: readonly SupabaseAppEnvEntry[] =
 	Object.freeze([
@@ -1409,7 +1388,6 @@ const laneDefaultSchema = z.strictObject({
 
 /**
  * The policy as the renderer sees it; paths are labels only.
- * @public
  */
 export const supabasePolicySchema = z.strictObject({
 	maxRunning: z.number().int().min(1).max(24),
@@ -1500,7 +1478,6 @@ export const SUPABASE_POLICY_ERRORS = Object.freeze({
 
 /**
  * What `update-policy` may change. Paths change only through `choose-path`.
- * @public
  */
 export const supabasePolicyPatchSchema = z
 	.strictObject({
@@ -1599,16 +1576,6 @@ export const supabasePolicyPatchSchema = z
 	});
 export type SupabasePolicyPatch = z.infer<typeof supabasePolicyPatchSchema>;
 
-/** @public */
-export type SupabasePolicyField =
-	| 'maxRunning'
-	| 'unheldStopDelayMs'
-	| 'retentionDays'
-	| 'exclude'
-	| 'appEnv'
-	| 'laneDefaults'
-	| 'form';
-
 /**
  * Field errors for a policy patch, keyed by field (`appEnv.<index>` for an
  * app variable row), in the Settings copy. Empty when the patch is valid.
@@ -1704,9 +1671,8 @@ export function supabasePolicyTrustChanges(
 
 /**
  * API path prefixes that identify Supabase traffic in captured requests.
- * @public
  */
-export const SUPABASE_API_PATH_PREFIXES: readonly string[] = Object.freeze([
+const SUPABASE_API_PATH_PREFIXES: readonly string[] = Object.freeze([
 	'/rest/v1',
 	'/auth/v1',
 	'/storage/v1',
@@ -1716,25 +1682,22 @@ export const SUPABASE_API_PATH_PREFIXES: readonly string[] = Object.freeze([
 ]);
 /**
  * Host suffixes of hosted projects; the first label is the project ref.
- * @public
  */
-export const SUPABASE_HOSTED_SUFFIXES: readonly string[] = Object.freeze([
+const SUPABASE_HOSTED_SUFFIXES: readonly string[] = Object.freeze([
 	'.supabase.co',
 	'.supabase.in',
 ]);
 /**
  * The Docker-era default API port.
- * @public
  */
-export const SUPABASE_LEGACY_API_PORT = 54_321;
+const SUPABASE_LEGACY_API_PORT = 54_321;
 
 /**
  * What main tells the renderer so it can classify an app's captured traffic
  * without secrets: which loopback API port belongs to which stack, and how
  * hosted and legacy targets look.
- * @public
  */
-export const supabaseTrafficSignatureSchema = z.strictObject({
+const supabaseTrafficSignatureSchema = z.strictObject({
 	apiPorts: z
 		.array(z.strictObject({ port: portSchema, stackId: supabaseStackIdSchema }))
 		.max(MAX_STACKS),
@@ -2220,9 +2183,8 @@ export type SupabaseOperationKind = SupabaseOperation['kind'];
 
 /**
  * The phase each operation kind arrives in; see {@link supabaseOperationPhase}.
- * @public
  */
-export const SUPABASE_OPERATION_PHASES = {
+const SUPABASE_OPERATION_PHASES = {
 	refresh: 1,
 	'read-logs': 1,
 	'read-database': 1,
@@ -2462,8 +2424,7 @@ export function withSupabaseConfirmation(
 // ---------------------------------------------------------------------------
 // Receipts
 
-/** @public */
-export const supabaseLogRecordSchema = z.discriminatedUnion('type', [
+const supabaseLogRecordSchema = z.discriminatedUnion('type', [
 	z.strictObject({
 		type: z.literal('entry'),
 		timestamp: plainText(64),
@@ -2504,7 +2465,6 @@ const logsPayloadSchema = z
 			) <= SUPABASE_MAX_LOG_CHARACTERS,
 		{ message: 'Log lines exceed 64 KiB.' }
 	);
-/** @public */
 export type SupabaseLogsPayload = z.infer<typeof logsPayloadSchema>;
 
 const statText = plainText(128).optional();
@@ -2651,14 +2611,12 @@ export type SupabaseOperationReceipt = z.infer<
 
 /**
  * How long main lets a copied key, psql command or app variables linger.
- * @public
  */
 export const SUPABASE_CLIPBOARD_CLEAR_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Interest
 
-/** @public */
 export const SUPABASE_DETAIL_SECTIONS = [
 	'overview',
 	'services',
@@ -2692,7 +2650,6 @@ export type SupabaseInterest = z.infer<typeof supabaseInterestSchema>;
 
 /**
  * No interest: what the runtime sends when the last consumer goes away.
- * @public
  */
 export const SUPABASE_NO_INTEREST: SupabaseInterest = Object.freeze({
 	view: 'hidden',
@@ -2702,7 +2659,6 @@ export const SUPABASE_NO_INTEREST: SupabaseInterest = Object.freeze({
 // ---------------------------------------------------------------------------
 // Bridge
 
-/** @public */
 export type SupabaseBridge = {
 	getSupabaseState: () => Promise<SupabaseState>;
 	subscribeSupabaseState: (
@@ -2721,8 +2677,7 @@ export type SupabaseBridge = {
 // ---------------------------------------------------------------------------
 // Lanes
 
-/** @public */
-export const LANE_BACKEND_REASONS = [
+const LANE_BACKEND_REASONS = [
 	/** The lane's policy is off, or its environment defaults to off. */
 	'off',
 	/** Local Supabase is turned off. */
@@ -2742,7 +2697,6 @@ export const LANE_BACKEND_REASONS = [
 	'failed',
 ] as const;
 
-/** @public */
 export const LANE_BACKEND_WARNINGS = [
 	'previous-session-on-simulator',
 	'shared-default-keys',
@@ -2849,7 +2803,6 @@ export function laneBackendChip(
 /**
  * A lane worktree's Supabase project, as main reports it on the lane wire
  * (never in lanes.json), for the start form's picker and Backend select.
- * @public
  */
 export const laneWorktreeSupabaseSchema = z.strictObject({
 	/** `none`: no supabase/config.toml between the app and the worktree root. */
@@ -2859,13 +2812,11 @@ export const laneWorktreeSupabaseSchema = z.strictObject({
 	/** A pinned listener port in this worktree's config. */
 	portsPinned: z.boolean().optional(),
 });
-/** @public */
 export type LaneWorktreeSupabase = z.infer<typeof laneWorktreeSupabaseSchema>;
 
 /**
  * The worktree picker suffix: `· Supabase`, `· Supabase (ports pinned)` or
  * `· Supabase (needs opt-in)`; nothing without a project or while off.
- * @public
  */
 export function laneWorktreeSupabaseSuffix(
 	worktree: LaneWorktreeSupabase | undefined,
@@ -2883,7 +2834,6 @@ export function laneWorktreeSupabaseSuffix(
 /**
  * Whether the start form's Backend select may offer Auto or Required for a
  * worktree; Off is always available. The reason is visible text.
- * @public
  */
 export function laneBackendSelectAvailability(
 	worktree: LaneWorktreeSupabase | undefined,
@@ -2925,7 +2875,6 @@ export function laneBackendSelectAvailability(
  * The Backend a lane starts with when the form or the agent names none: the
  * policy's lane default for its environment, else off. Required is only ever
  * a per-start choice.
- * @public
  */
 export function laneDefaultBackend(
 	policy: Pick<SupabasePolicy, 'laneDefaults'>,
@@ -2942,10 +2891,8 @@ export function laneDefaultBackend(
 
 /**
  * `supabase up` waits this long by default before returning a job.
- * @public
  */
 export const SUPABASE_AGENT_DEFAULT_WAIT_MS = 30_000;
-/** @public */
 export const SUPABASE_AGENT_MAX_WAIT_MS = 45_000;
 /** `lane up` waits at most this long past Metro's spawn for a cold backend. */
 export const SUPABASE_LANE_WAIT_MS = 15_000;
@@ -2953,7 +2900,6 @@ export const SUPABASE_LANE_WAIT_MS = 15_000;
 /**
  * The `--operation` values of `rndevtools supabase` and the MCP tool
  * `supabase`, for the agent CLI schema.
- * @public
  */
 export const SUPABASE_AGENT_OPERATIONS = [
 	'up',
@@ -2968,14 +2914,11 @@ export const SUPABASE_AGENT_OPERATIONS = [
 
 /**
  * A worktree path, or a stack id (8-64 hex; a prefix must be unique).
- * @public
  */
-export const supabaseAgentTargetSchema = z.union([
+const supabaseAgentTargetSchema = z.union([
 	z.strictObject({ worktreePath: absolutePathSchema }),
 	z.strictObject({ stackId: z.string().regex(/^[0-9a-f]{8,64}$/) }),
 ]);
-/** @public */
-export type SupabaseAgentTarget = z.infer<typeof supabaseAgentTargetSchema>;
 
 /**
  * What an agent asked for, after the TS agent CLI layer parsed the command.
@@ -3042,9 +2985,8 @@ export type SupabaseAgentOperation = z.infer<
 
 /**
  * `supabase log` reads this many lines by default.
- * @public
  */
-export const SUPABASE_AGENT_DEFAULT_LOG_TAIL = 200;
+const SUPABASE_AGENT_DEFAULT_LOG_TAIL = 200;
 
 /** The flat fields of a parsed `rndevtools supabase` command. */
 export type SupabaseAgentCommandFields = Readonly<{
@@ -3191,7 +3133,6 @@ const agentStackSchema = z.strictObject({
 		.optional(),
 	reasonText: plainText(512).optional(),
 });
-/** @public */
 export type SupabaseAgentStack = z.infer<typeof agentStackSchema>;
 
 /**
@@ -3213,7 +3154,6 @@ export const supabaseAgentEnvSchema = z.strictObject({
 		.regex(/^eyJ[\w-]+\.[\w-]+\.[\w-]*$/)
 		.optional(),
 });
-/** @public */
 export type SupabaseAgentEnv = z.infer<typeof supabaseAgentEnvSchema>;
 
 const agentNextSchema = plainText(MAX_TEXT_LENGTH);
@@ -3303,7 +3243,6 @@ export type SupabaseAgentResult = z.infer<typeof supabaseAgentResultSchema>;
 
 /**
  * Typed agent errors; the recovery names the next call.
- * @public
  */
 export const SUPABASE_AGENT_ERROR_CODES = [
 	'supabase_disabled',
@@ -3366,7 +3305,7 @@ export function supabaseAgentRecovery(
 		case 'not_found':
 			return 'Call supabase with operation ls to see the stacks on this Mac, then retry with a worktree path.';
 		case 'needs_recreate':
-			return 'Ask the user to recreate the stack in RN Devtools › Supabase; that deletes its local database.';
+			return 'If your change caused it, revert that setting and call supabase with operation up again; the stack keeps its data. Otherwise ask the user to recreate the stack in RN Devtools › Supabase; that deletes its local database.';
 		case 'supabase_failed':
 			return 'Retry once. If it keeps failing, read the stack logs with supabase operation log.';
 	}
@@ -3550,7 +3489,6 @@ export function isSupabaseStackRunning(
 
 /**
  * Docker and Podman stacks listen on every interface.
- * @public
  */
 export function isSupabaseStackLanExposed(
 	stack: Pick<SupabaseStackSummary, 'runtime' | 'exposure' | 'flags'>
@@ -3592,14 +3530,12 @@ function activeJobFor(
 // ---------------------------------------------------------------------------
 // Status model A: absolute stack status
 
-/** @public */
 export type SupabaseTone =
 	| 'info'
 	| 'success'
 	| 'warning'
 	| 'danger'
 	| 'default';
-/** @public */
 export type SupabaseStatusIcon =
 	| 'loader-circle'
 	| 'status-dot'
@@ -3614,8 +3550,7 @@ export type SupabaseStatusIcon =
 	| 'hollow-dot'
 	| 'refresh-cw';
 
-/** @public */
-export type SupabaseStatusKey =
+type SupabaseStatusKey =
 	| 'in-flight'
 	| 'queued'
 	| 'lan-exposed'
@@ -3755,7 +3690,9 @@ export function stackStatus(
 				'Needs recreate',
 				'danger',
 				'circle-x',
-				'The saved stack cannot adopt this configuration. Recreate it.'
+				supabaseRevertKeepsStack(stack.recreateChanges)
+					? 'The saved stack cannot adopt this configuration. Revert the change to keep it, or recreate it.'
+					: 'The saved stack cannot adopt this configuration. Recreate it.'
 			);
 		default:
 			break;
@@ -4056,14 +3993,12 @@ export function visibleStackFlags(
 // ---------------------------------------------------------------------------
 // Attention: one ranker for notices, the badge and the Needs attention filter
 
-/** @public */
 export type SupabaseAttentionRank =
 	| 'danger'
 	| 'request'
 	| 'warning'
 	| 'suggestion';
-/** @public */
-export type SupabaseAttentionKind =
+type SupabaseAttentionKind =
 	| 'policy-quarantined'
 	| 'state-unreadable'
 	| 'lan-exposed'
@@ -4078,8 +4013,7 @@ export type SupabaseAttentionKind =
 	| 'stale-branch'
 	| 'prune-suggested';
 
-/** @public */
-export type SupabaseAttentionRecovery =
+type SupabaseAttentionRecovery =
 	| Readonly<{
 			kind: 'show-stacks';
 			label: string;
@@ -4387,9 +4321,20 @@ export function attentionItems(
 				? `${failedKinds.interrupted} ${failedKinds.interrupted === 1 ? 'was' : 'were'} interrupted`
 				: '',
 			failedKinds['needs-recreate'] > 0
-				? `${failedKinds['needs-recreate']} must be recreated`
+				? `${failedKinds['needs-recreate']} can't adopt ${failedKinds['needs-recreate'] === 1 ? 'its' : 'their'} configuration`
 				: '',
 		].filter(Boolean);
+		const revertible = failed.filter(
+			(stack) =>
+				stack.state === 'needs-recreate' &&
+				supabaseRevertKeepsStack(stack.recreateChanges)
+		).length;
+		const recreateAdvice =
+			revertible === failed.length
+				? `: revert the change or recreate ${failed.length === 1 ? 'it' : 'them'}`
+				: revertible === 0
+					? ' and must be recreated'
+					: '';
 		const text =
 			parts.length > 1
 				? `${failed.length} stacks can't start: ${parts.join(', ')}.`
@@ -4397,7 +4342,7 @@ export function attentionItems(
 					? `${plural(failed.length, 'stack', 'stacks')} failed to start and left ${failed.length === 1 ? 'an empty stack' : 'empty stacks'}.`
 					: failedKinds.interrupted > 0
 						? `${plural(failed.length, 'stack was', 'stacks were')} interrupted during ${failed.length === 1 ? 'its' : 'their'} first start.`
-						: `${plural(failed.length, 'stack', 'stacks')} must be recreated before ${failed.length === 1 ? 'it' : 'they'} can start.`;
+						: `${plural(failed.length, 'stack', 'stacks')} can't adopt ${failed.length === 1 ? 'its' : 'their'} configuration${recreateAdvice}.`;
 		items.push({
 			id: 'start-failed',
 			rank: 'danger',
@@ -4842,9 +4787,8 @@ export type SupabaseStackAction =
 
 /**
  * The precedence buckets, in the order they are checked.
- * @public
  */
-export type SupabaseAvailabilityCheck =
+type SupabaseAvailabilityCheck =
 	| 'bridge'
 	| 'off'
 	| 'platform'
@@ -4886,6 +4830,7 @@ export const SUPABASE_REASONS = Object.freeze({
 	cancelling: 'Cancelling… the CLI is cleaning up (up to 45 s).',
 	turningOn: 'Turning on…',
 	turningOffWaiting: 'Turning off… waiting for running starts to finish.',
+	stillTurningOff: 'Local Supabase is still turning off.',
 	notManagedByDesktop: "RN Devtools didn't start this stack. Adopt it first.",
 	cliUnverified:
 		"This worktree's Supabase CLI isn't verified for RN Devtools. Stop the stack, then start it from a terminal.",
@@ -5287,9 +5232,14 @@ const checkCapacity: Check = (_stack, action, context) => {
 };
 
 function recreateReason(stack: SupabaseStackSummary): string | undefined {
-	const change = stack.lastError?.details.stackChanges?.[0];
+	const changes = stack.recreateChanges ?? [];
+	// Name the change that forces the recreate when one does.
+	const change = changes.find((candidate) => !candidate.editable) ?? changes[0];
 	if (!change?.key) return undefined;
-	return `This stack must be recreated: ${change.key} changed from ${change.saved ?? 'its saved value'} to ${change.requested ?? 'a new value'}.`;
+	const changed = `${change.key} changed from ${change.saved ?? 'its saved value'} to ${change.requested ?? 'a new value'}`;
+	return supabaseRevertKeepsStack(changes)
+		? `${changed}. Revert it to keep this stack, or recreate it.`
+		: `This stack must be recreated: ${changed}.`;
 }
 
 function stateReason(
@@ -5562,6 +5512,11 @@ export function supabaseGlobalActionAvailability(
 			if (context.pending === true) {
 				return refuse('in-flight', SUPABASE_REASONS.turningOn);
 			}
+			// A turn-off that stops managed stacks runs until its last stop:
+			// on again before that, its stops would run with the feature on.
+			if (feature.disabling !== undefined) {
+				return refuse('in-flight', SUPABASE_REASONS.stillTurningOff);
+			}
 			return feature.enabled
 				? refuse('state', 'Local Supabase is already on.')
 				: { allowed: true };
@@ -5689,9 +5644,18 @@ export function supabaseRequestActionAvailability(
 				`The worktree moved to ${request.branchMovedTo} since the request. Dismiss it.`
 			);
 		}
-		return context.stopStackId === undefined
-			? refuse('state', 'Choose a stack to stop.')
-			: { allowed: true };
+		if (context.stopStackId === undefined) {
+			return refuse('state', 'Choose a stack to stop.');
+		}
+		// Only a stack the request offers: one RN Devtools manages, running.
+		return request.capacity?.candidates.some(
+			(candidate) => candidate.stackId === context.stopStackId
+		)
+			? { allowed: true }
+			: refuse(
+					'state',
+					"That stack isn't one to stop to make room. Choose another."
+				);
 	}
 	if (!stack) {
 		return refuse('state', 'The stack is no longer listed. Deny the request.');
@@ -5937,20 +5901,47 @@ export function checkSupabaseOperation(
 					),
 				};
 			}
+			const stopStackId =
+				operation.kind === 'request.approve'
+					? operation.stopStackId
+					: undefined;
+			const refusal = refused(
+				supabaseRequestActionAvailability(
+					request,
+					operation.kind === 'request.approve' ? 'approve' : 'deny',
+					{
+						bridgeAvailable: context.bridgeAvailable,
+						state,
+						...(stopStackId === undefined ? {} : { stopStackId }),
+					}
+				)
+			);
+			if (refusal || request.kind !== 'start-capacity' || !stopStackId) {
+				return refusal ?? { allowed: true };
+			}
+			// Making room stops the chosen stack, under a plain stop's rules.
+			const stop = state.stacks.find(
+				(candidate) => candidate.id === stopStackId
+			);
+			if (!stop) {
+				return {
+					allowed: false,
+					error: supabaseDesktopError(
+						'unknown_target',
+						'That stack is not in a fresh list.'
+					),
+				};
+			}
 			return (
 				refused(
-					supabaseRequestActionAvailability(
-						request,
-						operation.kind === 'request.approve' ? 'approve' : 'deny',
-						{
-							bridgeAvailable: context.bridgeAvailable,
-							state,
-							...(operation.kind === 'request.approve' &&
-							operation.stopStackId !== undefined
-								? { stopStackId: operation.stopStackId }
-								: {}),
-						}
-					)
+					supabaseActionAvailability(stop, 'stop', {
+						bridgeAvailable: context.bridgeAvailable,
+						state,
+						...(context.pending === undefined
+							? {}
+							: { pending: context.pending }),
+						...(context.now === undefined ? {} : { now: context.now }),
+					})
 				) ?? { allowed: true }
 			);
 		}
@@ -6173,7 +6164,6 @@ export function supabaseInlineConfirmation(
 
 /**
  * Labels of the live agents holding a stack, through a lane or a hold.
- * @public
  */
 export function supabaseLiveAgentLabels(
 	stack: Pick<SupabaseStackSummary, 'holds'>

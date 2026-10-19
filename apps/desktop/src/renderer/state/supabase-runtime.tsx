@@ -18,14 +18,10 @@ import {
 	type SupabaseDetailSection,
 	type SupabaseOperationInput,
 	type SupabaseRepositoryFilter,
-	type SupabaseSessionBackend,
 	type SupabaseStackFilter,
 	type SupabaseView,
-	supabaseBackendsForSession,
 	supabaseClockCadence,
-	supabaseConfirmationKind,
 	supabaseRequesterName,
-	supabaseStackForLane,
 } from '@/simulator/supabase-model';
 import { formatHoldDuration } from '../../shared/device-hold';
 import {
@@ -45,7 +41,6 @@ import {
 	type SupabaseOperation,
 	type SupabaseOperationReceipt,
 	type SupabaseSidebarBadge,
-	type SupabaseStackSummary,
 	type SupabaseState,
 	sidebarBadge,
 	supabaseAgentLabel,
@@ -135,9 +130,19 @@ export function supabaseStackPendingKey(stackId: string): string {
 /**
  * What an operation keeps busy until main answers: a stack, the bulk key, or
  * a read of its own. Reads use their own keys, so reading logs never blocks
- * Stop; a second press of the same control while it runs is refused.
+ * Stop; a second press of the same control while it runs is refused. A
+ * background run, such as a log auto-refresh tick, holds keys of its own, so
+ * it never refuses the operator's read of the same stack.
  */
 export function supabasePendingKeys(
+	operation: SupabaseOperationInput,
+	{ background = false }: Readonly<{ background?: boolean }> = {}
+): readonly string[] {
+	const keys = operationPendingKeys(operation);
+	return background ? keys.map((key) => `background:${key}`) : keys;
+}
+
+function operationPendingKeys(
 	operation: SupabaseOperationInput
 ): readonly string[] {
 	switch (operation.kind) {
@@ -260,7 +265,6 @@ export async function confirmThenRunSupabaseOperation(
 
 /**
  * What a control may say instead of the defaults.
- * @public
  */
 export type SupabaseActionMessages = Readonly<{
 	pending?: string;
@@ -269,11 +273,15 @@ export type SupabaseActionMessages = Readonly<{
 	failure?: string;
 	/** Leave the shared notice alone; the control shows its own result. */
 	quiet?: boolean;
+	/**
+	 * A run the panel repeats on its own, such as log auto-refresh: it never
+	 * refuses, or is refused by, the operator's run of the same operation.
+	 */
+	background?: boolean;
 }>;
 
 /**
  * The default notice copy for an operation, from the UI spec's controls.
- * @public
  */
 export type SupabaseActionCopy = Readonly<{
 	pending?: string;
@@ -906,8 +914,7 @@ const INTEREST_DEBOUNCE_MS = 60;
 // ---------------------------------------------------------------------------
 // Navigation
 
-/** @public */
-export type SupabaseFocusTarget =
+type SupabaseFocusTarget =
 	| 'stack'
 	| 'repository'
 	| 'requests'
@@ -916,7 +923,6 @@ export type SupabaseFocusTarget =
 
 /**
  * A heading to focus once its view renders; deep links set one.
- * @public
  */
 export type SupabaseFocusRequest = Readonly<{
 	target: SupabaseFocusTarget;
@@ -950,7 +956,6 @@ export type SupabaseNavigation = Readonly<{
 
 /**
  * Where another panel sends the operator: a stack, a repository, a view.
- * @public
  */
 export type SupabaseOpenIntent = Readonly<{
 	stackId?: string;
@@ -960,7 +965,6 @@ export type SupabaseOpenIntent = Readonly<{
 	section?: SupabaseDetailSection | 'clean-up';
 }>;
 
-/** @public */
 export type SupabaseNavigationAction =
 	| Readonly<{ type: 'open'; intent: SupabaseOpenIntent }>
 	| Readonly<{ type: 'set-view'; view: SupabaseView }>
@@ -1434,7 +1438,9 @@ export function SupabaseRuntimeProvider({ children }: { children: ReactNode }) {
 					)
 				);
 			}
-			const keys = supabasePendingKeys(input);
+			const keys = supabasePendingKeys(input, {
+				background: messages.background === true,
+			});
 			if (keys.some((key) => pendingRef.current.has(key))) {
 				return failedReceipt(
 					operation,
@@ -1725,62 +1731,4 @@ export function useSupabaseNow(
 		return () => clearInterval(timer);
 	}, [active, cadence]);
 	return now;
-}
-
-/**
- * How a control confirms against the live state: the native dialog (label
- * it with an ellipsis), an inline ConfirmAction naming live agents, or none.
- * @public
- */
-export function useSupabaseConfirmation(
-	input: SupabaseOperationInput | null
-): ReturnType<typeof supabaseConfirmationKind> {
-	const { state } = useSupabaseState();
-	const key = input === null ? '' : JSON.stringify(input);
-	return useMemo<ReturnType<typeof supabaseConfirmationKind>>(
-		() =>
-			key === ''
-				? { kind: 'none' }
-				: supabaseConfirmationKind(
-						JSON.parse(key) as SupabaseOperationInput,
-						state
-					),
-		[key, state]
-	);
-}
-
-/**
- * The stack a lane is attached to, for the Lanes and Fleet chips.
- * @public
- */
-export function useSupabaseStackForLane(
-	laneId: string | undefined
-): SupabaseStackSummary | undefined {
-	const { state } = useSupabaseState();
-	return useMemo(
-		() =>
-			laneId === undefined ? undefined : supabaseStackForLane(state, laneId),
-		[laneId, state]
-	);
-}
-
-/**
- * The stacks an agent session holds and how, for the Agents view.
- * @public
- */
-export function useSupabaseBackendsForSession(
-	agent:
-		| Readonly<{ kind: 'claude' | 'codex' | 'other'; sessionId: string }>
-		| undefined
-): readonly SupabaseSessionBackend[] {
-	const { state } = useSupabaseState();
-	const kind = agent?.kind;
-	const sessionId = agent?.sessionId;
-	return useMemo(
-		() =>
-			kind === undefined || sessionId === undefined
-				? []
-				: supabaseBackendsForSession(state, { kind, sessionId }),
-		[kind, sessionId, state]
-	);
 }

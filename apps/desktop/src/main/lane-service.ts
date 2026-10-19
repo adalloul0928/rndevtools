@@ -4,7 +4,11 @@ import {
 	diagnosticErrorText,
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
-import { type DeviceHold, freeDevices } from '../shared/device-hold';
+import {
+	type DeviceAccessDecision,
+	type DeviceHold,
+	freeDevices,
+} from '../shared/device-hold';
 import {
 	allocateLanePort,
 	DEFAULT_LANE_ENVIRONMENTS,
@@ -28,6 +32,7 @@ import {
 	laneOperationReceiptSchema,
 	laneOperationSchema,
 	laneStateSchema,
+	MAX_DEVICE_REQUESTS,
 } from '../shared/lane-protocol';
 import type {
 	SimulatorAction,
@@ -54,6 +59,7 @@ import {
 	laneEnvProblem,
 	type MetroSupervisorPort,
 	metroSupervisor,
+	NotLaneMetroError,
 } from './lane-metro';
 import type { LaneStore } from './lane-store';
 import { type WorktreeInspectorPort, worktreeInspector } from './lane-worktree';
@@ -133,6 +139,15 @@ export type LaneBackendPort = {
 	/** The worktree's Supabase project for the start form, when known. */
 	describeWorktree?: (worktreePath: string) => LaneWorktreeSupabase | undefined;
 };
+
+/**
+ * Whether `requester` (an agent, or the operator when undefined) may drive
+ * the Simulator: the agent service's answer, the one the router asks.
+ */
+export type LaneDeviceAccessPort = (
+	simulatorUdid: string,
+	requester: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined
+) => DeviceAccessDecision;
 
 type LaneListener = (state: LaneState) => void;
 
@@ -258,6 +273,11 @@ function envFingerprint(env: BackendEnv | undefined): string {
 	);
 }
 
+/** A request the user settled, which the agent that made it may still read. */
+function isSettledRequest(request: LaneDeviceRequest): boolean {
+	return request.status === 'fulfilled' || request.status === 'dismissed';
+}
+
 function isPhone(device: SimulatorDevice): boolean {
 	return /iphone/i.test(device.deviceTypeIdentifier ?? device.name);
 }
@@ -339,6 +359,7 @@ export class LaneService {
 	readonly #slimming: LaneSlimmingPort | undefined;
 	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort | undefined;
 	readonly #holds: (() => ReadonlyMap<string, DeviceHold>) | undefined;
+	readonly #deviceAccess: LaneDeviceAccessPort | undefined;
 	readonly #metro: MetroSupervisorPort;
 	readonly #worktrees: WorktreeInspectorPort;
 	readonly #environments: readonly LaneEnvironment[];
@@ -385,6 +406,7 @@ export class LaneService {
 		resolveLaneEnv,
 		backends,
 		holds,
+		deviceAccess,
 		now = Date.now,
 	}: {
 		store: LaneStore;
@@ -418,6 +440,13 @@ export class LaneService {
 		 * period, so devices return to the pool without anyone's cooperation.
 		 */
 		holds?: () => ReadonlyMap<string, DeviceHold>;
+		/**
+		 * Who may drive a Simulator, from the agent service. When set, a lane
+		 * up resumes the app's existing lane only for a requester its holder
+		 * lets in, so one session's lane up never restarts another session's
+		 * Metro or relaunches its dev client.
+		 */
+		deviceAccess?: LaneDeviceAccessPort;
 		now?: () => number;
 	}) {
 		this.#store = store;
@@ -431,6 +460,7 @@ export class LaneService {
 		this.#resolveLaneEnv = resolveLaneEnv;
 		this.#backends = backends;
 		this.#holds = holds;
+		this.#deviceAccess = deviceAccess;
 		this.#now = now;
 		this.#updatedAt = now();
 	}
@@ -516,6 +546,11 @@ export class LaneService {
 		);
 	}
 
+	/**
+	 * Lists the tracked repositories' worktrees again. Agents poll this, so
+	 * each dirty flag may be reused for a short while; the operator's refresh
+	 * (`lane.refresh`) asks git again.
+	 */
 	refresh(): Promise<LaneState> {
 		if (!this.#refreshPromise) {
 			this.#refreshPromise = this.#refreshWorktrees().finally(() => {
@@ -596,7 +631,7 @@ export class LaneService {
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
-						state: await this.refresh(),
+						state: await this.#refreshWorktrees({ fresh: true }),
 					});
 				}
 				case 'lane.remove-repository': {
@@ -749,6 +784,12 @@ export class LaneService {
 							input.simulatorUdid.toUpperCase())
 			);
 		if (existing) {
+			// The router checks the named Simulator, or the device of the app's
+			// existing lane, before anything starts. That lane may have been
+			// created since by a start queued ahead of this one, possibly on
+			// another session's device, so the check is made here too, in turn.
+			const access = this.#deviceAccess?.(existing.simulatorUdid, input.agent);
+			if (access && !access.allowed) throw new Error(access.reason);
 			const resumed = await this.#resumeLane(
 				existing,
 				input,
@@ -1028,6 +1069,9 @@ export class LaneService {
 	/**
 	 * Records a start that is waiting on a Simulator. One request per app
 	 * directory: a retry replaces its predecessor instead of stacking cards.
+	 * Lane state lists at most MAX_DEVICE_REQUESTS, so a new request takes the
+	 * place of the oldest settled one, and with every listed request still
+	 * open the start is refused instead of parked.
 	 */
 	#parkDeviceRequest(
 		input: LaneStartInput,
@@ -1046,6 +1090,11 @@ export class LaneService {
 			) {
 				this.#deviceRequests.delete(id);
 			}
+		}
+		if (!this.#makeDeviceRequestRoom()) {
+			throw new Error(
+				`${MAX_DEVICE_REQUESTS} lane starts are already waiting on the user for a Simulator, so this one was not added. ${resolved.message} Ask the user to settle or dismiss the waiting requests in RN Devtools, then run lane up again.`
+			);
 		}
 		const now = this.#now();
 		const request: LaneDeviceRequest = {
@@ -1069,6 +1118,21 @@ export class LaneService {
 		this.#deviceRequests.set(request.id, request);
 		this.#touch();
 		return request;
+	}
+
+	/**
+	 * Drops the oldest settled device requests until one more fits; false
+	 * when every listed request is still waiting or starting.
+	 */
+	#makeDeviceRequestRoom(): boolean {
+		while (this.#deviceRequests.size >= MAX_DEVICE_REQUESTS) {
+			const oldest = [...this.#deviceRequests.values()]
+				.filter(isSettledRequest)
+				.sort((left, right) => left.updatedAt - right.updatedAt)[0];
+			if (!oldest) return false;
+			this.#deviceRequests.delete(oldest.id);
+		}
+		return true;
 	}
 
 	#updateDeviceRequest(
@@ -1359,12 +1423,19 @@ export class LaneService {
 		agent: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined,
 		signal: AbortSignal
 	): Promise<Lane> {
-		let lane = this.#requireLane(laneId);
+		const lane = this.#requireLane(laneId);
 		const healthy = await this.#waitForMetro(lane, signal);
 		if (!healthy) {
-			lane = { ...lane, metro: this.#metroStatus(lane) };
-			await this.#store.upsert(lane);
-			this.#touch();
+			// The wait awaited; write onto the lane as it is now, and not at all
+			// if it was stopped or got a new Metro meanwhile.
+			const current = this.#store.get(laneId);
+			if (current && current.metroPid === lane.metroPid) {
+				await this.#store.upsert({
+					...current,
+					metro: this.#metroStatus(current),
+				});
+				this.#touch();
+			}
 			throw new Error(
 				`Metro on port ${lane.port} did not become ready within ${LANE_METRO_HEALTH_TIMEOUT_MS / 1_000}s. Read the lane log for the bundler error.`
 			);
@@ -1393,36 +1464,61 @@ export class LaneService {
 			},
 			signal
 		);
+		// The checks and the open awaited, and a stop or a Metro restart may
+		// have run meanwhile: write onto the lane as it is now. A lane stopped
+		// mid-launch stays stopped, and a Metro that replaced the one that was
+		// checked keeps its PID and its own status.
+		const current = this.#store.get(laneId);
+		if (!current) {
+			throw new Error(
+				`Lane ${laneId} was stopped while its dev client opened.`
+			);
+		}
 		// A launch never moves the hold. The lane's agent stays its holder for
 		// the lane's life: its own launch refreshes when it was last seen, and a
 		// launch by anyone else (another session, or an agent on an operator's
 		// lane) leaves the holder as it was. Refusing non-holders is the
 		// router's job; this keeps ownership intact whoever gets through.
 		const holder =
-			lane.agent &&
+			current.agent &&
 			agent &&
-			lane.agent.kind === agent.kind &&
-			lane.agent.sessionId === agent.sessionId
+			current.agent.kind === agent.kind &&
+			current.agent.sessionId === agent.sessionId
 				? this.#agentWithTimestamp(agent)
-				: lane.agent;
-		lane = {
-			...lane,
-			metro: 'ready',
+				: current.agent;
+		const launched: Lane = {
+			...current,
+			...(current.metroPid === lane.metroPid
+				? { metro: 'ready' as const }
+				: {}),
 			lastLaunchedAt: this.#now(),
 			...(holder ? { agent: holder } : {}),
 		};
 		// Whoever launched, a launch held back for the backend has happened.
 		const record = this.#backendRecords.get(laneId);
 		if (record) record.deferredLaunch = false;
-		await this.#store.upsert(lane);
+		await this.#store.upsert(launched);
 		this.#touch();
-		return lane;
+		return launched;
 	}
 
 	async stopLane(laneId: string): Promise<void> {
 		const lane = this.#requireLane(laneId);
 		if (lane.metroPid !== undefined) {
-			await this.#metro.stop(lane.metroPid, lane.port);
+			try {
+				await this.#metro.stop(
+					lane.metroPid,
+					lane.port,
+					laneAppDirectory(lane)
+				);
+			} catch (error) {
+				// A PID that now names some other process proves the lane's own
+				// Metro is gone, which is all a stop wants. A PID whose owner could
+				// not be checked keeps the lane, as does an Expo on the lane's port
+				// serving from elsewhere: it may be the lane's own Metro after its
+				// worktree moved, and dropping the lane would orphan it.
+				if (!(error instanceof NotLaneMetroError)) throw error;
+			}
 		}
 		await this.#store.remove(laneId);
 		// The backend lets go of the lane without anything waiting for a stop,
@@ -1568,9 +1664,10 @@ export class LaneService {
 		const holds = this.#holds?.();
 		const now = this.#now();
 		for (const [id, request] of this.#deviceRequests) {
-			const settled =
-				request.status === 'fulfilled' || request.status === 'dismissed';
-			if (settled && now - request.updatedAt >= DEVICE_REQUEST_TTL_MS) {
+			if (
+				isSettledRequest(request) &&
+				now - request.updatedAt >= DEVICE_REQUEST_TTL_MS
+			) {
 				this.#deviceRequests.delete(id);
 				changed = true;
 			}
@@ -1631,7 +1728,11 @@ export class LaneService {
 		}
 	}
 
-	async #refreshWorktrees(): Promise<LaneState> {
+	async #refreshWorktrees({
+		fresh = false,
+	}: {
+		fresh?: boolean;
+	} = {}): Promise<LaneState> {
 		const roots = new Set(this.#store.repositories());
 		for (const lane of this.#store.lanes()) {
 			try {
@@ -1644,7 +1745,9 @@ export class LaneService {
 		const errors: string[] = [];
 		for (const root of roots) {
 			try {
-				for (const entry of await this.#worktrees.listWorktrees(root)) {
+				for (const entry of await this.#worktrees.listWorktrees(root, {
+					fresh,
+				})) {
 					worktrees.push({
 						path: entry.path,
 						branch: entry.branch,
@@ -1743,7 +1846,7 @@ export class LaneService {
 	): Promise<Lane> {
 		const pid = lane.metroPid;
 		if (pid !== undefined && this.#metro.isProcessRunning(pid)) {
-			await this.#metro.stop(pid, lane.port);
+			await this.#metro.stop(pid, lane.port, laneAppDirectory(lane));
 			await this.#waitForMetroExit(pid, lane.port);
 		}
 		const current = this.#store.get(lane.id);
@@ -1757,7 +1860,9 @@ export class LaneService {
 		// serve, so it goes too.
 		const latest = this.#store.get(lane.id);
 		if (!latest || latest.metroPid !== pid) {
-			await this.#metro.stop(metroPid, current.port).catch(() => undefined);
+			await this.#metro
+				.stop(metroPid, current.port, laneAppDirectory(current))
+				.catch(() => undefined);
 			throw new Error(`Lane ${lane.id} stopped while its Metro restarted.`);
 		}
 		const next: Lane = {
@@ -2193,7 +2298,7 @@ export class LaneService {
 		const pid = lane.metroPid;
 		if (pid === undefined || !this.#metro.isProcessRunning(pid)) return;
 		try {
-			await this.#metro.stop(pid, lane.port);
+			await this.#metro.stop(pid, lane.port, laneAppDirectory(lane));
 		} catch (error) {
 			record.note = backendReason(
 				`The lane requires its local backend, but its Metro could not be stopped: ${safeError(error)}${why}`

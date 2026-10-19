@@ -119,7 +119,7 @@ describe('slimming persistence', () => {
 		await rm(directory, { recursive: true });
 		await writeFile(directory, 'blocks recreation');
 
-		await expect(store.acknowledge(key, 42)).rejects.toThrow();
+		await expect(store.acknowledgeAll([key], 42)).rejects.toThrow();
 		expect(store.isAcknowledged(key)).toBe(false);
 	});
 });

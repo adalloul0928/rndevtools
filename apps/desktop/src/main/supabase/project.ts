@@ -80,8 +80,7 @@ const MAX_MAPPED_NAMES = 32;
 const MAX_FINDINGS = 256;
 const MAX_PROJECT_ID_LENGTH = 256;
 
-/** @public */
-export type StackFlag =
+type StackFlag =
 	| { optedIn: true; line: number }
 	| {
 			optedIn: false;
@@ -97,8 +96,6 @@ export type StackFlag =
 
 /**
  * A line that pins a listener port; delete it to get automatic ports.
- *
- * @public
  */
 export type PinnedListener = {
 	source: 'config' | 'dotenv';
@@ -111,23 +108,19 @@ export type PinnedListener = {
 
 /**
  * An app dotenv line that would override a mapped Metro variable.
- *
- * @public
  */
-export type ShadowedAppVariable = { name: string; file: string; line: number };
+type ShadowedAppVariable = { name: string; file: string; line: number };
 
 type StaticFileIssue = {
 	file: string;
 	issue: 'too-large' | 'not-a-file' | 'unreadable';
 };
 
-/** @public */
-export type SupabaseRunnerHint = {
+type SupabaseRunnerHint = {
 	command: (typeof LOCKFILE_RUNNERS)[number][1];
 	lockfile: string;
 };
 
-/** @public */
 export type SupabaseProjectDetection =
 	| {
 			status: 'none';

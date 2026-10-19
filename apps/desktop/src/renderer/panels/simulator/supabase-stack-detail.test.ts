@@ -4,13 +4,18 @@ import {
 	SUPABASE_DEMO_IDS,
 	SUPABASE_DEMO_NOW,
 } from '../../../shared/supabase-demo-data';
-import type {
-	SupabaseAvailability,
-	SupabaseStackSummary,
-	SupabaseState,
+import {
+	type SupabaseAvailability,
+	type SupabaseLogRecord,
+	type SupabaseLogsPayload,
+	type SupabaseStackSummary,
+	type SupabaseState,
+	supabaseDesktopError,
 } from '../../../shared/supabase-protocol';
 import {
+	type SupabaseStackReads,
 	supabaseActionReasons,
+	supabaseLogsAfterRefresh,
 	supabaseNoticeControls,
 	supabaseStudioControls,
 } from './supabase-stack-detail';
@@ -132,5 +137,70 @@ describe('supabaseStudioControls', () => {
 			allowed: false,
 			reason: "RN Devtools didn't start this stack. Adopt it first.",
 		});
+	});
+});
+
+describe('supabaseLogsAfterRefresh', () => {
+	const line = (timestamp: string, service: string): SupabaseLogRecord => ({
+		type: 'entry',
+		timestamp,
+		source: 'live',
+		service,
+		instanceId: 'container-1',
+		stream: 'stdout',
+		line: `${service} line`,
+	});
+	const payload = (...records: SupabaseLogRecord[]): SupabaseLogsPayload => ({
+		records,
+		truncated: false,
+		bytes: records.length * 9,
+		readAt: SUPABASE_DEMO_NOW,
+	});
+	const started = {
+		status: 'ready',
+		payload: payload(line('2026-10-17T14:02:11.000Z', 'rest')),
+		window: 'tail',
+		service: 'all',
+	} as const;
+	const tick = payload(line('2026-10-17T14:02:16.000Z', 'storage'));
+
+	it('appends the tick to the read it started from', () => {
+		const reads: SupabaseStackReads = { logs: started };
+		expect(
+			supabaseLogsAfterRefresh(reads, started, tick).logs?.payload?.records.map(
+				(record) => record.service
+			)
+		).toEqual(['rest', 'storage']);
+	});
+
+	it('drops the tick once the operator picked another service or window', () => {
+		// readLogs marks the new filter as reading before main answers.
+		const switching: SupabaseStackReads = {
+			logs: { ...started, status: 'reading', service: 'auth' },
+		};
+		expect(supabaseLogsAfterRefresh(switching, started, tick)).toBe(switching);
+		const wider: SupabaseStackReads = {
+			logs: { ...started, status: 'reading', window: '1h' },
+		};
+		expect(supabaseLogsAfterRefresh(wider, started, tick)).toBe(wider);
+	});
+
+	it('leaves a newer manual read and a failed one alone', () => {
+		const fresh: SupabaseStackReads = {
+			logs: {
+				...started,
+				service: 'auth',
+				payload: payload(line('2026-10-17T14:02:15.000Z', 'auth')),
+			},
+		};
+		expect(supabaseLogsAfterRefresh(fresh, started, tick)).toBe(fresh);
+		const failed: SupabaseStackReads = {
+			logs: {
+				...started,
+				status: 'error',
+				error: supabaseDesktopError('internal', 'The read did not complete.'),
+			},
+		};
+		expect(supabaseLogsAfterRefresh(failed, started, tick)).toBe(failed);
 	});
 });

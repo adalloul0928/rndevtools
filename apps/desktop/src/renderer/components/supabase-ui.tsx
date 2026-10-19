@@ -123,7 +123,6 @@ export function StackStatePill({ status }: { status: SupabaseStackStatus }) {
  * The lane-relative backend chip for Lanes, Fleet and Agents: `db :21734`
  * when the lane has its database, amber without one, red for a refused LAN
  * stack. Hidden while the feature is off.
- * @public
  */
 export function SupabaseChip({
 	summary,
@@ -145,7 +144,6 @@ export function SupabaseChip({
  * Who holds a stack and whether they are still around, worded like
  * Simulator holds: `Claude 9b1e2c00 · live`, `Codex · by worktree`,
  * `You · lane :8102`, `gone · stops in 7 min`. Only agent glyphs carry hue.
- * @public
  */
 export function HolderBadge({
 	hold,
@@ -221,7 +219,6 @@ const CHAIN_ICONS: Readonly<Record<SupabaseChainLink['kind'], IconComponent>> =
  * The "Who holds this" chain on a Timeline: Agent › Lane › Simulator ›
  * Worktree › Stack. Each link opens its target through `onOpen`, with an
  * accessible name that says where it goes.
- * @public
  */
 export function HolderChain({
 	links,
@@ -275,7 +272,6 @@ export function HolderChain({
 
 /**
  * One service in the CLI's own words; sleeping shows a static moon.
- * @public
  */
 export function ServiceRow({
 	service,
@@ -337,7 +333,6 @@ const STEP_WORDS: Readonly<Record<SupabaseStepView['state'], string>> = {
  * A job's steps on a Timeline. The current step carries aria-current="step",
  * a failed one the danger status, and every step a word as well as its
  * marker. Only step changes are announced, politely.
- * @public
  */
 export function StepList({
 	steps,
@@ -405,7 +400,6 @@ function highlighted(
  * Main's redacted log lines in one bounded, focusable pre. Markers read
  * like `--- launch 2 ---`, filter matches use mark, and Copy shown copies
  * exactly the visible redacted text.
- * @public
  */
 export function LogView({
 	lines,
@@ -463,7 +457,6 @@ type CopyResult = Readonly<{ ok: boolean; clearsAt?: number }>;
  * Asks main to write a value to the clipboard (the key, a psql command, app
  * variables). The value never reaches this window; the receipt only says
  * whether it was copied and when main clears it again.
- * @public
  */
 export function MainCopyButton({
 	label,
@@ -540,7 +533,6 @@ export function MainCopyButton({
 
 /**
  * The tab's select: a NativeSelect with typed values and a visible-reason hook.
- * @public
  */
 export function SupabaseSelect<T extends string>({
 	label,
@@ -606,7 +598,6 @@ const NOTICE_ICONS = {
  * Danger reads as an alert, everything else as status; it is never collapsed
  * into a popover the way an info PanelNotice is. `inset` draws it as a box
  * inside the detail pane instead of a full-width band.
- * @public
  */
 export function SupabaseNotice({
 	tone,
@@ -660,7 +651,6 @@ type InlineCopy = Readonly<{
  * inline-confirmed one asks with ConfirmAction first, which is never shown
  * in front of a native dialog; anything else runs at once (main shows its
  * own dialog when it guards the operation, so those labels end in `…`).
- * @public
  */
 export function SupabaseControlButton({
 	control,

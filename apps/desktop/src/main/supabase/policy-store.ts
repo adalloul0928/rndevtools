@@ -36,7 +36,6 @@ import {
 
 /**
  * What one bounded read of a store file found.
- * @public
  */
 export type SupabaseStoreRead =
 	| Readonly<{ status: 'missing' }>
@@ -208,7 +207,6 @@ export async function quarantineSupabaseStoreFile(
 
 /**
  * What loading one store file produced.
- * @public
  */
 export type SupabaseStoreLoad<T> =
 	| Readonly<{ status: 'missing' }>
@@ -344,9 +342,8 @@ type PolicyFile = z.infer<typeof policyFileSchema>;
 
 /**
  * Main-only absolute paths; the renderer sees labels.
- * @public
  */
-export type SupabasePolicyPaths = Readonly<{
+type SupabasePolicyPaths = Readonly<{
 	supabaseHome?: string;
 	sslCertFile?: string;
 }>;
@@ -363,7 +360,6 @@ export type SupabasePolicySnapshot = Readonly<{
 	paths: SupabasePolicyPaths;
 }>;
 
-/** @public */
 export type SupabasePolicyUpdate =
 	| Readonly<{ ok: true; snapshot: SupabasePolicySnapshot }>
 	| Readonly<{ ok: false; errors: Readonly<Record<string, string>> }>;

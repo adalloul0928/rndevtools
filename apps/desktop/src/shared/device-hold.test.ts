@@ -259,12 +259,12 @@ describe('resolveHolderLiveness', () => {
 		expect(isPathInside('/Users/dev', '/Users/dev/app')).toBe(false);
 	});
 
-	it('judges synthetic lane holders against the lane app directory', () => {
+	it('judges synthetic lane holders against the lane checkout', () => {
 		const holds = resolveDeviceHolds({
 			...inputs,
 			lanes: [
-				{ ...lane(A, synthetic), appDirectory: app },
-				{ ...lane(B, synthetic), appDirectory: '/Users/dev/app-onboarding' },
+				{ ...lane(A, synthetic), worktreePath: app },
+				{ ...lane(B, synthetic), worktreePath: '/Users/dev/app-onboarding' },
 			],
 			claims: [{ simulatorUdid: C, ...synthetic }],
 		});
@@ -272,6 +272,32 @@ describe('resolveHolderLiveness', () => {
 		expect(holds.get(B)).toMatchObject({ holderLive: false });
 		// A claim has no directory, so a synthetic claim is never live by cwd.
 		expect(holds.get(C)).toMatchObject({ via: 'claim', holderLive: false });
+	});
+
+	it('keeps a monorepo app lane live while a session works from the checkout root', () => {
+		// The lane's Expo app is /Users/dev/repo/examples/expo-demo; Codex runs
+		// from the repository root, above it.
+		const repo = '/Users/dev/repo';
+		const atRoot = {
+			...inputs,
+			liveSessions: [{ kind: 'codex' as const, cwd: repo }],
+		};
+		const holds = resolveDeviceHolds({
+			...atRoot,
+			lanes: [{ ...lane(A, synthetic), worktreePath: repo }],
+			claims: [],
+		});
+		expect(holds.get(A)).toMatchObject({ holder: synthetic, holderLive: true });
+		expect(
+			decideDeviceAccess(holds.get(A), codex, now, {
+				directory: repo,
+				requesterCwd: repo,
+			})
+		).toEqual({ allowed: true });
+		// A sibling checkout is still someone else's.
+		expect(
+			resolveHolderLiveness(synthetic, atRoot, '/Users/dev/repo-2').live
+		).toBe(false);
 	});
 });
 
@@ -282,7 +308,7 @@ describe('decideDeviceAccess for synthetic holders', () => {
 		sessionId: 'mcp-codex-mcp-client',
 	} as const;
 	const hold = resolveDeviceHolds({
-		lanes: [{ ...lane(A, synthetic), appDirectory: app }],
+		lanes: [{ ...lane(A, synthetic), worktreePath: app }],
 		claims: [],
 		liveSessionKeys: new Set(),
 		liveSessions: [{ kind: 'codex', cwd: app }],
@@ -321,7 +347,7 @@ describe('decideDeviceAccess for synthetic holders', () => {
 
 	it('never lets a synthetic requester through a real session’s hold', () => {
 		const real = resolveDeviceHolds({
-			lanes: [{ ...lane(A, codex), appDirectory: app }],
+			lanes: [{ ...lane(A, codex), worktreePath: app }],
 			claims: [],
 			liveSessionKeys: new Set(['codex:t1']),
 			missingSince: new Map(),

@@ -117,7 +117,3 @@ export function desktopActionConfirmationCopy(
 	}
 	return undefined;
 }
-
-export function desktopActionNeedsConfirmation(action: DesktopAction): boolean {
-	return desktopActionConfirmationCopy(action) !== undefined;
-}

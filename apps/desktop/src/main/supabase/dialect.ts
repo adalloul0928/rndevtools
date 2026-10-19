@@ -38,14 +38,10 @@ const MAX_LOG_TAIL = 1000;
 const MAX_LOG_SERVICES = 16;
 const MAX_DESTROY_STACKS = 32;
 
-/** @public */
-export type SupabaseCliGate = 'verified' | 'compatible' | 'unsupported';
-
 /**
  * What a verified CLI release can do.
- * @public
  */
-export type SupabaseDialectFeatures = Readonly<{
+type SupabaseDialectFeatures = Readonly<{
 	/** `stack destroy` accepts several `--stack-id` flags in one call. */
 	multiDestroy: boolean;
 	/** `stack start` reports `endpoint_changes` when ports moved. */
@@ -60,13 +56,11 @@ export type SupabaseDialectFeatures = Readonly<{
 	dump: boolean;
 }>;
 
-/** @public */
-export type SupabaseUnsupportedReason =
+type SupabaseUnsupportedReason =
 	| 'unparseable'
 	| 'prerelease'
 	| 'unverified-release';
 
-/** @public */
 export type SupabaseDialect =
 	| Readonly<{
 			gate: 'verified' | 'compatible';
@@ -209,8 +203,7 @@ export const SUPABASE_EXCLUDABLE_CAPABILITIES = Object.freeze([
 	'analytics',
 	'pooler',
 ] as const);
-/** @public */
-export type SupabaseExcludableCapability =
+type SupabaseExcludableCapability =
 	(typeof SUPABASE_EXCLUDABLE_CAPABILITIES)[number];
 
 /** Capabilities `stack prepare --capability` accepts. */
@@ -218,7 +211,6 @@ export const SUPABASE_PREPARABLE_CAPABILITIES = Object.freeze([
 	'database',
 	...SUPABASE_EXCLUDABLE_CAPABILITIES,
 ] as const);
-/** @public */
 export type SupabasePreparableCapability =
 	(typeof SUPABASE_PREPARABLE_CAPABILITIES)[number];
 
@@ -241,9 +233,8 @@ const LOG_SERVICE_NAMES: ReadonlySet<string> = new Set([
 
 /**
  * Read-only `inspect db` reports the desktop runs.
- * @public
  */
-export type SupabaseInspectReport = 'db-stats' | 'table-stats';
+type SupabaseInspectReport = 'db-stats' | 'table-stats';
 const INSPECT_REPORTS: readonly SupabaseInspectReport[] = [
 	'db-stats',
 	'table-stats',
@@ -254,11 +245,9 @@ const INSPECT_REPORTS: readonly SupabaseInspectReport[] = [
  * or a loopback DB_URL the desktop holds in main memory. A URL is how a read
  * reaches a stack whose branch is not checked out; `sslmode=disable` is added
  * because native Postgres has no TLS and a non-matching URL counts as remote.
- * @public
  */
-export type SupabaseDatabaseTarget = 'local' | Readonly<{ dbUrl: string }>;
+type SupabaseDatabaseTarget = 'local' | Readonly<{ dbUrl: string }>;
 
-/** @public */
 export type SupabaseCliOperation =
 	| Readonly<{ kind: 'version' }>
 	| Readonly<{ kind: 'stack.list' }>
@@ -331,12 +320,10 @@ export type SupabaseCliOperation =
 	  }>
 	| Readonly<{ kind: 'seed.buckets'; workdir: string }>;
 
-/** @public */
 export type SupabaseCliOperationKind = SupabaseCliOperation['kind'];
 type VersionOperation = Extract<SupabaseCliOperation, { kind: 'version' }>;
 type GroupOperation = Exclude<SupabaseCliOperation, VersionOperation>;
 
-/** @public */
 export type SupabaseArgvErrorReason =
 	| 'gate'
 	| 'feature'
@@ -1157,7 +1144,6 @@ function identifySupabaseArgv(
 
 /**
  * Rollout phases that change which CLI surfaces the desktop may run.
- * @public
  */
 export type SupabaseRolloutPhase = 1 | 3 | 4 | 5;
 
@@ -1231,7 +1217,9 @@ export function assertArgvAllowedForPhase(
 	return kind;
 }
 
-/** @public */
+/** The longest budget the runner accepts for one call. */
+export const SUPABASE_MAX_CLI_TIMEOUT_MS = 60 * 60_000;
+
 export type SupabaseOperationBudget = Readonly<{
 	timeoutMs: number;
 	/** How long to wait after SIGINT before sending SIGTERM. */
@@ -1298,12 +1286,16 @@ export function supabaseOperationBudget(
 		case 'stack.restart':
 			return lifecycleBudget(120_000);
 		case 'stack.destroy':
+			// Two minutes per stack, within what the runner accepts for one call.
 			return lifecycleBudget(
-				120_000 *
-					Math.max(
-						1,
-						Array.isArray(operation.stackIds) ? operation.stackIds.length : 1
-					)
+				Math.min(
+					SUPABASE_MAX_CLI_TIMEOUT_MS,
+					120_000 *
+						Math.max(
+							1,
+							Array.isArray(operation.stackIds) ? operation.stackIds.length : 1
+						)
+				)
 			);
 		case 'stack.prepare':
 			return lifecycleBudget(600_000);

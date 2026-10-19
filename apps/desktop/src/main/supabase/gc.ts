@@ -71,16 +71,14 @@ export type SupabaseGcStack = Readonly<{
 
 /**
  * One stack's place in clean up.
- * @public
  */
-export type SupabasePruneMark = Readonly<{
+type SupabasePruneMark = Readonly<{
 	/** The group it is suggested in, when it is. */
 	group?: PruneGroupId;
 	/** When it was (or will be, while it stays stopped) suggested. */
 	suggestedAt?: number;
 }>;
 
-/** @public */
 export type SupabasePruneResult = Readonly<{
 	summary: SupabasePruneSummary;
 	marks: ReadonlyMap<string, SupabasePruneMark>;
@@ -284,7 +282,6 @@ export function computeSupabasePrune(
 
 /**
  * An automatic stop that is due now.
- * @public
  */
 export type SupabaseDueStop = Readonly<{
 	stackId: string;

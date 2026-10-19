@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentSession, AgentState } from '../../shared/agent-protocol';
 import type { DeviceHolder } from '../../shared/device-hold';
-import { type Lane, laneAppDirectory } from '../../shared/lane-protocol';
+import type { Lane } from '../../shared/lane-protocol';
 import {
 	isActiveSupabaseJob,
 	isSupabaseStackRunning,
 	type LaneBackendSummary,
 	type LaneWorktreeSupabase,
+	SUPABASE_MAX_LOG_CHARACTERS,
 	SUPABASE_UI_PHASE,
 	type SupabaseAgentOperation,
 	type SupabaseAgentResult,
@@ -26,6 +27,7 @@ import {
 	type SupabaseState,
 	sanitizeSupabaseDisplayText,
 	supabaseDesktopError,
+	supabaseRevertKeepsStack,
 } from '../../shared/supabase-protocol';
 import { runSimulatorCommand } from '../simulator-command-runner';
 import { parseHostMemoryPressure } from '../simulator-metrics-provider';
@@ -43,11 +45,18 @@ import {
 	supabaseDoctorInfo,
 } from './agent-operations';
 import { nodeStaticFileSystem, type StaticFileSystem } from './bounded-read';
-import { observeSupabaseHeads, planSupabaseFollows } from './branch-follow';
+import {
+	nextSupabaseFollowRetry,
+	observeSupabaseHeads,
+	planSupabaseFollows,
+	type SupabaseFollowPlan,
+	type SupabaseFollowRetry,
+} from './branch-follow';
 import {
 	MainOnlyCredentials,
 	parseSupabaseStackDestroy,
 	parseSupabaseStackList,
+	parseSupabaseStackLogs,
 	parseSupabaseStackPrepare,
 	parseSupabaseStackRestart,
 	parseSupabaseStackStart,
@@ -56,13 +65,16 @@ import {
 	type SupabasePublicEndpoints,
 	type SupabaseStackList,
 	type SupabaseStackListEntry,
+	type SupabaseStackLogs,
 	type SupabaseStackStatus,
 } from './cli-contract';
 import { planSupabaseDrift, type SupabaseDriftStack } from './cli-drift';
 import {
 	type ClassifiedSupabaseError,
 	interpretSupabaseResult,
+	SUPABASE_BRANCH_MOVED_TITLE,
 	type SupabaseOutcome,
+	supabaseBranchMovedError,
 } from './cli-errors';
 import {
 	type ResolvedSupabaseCli,
@@ -70,7 +82,9 @@ import {
 	SupabaseCliResolver,
 } from './cli-resolver';
 import {
+	pruneSupabaseProgressFiles,
 	readSupabaseProgressLines,
+	removeSupabaseProgressFile,
 	type SupabaseCliEnvironmentOptions,
 	SupabaseCliRunner,
 	SupabaseCliRunnerError,
@@ -162,6 +176,7 @@ import {
 	SupabaseStackStore,
 	type SupabaseStoredHold,
 	supabaseKeyFingerprint,
+	supabaseRecreateError,
 } from './stack-store';
 import {
 	assembleSupabaseState,
@@ -221,6 +236,8 @@ const MAX_EXTRA_WORKTREES = 32;
 const MAX_ADMISSION_STOPS = 3;
 const ADOPTED_CHILD_POLL_MS = 1_000;
 const ADOPTED_CHILD_MAX_MS = 10 * 60_000;
+/** A logs read that keeps overflowing the runner stops shrinking here. */
+const MIN_LOG_TAIL = 16;
 const DOCKER_SOCKETS = [
 	'/var/run/docker.sock',
 	'.docker/run/docker.sock',
@@ -232,16 +249,37 @@ const PODMAN_SOCKETS = [
 ] as const;
 const LAN_EXPOSED_TITLE = 'Stack listened on your network';
 const NO_ROOM_TITLE = 'Not enough room';
+const OFF_MESSAGE = 'Local Supabase is off in RN Devtools.';
+/** Main's refusal of a CLI read that got its turn once the feature was off. */
+const OFF_ERROR: ClassifiedSupabaseError = Object.freeze({
+	code: 'failed',
+	title: 'Local Supabase is off',
+	message: OFF_MESSAGE,
+	recovery: 'Turn on local Supabase in the Supabase tab first.',
+	retry: 'none',
+	details: Object.freeze({}),
+});
+/**
+ * Jobs that can bring a stack up: a turn-off with Stop managed stacks waits
+ * for them, then stops their stacks too.
+ */
+const STARTING_JOB_KINDS: ReadonlySet<SupabaseJobKind> = new Set([
+	'create',
+	'resume',
+	'follow',
+	'recreate',
+	'stop-and-start',
+	'studio',
+	'restart',
+]);
 
 type MemoryPressure = SupabaseState['capacity']['memoryPressure'];
 type JobRequester = SupabaseJob['requestedBy'];
 
-/** @public */
 export type SupabaseEngineRunner = Pick<
 	SupabaseCliRunner,
 	'run' | 'spawnDetached'
 >;
-/** @public */
 export type SupabaseEngineResolver = Pick<
 	SupabaseCliResolver,
 	'resolve' | 'validateBinary'
@@ -249,7 +287,6 @@ export type SupabaseEngineResolver = Pick<
 
 /**
  * Seams the tests substitute; production uses the defaults.
- * @public
  */
 export type SupabaseEngineSeams = Readonly<{
 	platform: SupabaseState['availability']['platform'];
@@ -336,7 +373,8 @@ export type SupabaseEnsureRefusal = Readonly<{
 		| 'not_found'
 		| 'needs_recreate'
 		| 'supabase_failed'
-		| 'cli_mismatch';
+		| 'cli_mismatch'
+		| 'branch_moved';
 	message: string;
 	stackId?: string | undefined;
 	facts?: SupabaseWorktreeFacts | undefined;
@@ -375,7 +413,6 @@ type LaneAttachment = {
 	laneId: string;
 	stackId: string;
 	worktreePath: string;
-	appDirectory: string;
 	agent?: DeviceHolder | undefined;
 	since: number;
 	/** The lane has not been stored yet (its start is still running). */
@@ -445,6 +482,13 @@ function runnerFailure(error: unknown): ClassifiedSupabaseError {
 		retry: 'none',
 		details: {},
 	};
+}
+
+/** The CLI exited 0, so the stack runs, but its output could not be read. */
+function startedUnread(error: ClassifiedSupabaseError): boolean {
+	return (
+		error.details.unexpectedOutput === true && error.details.exitCode === 0
+	);
 }
 
 function sameHead(left: GitHead, right: GitHead | undefined): boolean {
@@ -563,6 +607,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	>();
 	readonly #containerStopped = new Set<string>();
 	readonly #following = new Set<string>();
+	readonly #followRetries = new Map<string, SupabaseFollowRetry>();
 
 	// Execution.
 	readonly #stackLocks = new SupabaseKeyedLock();
@@ -571,10 +616,19 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		SUPABASE_LIFECYCLE_CONCURRENCY
 	);
 	readonly #childGate = new SupabaseSemaphore(SUPABASE_MAX_CLI_CHILDREN);
+	/** Keyed `automatic:<id>` or `explicit:<id>`: who began the flight. */
 	readonly #ensures = new SupabaseSingleFlight<SupabaseEnsureResult>();
+	/**
+	 * The job each ensure flight runs, under the flight's key, and whether
+	 * the flight still waits for the automatic one before it.
+	 */
 	readonly #ensureJobs = new Map<
 		string,
-		{ jobId?: string; listeners: Set<(jobId: string) => void> }
+		{
+			jobId?: string;
+			queued: boolean;
+			listeners: Set<(jobId: string) => void>;
+		}
 	>();
 	readonly #statusFlights = new SupabaseSingleFlight<
 		SupabaseStackStatus | undefined
@@ -684,6 +738,23 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	/** Local Supabase is on and this Mac can run it. */
 	enabled(): boolean {
 		return this.policySnapshot().enabled && this.platform.supported;
+	}
+
+	/**
+	 * A lifecycle job whose turn came once the feature was off is called off
+	 * instead of beginning: nothing is probed or spawned while it is off.
+	 * Every job checks this after its gate and the stack's lock, right before
+	 * job.begin() or its first CLI call; only the turn-off's own stops don't.
+	 */
+	calledOff():
+		| Readonly<{ status: 'cancelled'; error: SupabaseErrorView }>
+		| undefined {
+		return this.enabled()
+			? undefined
+			: {
+					status: 'cancelled',
+					error: supabaseDesktopError('feature_off', OFF_MESSAGE),
+				};
 	}
 
 	policySnapshot(): SupabasePolicySnapshot {
@@ -891,7 +962,17 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			await ensureSupabaseStoreDirectory(this.root);
 			await Promise.all([this.policyStore.load(), this.stackStore.load()]);
 			const jobs = await this.jobStore.load();
-			this.#adoptChildren(jobs.children);
+			await this.#adoptChildren(jobs.children);
+			// Files of children that ended while no desktop ran, or that an
+			// earlier version kept: only an adopted child's is read again.
+			this.track(
+				pruneSupabaseProgressFiles(this.progressDirectory, {
+					before: this.now(),
+					keep: new Set(
+						this.jobStore.children().map((child) => child.progressFile)
+					),
+				})
+			);
 		} catch (error) {
 			this.log(`Supabase state could not be loaded: ${errorName(error)}`);
 		}
@@ -1017,6 +1098,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	async #boot(): Promise<void> {
 		await this.#readEngines();
 		await this.refreshRepositories();
+		// Turned off again meanwhile: no key file is checked with git.
+		if (!this.#active) return;
 		await this.applyPerStackKeys();
 		await this.#cheapTick({ boot: true });
 		// A window may already show the tab: its interest predates turning on.
@@ -1124,6 +1207,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			this.#lastMemoryAt = now;
 			await this.#measureMemory();
 		}
+		// Turned off meanwhile: nothing more is measured.
+		if (!this.#active) return;
 		if (now - this.#lastDiskAt >= DISK_INTERVAL_MS - 1_000) {
 			this.#lastDiskAt = now;
 			await this.#measureDisk();
@@ -1138,14 +1223,19 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	async #cheapTick(options: Readonly<{ boot?: boolean }> = {}): Promise<void> {
 		if (!this.#active) return;
 		try {
+			// Any step can outlast the feature: once it is off, the tick ends
+			// before the next one probes, lists, starts or stops anything.
 			const ownersChanged = await this.#readOwners();
+			if (!this.#active) return;
 			this.#reservations = await this.#discoveryNow().readPortReservations();
 			this.#homeStateRoot =
 				(await supabaseRealpath(path.join(this.supabaseHome(), 'stacks'))) ??
 				path.join(this.supabaseHome(), 'stacks');
 			await this.#checkPaths();
 			if (await this.#headsMoved()) this.#repositoriesDirty = true;
+			if (!this.#active) return;
 			if (this.#repositoriesDirty) await this.refreshRepositories();
+			if (!this.#active) return;
 			const now = this.now();
 			// A new owner, or none for a while: list again, but not in the
 			// middle of a creation (the list probes owners' locks).
@@ -1159,6 +1249,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				(options.boot === true || this.#creationGate.active === 0)
 			) {
 				await this.refreshList();
+				if (!this.#active) return;
 			}
 			if (options.boot === true) this.#deriveLaneAttachments();
 			if (now - this.#lastCapacityAt >= CAPACITY_INTERVAL_MS) {
@@ -1166,9 +1257,13 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			}
 			await this.stackStore.expireRequests();
 			await this.reconcileHolds();
+			if (!this.#active) return;
 			await this.#stopContainerStacks();
+			if (!this.#active) return;
 			await this.#planDrift();
+			if (!this.#active) return;
 			await this.#planFollows();
+			if (!this.#active) return;
 			if (now - this.#lastLsofSweepAt >= LSOF_INTERVAL_MS) {
 				this.#lastLsofSweepAt = now;
 				await this.#sweepExposure();
@@ -1264,6 +1359,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	async #readCapacity(): Promise<void> {
 		this.#lastCapacityAt = this.now();
 		this.#sysv = await this.#discoveryNow().readSysvCapacity();
+		// Turned off during that read: memory pressure isn't probed.
+		if (!this.#active) return;
 		this.#memoryPressure = await this.#memoryProbe();
 	}
 
@@ -1506,6 +1603,19 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		return head.status === 'ok' && head.branchContext === branch;
 	}
 
+	/**
+	 * A `--local` call's precondition: the CLI resolves the stack from HEAD
+	 * when it runs, so a worktree that left the stack's branch while the call
+	 * waited would send it to that branch's stack instead.
+	 */
+	async stillOnBranch(
+		view: SupabaseStackView
+	): Promise<ClassifiedSupabaseError | undefined> {
+		return (await this.headMatches(view))
+			? undefined
+			: supabaseBranchMovedError();
+	}
+
 	endpointsOf(stackId: string): SupabasePublicEndpoints | undefined {
 		return (
 			this.#statuses.get(stackId)?.status?.publicEndpoints ??
@@ -1653,6 +1763,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		options: Readonly<{
 			signal?: AbortSignal | undefined;
 			expectOutput?: 'json' | 'none';
+			/** Checked once a CLI slot is free, right before the spawn. */
+			precondition?:
+				| (() => Promise<ClassifiedSupabaseError | undefined>)
+				| undefined;
 		}> = {}
 	): Promise<SupabaseOutcome<T>> {
 		const blocked = this.#blockedCli();
@@ -1666,6 +1780,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const budget = supabaseOperationBudget(operation);
 		return this.#childGate.run(async () => {
 			try {
+				// A read that waited for a CLI slot, or behind another list, can
+				// get its turn once the feature is off: then it spawns nothing.
+				if (!this.enabled()) return { ok: false, error: OFF_ERROR };
+				const refused = await options.precondition?.();
+				if (refused) return { ok: false, error: refused };
 				const result = await this.runner.run({
 					binaryPath: cli.binaryPath,
 					argv,
@@ -1691,6 +1810,37 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	}
 
 	/**
+	 * `stack logs`, newest first within the character budget. Output longer
+	 * than the runner reads is read again with a quarter of the tail, so a
+	 * busy window shows its newest lines instead of failing.
+	 */
+	async readLogs(
+		cli: ResolvedSupabaseCli,
+		operation: Extract<SupabaseCliOperation, { kind: 'stack.logs' }>
+	): Promise<SupabaseOutcome<SupabaseStackLogs>> {
+		let tail = operation.tail;
+		for (;;) {
+			const outcome = await this.runRead(cli, { ...operation, tail }, (json) =>
+				parseSupabaseStackLogs(json, {
+					maxCharacters: SUPABASE_MAX_LOG_CHARACTERS,
+				})
+			);
+			if (outcome.ok) {
+				return tail === operation.tail
+					? outcome
+					: { ok: true, value: { ...outcome.value, truncated: true } };
+			}
+			if (
+				outcome.error.details.stdoutTruncated !== true ||
+				tail <= MIN_LOG_TAIL
+			) {
+				return outcome;
+			}
+			tail = Math.max(MIN_LOG_TAIL, Math.floor(tail / 4));
+		}
+	}
+
+	/**
 	 * A lifecycle call, detached so it survives the request and the app, its
 	 * stderr streamed into the job's steps. The child is recorded so a
 	 * restarted desktop can adopt it, and the job's cancel interrupts it
@@ -1704,6 +1854,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		options: Readonly<{
 			label: string;
 			leasedPorts?: Readonly<Record<string, string>> | undefined;
+			/** Checked once a CLI slot is free, right before the spawn. */
+			precondition?:
+				| (() => Promise<ClassifiedSupabaseError | undefined>)
+				| undefined;
 		}>
 	): Promise<SupabaseOutcome<T>> {
 		const blocked = this.#blockedCli();
@@ -1717,6 +1871,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const budget = supabaseOperationBudget(operation);
 		return this.#childGate.run(async () => {
 			try {
+				const refused = await options.precondition?.();
+				if (refused) return { ok: false, error: refused };
 				const handle = await this.runner.spawnDetached({
 					binaryPath: cli.binaryPath,
 					argv,
@@ -1746,7 +1902,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 							jobId: job.id,
 							pid: handle.pid,
 							startedAt: this.now(),
-							argvDigest: supabaseArgvDigest(argv),
+							argvDigest: supabaseArgvDigest([cli.binaryPath, ...argv]),
 							progressFile: handle.progressFile,
 							stackIds: [...job.stackIds].slice(0, 32),
 						})
@@ -1799,6 +1955,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				{ kind: 'stack.list' },
 				(json, stderr) => parseSupabaseStackList(json, stderr)
 			);
+			// Turned off meanwhile: nothing is kept, and no status is read.
+			if (!this.enabled()) return;
 			const now = this.now();
 			if (!outcome.ok) {
 				this.#listFailure = {
@@ -1814,6 +1972,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			const previous = new Map(
 				(this.#list?.stacks ?? []).map((entry) => [entry.id, entry])
 			);
+			const previousAt = this.#lastListAt ?? 0;
 			this.#list = outcome.value;
 			this.#lastListAt = now;
 			this.#listFailure = undefined;
@@ -1829,6 +1988,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 					old.runtime === entry.runtime &&
 					old.branchContext === entry.branchContext &&
 					cached?.status !== undefined &&
+					// Read or confirmed at the last list: one that list left unread
+					// (it reads 16 at most) may be stale, so it is read, not confirmed.
+					(cached.checkedAt ?? 0) >= previousAt &&
 					(cached.failure === undefined ||
 						cached.failure.at < (cached.checkedAt ?? 0))
 				) {
@@ -1853,6 +2015,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				);
 			}
 			this.markDirty();
+			// Turned off while it checked the unreadable folders: no status is
+			// read until it is on.
+			if (!this.enabled()) return;
 			await Promise.all(
 				changed
 					.slice(0, MAX_STATUS_READS_PER_LIST)
@@ -1874,6 +2039,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	/** One `stack status` read through the owner's validated CLI. */
 	readStatus(stackId: string): Promise<SupabaseStackStatus | undefined> {
 		return this.#statusFlights.run(stackId, async () => {
+			// Off, nothing is read, not even the version of the binary to use.
+			if (!this.enabled()) return undefined;
 			const cli = await this.ownerCli(stackId);
 			if (!cli) return undefined;
 			const outcome = await this.runRead(
@@ -1881,6 +2048,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				{ kind: 'stack.status', stackId },
 				parseSupabaseStackStatus
 			);
+			// Turned off meanwhile: nothing is kept.
+			if (!this.enabled()) return undefined;
 			const now = this.now();
 			const previous = this.#statuses.get(stackId);
 			if (!outcome.ok) {
@@ -1896,6 +2065,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			}
 			const status = outcome.value;
 			this.#statuses.set(stackId, { status, checkedAt: now });
+			if (status.configDrift?.status === 'unchanged') {
+				await this.#forgetRecreate(stackId);
+			}
 			if (status.publicEndpoints) {
 				this.#endpoints.set(stackId, status.publicEndpoints);
 			}
@@ -1911,6 +2083,40 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			this.#markLanesStale(stackId);
 			this.markDirty();
 			return status;
+		});
+	}
+
+	/**
+	 * The status read that lifecycle work ends with. Off by then (the
+	 * turn-off's own stops, or work that was running at it), nothing is read,
+	 * and a read that ends while off keeps nothing, even one that began before
+	 * the turn-off: either way the last status is dropped instead, so once on
+	 * again the stack never shows as it was before that work. Only those two
+	 * drop it: a read that a turn-off and a turn-on both land during ends
+	 * while on, so it keeps what it read, and until it ends the stack shows as
+	 * it was before.
+	 */
+	async #rereadStatus(stackId: string): Promise<void> {
+		if (this.enabled()) await this.readStatus(stackId);
+		if (!this.enabled()) this.#statuses.delete(stackId);
+	}
+
+	/**
+	 * The configuration matches the saved stack again (the setting it could
+	 * not adopt was reverted), so it starts and keeps its data.
+	 */
+	async #forgetRecreate(stackId: string): Promise<void> {
+		if (!this.stackStore.record(stackId)?.flags.needsRecreate) return;
+		await this.stackStore.updateRecord(stackId, (draft) => {
+			const { needsRecreate: _needsRecreate, ...flags } = draft.flags;
+			const { lastError, recreateError: _recreateError, ...rest } = draft;
+			return {
+				...rest,
+				...(lastError && lastError.code !== 'needs_recreate'
+					? { lastError }
+					: {}),
+				flags,
+			};
 		});
 	}
 
@@ -2058,6 +2264,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			if (record.runtime === 'docker' || record.runtime === 'podman') continue;
 			if (!this.ownerOf(record.id) || this.#jobActive(record.id)) continue;
 			await this.lockStack(record.id, async () => {
+				// Turned off while it waited for the lock: nothing is probed.
+				if (!this.#active) return;
 				await this.enforceExposure(record.id, undefined, {
 					notRunning: 'pass',
 				});
@@ -2069,10 +2277,12 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		if (this.#owners?.status !== 'ok') return;
 		const now = this.now();
 		for (const owner of this.#owners.owners.slice(0, 32)) {
+			// Turned off meanwhile: nothing more is measured.
+			if (!this.#active) return;
 			const tree = await this.#discoveryNow().processTree(owner.pid, {
 				stackId: owner.stackId,
 			});
-			if (tree.status !== 'ok') continue;
+			if (tree.status !== 'ok' || !this.#active) continue;
 			const memory = await this.#discoveryNow().measureMemory(tree.pids);
 			if (memory.status === 'ok') {
 				this.#memory.set(owner.stackId, {
@@ -2147,7 +2357,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			laneId: string;
 			stackId: string;
 			worktreePath: string;
-			appDirectory: string;
 			agent?: DeviceHolder | undefined;
 		}>
 	): void {
@@ -2157,7 +2366,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			laneId: attachment.laneId,
 			stackId: attachment.stackId,
 			worktreePath: attachment.worktreePath,
-			appDirectory: attachment.appDirectory,
 			...(attachment.agent ? { agent: attachment.agent } : {}),
 			since: same && existing ? existing.since : this.now(),
 			pending: !this.#lanes().some((lane) => lane.id === attachment.laneId),
@@ -2295,7 +2503,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				laneId: lane.id,
 				stackId,
 				worktreePath: lane.worktreePath,
-				appDirectory: laneAppDirectory(lane),
 				...(lane.agent
 					? {
 							agent: {
@@ -2377,7 +2584,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			result.push({
 				laneId: attachment.laneId,
 				...(agent ? { agent } : {}),
-				appDirectory: lane ? laneAppDirectory(lane) : attachment.appDirectory,
+				worktreePath: lane?.worktreePath ?? attachment.worktreePath,
 				since: lane?.startedAt ?? attachment.since,
 			});
 		}
@@ -2502,7 +2709,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				if (!record) continue;
 				const fresh = this.#resolveHolds(record);
 				if (fresh.autoStopAt === undefined || fresh.autoStopAt > now) continue;
-				this.track(this.stopJob(stop.stackId, stop.requestedBy));
+				this.track(
+					this.stopJob(stop.stackId, stop.requestedBy, { ifStillDue: true })
+				);
 			}
 			const next = [...this.#holds.values()]
 				.map((result) => result.autoStopAt)
@@ -2519,12 +2728,17 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	/**
 	 * A stop as a job, under the stack's lock and the lifecycle gate (two at
 	 * a time). `ungated` skips the gate for the stops admission makes, which
-	 * already run inside a gated start.
+	 * already run inside a gated start. `ifStillDue` checks an automatic stop
+	 * again once it has its turn, and skips a stack held again meanwhile.
 	 */
 	stopJob(
 		stackId: string,
 		requestedBy: JobRequester,
-		options: Readonly<{ clearPin?: boolean; ungated?: boolean }> = {}
+		options: Readonly<{
+			clearPin?: boolean;
+			ungated?: boolean;
+			ifStillDue?: boolean;
+		}> = {}
 	): Promise<
 		Readonly<{ jobId: string; done: Promise<SupabaseEngineJobOutcome> }>
 	> {
@@ -2541,7 +2755,13 @@ export class SupabaseEngine implements SupabaseServiceApi {
 					this.lockStack(
 						stackId,
 						async (): Promise<SupabaseEngineJobOutcome> => {
+							const off = this.calledOff();
+							if (off) return off;
 							job.begin();
+							if (options.ifStillDue && !this.#stopStillDue(stackId)) {
+								job.step('stop', 'skipped', 'In use again');
+								return { status: 'complete' };
+							}
 							const result = await this.stopStep(stackId, job, {
 								clearPin: options.clearPin === true,
 							});
@@ -2553,6 +2773,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				return options.ungated ? work() : this.#lifecycleGate.run(work);
 			}
 		);
+	}
+
+	/** Nothing holds the stack and its unheld linger has run out. */
+	#stopStillDue(stackId: string): boolean {
+		const record = this.stackStore.record(stackId);
+		if (!record) return false;
+		const holds = this.#resolveHolds(record);
+		return holds.autoStopAt !== undefined && holds.autoStopAt <= this.now();
 	}
 
 	/** Docker or Podman stacks on a managed identity: stopped once, never attached. */
@@ -2584,9 +2812,25 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			this.#containerStopped.add(entry.id);
 			await this.#markContainerStopped(entry);
 			this.track(
-				this.stopJob(entry.id, { kind: 'automatic', reason: 'container' })
+				this.stopJob(entry.id, { kind: 'automatic', reason: 'container' }).then(
+					async ({ done }) => {
+						// Called off by a turn-off: it is stopped once the feature is on.
+						if ((await done).status === 'cancelled') {
+							await this.#unmarkContainerStopped(entry.id);
+						}
+					}
+				)
 			);
 		}
+	}
+
+	async #unmarkContainerStopped(stackId: string): Promise<void> {
+		this.#containerStopped.delete(stackId);
+		if (!this.stackStore.record(stackId)) return;
+		await this.stackStore.updateRecord(stackId, (draft) => {
+			const { containerStoppedAt: _stoppedAt, ...flags } = draft.flags;
+			return { ...draft, flags };
+		});
 	}
 
 	async #markContainerStopped(entry: SupabaseStackListEntry): Promise<void> {
@@ -2629,6 +2873,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			if (record.origin !== 'managed' && record.origin !== 'adopted') continue;
 			const owner = this.ownerOf(record.id);
 			if (!owner) continue;
+			const ownerValidation = await this.#validateBinary(owner.executable);
+			// Turned off meanwhile: nothing more is validated or restarted.
+			if (!this.#active) return;
 			// Only a worktree still on the stack's branch may restart it.
 			const facts = this.factsForStack(record.id, record);
 			stacks.push({
@@ -2636,7 +2883,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				recordedBinary: record.binaryPath,
 				recordedVersion: record.cliVersion,
 				ownerExecutable: owner.executable,
-				ownerValidation: await this.#validateBinary(owner.executable),
+				ownerValidation,
 				worktreeCli:
 					facts?.expectedStackId === record.id ? facts.cli : undefined,
 				inFlight: this.#jobActive(record.id),
@@ -2659,6 +2906,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				this.restartWithWorktreeCli(view, {
 					kind: 'automatic',
 					reason: 'cli-upgrade',
+				}).then(async ({ done }) => {
+					// Called off by a turn-off, it is tried again once the feature is on.
+					if (
+						(await done).status === 'cancelled' &&
+						this.#driftAttempted.get(stackId) === signature
+					) {
+						this.#driftAttempted.delete(stackId);
+					}
 				})
 			);
 		}
@@ -2688,6 +2943,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			(job) =>
 				this.#lifecycleGate.run(() =>
 					this.lockStack(view.id, async () => {
+						const off = this.calledOff();
+						if (off) return off;
 						job.begin();
 						if (!facts) {
 							return {
@@ -2741,14 +2998,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			),
 			now: this.now(),
 			busy: this.#following,
+			retries: this.#followRetries,
 		});
 		for (const candidate of plan.due) {
-			this.track(
-				this.followBranch(candidate.worktreePath, candidate.fromStackIds, {
-					kind: 'automatic',
-					reason: 'follow',
-				})
-			);
+			this.track(this.#followAutomatically(candidate));
 		}
 		if (plan.nextDueAt !== undefined) {
 			this.#schedule('follow', plan.nextDueAt - this.now() + 50, async () => {
@@ -2756,6 +3009,30 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				await this.#planFollows();
 			});
 		}
+	}
+
+	/**
+	 * An automatic follow. One that fails waits longer before each new try
+	 * at the same stack instead of starting it on every cheap tick; a HEAD
+	 * move to another branch starts over.
+	 */
+	async #followAutomatically(
+		candidate: SupabaseFollowPlan['due'][number]
+	): Promise<void> {
+		const outcome = await this.followBranch(
+			candidate.worktreePath,
+			candidate.fromStackIds,
+			{ kind: 'automatic', reason: 'follow' }
+		);
+		if (outcome.status === 'complete') return;
+		this.#followRetries.set(
+			candidate.worktreePath,
+			nextSupabaseFollowRetry(
+				this.#followRetries.get(candidate.worktreePath),
+				candidate.toStackId,
+				this.now()
+			)
+		);
 	}
 
 	/**
@@ -2845,6 +3122,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				);
 				await stop.done;
 			}
+			this.#followRetries.delete(worktreePath);
 			await this.reconcileHolds();
 			return { status: 'complete' };
 		} finally {
@@ -3071,17 +3349,39 @@ export class SupabaseEngine implements SupabaseServiceApi {
 
 	/**
 	 * Children a previous desktop left running: followed by pid until they
-	 * exit, then their job ends from what their progress file says.
+	 * exit, then their job ends from what their progress file says. A pid
+	 * another process reused (after a reboot) is not adopted.
 	 */
-	#adoptChildren(children: readonly SupabaseDetachedChild[]): void {
+	async #adoptChildren(
+		children: readonly SupabaseDetachedChild[]
+	): Promise<void> {
 		for (const child of children) {
-			if (!this.#processAlive(child.pid)) {
+			if (!this.#processAlive(child.pid) || !(await this.#sameCommand(child))) {
 				this.track(this.jobStore.releaseChild(child.jobId));
+				this.track(
+					removeSupabaseProgressFile(this.progressDirectory, child.progressFile)
+				);
 				continue;
 			}
 			if (!this.jobStore.adopt(child.jobId)) continue;
 			this.track(this.#followAdopted(child));
 		}
+	}
+
+	/**
+	 * Whether `ps` shows the command the child was started with. ps escapes
+	 * the line by the locale it inherits, so both sides are compared as
+	 * digests of one form, never as text. Only while the feature is on: off,
+	 * nothing is spawned and the pid check decides.
+	 */
+	async #sameCommand(child: SupabaseDetachedChild): Promise<boolean> {
+		if (!this.enabled()) return true;
+		const found = await this.#discoveryNow().processCommand(child.pid);
+		return (
+			found.status === 'ok' &&
+			found.command !== undefined &&
+			supabaseArgvDigest([found.command]) === child.argvDigest
+		);
 	}
 
 	async #followAdopted(child: SupabaseDetachedChild): Promise<void> {
@@ -3112,6 +3412,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 		await this.jobStore.finish(child.jobId, { status });
 		await this.jobStore.releaseChild(child.jobId);
+		await removeSupabaseProgressFile(
+			this.progressDirectory,
+			child.progressFile
+		);
 		if (this.#active) await this.refreshList();
 	}
 
@@ -3204,7 +3508,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		if (exposure?.verdict === 'loopback') this.#exposure.delete(stackId);
 		this.#memory.delete(stackId);
 		await this.#readOwners();
-		await this.readStatus(stackId);
+		await this.#rereadStatus(stackId);
 		this.markDirty();
 	}
 
@@ -3261,6 +3565,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			eager?: boolean | undefined;
 			createdBy?: SupabaseStackRecord['createdBy'] | undefined;
 			skipLane?: string | undefined;
+			/** Checked before each spawn; a refusal records nothing (nothing ran). */
+			precondition?:
+				| (() => Promise<ClassifiedSupabaseError | undefined>)
+				| undefined;
 		}>,
 		job: SupabaseEngineJob | undefined
 	): Promise<
@@ -3298,12 +3606,21 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const delays: number[] = [...BUSY_RETRY_DELAYS_MS];
 		let partialRetried = false;
 		let portRetried = false;
+		const check = input.precondition;
+		const refused = { value: false };
+		const precondition = check
+			? async () => {
+					const error = await check();
+					if (error) refused.value = true;
+					return error;
+				}
+			: undefined;
 		let outcome = await this.#runLifecycle(
 			cli,
 			operation,
 			parseSupabaseStackStart,
 			job,
-			{ label, leasedPorts }
+			{ label, leasedPorts, precondition }
 		);
 		while (!outcome.ok && job?.signal.aborted !== true) {
 			const code = outcome.error.code;
@@ -3327,13 +3644,18 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				operation,
 				parseSupabaseStackStart,
 				job,
-				{ label, leasedPorts }
+				{ label, leasedPorts, precondition }
 			);
 		}
 		if (!outcome.ok) {
 			const view = this.errorView(outcome.error);
 			const stackId = input.stackId ?? facts.expectedStackId;
-			if (stackId !== undefined) {
+			// It started, but its output can't be read: nothing about the stack
+			// is verified, so it is stopped (its data is kept).
+			if (stackId !== undefined && startedUnread(outcome.error)) {
+				await this.stopStep(stackId, job, { clearPin: false });
+			}
+			if (stackId !== undefined && !refused.value) {
 				await this.#recordStartFailure(
 					stackId,
 					input,
@@ -3406,7 +3728,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			supersededAt: _supersededAt,
 			...flags
 		} = base.flags;
-		const { lastError: _lastError, ...rest } = base;
+		const {
+			lastError: _lastError,
+			recreateError: _recreateError,
+			...rest
+		} = base;
 		await this.stackStore.upsertRecord({
 			...rest,
 			origin: rest.origin === 'external' ? 'adopted' : rest.origin,
@@ -3446,6 +3772,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			input.mode === 'create' &&
 			(cancelled || classified.details.timedOut === true);
 		const recreate = classified.code === 'needs_recreate';
+		const started = startedUnread(classified);
 		const base: SupabaseStackRecord = existing ?? {
 			id: stackId,
 			origin: 'managed',
@@ -3465,15 +3792,25 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			studioEnabled: false,
 			flags: {},
 		};
+		// What the saved stack can't adopt stays with the flag: a retry that
+		// fails for another reason (a port conflict, a timeout, a cancel)
+		// replaces lastError, not this.
+		const { recreateError: _saved, ...kept } = base;
+		const recreateError = recreate
+			? error
+			: existing
+				? supabaseRecreateError(existing)
+				: undefined;
 		await this.stackStore.upsertRecord({
-			...base,
+			...kept,
 			lastError: error,
+			...(recreateError ? { recreateError } : {}),
 			flags: {
 				...base.flags,
 				...(recreate ? { needsRecreate: true as const } : {}),
 				...(interrupted ? { interrupted: true as const } : {}),
 				// The first start failed but still registered an empty stack.
-				...(input.mode === 'create' && !interrupted && !recreate
+				...(input.mode === 'create' && !interrupted && !recreate && !started
 					? { failedStart: true as const }
 					: {}),
 			},
@@ -3496,7 +3833,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		// row would still be the expected one. The list drops statuses of
 		// stacks it doesn't show, so read the status after it.
 		await this.refreshList();
-		await this.readStatus(stackId);
+		await this.#rereadStatus(stackId);
 		return { status: 'complete' };
 	}
 
@@ -3558,7 +3895,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const ready: string[] = [];
 		for (const stackId of stackIds) {
 			const entry = this.entry(stackId);
-			if (!entry) {
+			if (!this.enabled()) {
+				// Turned off meanwhile, no list was read, and a destroy needs a
+				// fresh one: nothing is destroyed.
+				failed.push({
+					stackId,
+					error: supabaseDesktopError('feature_off', OFF_MESSAGE),
+				});
+			} else if (!entry) {
 				failed.push({
 					stackId,
 					error: supabaseDesktopError(
@@ -3720,6 +4064,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		job.step(stepId, 'current');
 		const outcome = await this.#runLifecycle(cli, operation, project, job, {
 			label: stepId,
+			precondition: () => this.stillOnBranch(view),
 		});
 		if (!outcome.ok) {
 			const error = this.errorView(outcome.error);
@@ -3807,13 +4152,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	preflight(
 		facts: SupabaseWorktreeFacts | undefined
 	): SupabaseEnsureRefusal | undefined {
-		if (!this.policySnapshot().enabled) {
-			return refusal(
-				'disabled',
-				'supabase_disabled',
-				'Local Supabase is off in RN Devtools.'
-			);
-		}
+		if (!this.policySnapshot().enabled) return this.#offRefusal();
 		if (!this.platform.supported) {
 			return refusal(
 				'disabled',
@@ -3885,6 +4224,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		return undefined;
 	}
 
+	/** What an ensure the turn-off overtook is told, as preflight says it. */
+	#offRefusal(): SupabaseEnsureRefusal {
+		return refusal('disabled', 'supabase_disabled', OFF_MESSAGE);
+	}
+
 	#pinnedPortHolder(
 		facts: SupabaseWorktreeFacts
 	): Readonly<{ port: number; key: string }> | undefined {
@@ -3907,7 +4251,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	 * attaches to it when it runs, resumes it when stopped, creates it when
 	 * missing (one creation at a time, after admission). Single-flight per
 	 * identity: callers that join learn the same job, and each one then adds
-	 * its own hold. Never rejects.
+	 * its own hold. An explicit request (operator, lane, agent) never joins a
+	 * flight an automatic one began, whose answer can be a refusal only
+	 * automatic requests get: it runs its own once that one ends. Never
+	 * rejects.
 	 */
 	async ensureStack(
 		facts: SupabaseWorktreeFacts,
@@ -3917,12 +4264,26 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			const refused = this.preflight(facts);
 			if (refused) return refused;
 			const stackId = facts.expectedStackId as string;
+			const automatic = `automatic:${stackId}`;
+			const explicit = `explicit:${stackId}`;
+			// An automatic request joins whichever flight runs; an explicit one
+			// joins only another explicit one.
+			const key =
+				request.requestedBy.kind === 'automatic' && !this.#ensures.get(explicit)
+					? automatic
+					: explicit;
 			// A fresh flight registers its job slot synchronously, so callers
-			// that join learn the job id it starts.
-			const flight = this.#ensures.run(stackId, () =>
-				this.#ensureFlight(facts, stackId, request)
+			// that join learn the job id it starts, never another flight's.
+			const flight = this.#ensures.run(key, () =>
+				this.#ensureFlight(
+					key,
+					facts,
+					stackId,
+					request,
+					key === explicit ? this.#ensures.get(automatic) : undefined
+				)
 			);
-			const tracked = this.#ensureJobs.get(stackId);
+			const tracked = this.#ensureJobs.get(key);
 			if (request.onJob && tracked) {
 				if (tracked.jobId !== undefined) request.onJob(tracked.jobId);
 				else tracked.listeners.add(request.onJob);
@@ -3943,23 +4304,46 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
+	/**
+	 * Whether the explicit ensure of this stack still waits for an automatic
+	 * one: it has no job of its own yet, and that one's job isn't its job.
+	 */
+	ensureQueued(stackId: string): boolean {
+		return this.#ensureJobs.get(`explicit:${stackId}`)?.queued === true;
+	}
+
 	async #ensureFlight(
+		key: string,
 		facts: SupabaseWorktreeFacts,
 		stackId: string,
-		request: SupabaseEnsureRequest
+		request: SupabaseEnsureRequest,
+		after: Promise<unknown> | undefined
 	): Promise<SupabaseEnsureResult> {
-		const tracked: { jobId?: string; listeners: Set<(jobId: string) => void> } =
-			{ listeners: new Set() };
-		this.#ensureJobs.set(stackId, tracked);
+		const tracked: {
+			jobId?: string;
+			queued: boolean;
+			listeners: Set<(jobId: string) => void>;
+		} = { queued: after !== undefined, listeners: new Set() };
+		this.#ensureJobs.set(key, tracked);
 		try {
+			if (after) {
+				// Still one flight at a time per stack. Automatic requests join
+				// this one while it waits, so none begins behind it.
+				await after.catch(() => undefined);
+				tracked.queued = false;
+				// Asked again: the feature may have been turned off meanwhile,
+				// and then nothing is probed or started.
+				const refused = this.preflight(facts);
+				if (refused) return refused;
+			}
 			return await this.#ensureIdentity(facts, stackId, request, (jobId) => {
 				tracked.jobId = jobId;
 				for (const listener of [...tracked.listeners]) listener(jobId);
 				tracked.listeners.clear();
 			});
 		} finally {
-			if (this.#ensureJobs.get(stackId) === tracked) {
-				this.#ensureJobs.delete(stackId);
+			if (this.#ensureJobs.get(key) === tracked) {
+				this.#ensureJobs.delete(key);
 			}
 		}
 	}
@@ -3996,6 +4380,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		onJob: (jobId: string) => void
 	): Promise<SupabaseEnsureResult> {
 		await this.freshList();
+		// Reads can outlast the feature: once it is off, nothing more is
+		// probed, attached or started.
+		let refused = this.preflight(facts);
+		if (refused) return refused;
 		const record = this.stackStore.record(stackId);
 		const entry = this.entry(stackId);
 		if (entry && (entry.runtime === 'docker' || entry.runtime === 'podman')) {
@@ -4004,18 +4392,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				'container_runtime',
 				`A ${entry.runtime === 'podman' ? 'Podman' : 'Docker'} stack already uses this worktree's identity. RN Devtools never attaches container stacks; destroy it from the Supabase tab first.`,
 				{ facts, stackId }
-			);
-		}
-		if (record?.flags.needsRecreate) {
-			return refusal(
-				'failed',
-				'needs_recreate',
-				'The saved stack cannot adopt the current configuration; it must be recreated.',
-				{
-					facts,
-					stackId,
-					...(record.lastError ? { error: record.lastError } : {}),
-				}
 			);
 		}
 		if (record?.flags.interrupted) {
@@ -4027,6 +4403,30 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			);
 		}
 		let status = entry ? await this.readStatus(stackId) : undefined;
+		// A setting the saved stack can't adopt is never retried automatically.
+		// An explicit start tries again, because reverting the setting keeps the
+		// stack; a start that takes clears the flag, and so does a status read
+		// that finds the configuration matching again.
+		const recreate = this.stackStore.record(stackId);
+		if (
+			recreate?.flags.needsRecreate &&
+			request.requestedBy.kind === 'automatic' &&
+			!(status?.owner === 'reachable' && status.lifecycle === 'running')
+		) {
+			// The failure that set the flag, even when a later try failed for
+			// another reason: its recovery says what this message says.
+			const error = supabaseRecreateError(recreate);
+			return refusal(
+				'failed',
+				'needs_recreate',
+				// Reverting keeps the stack only when every listed change is
+				// editable, as its recovery and the renderer's copy also say.
+				supabaseRevertKeepsStack(error?.details.stackChanges)
+					? 'The saved stack cannot adopt the current configuration. Revert the change to keep it, or recreate it.'
+					: 'The saved stack cannot adopt the current configuration; it must be recreated.',
+				{ facts, stackId, ...(error ? { error } : {}) }
+			);
+		}
 		if (
 			status?.owner === 'reachable' &&
 			(status.lifecycle === 'starting' || status.lifecycle === 'stopping')
@@ -4034,6 +4434,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			// Someone else is starting or stopping it: wait for that to settle.
 			status = await this.#waitForOutsideLifecycle(stackId);
 		}
+		// And again once the status reads end.
+		refused = this.preflight(facts);
+		if (refused) return refused;
 		// Owned by another CLI release, which answers nothing else: stop it
 		// (that works across releases) and start it with this worktree's CLI.
 		if (status?.owner === 'reachable' && status.releaseMismatch) {
@@ -4043,24 +4446,35 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			);
 			onJob(restart.jobId);
 			const outcome = await restart.done;
-			return outcome.status === 'complete'
-				? {
-						kind: 'ready',
-						stackId,
+			if (outcome.status === 'complete') {
+				return {
+					kind: 'ready',
+					stackId,
+					facts,
+					warnings: this.#warningsFor(facts),
+				};
+			}
+			if (outcome.status === 'cancelled') {
+				// Called off because the feature was turned off before it began.
+				return (
+					this.preflight(facts) ??
+					refusal('failed', 'supabase_failed', 'The restart was cancelled.', {
 						facts,
-						warnings: this.#warningsFor(facts),
-					}
-				: refusal(
-						'cli-mismatch',
-						'cli_mismatch',
-						outcome.error?.message ??
-							'The stack runs on another Supabase CLI release.',
-						{
-							facts,
-							stackId,
-							...(outcome.error ? { error: outcome.error } : {}),
-						}
-					);
+						stackId,
+					})
+				);
+			}
+			return refusal(
+				'cli-mismatch',
+				'cli_mismatch',
+				outcome.error?.message ??
+					'The stack runs on another Supabase CLI release.',
+				{
+					facts,
+					stackId,
+					...(outcome.error ? { error: outcome.error } : {}),
+				}
+			);
 		}
 		if (status?.owner === 'reachable' && status.lifecycle === 'running') {
 			return this.#attachRunning(facts, stackId);
@@ -4120,10 +4534,15 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			};
 		}
 		if (outcome.status === 'cancelled') {
-			return refusal('failed', 'supabase_failed', 'The start was cancelled.', {
-				facts,
-				stackId,
-			});
+			// Cancelled, or called off because the feature was turned off
+			// before it began: then the refusal says so.
+			return (
+				this.preflight(facts) ??
+				refusal('failed', 'supabase_failed', 'The start was cancelled.', {
+					facts,
+					stackId,
+				})
+			);
 		}
 		const error = outcome.error;
 		if (error?.title === NO_ROOM_TITLE || error?.code === 'capacity') {
@@ -4153,7 +4572,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 						? 'container_runtime'
 						: error?.code === 'cli_mismatch'
 							? 'cli_mismatch'
-							: 'supabase_failed',
+							: error?.title === SUPABASE_BRANCH_MOVED_TITLE
+								? 'branch_moved'
+								: 'supabase_failed',
 			error?.message ?? 'The stack did not start.',
 			{ facts, stackId, ...(error ? { error } : {}) }
 		);
@@ -4181,6 +4602,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			(status.lifecycle === 'starting' || status.lifecycle === 'stopping')
 		) {
 			await supabaseDelay(this.timers, OUTSIDE_START_POLL_MS);
+			// Turned off meanwhile, it stops reading: nothing is probed while off.
+			if (!this.enabled()) break;
 			status = await this.readStatus(stackId);
 		}
 		return status;
@@ -4191,9 +4614,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		stackId: string
 	): Promise<SupabaseEnsureResult> {
 		if (this.#exposure.get(stackId)?.verdict !== 'loopback') {
-			const checked = await this.lockStack(stackId, () =>
-				this.enforceExposure(stackId, undefined)
+			const checked = await this.lockStack(stackId, async () =>
+				// Turned off while this waited for the lock: nothing is probed.
+				this.enabled() ? this.enforceExposure(stackId, undefined) : undefined
 			);
+			if (!checked) return this.#offRefusal();
 			if (!checked.ok) {
 				return refusal(
 					checked.error.title === LAN_EXPOSED_TITLE ? 'lan-exposed' : 'failed',
@@ -4262,11 +4687,19 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}>
 	): Promise<SupabaseEngineJobOutcome> {
 		if (job.signal.aborted) return { status: 'cancelled' };
+		// Turned off while this waited its turn behind the gate or the lock:
+		// it never begins, as nothing starts while the feature is off.
+		const off = this.calledOff();
+		if (off) return off;
 		job.begin();
 		const room = await this.admit(input.stackId, job);
 		if (!room.ok) {
 			job.step('room', 'failed', room.error.message);
-			return { status: 'failed', error: room.error };
+			// Turned off while it made room: called off before anything started.
+			return {
+				status: room.error.code === 'feature_off' ? 'cancelled' : 'failed',
+				error: room.error,
+			};
 		}
 		const started = await this.startStep(
 			{
@@ -4280,6 +4713,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 					this.policySnapshot().policy.eagerLanes,
 				createdBy: input.request.createdBy,
 				skipLane: input.request.lane?.laneId,
+				// The id was named from HEAD before this waited its turn, and the
+				// CLI names it from HEAD again when it runs.
+				precondition: () => this.#stillOnHead(input.facts),
 			},
 			job
 		);
@@ -4289,16 +4725,37 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				: { status: 'failed', error: started.error };
 		}
 		const verified = await this.verifyAfterStart(started.stackId, job);
+		if (verified.status === 'complete' && started.stackId !== input.stackId) {
+			// Another branch's stack started: nothing holds it, so it stops
+			// after the linger, and the caller asks again for its branch.
+			return {
+				status: 'failed',
+				error: this.errorView(supabaseBranchMovedError()),
+			};
+		}
 		if (verified.status === 'complete' && input.request.lane) {
 			job.step('attach', 'done');
 		}
 		return verified;
 	}
 
+	/** Refuses once the worktree left the branch its facts were read on. */
+	async #stillOnHead(
+		facts: SupabaseWorktreeFacts
+	): Promise<ClassifiedSupabaseError | undefined> {
+		if (facts.head?.status !== 'ok') return undefined;
+		const head = await this.#readHead(facts.worktreePath);
+		return head.status === 'ok' &&
+			head.branchContext === facts.head.branchContext
+			? undefined
+			: supabaseBranchMovedError();
+	}
+
 	/**
 	 * Admission before a create or resume: stops the least recently used
 	 * unheld managed stack while the cap or the free Postgres slots require
-	 * it, or refuses (critical memory pressure always refuses).
+	 * it, or refuses (critical memory pressure always refuses, and so does a
+	 * turn-off, with `feature_off`).
 	 */
 	async admit(
 		stackId: string,
@@ -4307,8 +4764,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		Readonly<{ ok: true }> | Readonly<{ ok: false; error: SupabaseErrorView }>
 	> {
 		job?.step('room', 'current');
+		const off = {
+			ok: false,
+			error: supabaseDesktopError('feature_off', OFF_MESSAGE),
+		} as const;
 		await this.#readCapacity();
 		for (let round = 0; ; round += 1) {
+			// Off, the state lists no stacks to count: nothing is admitted on it.
+			if (!this.enabled()) return off;
 			const state = this.getState();
 			const others = state.stacks.filter((stack) => stack.id !== stackId);
 			const running = others.filter(
@@ -4390,7 +4853,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				{ kind: 'automatic', reason: 'capacity' },
 				{ ungated: true }
 			);
-			await stop.done;
+			// Called off by a turn-off, or turned off while it stopped: no more
+			// room is made, and the start that asked never begins.
+			if ((await stop.done).status === 'cancelled' || !this.enabled()) {
+				return off;
+			}
 			await this.#readCapacity();
 		}
 	}
@@ -4480,18 +4947,21 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		this.markDirty();
 	}
 
-	/** Waits until no start, resume, follow or recreate is running. */
+	/**
+	 * The jobs still queued or running that can bring a stack up: creates,
+	 * resumes, follows, recreates, restarts, stop-and-starts and Studio
+	 * switches (a stop, then a start).
+	 */
+	activeStarts(): readonly SupabaseJob[] {
+		return this.jobStore
+			.activeJobs()
+			.filter((job) => STARTING_JOB_KINDS.has(job.kind));
+	}
+
+	/** Waits until none of those is queued or running. */
 	async whenStartsSettled(): Promise<void> {
 		for (;;) {
-			const starts = this.jobStore
-				.activeJobs()
-				.filter(
-					(job) =>
-						job.kind === 'create' ||
-						job.kind === 'resume' ||
-						job.kind === 'follow' ||
-						job.kind === 'recreate'
-				);
+			const starts = this.activeStarts();
 			if (starts.length === 0) return;
 			await Promise.all(
 				starts.map((job) => this.jobStore.waitFor(job.id, 60_000))
@@ -4592,9 +5062,12 @@ export class SupabaseEngine implements SupabaseServiceApi {
 
 	/** Re-reads everything now: the operator's Refresh. */
 	async refreshAll(): Promise<void> {
+		// Like a cheap tick, a Refresh in flight ends at its next step once off.
 		await this.#readOwners();
+		if (!this.#active) return;
 		this.#reservations = await this.#discoveryNow().readPortReservations();
 		await this.#checkPaths();
+		if (!this.#active) return;
 		await this.refreshRepositories();
 		await this.refreshList();
 		const inspected = this.#interest()?.inspectStackId;

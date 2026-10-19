@@ -90,12 +90,12 @@ describe('resolveSupabaseHolds', () => {
 					{
 						laneId: LANE,
 						agent: CLAUDE,
-						appDirectory: WORKTREE,
+						worktreePath: WORKTREE,
 						since: NOW - MINUTE,
 					},
 					{
 						laneId: 'lane-d3c29403-e3a7-4bc9-ab44-93684dacbc56',
-						appDirectory: WORKTREE,
+						worktreePath: WORKTREE,
 						since: NOW - 2 * MINUTE,
 					},
 				],
@@ -327,7 +327,7 @@ describe('resolveSupabaseHolds', () => {
 		const laneHeld = resolveSupabaseHolds(
 			input({
 				stack: { releasedAt: NOW - 60 * MINUTE },
-				lanes: [{ laneId: LANE, appDirectory: WORKTREE, since: NOW - DAY_MS }],
+				lanes: [{ laneId: LANE, worktreePath: WORKTREE, since: NOW - DAY_MS }],
 			})
 		);
 		expect(laneHeld.release).toBe('clear');
@@ -342,7 +342,7 @@ describe('resolveSupabaseHolds', () => {
 		expect(
 			resolveSupabaseHolds(
 				input({
-					lanes: [{ laneId: LANE, appDirectory: WORKTREE, since: NOW }],
+					lanes: [{ laneId: LANE, worktreePath: WORKTREE, since: NOW }],
 				})
 			).release
 		).toBeUndefined();
@@ -416,26 +416,40 @@ describe('resolveSupabaseHolds', () => {
 		expect(result.clocks).toEqual({});
 	});
 
-	it('judges a lane agent against the lane app directory', () => {
-		const result = resolveSupabaseHolds(
-			input({
-				lanes: [
-					{
-						laneId: LANE,
-						agent: SYNTHETIC,
-						appDirectory: `${WORKTREE}/apps/mobile`,
-						since: NOW - MINUTE,
-					},
-				],
-				sessions: [session(CODEX, `${WORKTREE}/apps/mobile/src`)],
-			})
+	it('keeps a monorepo lane live while Codex works over MCP from the checkout root', () => {
+		// The lane's app is apps/mobile; Codex calls over MCP (one synthetic
+		// holder) from the repository root, above it.
+		const lanes = [
+			{
+				laneId: LANE,
+				agent: SYNTHETIC,
+				worktreePath: WORKTREE,
+				since: NOW - MINUTE,
+			},
+		];
+		const atRoot = resolveSupabaseHolds(
+			input({ lanes, sessions: [session(CODEX, WORKTREE)] })
 		);
-		expect(result.holds[0]).toMatchObject({
+		expect(atRoot.holds[0]).toMatchObject({
 			holder: 'lane',
 			laneId: LANE,
 			live: true,
 			agent: { kind: 'codex', sessionId: SYNTHETIC.sessionId, synthetic: true },
 		});
+		expect(atRoot.held).toBe(true);
+		// The live hold stands for that session, so it is not a keeper too.
+		expect(atRoot.cwdKeepers).toEqual([]);
+		expect(atRoot.clocks).toEqual({});
+
+		// From a sibling checkout the lane is gone; its clock is keyed by the
+		// checkout, as its device hold's is.
+		const sibling = resolveSupabaseHolds(
+			input({ lanes, sessions: [session(CODEX, `${WORKTREE}-2`)] })
+		);
+		expect(sibling.holds[0]).toMatchObject({ holder: 'lane', live: false });
+		expect(Object.keys(sibling.clocks)).toEqual([
+			`codex:${SYNTHETIC.sessionId}@${WORKTREE}`,
+		]);
 	});
 
 	it('bounds the holds it reports to 16', () => {

@@ -1,4 +1,7 @@
-import { SUPABASE_UNREADABLE_RECOVERY } from '../../shared/supabase-protocol';
+import {
+	SUPABASE_UNREADABLE_RECOVERY,
+	supabaseRevertKeepsStack,
+} from '../../shared/supabase-protocol';
 import {
 	parseSupabaseErrorEnvelope,
 	parseSupabaseReleaseMismatch,
@@ -18,7 +21,6 @@ import { parseSupabaseJsonLine, type SupabaseCliRunResult } from './cli-runner';
  * native stacks ("Make sure Docker is running").
  */
 
-/** @public */
 export type SupabaseErrorCode =
 	| 'not_found'
 	| 'not_running'
@@ -40,12 +42,10 @@ export type SupabaseErrorCode =
 
 /**
  * How the caller may retry: never, once (stop then start), or with backoff.
- * @public
  */
-export type SupabaseErrorRetry = 'none' | 'once' | 'backoff';
+type SupabaseErrorRetry = 'none' | 'once' | 'backoff';
 
-/** @public */
-export type SupabasePortProblem =
+type SupabasePortProblem =
 	| 'held-by-stack'
 	| 'held-by-process'
 	| 'own-listener'
@@ -55,9 +55,8 @@ export type SupabasePortProblem =
 
 /**
  * Structured facts pulled from the failure; every field is display-safe.
- * @public
  */
-export type SupabaseErrorDetails = Readonly<{
+type SupabaseErrorDetails = Readonly<{
 	upstreamCode?: string;
 	/** The CLI's own suggestion, when it is not misleading for native stacks. */
 	upstreamSuggestion?: string;
@@ -81,9 +80,10 @@ export type SupabaseErrorDetails = Readonly<{
 	timedOut?: boolean;
 	cancelled?: boolean;
 	unexpectedOutput?: boolean;
+	/** More output than the runner reads: a smaller read may fit. Main only. */
+	stdoutTruncated?: boolean;
 }>;
 
-/** @public */
 export type ClassifiedSupabaseError = Readonly<{
 	code: SupabaseErrorCode;
 	title: string;
@@ -94,7 +94,6 @@ export type ClassifiedSupabaseError = Readonly<{
 	details: SupabaseErrorDetails;
 }>;
 
-/** @public */
 export type SupabaseFailureInput = Readonly<{
 	envelope?: SupabaseErrorEnvelope | undefined;
 	exitCode?: number | null | undefined;
@@ -381,8 +380,10 @@ const COPY: Readonly<Record<SupabaseErrorCode, Copy>> = {
 	},
 	needs_recreate: {
 		title: 'Saved stack cannot adopt this configuration',
+		// One change no setting controls forces the recreate whatever else
+		// changed, as the renderer's notice, Resume reason and pill also say.
 		recovery: (details) =>
-			details.stackChanges?.some((change) => change.editable) === true
+			supabaseRevertKeepsStack(details.stackChanges)
 				? 'Revert the listed settings to keep the stack and its data, or destroy and recreate it from RN Devtools, which deletes its local database.'
 				: 'This configuration needs a new stack. Destroy and recreate it from RN Devtools; that deletes its local database.',
 	},
@@ -554,16 +555,35 @@ export function classifySupabaseError(
 	});
 }
 
-/** @public */
 export type SupabaseOutcome<T> =
 	| Readonly<{ ok: true; value: T }>
 	| Readonly<{ ok: false; error: ClassifiedSupabaseError }>;
+
+/** A `--local` call refused because the worktree switched branches meanwhile. */
+export const SUPABASE_BRANCH_MOVED_TITLE = 'Worktree switched branches';
+
+/**
+ * The desktop's own refusal of a `--local` call: the CLI resolves the stack
+ * from HEAD when it runs, so it would reach another branch's stack.
+ */
+export function supabaseBranchMovedError(): ClassifiedSupabaseError {
+	return Object.freeze({
+		code: 'failed',
+		title: SUPABASE_BRANCH_MOVED_TITLE,
+		message:
+			"The worktree moved to another branch while this waited, so it didn't run; it would have reached that branch's stack instead.",
+		recovery: "Switch the worktree back to the stack's branch, then retry.",
+		retry: 'none',
+		details: Object.freeze({}),
+	});
+}
 
 function unexpectedOutput(
 	result: SupabaseCliRunResult,
 	reason: string
 ): ClassifiedSupabaseError {
 	const details: MutableDetails = { unexpectedOutput: true };
+	if (result.stdoutTruncated) details.stdoutTruncated = true;
 	if (typeof result.exitCode === 'number') details.exitCode = result.exitCode;
 	return Object.freeze({
 		code: 'failed',

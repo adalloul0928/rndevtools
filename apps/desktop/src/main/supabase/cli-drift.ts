@@ -36,7 +36,6 @@ export type SupabaseDriftStack = Readonly<{
 	inFlight: boolean;
 }>;
 
-/** @public */
 export type SupabaseDriftPlan = Readonly<{
 	/** Restart these now, with the worktree's binary. */
 	restart: readonly Readonly<{ stackId: string; signature: string }>[];

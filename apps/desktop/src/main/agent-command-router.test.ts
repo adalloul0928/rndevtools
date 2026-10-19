@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentOperation, AgentState } from '../shared/agent-protocol';
 import { createDemoDevice } from '../shared/demo-data';
@@ -9,7 +12,11 @@ import {
 	type LaneOperationReceipt,
 	type LaneState,
 } from '../shared/lane-protocol';
-import type { DesktopAction, DesktopState } from '../shared/protocol';
+import type {
+	DesktopAction,
+	DesktopState,
+	DeviceSession,
+} from '../shared/protocol';
 import type {
 	SimulatorAction,
 	SimulatorState,
@@ -38,6 +45,7 @@ import {
 	type AgentSupabasePort,
 	createAgentCommandRouter,
 } from './agent-command-router';
+import { AgentService } from './agent-service';
 import { NativeHostResponseError } from './native-host-client';
 import type {
 	SupabaseAgentContext,
@@ -209,6 +217,136 @@ const context = {
 	signal: new AbortController().signal,
 };
 
+/** The demo session, advertising the connected-app waits or not. */
+function desktopStateWithWaits(advertised = true): DesktopState {
+	const state = desktopState();
+	return {
+		...state,
+		devices: state.devices.map((device): DeviceSession => {
+			const others = device.info.capabilities.filter(
+				(capability) => !capability.startsWith('components.wait')
+			);
+			return {
+				...device,
+				info: {
+					...device.info,
+					capabilities: advertised
+						? [
+								...others,
+								'components.waitForElement',
+								'components.waitForScreenChange',
+							]
+						: others,
+				},
+			};
+		}),
+	};
+}
+
+type Holder = { kind: 'claude' | 'codex' | 'other'; sessionId: string };
+
+/** Whom `owner`'s lane lets onto every device: itself and the operator. */
+function heldBy(owner: Holder) {
+	return (udid: string, requester?: { kind: string; sessionId: string }) =>
+		!requester ||
+		(requester.kind === owner.kind && requester.sessionId === owner.sessionId)
+			? ({ allowed: true } as const)
+			: ({
+					allowed: false,
+					reason: `Simulator ${udid} is held by ${owner.kind} session ${owner.sessionId} through lane lane-1.`,
+					hold: {
+						simulatorUdid: udid,
+						via: 'lane' as const,
+						laneId: 'lane-1',
+						holder: owner,
+						holderLive: true,
+					},
+				} as const);
+}
+
+/** An agents port that only answers who may touch a device. */
+function holdsOnlyAgents(owner: Holder) {
+	return {
+		getState: (): AgentState => {
+			throw new Error('unused');
+		},
+		refresh: async (): Promise<AgentState> => {
+			throw new Error('unused');
+		},
+		runOperation: async (): Promise<AgentState> => {
+			throw new Error('unused');
+		},
+		touch: () => undefined,
+		access: heldBy(owner),
+	};
+}
+
+/** A simulator port whose recordings run until they are cancelled. */
+function recordingSimulator() {
+	let state = simulatorState();
+	const listeners = new Set<(value: SimulatorState) => void>();
+	const cancelled: string[] = [];
+	const publish = (jobs: SimulatorState['jobs']) => {
+		state = simulatorStateSchema.parse({ ...state, jobs });
+		for (const listener of listeners) listener(state);
+	};
+	const port = {
+		getState: () => state,
+		refresh: async () => state,
+		runAction: (action: SimulatorAction) => {
+			const jobId = `simulator-recording-${state.jobs.length + 1}`;
+			publish([
+				...state.jobs,
+				{
+					id: jobId,
+					actionId: action.actionId,
+					kind: action.kind,
+					...(action.kind === 'capture.video'
+						? { deviceUdid: action.udid }
+						: {}),
+					status: 'running',
+					progressSequence: 1,
+					phase: 'executing',
+					createdAt: now,
+					startedAt: now,
+					message: 'Recording.',
+				},
+			]);
+			return { actionId: action.actionId, accepted: true, jobId };
+		},
+		cancelJob: (jobId: string) => {
+			if (
+				!state.jobs.some((job) => job.id === jobId && job.status === 'running')
+			) {
+				return false;
+			}
+			cancelled.push(jobId);
+			queueMicrotask(() =>
+				publish(
+					state.jobs.map((job) =>
+						job.id === jobId
+							? {
+									...job,
+									status: 'cancelled',
+									progressSequence: 2,
+									phase: 'cancelled',
+									finishedAt: now + 1,
+									message: 'Recording stopped.',
+								}
+							: job
+					)
+				)
+			);
+			return true;
+		},
+		subscribe: (listener: (value: SimulatorState) => void) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+	return { port, cancelled };
+}
+
 describe('agent command router', () => {
 	it('projects local doctor and simulator state without host paths', async () => {
 		const { handler } = fixture();
@@ -311,7 +449,8 @@ describe('agent command router', () => {
 	});
 
 	it('honors long CLI waits through bounded connected-app slices', async () => {
-		const { dependencies } = fixture();
+		const { dependencies, setDesktop } = fixture();
+		setDesktop(desktopStateWithWaits());
 		const timeouts: number[] = [];
 		let failures = 2;
 		dependencies.broker.dispatchAction = async (action: DesktopAction) => {
@@ -341,6 +480,103 @@ describe('agent command router', () => {
 			)
 		).resolves.toMatchObject({ ok: true });
 		expect(timeouts).toEqual([5_000, 5_000, 5_000]);
+	});
+
+	it('spaces connected wait attempts with a timer, so failures answered at once never starve the event loop', async () => {
+		const { dependencies, setDesktop } = fixture();
+		setDesktop(desktopStateWithWaits());
+		let attempts = 0;
+		// The broker answers this without I/O, as it does while the app reloads.
+		dependencies.broker.dispatchAction = async (action: DesktopAction) => {
+			attempts += 1;
+			return {
+				actionId: action.actionId,
+				ok: false,
+				error: 'Device is offline.',
+			};
+		};
+		const handler = createAgentCommandRouter(dependencies);
+		const request = new AbortController();
+		let timerFired = false;
+		setTimeout(() => {
+			timerFired = true;
+		}, 50);
+		setTimeout(() => request.abort(), 120);
+		await expect(
+			handler(
+				{
+					kind: 'wait',
+					target: { udid: UDID },
+					condition: { kind: 'element', elementId: 'button' },
+					timeoutMs: 1_000,
+				},
+				{ ...context, signal: request.signal }
+			)
+		).rejects.toMatchObject({ code: 'cancelled' });
+		expect(timerFired).toBe(true);
+		expect(attempts).toBe(1);
+	});
+
+	it('ends a connected wait at once when the app does not advertise it or its session is gone', async () => {
+		const { dependencies, dispatched, setDesktop } = fixture();
+		const wait = {
+			kind: 'wait' as const,
+			target: { udid: UDID },
+			condition: { kind: 'screen-change' as const, screenHash: 'screen-1' },
+			timeoutMs: 30_000,
+		};
+		setDesktop(desktopStateWithWaits(false));
+		await expect(
+			createAgentCommandRouter(dependencies)(wait, context)
+		).rejects.toMatchObject({
+			code: 'capability_missing',
+			retryable: false,
+			message: expect.stringContaining('components.waitForScreenChange'),
+		});
+		expect(dispatched).toEqual([]);
+
+		const state = desktopStateWithWaits();
+		setDesktop(state);
+		let attempts = 0;
+		dependencies.broker.dispatchAction = async (action: DesktopAction) => {
+			attempts += 1;
+			setDesktop({ ...state, devices: [] });
+			return { actionId: action.actionId, ok: false, error: 'Wait elapsed.' };
+		};
+		await expect(
+			createAgentCommandRouter(dependencies)(wait, context)
+		).rejects.toMatchObject({ code: 'target_not_found' });
+		expect(attempts).toBe(1);
+	});
+
+	it('ends a wait with too little time left for a slice on its last failure, not a contract error', async () => {
+		const { dependencies, setDesktop } = fixture();
+		setDesktop(desktopStateWithWaits());
+		const timeouts: number[] = [];
+		dependencies.broker.dispatchAction = async (action: DesktopAction) => {
+			timeouts.push(Number(action.payload.timeoutMs));
+			return {
+				actionId: action.actionId,
+				ok: false,
+				error: 'Another action is already pending for this device.',
+			};
+		};
+		await expect(
+			createAgentCommandRouter(dependencies)(
+				{
+					kind: 'wait',
+					target: { udid: UDID },
+					condition: { kind: 'element', elementId: 'button' },
+					timeoutMs: 100,
+				},
+				context
+			)
+		).rejects.toMatchObject({
+			code: 'action_failed',
+			message: 'Another action is already pending for this device.',
+		});
+		expect(timeouts.length).toBeGreaterThan(0);
+		expect(timeouts.every((timeoutMs) => timeoutMs >= 50)).toBe(true);
 	});
 
 	it('sets and clears only the app-scoped network profile through safe actions', async () => {
@@ -515,6 +751,220 @@ describe('agent command router', () => {
 			).rejects.toMatchObject({ code: 'invalid_command' });
 		}
 		expect(cancelledSimulatorJobs).toEqual([]);
+	});
+
+	it('lets only the holder cancel jobs or stop a recording on a held device', async () => {
+		const { cancelledSimulatorJobs, dependencies, setSimulator, setSlimming } =
+			fixture();
+		const owner = { kind: 'claude' as const, sessionId: 'owner' };
+		const running = {
+			progressSequence: 1,
+			createdAt: now,
+			startedAt: now,
+			status: 'running' as const,
+		};
+		setSimulator(
+			simulatorStateSchema.parse({
+				...simulatorState(),
+				jobs: [
+					{
+						...running,
+						id: 'simulator-lane-boot',
+						actionId: 'lane-boot',
+						kind: 'device.boot',
+						deviceUdid: UDID,
+						phase: 'executing',
+						message: 'Booting.',
+					},
+					{
+						...running,
+						id: 'simulator-recording',
+						actionId: 'lane-recording',
+						kind: 'capture.video',
+						deviceUdid: UDID,
+						phase: 'executing',
+						message: 'Recording.',
+					},
+				],
+			})
+		);
+		setSlimming(
+			slimmingStateSchema.parse({
+				...slimmingState(),
+				jobs: [
+					{
+						...running,
+						id: 'slimming-lane-apply',
+						actionId: 'lane-apply',
+						kind: 'profile.apply',
+						phase: 'running',
+						message: 'Applying.',
+						currentIndex: 0,
+						total: 1,
+						targets: [
+							{ simulatorUdid: UDID, status: 'running', message: 'Applying.' },
+						],
+					},
+				],
+			})
+		);
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			agents: holdsOnlyAgents(owner),
+		});
+		const asStranger = {
+			...context,
+			agent: { kind: 'codex' as const, sessionId: 'stranger' },
+		};
+		for (const jobId of ['simulator-lane-boot', 'slimming-lane-apply']) {
+			await expect(
+				handler({ kind: 'jobs', operation: 'cancel', jobId }, asStranger)
+			).rejects.toMatchObject({ code: 'device_held' });
+		}
+		const stopRecording = {
+			kind: 'record' as const,
+			operation: 'stop' as const,
+			udid: UDID,
+			codec: 'h264' as const,
+		};
+		await expect(handler(stopRecording, asStranger)).rejects.toMatchObject({
+			code: 'device_held',
+		});
+		expect(cancelledSimulatorJobs).toEqual([]);
+		// Listing and reading jobs stay open to everyone.
+		await expect(
+			handler(
+				{ kind: 'jobs', operation: 'get', jobId: 'simulator-lane-boot' },
+				asStranger
+			)
+		).resolves.toMatchObject({ id: 'simulator-lane-boot' });
+
+		await expect(
+			handler(
+				{ kind: 'jobs', operation: 'cancel', jobId: 'simulator-lane-boot' },
+				{ ...context, agent: owner }
+			)
+		).resolves.toEqual({ cancelled: false });
+		// The fixture's cancel reports the recording already gone.
+		await expect(
+			handler(stopRecording, { ...context, agent: owner })
+		).rejects.toMatchObject({ code: 'invalid_command' });
+		expect(cancelledSimulatorJobs).toEqual([
+			'simulator-lane-boot',
+			'simulator-recording',
+		]);
+	});
+
+	it('lets a session stop or cancel a recording it started after another session took the device, and no one else', async () => {
+		const root = await mkdtemp(
+			path.join(os.tmpdir(), 'rndevtools-router-recordings-')
+		);
+		const recorder = { kind: 'codex' as const, sessionId: 'recorder' };
+		const owner = { kind: 'claude' as const, sessionId: 'owner' };
+		const stranger = { kind: 'claude' as const, sessionId: 'stranger' };
+		const agents = new AgentService({
+			directory: root,
+			lanes: () => [],
+			discover: async () => ({
+				sessions: [recorder, owner, stranger].map((session) => ({
+					...session,
+					title: session.sessionId,
+					cwd: '/Users/dev/app',
+				})),
+				claude: 'ok',
+				codex: 'ok',
+			}),
+			pollIntervalMs: 60_000,
+			now: () => now,
+		});
+		try {
+			await agents.start();
+			const { port: simulator, cancelled } = recordingSimulator();
+			const { dependencies } = fixture();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator,
+				agents,
+			});
+			const by = (agent: Holder) => ({ ...context, agent });
+			const start = {
+				kind: 'record' as const,
+				operation: 'start' as const,
+				udid: UDID,
+				codec: 'h264' as const,
+			};
+
+			// Recording needs no hold, so it starts on the free device; then the
+			// owner claims the device while it runs.
+			const first = (await handler(start, by(recorder))) as { jobId: string };
+			await handler({ kind: 'claim', udid: UDID }, by(owner));
+			const stopFirst = {
+				...start,
+				operation: 'stop' as const,
+				jobId: first.jobId,
+			};
+			// The hold still keeps every other session off the owner's device.
+			await expect(handler(stopFirst, by(stranger))).rejects.toMatchObject({
+				code: 'device_held',
+			});
+			await expect(
+				handler(
+					{ kind: 'jobs', operation: 'cancel', jobId: first.jobId },
+					by(stranger)
+				)
+			).rejects.toMatchObject({ code: 'device_held' });
+			expect(cancelled).toEqual([]);
+
+			await expect(handler(stopFirst, by(recorder))).resolves.toMatchObject({
+				job: { id: first.jobId, status: 'cancelled' },
+			});
+			// A recording only watches, so one on the held device is fine too,
+			// and its starter can cancel it.
+			const second = (await handler(start, by(recorder))) as {
+				jobId: string;
+			};
+			await expect(
+				handler(
+					{ kind: 'jobs', operation: 'cancel', jobId: second.jobId },
+					by(recorder)
+				)
+			).resolves.toEqual({ cancelled: true });
+			expect(cancelled).toEqual([first.jobId, second.jobId]);
+		} finally {
+			await agents.stop();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it('stops the caller’s own recording first when record stop names no job', async () => {
+		const { port: simulator, cancelled } = recordingSimulator();
+		const { dependencies } = fixture();
+		const owner = { kind: 'claude' as const, sessionId: 'owner' };
+		const recorder = { kind: 'codex' as const, sessionId: 'recorder' };
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			simulator,
+			agents: holdsOnlyAgents(owner),
+		});
+		const by = (agent: Holder) => ({ ...context, agent });
+		const record = {
+			kind: 'record' as const,
+			udid: UDID,
+			codec: 'h264' as const,
+		};
+		await handler({ ...record, operation: 'start' }, by(owner));
+		const mine = (await handler(
+			{ ...record, operation: 'start' },
+			by(recorder)
+		)) as { jobId: string };
+		await expect(
+			handler({ ...record, operation: 'stop' }, by(recorder))
+		).resolves.toMatchObject({ job: { id: mine.jobId } });
+		// With none of its own left, the one still going is the holder's.
+		await expect(
+			handler({ ...record, operation: 'stop' }, by(recorder))
+		).rejects.toMatchObject({ code: 'device_held' });
+		expect(cancelled).toEqual([mine.jobId]);
 	});
 
 	it('canonicalizes lowercase Simulator targets before local and recipe dispatch', async () => {
@@ -886,6 +1336,45 @@ describe('agent command router', () => {
 		).resolves.toEqual({ runId: 'recipe-run-smoke', status: 'complete' });
 	});
 
+	it('refuses a recipe run on a device another session holds before the recipe starts', async () => {
+		const { dependencies } = fixture();
+		const owner = { kind: 'claude' as const, sessionId: 'owner' };
+		const runs: string[][] = [];
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			agents: holdsOnlyAgents(owner),
+			recipes: {
+				list: () => [],
+				get: () => undefined,
+				run: async (_recipeId, udids) => {
+					runs.push([...udids]);
+					return { accepted: true };
+				},
+				cancel: () => false,
+				status: () => undefined,
+			},
+		});
+		const run = {
+			kind: 'recipe' as const,
+			operation: 'run' as const,
+			recipeId: 'recipe-smoke',
+			udids: [UDID.toLowerCase()],
+		};
+		await expect(
+			handler(run, {
+				...context,
+				agent: { kind: 'codex', sessionId: 'stranger' },
+			})
+		).rejects.toMatchObject({
+			code: 'device_held',
+			message: expect.stringContaining('owner'),
+		});
+		expect(runs).toEqual([]);
+		await handler(run, { ...context, agent: owner });
+		await handler(run, context);
+		expect(runs).toEqual([[UDID], [UDID]]);
+	});
+
 	describe('native plan and install', () => {
 		/** Simulator port whose app.list/app.install jobs complete and update appsByDevice. */
 		function simulatorWithApps(initial: string[]) {
@@ -1148,6 +1637,37 @@ describe('agent command router', () => {
 				false
 			);
 		});
+
+		it('refuses to install on a device another session holds', async () => {
+			const { dependencies } = fixture();
+			const owner = { kind: 'claude' as const, sessionId: 'owner' };
+			const { port, actions } = simulatorWithApps([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				simulator: port,
+				nativePlan: plan('hit'),
+				agents: holdsOnlyAgents(owner),
+			});
+			const install = {
+				kind: 'native' as const,
+				operation: 'install' as const,
+				configuration: 'Debug' as const,
+				worktreePath: '/Users/dev/app',
+				udid: UDID,
+			};
+			await expect(
+				handler(install, {
+					...context,
+					agent: { kind: 'codex', sessionId: 'stranger' },
+				})
+			).rejects.toMatchObject({ code: 'device_held' });
+			expect(actions.some(({ action }) => action.kind === 'app.install')).toBe(
+				false
+			);
+			await expect(
+				handler(install, { ...context, agent: owner })
+			).resolves.toMatchObject({ action: 'installed-from-cache' });
+		});
 	});
 
 	describe('agents, claims, and touches', () => {
@@ -1276,6 +1796,71 @@ describe('agent command router', () => {
 				simulatorUdid: UDID,
 				agent: session,
 			});
+		});
+
+		it('refuses a claim on a device another session holds', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const owner = { kind: 'codex' as const, sessionId: 'owner' };
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: { ...port, access: heldBy(owner) },
+			});
+			await expect(
+				handler({ kind: 'claim', udid: UDID }, { ...context, agent: session })
+			).rejects.toMatchObject({
+				code: 'device_held',
+				message: expect.stringContaining('owner'),
+			});
+			expect(operations).toEqual([]);
+			await handler(
+				{ kind: 'claim', udid: UDID },
+				{ ...context, agent: owner }
+			);
+			expect(operations).toEqual([
+				{ kind: 'agent.claim', simulatorUdid: UDID, agent: owner },
+			]);
+		});
+
+		it('gives a free device to only one of two sessions claiming it at once', async () => {
+			const root = await mkdtemp(
+				path.join(os.tmpdir(), 'rndevtools-router-claims-')
+			);
+			const agents = new AgentService({
+				directory: root,
+				lanes: () => [],
+				discover: async () => ({ sessions: [], claude: 'ok', codex: 'ok' }),
+				pollIntervalMs: 60_000,
+				now: () => now,
+			});
+			try {
+				await agents.start();
+				const { dependencies } = fixture();
+				const handler = createAgentCommandRouter({ ...dependencies, agents });
+				const results = await Promise.allSettled([
+					handler(
+						{ kind: 'claim', udid: UDID },
+						{ ...context, agent: session }
+					),
+					handler(
+						{ kind: 'claim', udid: UDID },
+						{ ...context, agent: { kind: 'codex', sessionId: 'codex-2' } }
+					),
+				]);
+				expect(results.map((result) => result.status)).toEqual([
+					'fulfilled',
+					'rejected',
+				]);
+				expect(results[1]).toMatchObject({
+					reason: { code: 'device_held' },
+				});
+				expect(
+					agents.getState().claims.map((claim) => claim.sessionId)
+				).toEqual(['claude-1']);
+			} finally {
+				await agents.stop();
+				await rm(root, { recursive: true, force: true });
+			}
 		});
 
 		it('release --all stops the lanes and drops the claims of the calling session only', async () => {
@@ -1601,6 +2186,107 @@ describe('agent command router', () => {
 			expect(
 				port.getState().claims.map((claim) => claim.simulatorUdid)
 			).toEqual([bareUdid]);
+		});
+
+		it('release --all from a monorepo checkout root releases the shared identity’s app lanes in it', async () => {
+			const { dependencies } = fixture();
+			const { port } = agentsPort();
+			const shared = {
+				kind: 'codex' as const,
+				sessionId: 'mcp-codex-mcp-client',
+			};
+			const app: Lane = {
+				...releaseLane(1, '/Users/dev/repo', shared),
+				appPath: '/Users/dev/repo/examples/expo-demo',
+			};
+			port.getState().claims.push({
+				simulatorUdid: app.simulatorUdid,
+				...shared,
+				claimedAt: now,
+			});
+			const { port: lanes } = releaseLanes([app]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+				lanes,
+			});
+			await expect(
+				handler(
+					{ kind: 'release', all: true, sessionCwd: '/Users/dev/repo' },
+					{ ...context, agent: shared }
+				)
+			).resolves.toMatchObject({
+				stoppedLanes: [app.id],
+				releasedClaims: [app.simulatorUdid],
+				errors: [],
+			});
+		});
+
+		it('release --all from inside one app of a checkout leaves the shared identity’s other app lanes running', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const thread = { kind: 'codex' as const, sessionId: 'thread-mobile' };
+			const shared = {
+				kind: 'codex' as const,
+				sessionId: 'mcp-codex-mcp-client',
+			};
+			const mobile: Lane = {
+				...releaseLane(1, '/Users/dev/mono', shared),
+				appPath: '/Users/dev/mono/apps/mobile',
+			};
+			const admin: Lane = {
+				...releaseLane(2, '/Users/dev/mono', shared),
+				appPath: '/Users/dev/mono/apps/admin',
+			};
+			port
+				.getState()
+				.claims.push(
+					{ simulatorUdid: mobile.simulatorUdid, ...shared, claimedAt: now },
+					{ simulatorUdid: admin.simulatorUdid, ...shared, claimedAt: now }
+				);
+			const { port: lanes } = releaseLanes([mobile, admin]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+				lanes,
+			});
+			const endIn = (sessionCwd: string) =>
+				handler(
+					{ kind: 'release', all: true, sessionCwd },
+					{ ...context, agent: thread }
+				);
+
+			// The mobile session's end leaves the admin session's lane alone.
+			await expect(endIn('/Users/dev/mono/apps/mobile/src')).resolves.toEqual({
+				you: thread,
+				stoppedLanes: [mobile.id],
+				pendingLanes: [],
+				releasedClaims: [mobile.simulatorUdid],
+				errors: [],
+			});
+			// A session above the checkout worked in none of its lanes.
+			await expect(endIn('/Users/dev')).resolves.toMatchObject({
+				stoppedLanes: [],
+				releasedClaims: [],
+			});
+			expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([admin.id]);
+			// One at the checkout's root worked above every app lane in it.
+			await expect(endIn('/Users/dev/mono')).resolves.toMatchObject({
+				stoppedLanes: [admin.id],
+				releasedClaims: [admin.simulatorUdid],
+			});
+			expect(operations).toEqual([
+				{
+					kind: 'agent.release',
+					simulatorUdid: mobile.simulatorUdid,
+					agent: shared,
+				},
+				{
+					kind: 'agent.release',
+					simulatorUdid: admin.simulatorUdid,
+					agent: shared,
+				},
+			]);
 		});
 
 		it('records a touch for every device-targeted command that carried a session, after it succeeds', async () => {
@@ -2162,7 +2848,8 @@ describe('agent command router', () => {
 			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app-feature' },
 			{ ...context, agent: stranger }
 		)) as { completed: boolean; deviceRequest?: unknown; next?: string };
-		// No device named, so nothing to check ownership against.
+		// No device named and no lane for the app yet, so nothing to check
+		// ownership against.
 		expect(accessChecks).toBe(0);
 		expect(operations[0]).toMatchObject({
 			kind: 'lane.start',
@@ -2181,6 +2868,101 @@ describe('agent command router', () => {
 		await expect(
 			handler({ kind: 'lane', operation: 'ls' }, context)
 		).resolves.toMatchObject({ deviceRequests: [deviceRequest] });
+	});
+
+	it("checks the device of the app's existing lane on a lane up without a udid", async () => {
+		const { dependencies } = fixture();
+		const owner = { kind: 'claude' as const, sessionId: 'owner-session' };
+		const stranger = { kind: 'codex' as const, sessionId: 'stranger-thread' };
+		// One app of a monorepo worktree has a lane; the worktree root is another app.
+		const lane: Lane = {
+			id: 'lane-11111111-2222-4333-8444-555555555555',
+			worktreePath: '/Users/dev/mono',
+			appPath: '/Users/dev/mono/apps/mobile',
+			branch: 'feature',
+			simulatorUdid: UDID,
+			environment: 'development',
+			port: 8_100,
+			metro: 'ready',
+			logPath: '/Users/dev/lane.log',
+			startedAt: now,
+			agent: { ...owner, lastSeenAt: now },
+		};
+		const state: LaneState = {
+			revision: 1,
+			updatedAt: now,
+			environments: [...DEFAULT_LANE_ENVIRONMENTS],
+			lanes: [lane],
+			worktrees: [],
+			repositories: [],
+			deviceRequests: [],
+		};
+		const operations: LaneOperation[] = [];
+		const checked: string[] = [];
+		const handler = createAgentCommandRouter({
+			...dependencies,
+			agents: {
+				...holdsOnlyAgents(owner),
+				access: (udid, requester) => {
+					checked.push(udid);
+					return heldBy(owner)(udid, requester);
+				},
+			},
+			lanes: {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async (operation: LaneOperation) => {
+					operations.push(operation);
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						lane,
+						state,
+					};
+				},
+			},
+		});
+		const up = (worktreePath: string) =>
+			({ kind: 'lane', operation: 'up', worktreePath }) as const;
+
+		// The lane service would resume the owner's lane, restarting its Metro,
+		// so the stranger gets the typed refusal and its recovery rather than a
+		// failed lane. The path matches however the lane service resolves it.
+		await expect(
+			handler(up('/Users/dev/mono/apps/mobile/'), {
+				...context,
+				agent: stranger,
+			})
+		).rejects.toMatchObject({
+			code: 'device_held',
+			retryable: true,
+			message: expect.stringContaining('owner-session'),
+			recovery: expect.stringContaining('find a free device'),
+		});
+		expect(checked).toEqual([UDID]);
+		expect(operations).toEqual([]);
+
+		// The holder and the operator resume it. Another app in the worktree has
+		// no lane of its own, so there is no device to check: the lane service
+		// picks a free one.
+		await handler(up('/Users/dev/mono/apps/mobile'), {
+			...context,
+			agent: owner,
+		});
+		await handler(up('/Users/dev/mono/apps/mobile'), context);
+		await handler(up('/Users/dev/mono'), { ...context, agent: stranger });
+		expect(checked).toEqual([UDID, UDID]);
+		expect(operations).toMatchObject([
+			{ kind: 'lane.start', worktreePath: '/Users/dev/mono/apps/mobile' },
+			{ kind: 'lane.start', worktreePath: '/Users/dev/mono/apps/mobile' },
+			{ kind: 'lane.start', worktreePath: '/Users/dev/mono', agent: stranger },
+		]);
+		// The router never names the device; the lane service resumes the lane
+		// wherever it runs.
+		for (const operation of operations) {
+			expect(operation).not.toHaveProperty('simulatorUdid');
+		}
 	});
 
 	it('routes lane up/launch/down/log through the lane service and resolves worktree targets', async () => {

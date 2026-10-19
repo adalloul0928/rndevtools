@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { resolveToolPath, type ToolPathResolver } from './lane-tool-path';
 
 /**
  * Native build planning for a worktree: what Expo's fingerprint says, whether
@@ -93,9 +94,10 @@ const req = (id) => require(require.resolve(id, { paths: [projectRoot] }));
 
 /**
  * The project's Node, found next to its Expo binary so the fingerprint runs
- * with the same runtime that would build. Falls back to the Node on PATH that
- * the desktop inherited; never the Electron binary, whose `process.versions`
- * and native modules differ.
+ * with the same runtime that would build. Falls back to the Node on `env`'s
+ * PATH (the tool PATH, which finds the user's Node even in a desktop opened
+ * from Finder); never the Electron binary, whose `process.versions` and
+ * native modules differ.
  */
 export function resolveProjectNode(
 	projectRoot: string,
@@ -130,19 +132,20 @@ export type NativePlanRunner = (
  * Bounded child process in the project directory. `runSimulatorCommand`
  * pins a minimal PATH for Apple tooling, which is right for simctl and wrong
  * for a project's Node (version managers live in the user's PATH), so this
- * runner is separate: inherited environment, a hard timeout, output caps,
- * and a kill on abort.
+ * runner is separate: the desktop's environment with the tool PATH, a hard
+ * timeout, output caps, and a kill on abort.
  */
 function runProjectNode(
 	node: string,
 	args: readonly string[],
 	cwd: string,
+	env: NodeJS.ProcessEnv,
 	signal: AbortSignal | undefined
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(node, [...args], {
 			cwd,
-			env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1' },
+			env: { ...env, CI: '1', EXPO_NO_TELEMETRY: '1' },
 			stdio: ['ignore', 'pipe', 'pipe'],
 			shell: false,
 		});
@@ -187,25 +190,50 @@ function runProjectNode(
 	});
 }
 
-export const runNativePlan: NativePlanRunner = async (input, signal) => {
-	const projectRoot = path.resolve(input.projectRoot);
-	const node = resolveProjectNode(projectRoot);
-	if (!node) {
-		throw new Error(
-			'Node was not found for this worktree; install dependencies so @expo/fingerprint can run.'
+/**
+ * The native plan with `toolPath` deciding the PATH its Node is found on and
+ * runs with; the desktop's own PATH may hold no Node at all.
+ */
+export function createNativePlanRunner({
+	toolPath = resolveToolPath,
+}: {
+	toolPath?: ToolPathResolver;
+} = {}): NativePlanRunner {
+	return async (input, signal) => {
+		const projectRoot = path.resolve(input.projectRoot);
+		const searchPath = await toolPath(process.env.PATH);
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			...(searchPath !== undefined ? { PATH: searchPath } : {}),
+		};
+		const node = resolveProjectNode(projectRoot, env);
+		if (!node) {
+			throw new Error(
+				'Node was not found for this worktree; install dependencies so @expo/fingerprint can run.'
+			);
+		}
+		const result = await runProjectNode(
+			node,
+			[
+				'-e',
+				PLAN_SCRIPT,
+				'--',
+				projectRoot,
+				input.platform,
+				input.configuration,
+			],
+			projectRoot,
+			env,
+			signal
 		);
-	}
-	const result = await runProjectNode(
-		node,
-		['-e', PLAN_SCRIPT, '--', projectRoot, input.platform, input.configuration],
-		projectRoot,
-		signal
-	);
-	if (result.exitCode !== 0) {
-		const detail = result.stderr.trim().split('\n').slice(0, 3).join(' ');
-		throw new Error(
-			`Fingerprinting ${projectRoot} failed: ${detail || `exit ${result.exitCode}`}. Is @expo/fingerprint installed in the worktree?`
-		);
-	}
-	return nativePlanResultSchema.parse(JSON.parse(result.stdout));
-};
+		if (result.exitCode !== 0) {
+			const detail = result.stderr.trim().split('\n').slice(0, 3).join(' ');
+			throw new Error(
+				`Fingerprinting ${projectRoot} failed: ${detail || `exit ${result.exitCode}`}. Is @expo/fingerprint installed in the worktree?`
+			);
+		}
+		return nativePlanResultSchema.parse(JSON.parse(result.stdout));
+	};
+}
+
+export const runNativePlan: NativePlanRunner = createNativePlanRunner();

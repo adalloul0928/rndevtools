@@ -7,7 +7,6 @@ import {
 import {
 	isSupabaseStackRunning,
 	LANE_BACKEND_WARNINGS,
-	SUPABASE_MAX_LOG_CHARACTERS,
 	type SupabaseAgentEnv,
 	type SupabaseAgentErrorCode,
 	type SupabaseAgentOperation,
@@ -24,7 +23,8 @@ import {
 	supabaseBranchLabel,
 } from '../../shared/supabase-protocol';
 import { AgentCliError } from '../agent-cli-service';
-import { parseSupabaseDbReset, parseSupabaseStackLogs } from './cli-contract';
+import { parseSupabaseDbReset } from './cli-contract';
+import { SUPABASE_BRANCH_MOVED_TITLE } from './cli-errors';
 import { hasSupabaseControlCharacters } from './engine-support';
 import { initialSupabaseJobSteps } from './job-store';
 import type { SupabaseWorktreeFacts } from './repositories';
@@ -415,7 +415,12 @@ async function up(
 	const lanes = engine.attachmentsOf(stackId);
 	if (!settled) {
 		const stack = stackOf(engine, stackId);
-		const job = jobId ?? engine.activeJobFor(stackId)?.id;
+		// Queued behind an automatic start of this stack, the up has no job of
+		// its own yet; that start's job may fail while this up then succeeds.
+		const queued = jobId === undefined && engine.ensureQueued(stackId);
+		const job = queued
+			? undefined
+			: (jobId ?? engine.activeJobFor(stackId)?.id);
 		return {
 			operation: 'up',
 			stack: stack
@@ -435,9 +440,11 @@ async function up(
 			metro: lanes.length > 0 ? 'pending' : 'no-lane',
 			...(cli ? { cli } : {}),
 			...(job ? { jobId: job } : {}),
-			next: job
-				? `The stack is still starting (a first start on this Mac downloads services once). Call wait with condition job and job id ${job}, then call supabase with operation up again.`
-				: 'The stack is still starting. Call supabase with operation up again in a few seconds.',
+			next: queued
+				? "This up is queued behind RN Devtools' automatic start of the stack. Call supabase with operation up again in a few seconds."
+				: job
+					? `The stack is still starting (a first start on this Mac downloads services once). Call wait with condition job and job id ${job}, then call supabase with operation up again.`
+					: 'The stack is still starting. Call supabase with operation up again in a few seconds.',
 			warnings: warningsFor(engine, stack, []),
 		};
 	}
@@ -812,6 +819,8 @@ async function reset(
 		},
 		(job) =>
 			engine.lockStack(view.id, async () => {
+				const off = engine.calledOff();
+				if (off) return off;
 				job.begin();
 				const result = await engine.databaseStep(
 					view,
@@ -838,6 +847,17 @@ async function reset(
 	);
 	const outcome = await within(engine, done, RESET_WAIT_MS, signal);
 	if (outcome && outcome.status !== 'complete') {
+		// The worktree switched branches while the reset waited its turn.
+		if (outcome.error?.title === SUPABASE_BRANCH_MOVED_TITLE) {
+			throw agentError('branch_moved', outcome.error.message, runner);
+		}
+		// Or the feature was turned off, and the reset was called off.
+		if (outcome.error?.code === 'feature_off') {
+			throw agentError(
+				'supabase_disabled',
+				'Local Supabase is off in RN Devtools, so it is not managing this worktree.'
+			);
+		}
 		throw agentError(
 			'supabase_failed',
 			outcome.error?.message ?? 'The reset failed.',
@@ -871,21 +891,21 @@ async function log(
 			runnerOf(resolved.facts)
 		);
 	}
-	const outcome = await engine.runRead(
-		cli,
-		{
-			kind: 'stack.logs',
-			stackId: resolved.stackId,
-			tail: operation.tail,
-			...(operation.services ? { services: operation.services } : {}),
-			...(operation.since ? { since: operation.since } : {}),
-		},
-		(json) =>
-			parseSupabaseStackLogs(json, {
-				maxCharacters: SUPABASE_MAX_LOG_CHARACTERS,
-			})
-	);
+	const outcome = await engine.readLogs(cli, {
+		kind: 'stack.logs',
+		stackId: resolved.stackId,
+		tail: operation.tail,
+		...(operation.services ? { services: operation.services } : {}),
+		...(operation.since ? { since: operation.since } : {}),
+	});
 	if (!outcome.ok) {
+		// Turned off while the read waited for a CLI slot: it never ran.
+		if (!engine.enabled()) {
+			throw agentError(
+				'supabase_disabled',
+				'Local Supabase is off in RN Devtools, so it is not managing this worktree.'
+			);
+		}
 		throw agentError(
 			outcome.error.code === 'not_found' ? 'not_found' : 'supabase_failed',
 			outcome.error.message,

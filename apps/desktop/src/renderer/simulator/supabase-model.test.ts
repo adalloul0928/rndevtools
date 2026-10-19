@@ -14,6 +14,7 @@ import {
 	type SupabaseJob,
 	type SupabaseLogRecord,
 	type SupabaseLogsPayload,
+	type SupabaseStackChangeView,
 	type SupabaseStackSummary,
 	type SupabaseState,
 	stackStatus,
@@ -82,7 +83,6 @@ import {
 	supabaseTabState,
 	supabaseVisibleRepositoryRows,
 	supabaseVisibleRows,
-	toggleSupabasePruneGroup,
 	toggleSupabasePruneStack,
 } from './supabase-model';
 
@@ -970,18 +970,14 @@ describe('clean up', () => {
 		).toEqual(selection);
 	});
 
-	it('toggles stacks and groups, and summarises the trigger', () => {
+	it('toggles stacks, and summarises the trigger', () => {
 		let selection = defaultSupabasePruneSelection(state.prune);
 		selection = toggleSupabasePruneStack(
 			selection,
 			state.prune,
 			ids.featSearch
 		);
-		selection = toggleSupabasePruneGroup(
-			selection,
-			state.prune,
-			'stale-branch'
-		);
+		selection = toggleSupabasePruneStack(selection, state.prune, ids.featOldUi);
 		expect(selection.stackIds).toEqual([
 			ids.featGone,
 			ids.featSearch,
@@ -1001,11 +997,7 @@ describe('clean up', () => {
 		expect(summary.lastResult).toMatch(
 			/^Last clean up destroyed 2 stacks and freed 120 MB · /
 		);
-		selection = toggleSupabasePruneGroup(
-			selection,
-			state.prune,
-			'stale-branch'
-		);
+		selection = toggleSupabasePruneStack(selection, state.prune, ids.featOldUi);
 		expect(selection.stackIds).toEqual([ids.featGone, ids.featSearch]);
 		expect(supabaseCleanUpOperation(selection)).toEqual({
 			kind: 'destroy',
@@ -1509,6 +1501,155 @@ describe('supabaseDetailNotices', () => {
 			'try-again',
 			'destroy',
 		]);
+	});
+
+	it('offers reverting editable changes, else only Destroy and recreate', () => {
+		const majorVersion: SupabaseStackChangeView = {
+			service: 'database',
+			path: 'config.version',
+			key: '[db] major_version',
+			saved: '15',
+			requested: '17',
+			editable: true,
+		};
+		const needsRecreate = (stackChanges?: SupabaseStackChangeView[]) =>
+			withStack(demo(), ids.featSearch, {
+				state: 'needs-recreate',
+				lastError: {
+					code: 'needs_recreate',
+					title: 'Saved stack cannot adopt this configuration',
+					message: 'The saved stack cannot adopt these changes.',
+					recovery: 'Revert the listed settings, or destroy and recreate it.',
+					retry: 'none',
+					details: stackChanges ? { stackChanges } : {},
+				},
+				...(stackChanges ? { recreateChanges: stackChanges } : {}),
+			});
+		const noticesOf = (state: SupabaseState) =>
+			supabaseDetailNotices(stackIn(state, ids.featSearch), state, context);
+		const resumeOf = (state: SupabaseState) =>
+			supabaseDetailActions(stackIn(state, ids.featSearch), state, context)[0];
+
+		const revertable = needsRecreate([majorVersion]);
+		const [notice, ...rest] = noticesOf(revertable);
+		expect(rest).toEqual([]);
+		expect(notice).toMatchObject({
+			id: 'needs-recreate',
+			tone: 'danger',
+			title: 'Needs recreate.',
+			text: "The saved stack can't adopt this configuration. Revert the listed settings to keep it and its data, or destroy and recreate it for a fresh, migrated, seeded database.",
+			changes: [majorVersion],
+		});
+		expect(
+			notice?.controls.map((control) => [
+				control.label,
+				control.availability.allowed,
+				control.confirmation.kind,
+			])
+		).toEqual([['Destroy and recreate…', true, 'native']]);
+		expect(resumeOf(revertable)).toMatchObject({
+			id: 'resume',
+			availability: { allowed: false },
+		});
+		// The notice, the disabled Resume's reason and the pill agree.
+		const adviceOf = (state: SupabaseState) => {
+			const resume = resumeOf(state)?.availability;
+			return {
+				notice: noticesOf(state)[0]?.text,
+				resume: resume?.allowed === false ? resume.reason : undefined,
+				pill: stackStatus(stackIn(state, ids.featSearch)).explanation,
+			};
+		};
+		expect(adviceOf(revertable)).toEqual({
+			notice: notice?.text,
+			resume:
+				'[db] major_version changed from 15 to 17. Revert it to keep this stack, or recreate it.',
+			pill: 'The saved stack cannot adopt this configuration. Revert the change to keep it, or recreate it.',
+		});
+
+		const build: SupabaseStackChangeView = {
+			key: 'Postgres build',
+			saved: '17.4.1',
+			requested: '17.6.1',
+			editable: false,
+		};
+		const recreateOnly = {
+			notice:
+				"The saved stack can't adopt this configuration. Recreating destroys its data and starts a fresh, migrated, seeded database.",
+			resume:
+				'This stack must be recreated: Postgres build changed from 17.4.1 to 17.6.1.',
+			pill: 'The saved stack cannot adopt this configuration. Recreate it.',
+		};
+		expect(adviceOf(needsRecreate([build]))).toEqual(recreateOnly);
+		// A change no setting controls blocks the start whatever else changed.
+		expect(adviceOf(needsRecreate([majorVersion, build]))).toEqual(
+			recreateOnly
+		);
+		expect(adviceOf(needsRecreate([build, majorVersion]))).toEqual(
+			recreateOnly
+		);
+		const [unlisted] = noticesOf(needsRecreate());
+		expect(unlisted?.text).toBe(recreateOnly.notice);
+		expect(unlisted).not.toHaveProperty('changes');
+		expect(adviceOf(needsRecreate()).pill).toBe(recreateOnly.pill);
+
+		// Reverted: main's next status read drops the state and its error.
+		const reverted = withStack(demo(), ids.featSearch, { state: 'stopped' });
+		expect(noticesOf(reverted)).toEqual([]);
+		expect(resumeOf(reverted)).toMatchObject({
+			id: 'resume',
+			availability: { allowed: true },
+		});
+	});
+
+	it('still offers reverting once a retry fails for another reason', () => {
+		const majorVersion: SupabaseStackChangeView = {
+			service: 'database',
+			path: 'config.version',
+			key: '[db] major_version',
+			saved: '15',
+			requested: '17',
+			editable: true,
+		};
+		// A lane tried it again and found its port taken: main keeps the state
+		// and what it can't adopt, and lastError is the new failure.
+		const state = withStack(demo(), ids.featSearch, {
+			state: 'needs-recreate',
+			recreateChanges: [majorVersion],
+			lastError: {
+				code: 'ports_conflict',
+				title: 'Port unavailable',
+				message: 'Port 54321 for api at 127.0.0.1 is in use by another process',
+				recovery:
+					'Another process is using port 54321. Free it, or remove the pinned port setting, then start again.',
+				retry: 'none',
+				details: { port: 54_321, key: 'api', portProblem: 'held-by-process' },
+			},
+		});
+		const stack = stackIn(state, ids.featSearch);
+		const notices = supabaseDetailNotices(stack, state, context);
+		expect(notices.map((notice) => notice.id)).toEqual([
+			'needs-recreate',
+			'error:ports_conflict',
+		]);
+		expect(notices[0]).toMatchObject({
+			text: "The saved stack can't adopt this configuration. Revert the listed settings to keep it and its data, or destroy and recreate it for a fresh, migrated, seeded database.",
+			changes: [majorVersion],
+		});
+		expect(notices[1]).toMatchObject({
+			title: 'Port unavailable.',
+			text: 'Another process is using port 54321. Free it, or remove the pinned port setting, then start again.',
+		});
+		expect(
+			supabaseDetailActions(stack, state, context)[0]?.availability
+		).toMatchObject({
+			allowed: false,
+			reason:
+				'[db] major_version changed from 15 to 17. Revert it to keep this stack, or recreate it.',
+		});
+		expect(stackStatus(stack).explanation).toBe(
+			'The saved stack cannot adopt this configuration. Revert the change to keep it, or recreate it.'
+		);
 	});
 
 	it('offers Stop and Restart with this CLI for a release mismatch', () => {

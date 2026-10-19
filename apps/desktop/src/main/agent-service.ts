@@ -1,4 +1,12 @@
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import {
+	chmod,
+	mkdir,
+	readFile,
+	rename,
+	unlink,
+	writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -70,6 +78,7 @@ const storedClaimsSchema = z.strictObject({
 class AgentClaimStore {
 	readonly #file: string;
 	#claims: AgentClaim[] = [];
+	#writeQueue: Promise<void> = Promise.resolve();
 
 	constructor(directory: string) {
 		this.#file = path.join(directory, 'claims.json');
@@ -97,23 +106,38 @@ class AgentClaimStore {
 		return this.#claims;
 	}
 
+	/**
+	 * Replaces the claims at once and persists them. Writes queue up, each
+	 * through its own temporary file, so overlapping claims, releases, and
+	 * expiries reach the disk in order and never fail each other's rename.
+	 */
 	async set(claims: readonly AgentClaim[]): Promise<void> {
 		this.#claims = [...claims];
-		const temporary = `${this.#file}.tmp`;
-		await writeFile(
-			temporary,
-			`${JSON.stringify({ version: 1, claims: this.#claims }, null, '\t')}\n`,
-			{ mode: 0o600 }
-		);
-		await chmod(temporary, 0o600).catch(() => undefined);
-		await rename(temporary, this.#file);
+		const snapshot = `${JSON.stringify({ version: 1, claims: this.#claims }, null, '\t')}\n`;
+		const write = this.#writeQueue.then(async () => {
+			const temporary = `${this.#file}.${process.pid}.${randomUUID()}.tmp`;
+			try {
+				await writeFile(temporary, snapshot, { mode: 0o600 });
+				await chmod(temporary, 0o600).catch(() => undefined);
+				await rename(temporary, this.#file);
+			} catch (error) {
+				await unlink(temporary).catch(() => undefined);
+				throw error;
+			}
+		});
+		this.#writeQueue = write.catch(() => undefined);
+		await write;
 	}
 }
 
 export type AgentLaneSource = () => readonly {
 	id: string;
 	simulatorUdid: string;
-	appDirectory: string;
+	/**
+	 * The lane's checkout, not the app inside it: sessions working anywhere in
+	 * it are attributed to the lane and keep a synthetic owner's hold alive.
+	 */
+	worktreePath: string;
 	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string } | undefined;
 	metro: 'starting' | 'ready' | 'stopped';
 	startedAt: number;
@@ -244,7 +268,7 @@ export class AgentService {
 				)
 			: undefined;
 		return decideDeviceAccess(hold, requester, this.#now(), {
-			directory: lane?.appDirectory,
+			directory: lane?.worktreePath,
 			requesterCwd: session?.cwd,
 		});
 	}
@@ -314,28 +338,32 @@ export class AgentService {
 		switch (operation.kind) {
 			case 'agent.claim': {
 				const udid = operation.simulatorUdid.toUpperCase();
-				const others = this.#store
-					.claims()
-					.filter(
-						(claim) =>
-							!(
-								claim.simulatorUdid === udid &&
-								agentSessionKey(claim) === agentSessionKey(operation.agent)
-							)
-					);
-				if (others.length >= MAX_CLAIMS) {
+				const claim: AgentClaim = {
+					simulatorUdid: udid,
+					kind: operation.agent.kind,
+					sessionId: operation.agent.sessionId,
+					...(operation.note ? { note: operation.note } : {}),
+					claimedAt: this.#now(),
+				};
+				const claims = this.#store.claims();
+				const existing = claims.findIndex(
+					(candidate) =>
+						candidate.simulatorUdid === udid &&
+						agentSessionKey(candidate) === agentSessionKey(operation.agent)
+				);
+				if (existing === -1 && claims.length >= MAX_CLAIMS) {
 					throw new Error(`The ${MAX_CLAIMS}-claim limit is reached.`);
 				}
-				await this.#store.set([
-					...others,
-					{
-						simulatorUdid: udid,
-						kind: operation.agent.kind,
-						sessionId: operation.agent.sessionId,
-						...(operation.note ? { note: operation.note } : {}),
-						claimedAt: this.#now(),
-					},
-				]);
+				// A re-claim (to change the note, say) replaces the claim where it
+				// stands: a device's first claim is its hold, and refreshing that
+				// claim must not hand the device to a later claimant.
+				await this.#store.set(
+					existing === -1
+						? [...claims, claim]
+						: claims.map((candidate, index) =>
+								index === existing ? claim : candidate
+							)
+				);
 				this.touch(operation.agent, udid);
 				return this.getState();
 			}
@@ -424,7 +452,7 @@ export class AgentService {
 									kind: lane.agent.kind,
 									sessionId: lane.agent.sessionId,
 								},
-								directory: lane.appDirectory,
+								directory: lane.worktreePath,
 							},
 						]
 					: []

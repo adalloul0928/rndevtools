@@ -169,6 +169,33 @@ describe('supabasePendingKeys', () => {
 		).toEqual([`request:${ids.requestOldUi}`]);
 		expect(supabasePendingKeys({ kind: 'refresh' })).toEqual(['refresh']);
 	});
+
+	it('keys a background read apart, so auto-refresh never refuses the operator', () => {
+		const manual = supabasePendingKeys({
+			kind: 'read-logs',
+			stackId: ids.main,
+			services: ['auth'],
+			tail: 200,
+		});
+		const tick = supabasePendingKeys(
+			{
+				kind: 'read-logs',
+				stackId: ids.main,
+				tail: 1_000,
+				since: '2026-10-17T14:02:11.000Z',
+			},
+			{ background: true }
+		);
+		expect(tick).toEqual([`background:read-logs:${ids.main}`]);
+		expect(tick.some((key) => manual.includes(key))).toBe(false);
+		// Two ticks still share a key, so a slow one is never doubled.
+		expect(
+			supabasePendingKeys(
+				{ kind: 'read-logs', stackId: ids.main, tail: 1_000, since: '5s' },
+				{ background: true }
+			)
+		).toEqual(tick);
+	});
 });
 
 describe('confirmThenRunSupabaseOperation', () => {

@@ -206,7 +206,7 @@ describe('AgentService', () => {
 				{
 					id: 'lane-checkout',
 					simulatorUdid: A,
-					appDirectory: '/Users/dev/app-checkout',
+					worktreePath: '/Users/dev/app-checkout',
 					metro: 'ready',
 					startedAt: clock - 60_000,
 				},
@@ -378,7 +378,7 @@ describe('AgentService', () => {
 		await withHolders.stop();
 	});
 
-	it('attributes a session to the lane whose app directory it works in', () => {
+	it('attributes a session to the lane whose checkout it works in', () => {
 		expect(service.getState().byDevice[A]).toEqual([
 			expect.objectContaining({
 				sessionId: 'claude-1',
@@ -386,6 +386,88 @@ describe('AgentService', () => {
 				live: true,
 			}),
 		]);
+	});
+
+	it('keeps a device with its first claimant when that session claims it again', async () => {
+		const first = { kind: 'claude' as const, sessionId: 'claude-1' };
+		const later = { kind: 'codex' as const, sessionId: 'codex-9' };
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: first,
+		});
+		// The operator may still claim a held device on another session's behalf.
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: later,
+		});
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: first,
+			note: 'still mine',
+		});
+		expect(service.holds().get(B)?.holder).toEqual(first);
+		expect(service.access(B, first).allowed).toBe(true);
+		expect(service.access(B, later).allowed).toBe(false);
+		expect(
+			service.getState().claims.map((claim) => [claim.sessionId, claim.note])
+		).toEqual([
+			['claude-1', 'still mine'],
+			['codex-9', undefined],
+		]);
+	});
+
+	it('persists overlapping claims and releases in order, failing none of them', async () => {
+		const udids = Array.from(
+			{ length: 8 },
+			(_, index) => `AAAAAAAA-0000-4000-8000-00000000001${index}`
+		);
+		await Promise.all(
+			udids.map((simulatorUdid, index) =>
+				service.runOperation({
+					kind: 'agent.claim',
+					simulatorUdid,
+					agent: { kind: 'claude', sessionId: `claude-${index + 10}` },
+				})
+			)
+		);
+		// A release and a claim started in the same tick.
+		await Promise.all([
+			service.runOperation({
+				kind: 'agent.release',
+				simulatorUdid: 'AAAAAAAA-0000-4000-8000-000000000010',
+				agent: { kind: 'claude', sessionId: 'claude-10' },
+			}),
+			service.runOperation({
+				kind: 'agent.claim',
+				simulatorUdid: B,
+				agent: { kind: 'claude', sessionId: 'claude-1' },
+			}),
+		]);
+		const claims = service.getState().claims;
+		expect(claims).toHaveLength(8);
+		// What a restart reads back is exactly what the running service holds.
+		const restarted = new AgentService({
+			directory: root,
+			lanes: () => [],
+			discover: async () => ({ sessions, claude: 'ok', codex: 'unavailable' }),
+			now: () => clock,
+		});
+		await restarted.start();
+		expect(restarted.getState().claims).toEqual(claims);
+		await restarted.stop();
+	});
+
+	it('keeps answering when more than 32 sessions have touched one device', () => {
+		for (let index = 0; index < 40; index += 1) {
+			clock += 1;
+			service.touch({ kind: 'claude', sessionId: `headless-${index}` }, B);
+		}
+		const attached = service.getState().byDevice[B] ?? [];
+		expect(attached).toHaveLength(32);
+		expect(attached[0]?.sessionId).toBe('headless-39');
 	});
 
 	it('notifies subscribers with validated state and keeps discovery errors visible', async () => {
@@ -509,7 +591,7 @@ describe('AgentService holds through the lane reconcile', () => {
 				lanes.getState().lanes.map((entry) => ({
 					id: entry.id,
 					simulatorUdid: entry.simulatorUdid,
-					appDirectory: entry.appPath ?? entry.worktreePath,
+					worktreePath: entry.worktreePath,
 					agent: entry.agent,
 					metro: entry.metro,
 					startedAt: entry.startedAt,
@@ -604,6 +686,35 @@ describe('AgentService holds through the lane reconcile', () => {
 		clock += DEVICE_HOLD_GRACE_MS;
 		await tick();
 		expect(laneIds()).toEqual([]);
+	});
+
+	it('keeps a monorepo app lane while a session of its synthetic holder works from the checkout root', async () => {
+		const REPO = '/Users/dev/repo';
+		sessions = [session('codex', 'thread-1', REPO)];
+		await start([
+			{
+				...lane(LANE_A, A, REPO, synthetic),
+				appPath: `${REPO}/examples/expo-demo`,
+			},
+		]);
+		await tick();
+		expect(agents.holds().get(A)).toMatchObject({
+			holder: synthetic,
+			holderLive: true,
+		});
+		clock += 2 * DEVICE_HOLD_GRACE_MS;
+		await tick();
+		expect(laneIds()).toEqual([LANE_A]);
+		expect(metro.stopped).toEqual([]);
+		// The same thread may drive the device over the CLI, and reads as attached.
+		expect(
+			agents.access(A, { kind: 'codex', sessionId: 'thread-1' }).allowed
+		).toBe(true);
+		expect(
+			agents
+				.getState()
+				.byDevice[A]?.map((agent) => [agent.sessionId, agent.via])
+		).toEqual([['thread-1', 'lane']]);
 	});
 
 	it('pauses the clocks of an agent kind while its discovery is unavailable', async () => {

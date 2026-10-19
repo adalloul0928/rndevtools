@@ -4,7 +4,6 @@ import {
 	checkSupabaseOperation,
 	isSupabaseStackRunning,
 	SUPABASE_CLIPBOARD_CLEAR_MS,
-	SUPABASE_MAX_LOG_CHARACTERS,
 	SUPABASE_PREPARABLE_CAPABILITIES,
 	type SupabaseDatabasePayload,
 	type SupabaseErrorView,
@@ -27,7 +26,6 @@ import {
 	parseSupabaseMigrationList,
 	parseSupabaseMigrationUp,
 	parseSupabaseSeedBuckets,
-	parseSupabaseStackLogs,
 	type SupabaseMigrationStatus,
 } from './cli-contract';
 import type { SupabasePreparableCapability } from './dialect';
@@ -178,8 +176,15 @@ async function stop(
 			async (job) => {
 				job.begin();
 				const errors: SupabaseErrorView[] = [];
+				const calledOff: SupabaseEngineJobOutcome[] = [];
 				let finished = 0;
 				await forEachStack(engine, ids, async (stackId) => {
+					// A stack whose turn comes once the feature is off keeps running.
+					const off = engine.calledOff();
+					if (off) {
+						calledOff.push(off);
+						return;
+					}
 					const result = await engine.stopStep(stackId, job, {
 						clearPin: true,
 					});
@@ -189,6 +194,8 @@ async function stop(
 						job.progress(`Stopped ${finished} of ${ids.length}.`);
 				});
 				const [first] = errors;
+				const [off] = calledOff;
+				if (!first && off) return off;
 				return first
 					? {
 							status: 'failed',
@@ -197,7 +204,7 @@ async function stop(
 									? {
 											...first,
 											message: message(
-												`Stopped ${ids.length - errors.length} of ${ids.length}. ${first.message}`
+												`Stopped ${finished - errors.length} of ${ids.length}. ${first.message}`
 											),
 										}
 									: first,
@@ -307,6 +314,8 @@ async function stopAndStart(
 			(job) =>
 				engine.lifecycleGate().run(() =>
 					engine.lockStack(view.id, async () => {
+						const off = engine.calledOff();
+						if (off) return off;
 						job.begin();
 						const stopped = await engine.stopStep(view.id, job, {
 							clearPin: false,
@@ -361,6 +370,8 @@ async function restart(
 			(job) =>
 				engine.lifecycleGate().run(() =>
 					engine.lockStack(view.id, async () => {
+						const off = engine.calledOff();
+						if (off) return off;
 						job.begin();
 						const restarted = await engine.restartStep(view, job, cli);
 						if (!restarted.ok)
@@ -392,20 +403,13 @@ async function readLogs(
 			)
 		);
 	}
-	const outcome = await engine.runRead(
-		cli,
-		{
-			kind: 'stack.logs',
-			stackId: operation.stackId,
-			tail: operation.tail,
-			...(operation.services ? { services: operation.services } : {}),
-			...(operation.since ? { since: operation.since } : {}),
-		},
-		(json) =>
-			parseSupabaseStackLogs(json, {
-				maxCharacters: SUPABASE_MAX_LOG_CHARACTERS,
-			})
-	);
+	const outcome = await engine.readLogs(cli, {
+		kind: 'stack.logs',
+		stackId: operation.stackId,
+		tail: operation.tail,
+		...(operation.services ? { services: operation.services } : {}),
+		...(operation.since ? { since: operation.since } : {}),
+	});
 	if (!outcome.ok) return failed(operation, engine.errorView(outcome.error));
 	const records: SupabaseLogRecord[] = outcome.value.records
 		.slice(-5_000)
@@ -604,6 +608,8 @@ async function databaseJob(
 		},
 		(job) =>
 			engine.lockStack(view.id, async () => {
+				const off = engine.calledOff();
+				if (off) return off;
 				job.begin();
 				let result:
 					| Readonly<{ ok: true; value: unknown }>
@@ -720,6 +726,9 @@ async function exportDatabase(
 			steps: initialSupabaseJobSteps('export'),
 		},
 		async (job) => {
+			// Turned off while the save dialog was open: nothing is dumped.
+			const off = engine.calledOff();
+			if (off) return off;
 			job.begin();
 			job.step('export', 'current');
 			const outcome = await engine.runRead(
@@ -732,7 +741,12 @@ async function exportDatabase(
 					...(operation.content === 'data' ? { dataOnly: true } : {}),
 				},
 				() => undefined,
-				{ expectOutput: 'none' }
+				{
+					expectOutput: 'none',
+					...(target === 'local'
+						? { precondition: () => engine.stillOnBranch(view) }
+						: {}),
+				}
 			);
 			if (!outcome.ok) {
 				const error = engine.errorView(outcome.error);
@@ -797,6 +811,8 @@ async function destroy(
 				const locked = ids.reduceRight<() => Promise<SupabaseEngineJobOutcome>>(
 					(inner, stackId) => () => engine.lockStack(stackId, inner),
 					async () => {
+						const off = engine.calledOff();
+						if (off) return off;
 						const result = await engine.destroyStep(ids, job, {
 							removeUploads: operation.removeUploads,
 						});
@@ -861,6 +877,8 @@ async function recreate(
 			(job) =>
 				engine.creationGate().run(() =>
 					engine.lockStack(view.id, async () => {
+						const off = engine.calledOff();
+						if (off) return off;
 						job.begin();
 						if (engine.isLive(view.id)) {
 							const stopped = await engine.stopStep(view.id, job, {
@@ -941,6 +959,8 @@ async function setStudio(
 			(job) =>
 				engine.lifecycleGate().run(() =>
 					engine.lockStack(view.id, async () => {
+						const off = engine.calledOff();
+						if (off) return off;
 						job.begin();
 						const stopped = await engine.stopStep(view.id, job, {
 							clearPin: false,
@@ -1307,6 +1327,8 @@ async function approve(
 		(work) =>
 			engine.lifecycleGate().run(() =>
 				engine.lockStack(stackId, async () => {
+					const off = engine.calledOff();
+					if (off) return off;
 					work.begin();
 					if (engine.isLive(stackId)) {
 						const stopped = await engine.stopStep(stackId, work, {
@@ -1362,7 +1384,20 @@ async function setEnabled(
 		.map((stack) => stack.id);
 	await engine.policyStore.setEnabled(false);
 	engine.syncActivation();
-	if (operation.disposition !== 'stop-managed' || running.length === 0) {
+	// Off now, nothing new begins: every ensure asks again first, and a job
+	// still waiting its turn is called off when it comes. One that can bring
+	// a stack up and already runs finishes first, and its stack counts too:
+	// the state shows it starting only once its CLI says so.
+	const stackIds = [
+		...new Set([
+			...running,
+			...engine
+				.activeStarts()
+				.filter((job) => job.status === 'running')
+				.flatMap((job) => job.stackIds),
+		]),
+	];
+	if (operation.disposition !== 'stop-managed' || stackIds.length === 0) {
 		engine.clearLiveCaches();
 		return done(engine, operation, {
 			message:
@@ -1372,8 +1407,8 @@ async function setEnabled(
 		});
 	}
 	engine.setDisabling({
-		remaining: running.length,
-		total: running.length,
+		remaining: stackIds.length,
+		total: stackIds.length,
 		waitingForStarts: true,
 	});
 	return asJob(
@@ -1382,7 +1417,7 @@ async function setEnabled(
 		engine.startJob(
 			{
 				kind: 'disable',
-				stackIds: running.slice(0, 32),
+				stackIds: stackIds.slice(0, 32),
 				requestedBy: { kind: 'operator' },
 				cancellable: false,
 				steps: initialSupabaseJobSteps('disable'),
@@ -1392,16 +1427,16 @@ async function setEnabled(
 				try {
 					await engine.whenStartsSettled();
 					const failures: SupabaseErrorView[] = [];
-					let remaining = running.length;
+					let remaining = stackIds.length;
 					engine.setDisabling({
 						remaining,
-						total: running.length,
+						total: stackIds.length,
 						waitingForStarts: false,
 					});
 					// One at a time, so the progress reads 1 of 3, 2 of 3.
-					for (const stackId of running) {
+					for (const stackId of stackIds) {
 						job.progress(
-							`Stopping ${running.length - remaining + 1} of ${running.length} managed stacks.`
+							`Stopping ${stackIds.length - remaining + 1} of ${stackIds.length} managed stacks.`
 						);
 						const result = await engine.lockStack(stackId, () =>
 							engine.stopStep(stackId, job, { clearPin: false })
@@ -1410,7 +1445,7 @@ async function setEnabled(
 						remaining -= 1;
 						engine.setDisabling({
 							remaining,
-							total: running.length,
+							total: stackIds.length,
 							waitingForStarts: false,
 						});
 					}
@@ -1424,7 +1459,7 @@ async function setEnabled(
 				}
 			}
 		),
-		`Turning off… stopping ${running.length} managed ${running.length === 1 ? 'stack' : 'stacks'}.`
+		`Turning off… stopping ${stackIds.length} managed ${stackIds.length === 1 ? 'stack' : 'stacks'}.`
 	);
 }
 
@@ -1696,9 +1731,13 @@ async function adopt(
 	}
 	if (engine.ownerOf(view.id)) {
 		await engine.readStatus(view.id);
-		const exposure = await engine.lockStack(view.id, () =>
-			engine.enforceExposure(view.id, undefined)
-		);
+		const exposure = await engine.lockStack(view.id, async () => {
+			// Turned off while this waited for the lock: nothing is probed.
+			const off = engine.calledOff();
+			return off
+				? { ok: false as const, error: off.error }
+				: engine.enforceExposure(view.id, undefined);
+		});
 		if (!exposure.ok) return failed(operation, exposure.error);
 	}
 	const now = engine.now();
@@ -1782,6 +1821,8 @@ async function prepare(
 						engine.lockStack(
 							stackId,
 							async (): Promise<SupabaseEngineJobOutcome> => {
+								const off = engine.calledOff();
+								if (off) return off;
 								job.begin();
 								const result = await engine.prepareStep(
 									facts,

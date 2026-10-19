@@ -79,7 +79,7 @@ async function setup(options: { appDotenv?: string } = {}) {
 	const repo = await h.repository('repo', options);
 	h.lanes.lanes = [fakeLane({ id: LANE_A, worktreePath: repo })];
 	await h.engine.start();
-	await h.settle();
+	await h.engine.settle();
 	return { h, repo, stackId: await h.identity(repo) };
 }
 
@@ -206,12 +206,12 @@ describe('ensureForLane', () => {
 		];
 		h.lanes.lanes = lanes;
 		await h.engine.start();
-		await h.settle();
+		await h.engine.settle();
 		const stackId = await h.identity(repo);
 		checked(await h.engine.ensureForLane(input(repo, { laneId: LANE_B })));
 		await h.settle();
 		// Stopped meanwhile; its next start moves the API port.
-		await h.engine.runOperation(
+		const stop = await h.engine.runOperation(
 			supabaseOperationSchema.parse({
 				actionId: 'action-stop',
 				kind: 'stop',
@@ -219,6 +219,7 @@ describe('ensureForLane', () => {
 			}),
 			{ actor: { kind: 'operator', senderId: 1 }, confirmed: false }
 		);
+		await h.engine.waitForJob(stop.jobId ?? '', 10_000);
 		await h.settle();
 		const stack = h.cli.stacks.get(stackId);
 		if (stack) stack.moveApiTo = 26_999;
@@ -246,7 +247,7 @@ describe('ensureForLane', () => {
 			fakeLane({ id: LANE_B, worktreePath: second, port: 8082 }),
 		];
 		await h.engine.start();
-		await h.settle();
+		await h.engine.settle();
 		const warned = async (laneId: string, worktreePath: string) => {
 			const result = checked(
 				await h.engine.ensureForLane(input(worktreePath, { laneId }))

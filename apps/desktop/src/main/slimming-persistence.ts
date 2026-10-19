@@ -270,10 +270,6 @@ export class SlimmingPersistence {
 		});
 	}
 
-	async acknowledge(key: string, acknowledgedAt: number): Promise<void> {
-		await this.acknowledgeAll([key], acknowledgedAt);
-	}
-
 	async acknowledgeAll(
 		keys: readonly string[],
 		acknowledgedAt: number
@@ -298,26 +294,6 @@ export class SlimmingPersistence {
 				changed = true;
 			}
 			return changed;
-		});
-	}
-
-	async putCheckpoint(
-		simulatorUdid: string,
-		token: string,
-		metadata: SlimmingCheckpointMetadata
-	): Promise<void> {
-		const udid = udidSchema.parse(simulatorUdid).toUpperCase();
-		const checkpoint = checkpointSchema.parse({ metadata, token });
-		await this.#update((draft) => {
-			if (
-				!draft.checkpoints[udid] &&
-				Object.keys(draft.checkpoints).length >= MAX_SIMULATORS
-			) {
-				throw new Error(
-					`Checkpoint store cannot exceed ${MAX_SIMULATORS} simulators.`
-				);
-			}
-			draft.checkpoints[udid] = checkpoint;
 		});
 	}
 

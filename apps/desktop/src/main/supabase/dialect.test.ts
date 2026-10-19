@@ -7,6 +7,7 @@ import {
 	resolveSupabaseDialect,
 	SUPABASE_ARGV_ALLOWLIST,
 	SUPABASE_EXCLUDABLE_CAPABILITIES,
+	SUPABASE_MAX_CLI_TIMEOUT_MS,
 	SUPABASE_PREPARABLE_CAPABILITIES,
 	SupabaseArgvError,
 	type SupabaseCliOperation,
@@ -876,6 +877,36 @@ describe('supabaseOperationBudget', () => {
 		expect(
 			supabaseOperationBudget({ kind: 'db.reset', workdir: WORKDIR }).timeoutMs
 		).toBe(180_000);
+	});
+
+	it('stays within what the runner accepts, for the largest destroy too', () => {
+		// The most ids one destroy may name, each a distinct 64-hex id.
+		const stackIds = Array.from({ length: 32 }, (_, index) =>
+			index.toString(16).padStart(64, '0')
+		);
+		const destroy: SupabaseCliOperation = {
+			kind: 'stack.destroy',
+			stackIds,
+			confirmed: true,
+		};
+		expect(
+			argvOf(destroy).filter((value) => value === '--stack-id')
+		).toHaveLength(32);
+		for (const operation of [...EVERY_OPERATION, destroy]) {
+			expect(supabaseOperationBudget(operation).timeoutMs).toBeLessThanOrEqual(
+				SUPABASE_MAX_CLI_TIMEOUT_MS
+			);
+		}
+		expect(supabaseOperationBudget(destroy).timeoutMs).toBe(
+			SUPABASE_MAX_CLI_TIMEOUT_MS
+		);
+		expect(
+			supabaseOperationBudget({
+				kind: 'stack.destroy',
+				stackIds: stackIds.slice(0, 3),
+				confirmed: true,
+			}).timeoutMs
+		).toBe(360_000);
 	});
 });
 

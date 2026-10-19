@@ -27,8 +27,7 @@ export type SupabaseTrafficTarget =
 	| Readonly<{ kind: 'unknown-local'; port: number }>
 	| Readonly<{ kind: 'legacy'; port: number }>;
 
-/** @public */
-export type SupabaseTrafficTargetCount = SupabaseTrafficTarget &
+type SupabaseTrafficTargetCount = SupabaseTrafficTarget &
 	Readonly<{ count: number; lastAt: number }>;
 
 export type SupabaseTrafficClassification = Readonly<{

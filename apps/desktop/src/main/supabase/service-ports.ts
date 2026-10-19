@@ -35,9 +35,8 @@ import type { ClassifiedSupabaseError } from './cli-errors';
  * The operator, through a trusted renderer (`senderId` binds confirmation
  * tokens and owns the dialog window), or an agent session through the CLI
  * socket. A synthetic agent (`mcp-*`) is matched by `sessionCwd`.
- * @public
  */
-export type SupabaseActor =
+type SupabaseActor =
 	| Readonly<{ kind: 'operator'; senderId: number }>
 	| Readonly<{
 			kind: 'agent';
@@ -46,7 +45,6 @@ export type SupabaseActor =
 			sessionCwd?: string | undefined;
 	  }>;
 
-/** @public */
 export type SupabaseOperationContext = Readonly<{
 	actor: SupabaseActor;
 	/**
@@ -59,7 +57,6 @@ export type SupabaseOperationContext = Readonly<{
 
 /**
  * An agent's `supabase` call, with the identity from its request envelope.
- * @public
  */
 export type SupabaseAgentContext = Readonly<{
 	requestId: string;
@@ -165,11 +162,9 @@ export function supabaseConfirmationOutcome(
 
 /**
  * Identifies the renderer that asked, so a dialog can be modal to its window.
- * @public
  */
 export type SupabaseDialogOwner = Readonly<{ senderId: number }>;
 
-/** @public */
 export type SupabaseDialogPort = Readonly<{
 	showMessageBox: (
 		options: SupabaseMessageBoxOptions,
@@ -200,7 +195,6 @@ export type SupabaseDialogPort = Readonly<{
 	) => Promise<Readonly<{ canceled: boolean; filePaths: readonly string[] }>>;
 }>;
 
-/** @public */
 export type SupabaseShellPort = Readonly<{
 	/** Only main-validated loopback http URLs (Mailpit, Studio). */
 	openExternal: (url: string) => Promise<void>;
@@ -211,7 +205,6 @@ export type SupabaseShellPort = Readonly<{
 /**
  * Main writes keys, the psql command and app variables itself, then clears
  * the clipboard after SUPABASE_CLIPBOARD_CLEAR_MS if it still holds that text.
- * @public
  */
 export type SupabaseClipboardPort = Readonly<{
 	/** Electron's main-process clipboard is promise-based. */
@@ -222,7 +215,6 @@ export type SupabaseClipboardPort = Readonly<{
 // ---------------------------------------------------------------------------
 // What the service needs from lanes and agents
 
-/** @public */
 export type SupabaseMetroRestartReason =
 	| 'attach'
 	| 'ports-moved'
@@ -232,7 +224,6 @@ export type SupabaseMetroRestartReason =
 
 /**
  * What the Supabase service reads from and asks of the lane service.
- * @public
  */
 export type SupabaseLanePort = Readonly<{
 	lanes: () => readonly Lane[];
@@ -255,7 +246,6 @@ export type SupabaseLanePort = Readonly<{
 
 /**
  * What the Supabase service reads from the agent service.
- * @public
  */
 export type SupabaseAgentPort = Readonly<{
 	sessions: () => readonly AgentSession[];
@@ -269,7 +259,6 @@ export type SupabaseAgentPort = Readonly<{
 /**
  * A holder the service names, with the directory its stack lives in: the
  * element type of AgentService's `holders` option, so their clocks run.
- * @public
  */
 export type SupabaseHolderKey = Readonly<{
 	holder: DeviceHolder;
@@ -279,7 +268,6 @@ export type SupabaseHolderKey = Readonly<{
 // ---------------------------------------------------------------------------
 // Lanes ↔ Supabase
 
-/** @public */
 export type LaneBackendEnsureInput = Readonly<{
 	laneId?: string | undefined;
 	/** The checkout root. */
@@ -294,14 +282,12 @@ export type LaneBackendEnsureInput = Readonly<{
 	waitMs?: number | undefined;
 }>;
 
-/** @public */
 export type LaneBackendLateAttach = Readonly<{
 	summary: LaneBackendSummary;
 	/** Public values only (URL, publishable or anon key) under the mapped names. */
 	laneEnv?: Readonly<Record<string, string>> | undefined;
 }>;
 
-/** @public */
 export type LaneBackendEnsureResult = Readonly<{
 	summary: LaneBackendSummary;
 	/** Public values for the Metro spawn env, when the backend is ready now. */
@@ -320,7 +306,6 @@ export const LANE_BACKEND_DEFAULT_WAIT_MS = SUPABASE_LANE_WAIT_MS;
 // ---------------------------------------------------------------------------
 // Steering (the Go PreToolUse hook)
 
-/** @public */
 export type SteeringRoot = Readonly<{
 	/** The worktree root. */
 	root: string;
@@ -388,7 +373,6 @@ export function supabaseSteeringFile(
 // ---------------------------------------------------------------------------
 // The service
 
-/** @public */
 export type SupabaseReleaseResult = Readonly<{
 	/** Stacks this release dropped a hold on. */
 	releasedStackIds: readonly string[];
@@ -400,7 +384,6 @@ export type SupabaseReleaseResult = Readonly<{
  * What the Supabase service offers. One owner of Supabase state in main;
  * IPC, lanes, the agent router, AgentService and the steering writer all go
  * through it.
- * @public
  */
 export interface SupabaseServiceApi {
 	getState(): SupabaseState;
@@ -460,19 +443,6 @@ export interface SupabaseServiceApi {
 	/** Clears timers and waits at most 15 s for lifecycle children; never stops stacks. */
 	stop(): Promise<void>;
 }
-
-/**
- * The injected dependencies a SupabaseService is built from.
- * @public
- */
-export type SupabaseServicePorts = Readonly<{
-	lanes: SupabaseLanePort;
-	agents: SupabaseAgentPort;
-	dialog: SupabaseDialogPort;
-	shell: SupabaseShellPort;
-	clipboard: SupabaseClipboardPort;
-	now: () => number;
-}>;
 
 /** What main's index.ts builds the Supabase service from. */
 export type SupabaseServiceDeps = Readonly<{

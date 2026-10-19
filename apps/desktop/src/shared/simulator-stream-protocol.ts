@@ -68,7 +68,11 @@ export const simulatorStreamSubscriptionsSchema = z
 export const simulatorStreamFrameSchema = z.strictObject({
 	udid: simulatorStreamUdidSchema,
 	quality: simulatorStreamQualitySchema,
-	/** Monotonic per-UDID sequence so a late frame never overwrites a newer one. */
+	/**
+	 * Monotonic per poller and counted from 1, so a late frame never overwrites
+	 * a newer one. A quality change restarts the poller and its count; every new
+	 * poller is announced with a `starting` status before its first frame.
+	 */
 	sequence: z.number().int().nonnegative(),
 	capturedAt: z.number().finite().nonnegative(),
 	width: z.number().int().positive().max(8_192),

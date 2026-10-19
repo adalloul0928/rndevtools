@@ -125,6 +125,8 @@ type FakeStack = {
 	lanExposed: boolean;
 	/** The next start reports the API on this port instead. */
 	moveApiTo?: number;
+	/** `stack status` reports config.toml no longer matching the saved stack. */
+	configChanged?: boolean;
 	lastExclude: readonly string[];
 	lastEager: boolean;
 };
@@ -140,6 +142,8 @@ type FakeReply = Readonly<{
 	exitCode: number;
 	stdout: string;
 	stderr: readonly string[];
+	/** The CLI printed more than the runner reads. */
+	stdoutTruncated?: boolean;
 }>;
 
 type Hold = { promise: Promise<void>; release: () => void };
@@ -206,6 +210,19 @@ function renderFixture(
 	return `${text}\n`;
 }
 
+/** A status line whose config drift says what the stack's config.toml does. */
+function withConfigDrift(line: string, stack: FakeStack): string {
+	if (stack.configChanged !== true) return line;
+	const value = JSON.parse(line) as Record<string, unknown>;
+	value.config_drift = {
+		status: 'changed',
+		message:
+			'Project configuration differs from the saved composition members.',
+		paths: ['database.config.version'],
+	};
+	return `${JSON.stringify(value)}\n`;
+}
+
 function fixtureReply(
 	name: SupabaseCliFixtureName,
 	stack?: FakeStack
@@ -245,8 +262,6 @@ class FakeSupabaseCli {
 	#nextPort = 26_300;
 	/** Detached calls the service interrupted. */
 	readonly interrupts: string[] = [];
-	/** Files `db dump` wrote. */
-	readonly dumps: string[] = [];
 
 	/** Adds a stack as another tool would have left it. */
 	addStack(
@@ -373,7 +388,7 @@ class FakeSupabaseCli {
 				cancelled,
 				signalsSent: cancelled ? ['SIGINT'] : [],
 				stdoutBytes: Buffer.byteLength(reply.stdout, 'utf8'),
-				stdoutTruncated: false,
+				stdoutTruncated: reply.stdoutTruncated === true,
 				stderrLines: reply.stderr,
 				stderrTruncated: false,
 				durationMs: 1,
@@ -453,12 +468,15 @@ class FakeSupabaseCli {
 				}
 				return {
 					exitCode: 0,
-					stdout: renderFixture(
-						stack.running
-							? 'status-awake'
-							: stack.members === 0
-								? 'status-never-started'
-								: 'status-stopped',
+					stdout: withConfigDrift(
+						renderFixture(
+							stack.running
+								? 'status-awake'
+								: stack.members === 0
+									? 'status-never-started'
+									: 'status-stopped',
+							stack
+						),
 						stack
 					),
 					stderr: [],
@@ -557,10 +575,7 @@ class FakeSupabaseCli {
 				);
 			case 'db dump': {
 				const file = flag(argv, '--file');
-				if (file !== undefined) {
-					await writeFile(file, '-- schema\n');
-					this.dumps.push(file);
-				}
+				if (file !== undefined) await writeFile(file, '-- schema\n');
 				return fixtureReply('db-dump');
 			}
 			default:
@@ -579,6 +594,8 @@ class FakeDiscovery implements SupabaseDiscovery {
 	exposureUnavailable = false;
 	/** `<SUPABASE_HOME>/stacks` as the port registry records it. */
 	stateRoot = '/Users/example/.supabase/stacks';
+	/** What `ps -o args=` prints per pid. */
+	readonly commands = new Map<number, string>();
 	readonly #cli: FakeSupabaseCli;
 
 	constructor(cli: FakeSupabaseCli) {
@@ -681,6 +698,11 @@ class FakeDiscovery implements SupabaseDiscovery {
 			processCount: pids.length,
 		};
 	};
+
+	processCommand: SupabaseDiscovery['processCommand'] = async (pid) => {
+		this.probes.push('command');
+		return { status: 'ok', command: this.commands.get(pid) };
+	};
 }
 
 function fakeDialect(
@@ -782,7 +804,6 @@ class FakeLanes {
 		laneId: string;
 		reason: SupabaseMetroRestartReason;
 	}[] = [];
-	readonly launches: string[] = [];
 	restartMetroImpl: (
 		laneId: string,
 		reason: SupabaseMetroRestartReason
@@ -799,9 +820,7 @@ class FakeLanes {
 				this.metroRestarts.push({ laneId, reason });
 				return this.restartMetroImpl(laneId, reason);
 			},
-			launchDeferred: async (laneId) => {
-				this.launches.push(laneId);
-			},
+			launchDeferred: async () => {},
 			subscribe: (listener) => {
 				this.#listeners.add(listener);
 				return () => {
@@ -836,17 +855,14 @@ class FakeAgents {
 class FakeDialog {
 	saveFile: string | undefined;
 	openPaths: string[] = [];
-	readonly saves: string[] = [];
 
 	port(): SupabaseDialogPort {
 		return {
 			showMessageBox: async () => ({ response: 0, checkboxChecked: false }),
-			showSaveDialog: async (options) => {
-				this.saves.push(options.defaultPath);
-				return this.saveFile === undefined
+			showSaveDialog: async () =>
+				this.saveFile === undefined
 					? { canceled: true }
-					: { canceled: false, filePath: this.saveFile };
-			},
+					: { canceled: false, filePath: this.saveFile },
 			showOpenDialog: async () =>
 				this.openPaths.length === 0
 					? { canceled: true, filePaths: [] }
@@ -873,12 +889,10 @@ class FakeShell {
 
 class FakeClipboard {
 	text = '';
-	readonly writes: string[] = [];
 
 	port(): SupabaseClipboardPort {
 		return {
 			writeText: async (text) => {
-				this.writes.push(text);
 				this.text = text;
 			},
 			readText: async () => this.text,
@@ -962,6 +976,8 @@ export type EngineHarness = Readonly<{
 	logs: string[];
 	signals: { pid: number; signal: NodeJS.Signals }[];
 	checkIgnores: string[];
+	/** Pids `process.kill(pid, 0)` finds alive; none by default. */
+	alivePids: Set<number>;
 	/** Every call that would have been a process. */
 	processCalls: () => number;
 	/** A main checkout tracked by Lanes, on `main` unless told otherwise. */
@@ -1025,6 +1041,7 @@ export async function createEngineHarness(
 	const logs: string[] = [];
 	const signals: { pid: number; signal: NodeJS.Signals }[] = [];
 	const checkIgnores: string[] = [];
+	const alivePids = new Set<number>();
 	let memoryProbes = 0;
 	const platform = {
 		platform: 'darwin',
@@ -1062,7 +1079,7 @@ export async function createEngineHarness(
 				if (stack.pid === pid) stack.running = false;
 			}
 		},
-		processAlive: () => false,
+		processAlive: (pid) => alivePids.has(pid),
 		gitCheckIgnore: async (_root, relative) => {
 			checkIgnores.push(relative);
 			return options.gitIgnored ?? true;
@@ -1079,7 +1096,11 @@ export async function createEngineHarness(
 	});
 	// Work waiting on the manual clock (a busy retry, an owner poll) or on a
 	// held CLI call never settles on its own: settling then ends once
-	// nothing has changed for `quietMs` of real time.
+	// nothing has changed for `quietMs` of real time with no file request in
+	// flight (Node 26 doesn't list a small write). The fakes answer at once,
+	// so work that still runs waits on a file. Time this process didn't get
+	// to run (a loaded machine) doesn't count: a poll that comes late counts
+	// no more than one on time.
 	const progress = () =>
 		[
 			cli.calls.length,
@@ -1089,9 +1110,16 @@ export async function createEngineHarness(
 				.map((job) => job.status)
 				.join(','),
 		].join('|');
+	const filesInFlight = () =>
+		process
+			.getActiveResourcesInfo()
+			.some((resource) =>
+				/^(?:FSReq|CloseReq|FileHandleCloseReq)/.test(resource)
+			);
 	const settleQuietly = async (quietMs: number) => {
 		let last = '';
-		let quietSince = Date.now();
+		let quiet = 0;
+		let polledAt = Date.now();
 		for (;;) {
 			const idle = await Promise.race([
 				engine.settle().then(() => true),
@@ -1103,15 +1131,18 @@ export async function createEngineHarness(
 					engine.settle().then(() => true),
 					realDelay(10).then(() => false),
 				]);
-				if (again) return;
+				if (again && !filesInFlight()) return;
 			}
 			const now = progress();
-			if (now !== last) {
+			const elapsed = Math.min(Date.now() - polledAt, 25);
+			polledAt = Date.now();
+			if (now !== last || filesInFlight()) {
 				last = now;
-				quietSince = Date.now();
-			} else if (Date.now() - quietSince >= quietMs) {
-				return;
+				quiet = 0;
+				continue;
 			}
+			quiet += elapsed;
+			if (quiet >= quietMs) return;
 		}
 	};
 	const settle = () => settleQuietly(300);
@@ -1133,6 +1164,7 @@ export async function createEngineHarness(
 		logs,
 		signals,
 		checkIgnores,
+		alivePids,
 		processCalls: () =>
 			cli.calls.length +
 			discovery.probes.length +

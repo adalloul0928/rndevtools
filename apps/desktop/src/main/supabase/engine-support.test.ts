@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from './engine.test-support';
 import {
 	deleteSupabaseUploads,
@@ -20,6 +20,7 @@ import {
 	SupabaseSingleFlight,
 	shellQuote,
 	supabaseDelay,
+	supabaseProcessAlive,
 	supabaseUploadsPath,
 } from './engine-support';
 
@@ -204,6 +205,26 @@ describe('small helpers', () => {
 		expect(hasSupabaseControlCharacters('/Users/example/app')).toBe(false);
 		expect(hasSupabaseControlCharacters('a\nb')).toBe(true);
 		expect(hasSupabaseControlCharacters('a\u009bb')).toBe(true);
+	});
+
+	it("counts only this user's live processes as alive", () => {
+		const kill = vi.spyOn(process, 'kill');
+		try {
+			kill.mockImplementation(() => true);
+			expect(supabaseProcessAlive(4_242)).toBe(true);
+			// Another user's process: never a child this desktop started.
+			kill.mockImplementation(() => {
+				throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+			});
+			expect(supabaseProcessAlive(4_242)).toBe(false);
+			kill.mockImplementation(() => {
+				throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+			});
+			expect(supabaseProcessAlive(4_242)).toBe(false);
+			expect(supabaseProcessAlive(1)).toBe(false);
+		} finally {
+			kill.mockRestore();
+		}
 	});
 });
 

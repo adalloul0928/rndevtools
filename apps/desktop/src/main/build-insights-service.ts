@@ -1,5 +1,5 @@
 import { type FSWatcher, watch } from 'node:fs';
-import { lstat, readdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
 	diagnosticErrorText,
@@ -20,6 +20,8 @@ const MAX_SCAN_ENTRIES = 5_000;
 const MAX_SCAN_RESULTS = 100;
 const MAX_SCAN_DEPTH = 4;
 const WATCH_DEBOUNCE_MS = 1_500;
+/** Build results remembered as read, so a rescan can skip them. */
+const MAX_REMEMBERED_ARTIFACTS = 1_000;
 const SPREADSHEET_FORMULA_PREFIXES = new Set([
 	'=',
 	'+',
@@ -64,7 +66,14 @@ type XcresultRunner = (
 	artifactPath: string,
 	signal?: AbortSignal
 ) => Promise<unknown>;
-type WatchFactory = (sourcePath: string, listener: () => void) => FSWatcher;
+type WatchFactory = (
+	sourcePath: string,
+	/** Gets the changed path relative to the root, or null when unknown. */
+	listener: (filename: string | null) => void
+) => FSWatcher;
+
+/** A refresh of one source and whether another pass was asked for meanwhile. */
+type SourceRefresh = { again: boolean; done: Promise<void> };
 
 export class BuildInsightsService {
 	readonly #store: BuildInsightsStore;
@@ -75,13 +84,18 @@ export class BuildInsightsService {
 	readonly #watchers = new Map<string, FSWatcher>();
 	readonly #watchTimers = new Map<string, NodeJS.Timeout>();
 	readonly #watchErrors = new Map<string, string>();
+	readonly #sourceRefreshes = new Map<string, SourceRefresh>();
+	/** How each scanned build result looked when it was read, by source and path. */
+	readonly #readArtifacts = new Map<string, string>();
 	#stopped = false;
 
 	constructor({
 		store,
 		runXcresult = readXcresult,
 		watchFactory = (sourcePath, listener) =>
-			watch(sourcePath, { recursive: true }, listener),
+			watch(sourcePath, { recursive: true }, (_event, filename) =>
+				listener(filename)
+			),
 		now = Date.now,
 	}: {
 		store: BuildInsightsStore;
@@ -159,14 +173,44 @@ export class BuildInsightsService {
 			: this.#store.listStoredSources();
 		if (sourceId && sources.length === 0)
 			throw new Error('Build source was not found.');
-		for (const source of sources) {
-			if (source.kind === 'xcresult')
-				await this.#ingest(source, source.sourcePath);
-			else await this.#scanRoot(source);
-		}
+		for (const source of sources) await this.#refreshSource(source.id);
 		this.#store.prune();
 		this.#emit();
 		return this.getState();
+	}
+
+	/**
+	 * Refreshes one source, one pass at a time. Asked again while a pass
+	 * runs, it runs one more pass after it, however many asked meanwhile, and
+	 * every caller waits for that last pass.
+	 */
+	#refreshSource(sourceId: string): Promise<void> {
+		const running = this.#sourceRefreshes.get(sourceId);
+		if (running) {
+			running.again = true;
+			return running.done;
+		}
+		const pass: SourceRefresh = { again: false, done: Promise.resolve() };
+		this.#sourceRefreshes.set(sourceId, pass);
+		pass.done = (async () => {
+			try {
+				do {
+					pass.again = false;
+					const source = this.#store.getStoredSource(sourceId);
+					if (!source) return;
+					if (source.kind === 'xcresult') {
+						await this.#ingest(source, source.sourcePath);
+					} else {
+						await this.#scanRoot(source);
+					}
+				} while (pass.again && !this.#stopped);
+			} finally {
+				if (this.#sourceRefreshes.get(sourceId) === pass) {
+					this.#sourceRefreshes.delete(sourceId);
+				}
+			}
+		})();
+		return pass.done;
 	}
 
 	async export(format: 'csv' | 'json', destinationPath: string): Promise<void> {
@@ -192,9 +236,15 @@ export class BuildInsightsService {
 			const artifacts = await discoverXcresults(source.sourcePath);
 			const failures: string[] = [];
 			for (const artifactPath of artifacts) {
+				// A result read before and unchanged since would read the same.
+				const key = `${source.id}\0${artifactPath}`;
+				const signature = await artifactSignature(artifactPath);
+				if (this.#readArtifacts.get(key) === signature) continue;
 				try {
 					await this.#ingest(source, artifactPath, false);
+					this.#rememberArtifact(key, signature);
 				} catch (error) {
+					this.#readArtifacts.delete(key);
 					failures.push(errorText(error));
 				}
 			}
@@ -263,12 +313,24 @@ export class BuildInsightsService {
 		}
 	}
 
+	#rememberArtifact(key: string, signature: string): void {
+		this.#readArtifacts.delete(key);
+		this.#readArtifacts.set(key, signature);
+		for (const oldest of this.#readArtifacts.keys()) {
+			if (this.#readArtifacts.size <= MAX_REMEMBERED_ARTIFACTS) break;
+			this.#readArtifacts.delete(oldest);
+		}
+	}
+
 	#watchSource(
 		source: NonNullable<ReturnType<BuildInsightsStore['getStoredSource']>>
 	): void {
 		if (this.#watchers.has(source.id)) return;
 		try {
-			const watcher = this.#watchFactory(source.sourcePath, () => {
+			const watcher = this.#watchFactory(source.sourcePath, (filename) => {
+				// Indexing, builds and caches write under DerivedData all the
+				// time; only a change to a build result is worth a scan.
+				if (!touchesBuildResult(filename)) return;
 				const current = this.#watchTimers.get(source.id);
 				if (current) clearTimeout(current);
 				const timer = setTimeout(() => {
@@ -371,6 +433,37 @@ function sourceLabel(sourcePath: string): string {
 		);
 	}
 	return label;
+}
+
+/** Whether a change under a watched root may touch a build result. */
+function touchesBuildResult(filename: string | null): boolean {
+	// A change without a name could be anywhere, so it counts.
+	return (
+		filename === null ||
+		filename
+			.split(path.sep)
+			.some((segment) => segment.toLowerCase().endsWith('.xcresult'))
+	);
+}
+
+/**
+ * When a build result last changed: the bundle itself, its Info.plist (which
+ * points at the result's root object) and its Data directory (one file per
+ * object written). The same signature means xcresulttool would read the
+ * same result again.
+ */
+async function artifactSignature(artifactPath: string): Promise<string> {
+	const parts = await Promise.all(
+		[
+			artifactPath,
+			path.join(artifactPath, 'Info.plist'),
+			path.join(artifactPath, 'Data'),
+		].map(async (entry) => {
+			const info = await stat(entry).catch(() => undefined);
+			return info ? `${info.mtimeMs}:${info.size}` : '-';
+		})
+	);
+	return parts.join('|');
 }
 
 async function discoverXcresults(root: string): Promise<string[]> {

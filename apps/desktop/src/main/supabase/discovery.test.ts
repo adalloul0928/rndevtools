@@ -18,6 +18,7 @@ import {
 	type ProbeRunner,
 	type ProbeRunResult,
 } from './discovery';
+import { supabaseArgvDigest } from './job-store';
 
 type ProbeOutput = { exitCode: number; lines: string[] };
 type StackFixture = {
@@ -589,6 +590,63 @@ describe('measureMemory', () => {
 				[ps]: exit({ exitCode: 0, lines: ['PID RSS'] }),
 			}).probes.measureMemory([1, 2])
 		).toMatchObject({ status: 'unavailable', reason: 'unparseable' });
+	});
+});
+
+describe('processCommand', () => {
+	it('reads one command line with ps, and none once the pid is gone', async () => {
+		const ps = command('/bin/ps', '-ww', '-o', 'args=', '-p', '4242');
+		const line =
+			'/Users/example/ExampleApp/node_modules/@supabase/cli-darwin-arm64/bin/supabase stack stop --stack-id 64616c83 --output-format json';
+		expect(
+			await discovery({
+				[ps]: exit({ exitCode: 0, lines: [line] }),
+			}).probes.processCommand(4_242)
+		).toEqual({ status: 'ok', command: line });
+		expect(
+			await discovery({
+				[ps]: exit({ exitCode: 1, lines: [] }),
+			}).probes.processCommand(4_242)
+		).toEqual({ status: 'ok', command: undefined });
+		expect(
+			await discovery({
+				[ps]: { kind: 'error', reason: 'spawn' },
+			}).probes.processCommand(4_242)
+		).toEqual({ status: 'unavailable', reason: 'spawn-failed' });
+		const none = discovery({});
+		expect(await none.probes.processCommand(1)).toMatchObject({
+			status: 'unavailable',
+			reason: 'invalid-input',
+		});
+		expect(none.calls).toEqual([]);
+	});
+
+	it('reads the line ps escapes without a UTF-8 locale, which the argv digest still matches', async () => {
+		const worktree = '/Users/example/D\u00e9veloppement/ExampleApp';
+		const argv = [
+			`${worktree}/node_modules/@supabase/cli-darwin-arm64/bin/supabase`,
+			'stack',
+			'stop',
+			'--stack-id',
+			'64616c83',
+			'--output-format',
+			'json',
+		];
+		// What /bin/ps prints for it with no LANG or LC_ALL, the C locale a
+		// desktop opened from the Dock passes on.
+		const line =
+			'/Users/example/DM-CM-)veloppement/ExampleApp/node_modules/@supabase/cli-darwin-arm64/bin/supabase stack stop --stack-id 64616c83 --output-format json';
+		const found = await discovery({
+			[command('/bin/ps', '-ww', '-o', 'args=', '-p', '4242')]: exit({
+				exitCode: 0,
+				lines: [line],
+			}),
+		}).probes.processCommand(4_242);
+		if (found.status !== 'ok') throw new Error(found.reason);
+		expect(found.command).toBe(line);
+		expect(supabaseArgvDigest([found.command ?? ''])).toBe(
+			supabaseArgvDigest(argv)
+		);
 	});
 });
 

@@ -1,8 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { nativePlanResultSchema, resolveProjectNode } from './native-plan';
+import {
+	createNativePlanRunner,
+	nativePlanResultSchema,
+	resolveProjectNode,
+} from './native-plan';
 
 describe('resolveProjectNode', () => {
 	let root: string;
@@ -32,6 +42,43 @@ describe('resolveProjectNode', () => {
 			resolveProjectNode(root, { PATH: `/nowhere${path.delimiter}${bin}` })
 		).toBe(path.join(bin, 'node'));
 		expect(resolveProjectNode(root, { PATH: '/nowhere' })).toBeUndefined();
+	});
+});
+
+describe('runNativePlan', () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(path.join(os.tmpdir(), 'rndevtools-native-plan-run-'));
+	});
+	afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+	it('finds Node on the tool PATH and runs the plan with that PATH', async () => {
+		const tools = path.join(root, 'tools');
+		const project = path.join(root, 'app');
+		mkdirSync(tools);
+		mkdirSync(project);
+		const seenPath = path.join(root, 'seen-path');
+		const plan = {
+			projectRoot: project,
+			platform: 'ios',
+			configuration: 'Debug',
+			fingerprintHash: '78f81f7cf5a5717ebff99c9fbd6abf28831d1bf8',
+			sourceCount: 3,
+			cache: 'no-provider',
+		};
+		// Stands in for the user's Node: it records the PATH it was given and
+		// prints what the in-project script would.
+		writeFileSync(
+			path.join(tools, 'node'),
+			`#!/bin/sh\nprintf '%s' "$PATH" > '${seenPath}'\nprintf '%s' '${JSON.stringify(plan)}'\n`,
+			{ mode: 0o755 }
+		);
+		const toolPath = `${tools}${path.delimiter}/usr/bin${path.delimiter}/bin`;
+		const run = createNativePlanRunner({ toolPath: async () => toolPath });
+		await expect(
+			run({ projectRoot: project, platform: 'ios', configuration: 'Debug' })
+		).resolves.toEqual(plan);
+		expect(readFileSync(seenPath, 'utf8')).toBe(toolPath);
 	});
 });
 

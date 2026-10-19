@@ -8,7 +8,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	supabaseDesktopError,
 	supabaseJobSchema,
@@ -27,6 +27,11 @@ import {
 	SupabaseJobStore,
 	supabaseArgvDigest,
 } from './job-store';
+
+// Jobs here are persisted with fsync'd writes, which a faster CPU doesn't
+// speed up and a busy disk slows down. The slowest test on this timeout takes
+// about 0.7 s in a full desktop run, under a tenth of it.
+vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = 1_792_245_785_000;
 const STACK =
@@ -399,6 +404,57 @@ describe('SupabaseJobStore', () => {
 		expect(jobs.children()).toEqual([]);
 		expect(supabaseArgvDigest(['a', 'b'])).toMatch(/^[0-9a-f]{64}$/);
 		expect(supabaseArgvDigest(['a', 'b'])).not.toBe(supabaseArgvDigest(['ab']));
+		// The command line as `ps -o args=` prints it, space-joined.
+		expect(supabaseArgvDigest(['/bin/supabase', 'stack', 'stop'])).toBe(
+			supabaseArgvDigest(['/bin/supabase stack stop'])
+		);
+	});
+
+	it('matches an argv to the line ps prints for it with or without a UTF-8 locale', () => {
+		const worktree = '/Users/example/D\u00e9veloppement/ExampleApp';
+		const argv = [
+			`${worktree}/node_modules/@supabase/cli-darwin-arm64/bin/supabase`,
+			'stack',
+			'start',
+			'--workdir',
+			worktree,
+			'--runtime',
+			'native',
+			'--output-format',
+			'json',
+		];
+		const recorded = supabaseArgvDigest(argv);
+		// /bin/ps's strvis(3) output with no LANG or LC_ALL, the C locale a
+		// desktop opened from the Dock passes on.
+		expect(
+			supabaseArgvDigest([
+				'/Users/example/DM-CM-)veloppement/ExampleApp/node_modules/@supabase/cli-darwin-arm64/bin/supabase stack start --workdir /Users/example/DM-CM-)veloppement/ExampleApp --runtime native --output-format json',
+			])
+		).toBe(recorded);
+		// In a UTF-8 locale ps prints the line as it is.
+		expect(supabaseArgvDigest([argv.join(' ')])).toBe(recorded);
+		// Decomposed accents, CJK and a tab, as ps prints them in the C locale.
+		// a-grave and Cyrillic Er end in 0xA0, the high-bit space: `\240`.
+		for (const [name, printed] of [
+			['De\u0301veloppement', 'DeM-LM^Aveloppement'],
+			['\u958b\u767a', 'M-iM^VM^KM-gM^YM-:'],
+			['a\tb', 'a\\011b'],
+			['\u00e0 faire', 'M-C\\240 faire'],
+			[
+				'\u0420\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u043a\u0430',
+				'M-P\\240M-PM-0M-PM-7M-QM^@M-PM-0M-PM-1M-PM->M-QM^BM-PM-:M-PM-0',
+			],
+		] as const) {
+			expect(
+				supabaseArgvDigest([`/Users/example/${name}/supabase`, 'stack', 'stop'])
+			).toBe(
+				supabaseArgvDigest([`/Users/example/${printed}/supabase stack stop`])
+			);
+		}
+		// Another process's command line still differs.
+		expect(supabaseArgvDigest(['/usr/libexec/exampled --serve'])).not.toBe(
+			recorded
+		);
 	});
 
 	it('waits for a job to end, or answers at the timeout or abort', async () => {
@@ -472,6 +528,30 @@ describe('SupabaseJobStore', () => {
 		expect(jobs.requestCancel(running.id)?.cancelRequested).toBeUndefined();
 	});
 
+	it('forgets finished jobs from memory once the state no longer lists them', async () => {
+		const directory = await root();
+		const clock = { now: NOW };
+		const jobs = jobStore(directory, clock);
+		await jobs.load();
+		const stop = () =>
+			jobs.create({
+				kind: 'stop',
+				stackIds: [STACK],
+				requestedBy: { kind: 'automatic', reason: 'idle' },
+				cancellable: false,
+			});
+		const old = await stop();
+		await jobs.finish(old.id, { status: 'complete' });
+		clock.now += 11 * 60_000;
+		const next = await stop();
+		await jobs.finish(next.id, { status: 'complete' });
+		expect(
+			jobs.jobs({ recentMs: Number.MAX_SAFE_INTEGER }).map((job) => job.id)
+		).toEqual([next.id]);
+		// The ring still answers for it.
+		expect(jobs.job(old.id)?.status).toBe('complete');
+	});
+
 	it('writes no secret to jobs.json, whatever a line or error carried', async () => {
 		const directory = await root();
 		const jobs = jobStore(directory);
@@ -507,7 +587,8 @@ describe('SupabaseJobStore', () => {
 		}
 	});
 
-	// 70 jobs, each persisted durably (fsync) when created and when finished.
+	// 70 jobs, each persisted durably (fsync) when created and when finished:
+	// up to about 7.5 s in a full desktop run, a tenth of its own timeout.
 	it('keeps the newest 64 terminal jobs in its ring', async () => {
 		const directory = await root();
 		const jobs = jobStore(directory);
@@ -528,11 +609,14 @@ describe('SupabaseJobStore', () => {
 		);
 		expect(stored.ring).toHaveLength(64);
 		expect(stored.ring[0].id).toBe(created[69]);
+		// Memory keeps no more than the ring does.
+		expect(jobs.job(created[0] as string)).toBeUndefined();
+		expect(jobs.job(created[6] as string)?.status).toBe('complete');
 		const reloaded = jobStore(directory);
 		await reloaded.load();
 		expect(reloaded.job(created[0] as string)).toBeUndefined();
 		expect(reloaded.job(created[69] as string)?.status).toBe('complete');
-	}, 30_000);
+	}, 75_000);
 
 	it('quarantines an unreadable history and starts empty', async () => {
 		const directory = await root();

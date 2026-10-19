@@ -40,7 +40,6 @@ import {
 
 const MAX_REASON = 1_024;
 
-/** @public */
 export type SupabaseLaneEnv = Readonly<{
 	env: Readonly<Record<string, string>>;
 	names: readonly string[];
@@ -353,7 +352,6 @@ export async function ensureSupabaseForLane(
 				laneId: input.laneId,
 				stackId,
 				worktreePath: input.worktreePath,
-				appDirectory: input.appPath ?? input.worktreePath,
 				...(input.agent ? { agent: input.agent } : {}),
 			});
 		}

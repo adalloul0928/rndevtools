@@ -1,7 +1,12 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { realpathSync } from 'node:fs';
 import {
+	mkdir,
 	mkdtemp,
 	readdir,
 	readFile,
+	rename,
 	rm,
 	utimes,
 	writeFile,
@@ -28,9 +33,15 @@ import type {
 	LaneBackendSummary,
 	LaneWorktreeSupabase,
 } from '../shared/supabase-protocol';
-import type { MetroLaunchInput, MetroSupervisorPort } from './lane-metro';
+import {
+	createMetroSupervisor,
+	type MetroLaunchInput,
+	type MetroSupervisorPort,
+	NotLaneMetroError,
+} from './lane-metro';
 import {
 	type LaneBackendPort,
+	type LaneDeviceAccessPort,
 	LaneService,
 	type LaneSimulatorPort,
 	type LaneSlimmingPort,
@@ -330,7 +341,7 @@ class FakeMetro implements MetroSupervisorPort {
 			(this.listeners.get(port) === pid && !this.deadPids.has(pid)));
 	isProcessRunning = (pid: number) => !this.deadPids.has(pid);
 	/** A stopped Metro exits and lets go of its port, as a real one does. */
-	stop = async (pid: number, port: number) => {
+	stop: MetroSupervisorPort['stop'] = async (pid, port) => {
 		this.stopped.push({ pid, port });
 		this.deadPids.add(pid);
 		if (this.listeners.get(port) === pid) this.listeners.delete(port);
@@ -899,6 +910,84 @@ describe('LaneService', () => {
 		expect(own.lane?.agent).toEqual({ ...holder, lastSeenAt: now });
 	});
 
+	it("refuses a lane up that would resume another session's lane, and resumes it for its holder and the operator", async () => {
+		metro.healthyPorts.add(8_100);
+		// The agent service's rule in brief: a lane's holder, or the operator,
+		// may drive its device.
+		const deviceAccess: LaneDeviceAccessPort = (udid, requester) => {
+			const lane = guarded
+				.getState()
+				.lanes.find((candidate) => candidate.simulatorUdid === udid);
+			const holder = lane?.agent;
+			if (
+				!lane ||
+				!holder ||
+				!requester ||
+				(holder.kind === requester.kind &&
+					holder.sessionId === requester.sessionId)
+			) {
+				return { allowed: true };
+			}
+			return {
+				allowed: false,
+				reason: `Simulator ${udid} is held by ${holder.kind} session ${holder.sessionId} through lane ${lane.id}.`,
+				hold: {
+					simulatorUdid: udid,
+					via: 'lane',
+					laneId: lane.id,
+					holder: { kind: holder.kind, sessionId: holder.sessionId },
+					holderLive: true,
+				},
+			};
+		};
+		const guarded: LaneService = new LaneService({
+			store: new LaneStore(root),
+			simulator,
+			metro,
+			worktrees,
+			now: () => now,
+			deviceAccess,
+		});
+		await guarded.start();
+		const up = (agent?: { kind: 'claude' | 'codex'; sessionId: string }) =>
+			guarded.runOperation({
+				actionId: `op-${Math.random().toString(16).slice(2)}`,
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				environment: 'development',
+				launch: true,
+				backend: 'off',
+				...(agent ? { agent } : {}),
+			});
+		const started = await guarded.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+			agent: { kind: 'claude', sessionId: 'session-1' },
+		});
+		const opens = () =>
+			simulator.actions.filter((action) => action.kind === 'url.open').length;
+
+		const refused = await up({ kind: 'codex', sessionId: 'thread-9' });
+		expect(refused.completed).toBe(false);
+		expect(refused.error).toMatch(/held by claude session session-1/);
+		expect(metro.stopped).toEqual([]);
+		expect(metro.started).toHaveLength(1);
+		expect(opens()).toBe(0);
+
+		const own = await up({ kind: 'claude', sessionId: 'session-1' });
+		expect(own.completed).toBe(true);
+		expect(own.lane?.id).toBe(started.lane?.id);
+		const operator = await up();
+		expect(operator.completed).toBe(true);
+		expect(operator.lane?.id).toBe(started.lane?.id);
+		expect(opens()).toBe(2);
+		await guarded.stop();
+	});
+
 	it("keeps an operator's lane with the operator when an agent launches it", async () => {
 		metro.healthyPorts.add(8_100);
 		const started = await service.runOperation({
@@ -944,6 +1033,230 @@ describe('LaneService', () => {
 			laneId,
 		});
 		expect(again.error).toMatch(/does not exist/);
+	});
+
+	it('removes a lane whose recorded PID now names another process, signalling nothing', async () => {
+		metro.healthyPorts.add(8_100);
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		const asked: string[] = [];
+		metro.stop = async (pid, port, appDirectory) => {
+			asked.push(appDirectory);
+			throw new NotLaneMetroError(
+				`Process ${pid} is no longer the Metro serving port ${port} from ${appDirectory}; refusing to stop it.`
+			);
+		};
+		const stopped = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.stop',
+			laneId: started.lane?.id as string,
+		});
+		expect(stopped.completed).toBe(true);
+		expect(asked).toEqual([WORKTREE]);
+		expect(metro.stopped).toEqual([]);
+		expect(service.getState().lanes).toEqual([]);
+	});
+
+	it("keeps a lane whose Metro's owner could not be checked, and says why", async () => {
+		metro.healthyPorts.add(8_100);
+		const started = await service.runOperation({
+			actionId: 'op-1',
+			kind: 'lane.start',
+			worktreePath: WORKTREE,
+			simulatorUdid: UDID,
+			environment: 'development',
+			launch: false,
+		});
+		metro.stop = async (pid) => {
+			throw new Error(
+				`Could not inspect process ${pid} to confirm it is this lane's Metro; refusing to stop it.`
+			);
+		};
+		const stopped = await service.runOperation({
+			actionId: 'op-2',
+			kind: 'lane.stop',
+			laneId: started.lane?.id as string,
+		});
+		expect(stopped.completed).toBe(false);
+		expect(stopped.error).toMatch(/Could not inspect process/);
+		expect(service.getState().lanes).toHaveLength(1);
+	});
+
+	it('keeps a lane whose worktree moved under its running Metro, leaving that Metro alone', async () => {
+		const checkout = path.join(root, 'checkout');
+		const appDirectory = path.join(checkout, 'apps', 'mobile');
+		await mkdir(appDirectory, { recursive: true });
+		// The lane's own Metro: a live process serving from the app directory.
+		const own = spawn('/bin/sleep', ['30'], {
+			cwd: appDirectory,
+			detached: true,
+			stdio: 'ignore',
+		});
+		await once(own, 'spawn');
+		const laneStore = new LaneStore(path.join(root, 'state'));
+		const lanes = new LaneService({
+			store: laneStore,
+			simulator,
+			worktrees,
+			now: () => now,
+			metro: createMetroSupervisor({
+				probe: async () => {
+					throw new Error('connect ECONNREFUSED 127.0.0.1:8100');
+				},
+				// What ps and lsof report for that Metro once its checkout moved.
+				runCommand: async (executable) => ({
+					stdout:
+						executable === '/bin/ps'
+							? 'node /Users/dev/node_modules/.bin/expo start --dev-client --localhost --port 8100 --max-workers 2\n'
+							: `p${own.pid}\nfcwd\nn${realpathSync(path.join(root, 'moved', 'apps', 'mobile'))}\n`,
+					stderr: '',
+					exitCode: 0,
+				}),
+			}),
+		});
+		try {
+			await lanes.start();
+			const laneId = laneStore.newLaneId();
+			await laneStore.upsert({
+				id: laneId,
+				worktreePath: checkout,
+				appPath: appDirectory,
+				branch: 'main',
+				simulatorUdid: UDID,
+				environment: 'development',
+				port: 8_100,
+				metroPid: own.pid as number,
+				metro: 'ready',
+				logPath: laneStore.logPathFor(laneId),
+				startedAt: now,
+			});
+			await rename(checkout, path.join(root, 'moved'));
+			const stopped = await lanes.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId,
+			});
+			expect(stopped.completed).toBe(false);
+			expect(stopped.error).toMatch(/moved or renamed/);
+			expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([laneId]);
+			expect(own.exitCode).toBeNull();
+			expect(own.signalCode).toBeNull();
+		} finally {
+			own.kill('SIGKILL');
+			await lanes.stop();
+		}
+	});
+
+	describe('launch races', () => {
+		/** Takes url.open from the fake Simulator and finishes it on `release`. */
+		function holdUrlOpen() {
+			let release: () => void = () => undefined;
+			const gate = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let markOpening: () => void = () => undefined;
+			const opening = new Promise<void>((resolve) => {
+				markOpening = resolve;
+			});
+			const run = simulator.runAction;
+			simulator.runAction = (action) => {
+				if (action.kind !== 'url.open') return run(action);
+				simulator.actions.push(action);
+				const jobId = `simulator-held-${simulator.actions.length}`;
+				markOpening();
+				void gate.then(() => {
+					const job = {
+						id: jobId,
+						actionId: action.actionId,
+						kind: action.kind,
+						status: 'complete',
+						progressSequence: 1,
+						phase: 'complete',
+						createdAt: 1,
+						finishedAt: 2,
+						message: 'done',
+						deviceUdid: action.udid,
+					} as unknown as SimulatorJob;
+					simulator.state = {
+						...simulator.state,
+						jobs: [...simulator.state.jobs, job],
+					};
+					for (const listener of simulator.listeners) listener(simulator.state);
+				});
+				return { actionId: action.actionId, accepted: true, jobId };
+			};
+			return { release, opening };
+		}
+
+		async function startLane(): Promise<LaneOperationReceipt> {
+			metro.healthyPorts.add(8_100);
+			return service.runOperation({
+				actionId: 'op-1',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+				agent: { kind: 'claude', sessionId: 'session-1' },
+			});
+		}
+
+		it('does not bring back a lane stopped while its dev client opened', async () => {
+			const started = await startLane();
+			const laneId = started.lane?.id as string;
+			const held = holdUrlOpen();
+			const launching = service.runOperation({
+				actionId: 'op-launch',
+				kind: 'lane.launch',
+				laneId,
+			});
+			await held.opening;
+			const stopped = await service.runOperation({
+				actionId: 'op-stop',
+				kind: 'lane.stop',
+				laneId,
+			});
+			expect(stopped.completed).toBe(true);
+			held.release();
+			const launched = await launching;
+			expect(launched.completed).toBe(false);
+			expect(launched.error).toMatch(/was stopped while its dev client opened/);
+			expect(service.getState().lanes).toEqual([]);
+			const reopened = new LaneStore(root);
+			await reopened.start();
+			expect(reopened.lanes()).toEqual([]);
+		});
+
+		it('keeps the Metro that replaced the checked one while the dev client opened', async () => {
+			const started = await startLane();
+			const laneId = started.lane?.id as string;
+			const held = holdUrlOpen();
+			const launching = service.runOperation({
+				actionId: 'op-launch',
+				kind: 'lane.launch',
+				laneId,
+			});
+			await held.opening;
+			// The backend detaching restarts the lane's Metro without its values.
+			await service.restartMetro(laneId, 'detach');
+			const respawned = service.getState().lanes[0];
+			expect(respawned?.metroPid).not.toBe(started.lane?.metroPid);
+			now += 1_000;
+			held.release();
+			const launched = await launching;
+			expect(launched.completed).toBe(true);
+			expect(service.getState().lanes[0]).toMatchObject({
+				metroPid: respawned?.metroPid,
+				metro: respawned?.metro,
+				lastLaunchedAt: now,
+			});
+		});
 	});
 
 	it('returns the Metro log tail for a lane, redacted', async () => {
@@ -1160,6 +1473,22 @@ describe('LaneService', () => {
 		expect(last.environments.map((env: { id: string }) => env.id)).toContain(
 			'development'
 		);
+	});
+
+	it("asks git again for the operator's refresh, while a polled refresh may reuse dirty flags", async () => {
+		await service.addRepository(REPO);
+		const asked: Array<boolean | undefined> = [];
+		const list = worktrees.listWorktrees;
+		worktrees.listWorktrees = async (
+			_root?: string,
+			options?: { fresh?: boolean }
+		) => {
+			asked.push(options?.fresh);
+			return list();
+		};
+		await service.refresh();
+		await service.runOperation({ actionId: 'op-r', kind: 'lane.refresh' });
+		expect(asked).toEqual([false, true]);
 	});
 
 	it('surfaces repository discovery errors without hiding the rest of the state', async () => {
@@ -2393,6 +2722,62 @@ describe('LaneService', () => {
 			now += 31 * 60_000;
 			await service.runOperation({ actionId: 'op-r2', kind: 'lane.refresh' });
 			expect(service.getState().deviceRequests).toEqual([]);
+		});
+
+		it('lists at most 16 device requests: a new one takes the oldest settled place, and with none settled the start is refused', async () => {
+			await up({ simulatorUdid: UDID });
+			await service.runOperation({
+				actionId: 'op-other-app',
+				kind: 'lane.start',
+				worktreePath: OTHER_WORKTREE,
+				simulatorUdid: OTHER_UDID,
+				environment: 'development',
+				launch: false,
+			});
+			// Every app directory inside a worktree parks a request of its own.
+			const park = (n: number) =>
+				service.runOperation({
+					actionId: `op-park-${n}`,
+					kind: 'lane.start',
+					worktreePath: `${THIRD_WORKTREE}/apps/app-${n}`,
+					environment: 'development',
+					launch: false,
+				});
+			const parked: LaneOperationReceipt[] = [];
+			for (let n = 1; n <= 16; n += 1) parked.push(await park(n));
+			expect(parked.map((receipt) => receipt.deviceRequest?.status)).toEqual(
+				Array.from({ length: 16 }, () => 'pending')
+			);
+
+			const refused = await park(17);
+			expect(refused.completed).toBe(false);
+			expect(refused.error).toMatch(
+				/16 lane starts are already waiting on the user for a Simulator/
+			);
+			// Lane state still reads, and so does everything built on it.
+			expect(service.getState().deviceRequests).toHaveLength(16);
+			const refreshed = await service.runOperation({
+				actionId: 'op-r',
+				kind: 'lane.refresh',
+			});
+			expect(refreshed.completed).toBe(true);
+
+			const first = parked[0]?.deviceRequest?.id as string;
+			const dismissed = await service.runOperation({
+				actionId: 'op-dismiss',
+				kind: 'lane.provide-device',
+				requestId: first,
+				decision: 'dismiss',
+			});
+			expect(dismissed.completed).toBe(true);
+			const replaced = await park(17);
+			expect(replaced.deviceRequest?.status).toBe('pending');
+			const ids = service
+				.getState()
+				.deviceRequests.map((request) => request.id);
+			expect(ids).toHaveLength(16);
+			expect(ids).not.toContain(first);
+			expect(ids).toContain(replaced.deviceRequest?.id);
 		});
 
 		it('keeps a request pending with the reason when the chosen start fails', async () => {

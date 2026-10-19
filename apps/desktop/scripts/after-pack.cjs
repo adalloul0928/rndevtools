@@ -181,6 +181,3 @@ function buildNativeCodeSignArguments(helperPath, signing) {
 	);
 	return arguments_;
 }
-
-module.exports.fuseOptions = fuseOptions;
-module.exports.buildNativeCodeSignArguments = buildNativeCodeSignArguments;

@@ -82,7 +82,6 @@ const keyFileSchema = z.strictObject({
 });
 type KeyFile = z.infer<typeof keyFileSchema>;
 
-/** @public */
 export type SupabaseStackKeys = Readonly<
 	Pick<KeyFile, 'jwtSecret' | 'publishableKey' | 'secretKey' | 'signingKey'>
 >;
@@ -162,7 +161,6 @@ export const nodeGitCheckIgnore: SupabaseGitCheckIgnore = (
 		);
 	});
 
-/** @public */
 export type SupabaseKeysApplied =
 	| 'written'
 	| 'unchanged'
@@ -411,33 +409,6 @@ export class SupabaseKeyStore {
 		} catch {
 			return false;
 		}
-	}
-
-	/**
-	 * Whether the worktree still carries this key set, by sha256 of each
-	 * value (the values themselves are never compared outside this check).
-	 */
-	async intact(projectRoot: string): Promise<boolean> {
-		const files = this.#files(projectRoot);
-		const loaded = await readSupabaseStoreFile(files.keys, MAX_KEY_FILE_BYTES);
-		if (loaded.status !== 'ok') return false;
-		let file: KeyFile;
-		try {
-			file = keyFileSchema.parse(JSON.parse(loaded.text));
-		} catch {
-			return false;
-		}
-		const current = await this.#readEnv(
-			path.join(projectRoot, 'supabase', '.env.local')
-		);
-		if (current === 'unsafe') return false;
-		const present = managedValues(current);
-		const wanted = this.#values(file, files.signing);
-		return KEY_NAMES.every(
-			(name) =>
-				present[name] !== undefined &&
-				sha256Hex(present[name] ?? '') === sha256Hex(wanted[name])
-		);
 	}
 
 	/** The file's text, empty when missing, `unsafe` for a symlink or oversize file. */

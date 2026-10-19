@@ -9,7 +9,10 @@ import type {
 	DesktopState,
 	DeviceSession,
 } from '../shared/protocol';
-import { desktopActionSchema } from '../shared/protocol';
+import {
+	desktopActionCapability,
+	desktopActionSchema,
+} from '../shared/protocol';
 import {
 	DEFAULT_RECIPE_RUN_CONCURRENCY,
 	type RecipeDefinition,
@@ -58,6 +61,18 @@ const SLIMMING_CANCEL_SETTLE_TIMEOUT_MS = 6 * 60 * 1_000;
 const MAX_RUN_MESSAGE_LENGTH = 4 * 1_024;
 const MAX_CLEANUP_FAILURE_LENGTH = 1_024;
 const CONNECTED_WAIT_SLICE_MS = 5_000;
+/**
+ * The connected-action contract's shortest wait (a `timeoutMs` of at least
+ * 50 ms); a wait-for step with less time left than this is over.
+ */
+const MIN_CONNECTED_WAIT_SLICE_MS = 50;
+/**
+ * Wait-for attempts start at least this far apart. The broker answers some
+ * failures at once (another action is in flight for the device), and retrying
+ * those back to back would run on microtasks alone and starve the main
+ * process's event loop, the step timeout and cancellation included.
+ */
+const CONNECTED_WAIT_RETRY_MS = 250;
 const TERMINAL_SIMULATOR_STATUSES = new Set([
 	'complete',
 	'failed',
@@ -175,6 +190,18 @@ function currentDevice(
 	if (!device)
 		throw new Error('The exact connected app instance went offline.');
 	return device;
+}
+
+/** Refuses an action the app instance does not advertise; retrying cannot change that. */
+function assertAdvertised(
+	device: DeviceSession,
+	action: Pick<DesktopAction, 'tool' | 'command'>
+): void {
+	const capability = desktopActionCapability(action.tool, action.command);
+	if (capability && device.info.capabilities.includes(capability)) return;
+	throw new Error(
+		`The connected app does not advertise ${capability ?? `${action.tool}.${action.command}`}.`
+	);
 }
 
 function diagnosticIds(state: DesktopState, deviceId?: string): Set<string> {
@@ -1124,21 +1151,33 @@ export class RecipeService {
 		if (!result.ok) throw new Error(result.error ?? 'Connected action failed.');
 	}
 
+	/**
+	 * Waits on the app in bounded slices until `timeoutMs`. The exact app
+	 * instance is looked up for every attempt, so one that went offline fails
+	 * the step as it fails any other step, and so does one that does not
+	 * advertise the wait.
+	 */
 	async #runBoundedDesktopWait(
-		value: Omit<DesktopAction, 'actionId'>,
+		value: Omit<DesktopAction, 'actionId' | 'deviceId'>,
+		context: TargetContext,
 		timeoutMs: number,
 		signal: AbortSignal
 	): Promise<void> {
 		const deadline = this.#now() + timeoutMs;
 		let lastError: unknown;
-		do {
+		for (;;) {
 			if (signal.aborted)
 				throw signal.reason ?? new Error('Recipe run cancelled.');
-			const remainingMs = Math.max(1, deadline - this.#now());
+			const device = currentDevice(this.#broker.getState(), context);
+			assertAdvertised(device, value);
+			const startedAt = this.#now();
+			const remainingMs = deadline - startedAt;
+			if (remainingMs < MIN_CONNECTED_WAIT_SLICE_MS) break;
 			try {
 				await this.#runDesktopAction({
 					...value,
 					actionId: actionId(),
+					deviceId: device.info.id,
 					payload: {
 						...value.payload,
 						timeoutMs: Math.min(CONNECTED_WAIT_SLICE_MS, remainingMs),
@@ -1148,7 +1187,10 @@ export class RecipeService {
 			} catch (error) {
 				lastError = error;
 			}
-		} while (this.#now() < deadline);
+			const pauseMs =
+				Math.min(startedAt + CONNECTED_WAIT_RETRY_MS, deadline) - this.#now();
+			if (pauseMs > 0) await waitForDelay(pauseMs, signal);
+		}
 		throw lastError ?? new Error('Connected-app wait timed out.');
 	}
 
@@ -1303,14 +1345,13 @@ export class RecipeService {
 	): Promise<void> {
 		const waitFor = step.waitFor;
 		if (waitFor.condition === 'component.exists') {
-			const device = currentDevice(this.#broker.getState(), context);
 			await this.#runBoundedDesktopWait(
 				{
-					deviceId: device.info.id,
 					tool: 'components',
 					command: 'waitForElement',
 					payload: { id: waitFor.componentId },
 				},
+				context,
 				step.timeoutMs ?? 10_000,
 				signal
 			);
@@ -1323,11 +1364,11 @@ export class RecipeService {
 			if (!screenHash) throw new Error('No starting screen hash is available.');
 			await this.#runBoundedDesktopWait(
 				{
-					deviceId: device.info.id,
 					tool: 'components',
 					command: 'waitForScreenChange',
 					payload: { screenHash },
 				},
+				context,
 				step.timeoutMs ?? 10_000,
 				signal
 			);
@@ -1575,18 +1616,4 @@ export class RecipeService {
 			error,
 		});
 	}
-}
-
-/** Narrow, confirmation-preserving surface for the agent command router. */
-export function createRecipePort(service: RecipeService) {
-	return {
-		list: () => Promise.resolve(service.getState().recipes),
-		get: (recipeId: string) => Promise.resolve(service.getRecipe(recipeId)),
-		run: (request: RecipeRunRequest) => service.runRecipe(request),
-		cancel: (runId: string) => Promise.resolve(service.cancelRun(runId)),
-		status: (runId: string) =>
-			Promise.resolve(
-				service.getState().runs.find((run) => run.id === runId) ?? null
-			),
-	};
 }

@@ -63,26 +63,17 @@ const serviceKindSchema = z.enum([
 	'unknown',
 ]);
 
-/** @public */
-export type SupabaseRuntime = z.infer<typeof runtimeSchema>;
-/** @public */
-export type SupabaseOwner = z.infer<typeof ownerSchema>;
-/** @public */
-export type SupabaseLifecycle = z.infer<typeof lifecycleSchema>;
-/** @public */
-export type SupabaseReadiness = z.infer<typeof readinessSchema>;
-/** @public */
-export type SupabaseServiceState = z.infer<typeof serviceStateSchema>;
-/** @public */
-export type SupabaseServiceHealth = z.infer<typeof healthSchema>;
-/** @public */
-export type SupabaseServiceKind = z.infer<typeof serviceKindSchema>;
-/** @public */
-export type SupabaseConfigDrift = z.infer<typeof configDriftSchema>;
+type SupabaseRuntime = z.infer<typeof runtimeSchema>;
+type SupabaseOwner = z.infer<typeof ownerSchema>;
+type SupabaseLifecycle = z.infer<typeof lifecycleSchema>;
+type SupabaseReadiness = z.infer<typeof readinessSchema>;
+type SupabaseServiceState = z.infer<typeof serviceStateSchema>;
+type SupabaseServiceHealth = z.infer<typeof healthSchema>;
+type SupabaseServiceKind = z.infer<typeof serviceKindSchema>;
+type SupabaseConfigDrift = z.infer<typeof configDriftSchema>;
 
 /**
  * A surface name for errors: an operation kind or `error-envelope`.
- * @public
  */
 export type SupabaseContractSurface = string;
 
@@ -172,7 +163,6 @@ export class MainOnlyCredentials {
 
 /**
  * Renderer-safe loopback URLs from the env map.
- * @public
  */
 export type SupabasePublicEndpoints = Readonly<{
 	apiUrl: string;
@@ -320,9 +310,8 @@ const serviceEndpointMap = z
  * A listener as the CLI reports it. The address is display only: it reads
  * 127.0.0.1 even for container stacks that bind every interface, so exposure
  * must be verified with lsof, never from here.
- * @public
  */
-export type SupabaseEndpoint = Readonly<{
+type SupabaseEndpoint = Readonly<{
 	protocol: 'tcp' | 'http';
 	address: string;
 	port: number;
@@ -378,7 +367,6 @@ const listSchema = z.object({
 		.max(512),
 });
 
-/** @public */
 export type SupabaseStackListEntry = Readonly<{
 	id: string;
 	/** Realpath of the project root when the stack was created; it may be gone. */
@@ -391,7 +379,6 @@ export type SupabaseStackListEntry = Readonly<{
 	owner: SupabaseOwner;
 }>;
 
-/** @public */
 export type SupabaseStackList = Readonly<{
 	stacks: readonly SupabaseStackListEntry[];
 	/** Stacks the CLI skipped because their state could not be decoded. */
@@ -482,16 +469,14 @@ const statusSchema = z.object({
 	env: environmentSchema.optional(),
 });
 
-/** @public */
-export type SupabaseStackIdentity = Readonly<{
+type SupabaseStackIdentity = Readonly<{
 	id: string;
 	name: string;
 	projectRoot: string;
 	branchContext: string;
 }>;
 
-/** @public */
-export type SupabaseCompositionMember = Readonly<{
+type SupabaseCompositionMember = Readonly<{
 	id: string;
 	service: SupabaseServiceKind;
 	activation: 'eager' | 'lazy';
@@ -500,8 +485,7 @@ export type SupabaseCompositionMember = Readonly<{
 	health: SupabaseServiceHealth | null;
 }>;
 
-/** @public */
-export type SupabaseServiceStatus = Readonly<{
+type SupabaseServiceStatus = Readonly<{
 	id: string;
 	service: SupabaseServiceKind;
 	state: SupabaseServiceState;
@@ -512,14 +496,12 @@ export type SupabaseServiceStatus = Readonly<{
 	error: string | undefined;
 }>;
 
-/** @public */
 export type SupabaseReleaseMismatch = Readonly<{
 	stackId: string | undefined;
 	ownerRelease: string;
 	clientRelease: string;
 }>;
 
-/** @public */
 export type SupabaseStackStatus = Readonly<{
 	identity: SupabaseStackIdentity;
 	runtime: SupabaseRuntime;
@@ -663,9 +645,8 @@ const startSchema = z.object({
 
 /**
  * A public port that moved since the stack last ran.
- * @public
  */
-export type SupabaseEndpointChange = Readonly<{
+type SupabaseEndpointChange = Readonly<{
 	/** `api` or `<service>.<endpoint>`. */
 	endpoint: string;
 	/** Endpoint keys that share the moved listener, such as `rest.http`. */
@@ -674,7 +655,6 @@ export type SupabaseEndpointChange = Readonly<{
 	to: number;
 }>;
 
-/** @public */
 export type SupabaseStackStart = Readonly<{
 	id: string;
 	runtime: SupabaseRuntime;
@@ -723,7 +703,6 @@ const stopSchema = z.object({
 	not_running: z.array(hex64).max(64),
 });
 
-/** @public */
 export type SupabaseStackStop = Readonly<{
 	stopped: readonly string[];
 	/** Already stopped; leftovers were reclaimed. */
@@ -755,7 +734,6 @@ const restartSchema = z.object({
 
 /**
  * Restart reports no endpoints or env; follow it with a status.
- * @public
  */
 export type SupabaseStackRestart = Readonly<{
 	id: string;
@@ -797,7 +775,6 @@ const destroySchema = z.union([
 	}),
 ]);
 
-/** @public */
 export type SupabaseStackDestroy = Readonly<{
 	destroyedIds: readonly string[];
 }>;
@@ -840,8 +817,7 @@ const logsSchema = z.array(logRecordSchema).max(5_000);
 const LOG_LINE_MAX_CHARS = 2_000;
 const DEFAULT_LOG_CHARACTERS = 64 * 1024;
 
-/** @public */
-export type SupabaseLogRecord =
+type SupabaseLogRecord =
 	| Readonly<{
 			type: 'entry';
 			timestamp: string;
@@ -864,7 +840,6 @@ export type SupabaseLogRecord =
 			count: number | undefined;
 	  }>;
 
-/** @public */
 export type SupabaseStackLogs = Readonly<{
 	records: readonly SupabaseLogRecord[];
 	/** Older records were dropped to fit the character budget. */
@@ -945,7 +920,6 @@ const prepareSchema = z.object({
 		.max(32),
 });
 
-/** @public */
 export type SupabaseStackPrepare = Readonly<{
 	/** The stack the preparation registered or reused; stop it afterwards. */
 	id: string;
@@ -983,14 +957,12 @@ const migrationListSchema = z.object({
 		.max(10_000),
 });
 
-/** @public */
-export type SupabaseMigrationRowStatus =
+type SupabaseMigrationRowStatus =
 	| 'applied'
 	| 'pending'
 	| 'out-of-order'
 	| 'missing-local';
 
-/** @public */
 export type SupabaseMigrationStatus = Readonly<{
 	/**
 	 * `missing-local`: the database has versions this checkout lacks (often a
@@ -1095,7 +1067,6 @@ export function deriveSupabaseMigrationStatus(
 	});
 }
 
-/** @public */
 export type SupabaseMigrationList = Readonly<{
 	rows: readonly Readonly<{ local: string; remote: string; time: string }>[];
 	status: SupabaseMigrationStatus;
@@ -1117,7 +1088,6 @@ const migrationUpSchema = z.object({
 	applied: z.array(text(4096)).max(10_000),
 });
 
-/** @public */
 export type SupabaseMigrationUp = Readonly<{
 	/** File names only; the absolute paths are not needed for display. */
 	applied: readonly string[];
@@ -1139,7 +1109,6 @@ const dbResetSchema = z.object({
 	version: text(64),
 });
 
-/** @public */
 export type SupabaseDbReset = Readonly<{
 	/** Always `local` for desktop calls; `remote` would mean a hosted reset ran. */
 	target: 'local' | 'remote';
@@ -1181,7 +1150,6 @@ const dbStatsSchema = z.object({
 
 /**
  * Sizes are pg_size_pretty text; hit rates are numeric text or N/A.
- * @public
  */
 export type SupabaseDbStats = Readonly<{
 	databaseSize: string | undefined;
@@ -1229,7 +1197,6 @@ const tableStatsSchema = z.object({
 
 /**
  * One table, largest first; counts arrive as int8 text.
- * @public
  */
 export type SupabaseTableStats = Readonly<{
 	name: string;
@@ -1269,7 +1236,6 @@ const seedBucketsSchema = z.object({
 	objects_uploaded: z.array(z.string()).max(100_000),
 });
 
-/** @public */
 export type SupabaseSeedBuckets = Readonly<{
 	bucketsCreated: readonly string[];
 	bucketsUpdated: readonly string[];
@@ -1322,7 +1288,6 @@ const errorEnvelopeSchema = z.object({
 
 /**
  * One saved setting a start could not adopt.
- * @public
  */
 export type SupabaseStackChange = Readonly<{
 	service: string | undefined;
@@ -1335,7 +1300,6 @@ export type SupabaseStackChange = Readonly<{
 	editable: boolean;
 }>;
 
-/** @public */
 export type SupabaseErrorEnvelope = Readonly<{
 	/** The thrown error's tag, such as ExperimentalStackStartError. */
 	code: string;

@@ -1,16 +1,13 @@
-import {
-	type ChildProcess,
-	type SpawnOptions,
-	spawn,
-} from 'node:child_process';
+import { type SpawnOptions, spawn } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
-import { open, stat } from 'node:fs/promises';
+import { open, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import {
 	MAX_METRO_ENV_VALUE_LENGTH,
 	METRO_ENV_NAME,
 } from '../shared/lane-protocol';
+import { resolveToolPath, type ToolPathResolver } from './lane-tool-path';
 import { runSimulatorCommand } from './simulator-command-runner';
 
 const METRO_PROBE_TIMEOUT_MS = 750;
@@ -63,18 +60,43 @@ export type MetroSupervisorPort = {
 	 */
 	isHealthy: (port: number, pid: number) => Promise<boolean>;
 	isProcessRunning: (pid: number) => boolean;
-	/** Stops the Metro at `pid` only if it is the one serving `port`. */
-	stop: (pid: number, port: number) => Promise<void>;
+	/**
+	 * Stops the Metro at `pid` only if it is the one serving `port` from
+	 * `appDirectory`. Throws NotLaneMetroError, signalling nothing, once `pid`
+	 * is proven to be some other process, and a plain error, signalling
+	 * nothing either, when it cannot tell whether `pid` is the lane's Metro.
+	 */
+	stop: (pid: number, port: number, appDirectory: string) => Promise<void>;
 	readLogTail: (logPath: string, maxCharacters: number) => Promise<string>;
 };
 
+/**
+ * The PID a lane recorded now names some other process: its command line is
+ * no Expo or Metro on the lane's port. PIDs get reused, so the lane's own
+ * Metro is gone. Nothing was signalled.
+ */
+export class NotLaneMetroError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'NotLaneMetroError';
+	}
+}
+
 type CommandRunner = typeof runSimulatorCommand;
+
+/** What a Metro start needs from the child it spawned. */
+type MetroChild = {
+	readonly pid?: number | undefined;
+	unref: () => void;
+	once: (event: 'spawn', listener: () => void) => unknown;
+	on: (event: 'error', listener: (error: Error) => void) => unknown;
+};
 
 type MetroSpawn = (
 	command: string,
 	args: readonly string[],
 	options: SpawnOptions
-) => Pick<ChildProcess, 'pid' | 'unref'>;
+) => MetroChild;
 
 type PackagerProbe = (
 	url: string,
@@ -82,11 +104,12 @@ type PackagerProbe = (
 ) => Promise<{ ok: boolean; text: () => Promise<string> }>;
 
 /**
- * Proves a PID is still the Metro this lane started before signalling it.
- * The command line is the only thing `ps` gives us; the working directory is
- * not on it, and a pnpm workspace hoists `.bin/expo` far from the app, so the
- * proof is the `--port <n>` argument the lane itself passed at launch. PIDs
- * get reused; without this a stale lease could kill an unrelated process.
+ * The command-line half of proving a PID is still the Metro this lane
+ * started before signalling it: Expo or Metro, with the `--port <n>` the lane
+ * itself passed at launch. The app directory is not on the command line (a
+ * pnpm workspace hoists `.bin/expo` far from the app), so stopping also
+ * checks the process's working directory. PIDs get reused; without this a
+ * stale lease could kill an unrelated process.
  */
 export function isLaneMetroCommand(commandLine: string, port: number): boolean {
 	if (!/\b(expo|metro)\b/i.test(commandLine)) return false;
@@ -177,21 +200,23 @@ function checkedLaneEnv(
 
 /**
  * Metro's environment, in this order: the desktop's own environment without
- * the variables a lane must not inherit, then the environment's metroEnv,
- * then the lane's laneEnv, then the fixed keys every lane needs, which
- * nothing overrides.
+ * the variables a lane must not inherit, its PATH replaced by `toolPath` when
+ * there is one, then the environment's metroEnv, then the lane's checked
+ * laneEnv, then the fixed keys every lane needs, which nothing overrides.
  */
 function metroEnvironment(
 	inherited: NodeJS.ProcessEnv,
-	input: MetroLaunchInput
+	input: MetroLaunchInput,
+	laneEnv: Record<string, string>,
+	toolPath: string | undefined
 ): NodeJS.ProcessEnv {
-	const laneEnv = checkedLaneEnv(input.laneEnv);
 	const base: NodeJS.ProcessEnv = {};
 	for (const [name, value] of Object.entries(inherited)) {
 		if (value !== undefined && !STRIPPED_INHERITED_ENV.test(name)) {
 			base[name] = value;
 		}
 	}
+	if (toolPath !== undefined) base.PATH = toolPath;
 	return {
 		...base,
 		...input.metroEnv,
@@ -215,6 +240,20 @@ function metroEnvironment(
 }
 
 /**
+ * Resolves once the child runs. A spawn that fails (an Expo CLI without its
+ * execute bit, an app directory that is gone) is reported on the child's
+ * 'error' event after spawn() returned; listening turns it into this start's
+ * error instead of an uncaught exception in main. The listener stays: no one
+ * else holds a detached Metro's child object.
+ */
+function spawned(child: MetroChild): Promise<void> {
+	return new Promise((resolve, reject) => {
+		child.once('spawn', () => resolve());
+		child.on('error', reject);
+	});
+}
+
+/**
  * Metro is detached so it survives the desktop app and so one lane's crash
  * cannot take down the main process. Its output goes to a per-lane log file
  * that the renderer and the agent CLI can tail.
@@ -222,7 +261,8 @@ function metroEnvironment(
 async function startMetro(
 	input: MetroLaunchInput,
 	spawnProcess: MetroSpawn,
-	inherited: NodeJS.ProcessEnv
+	inherited: NodeJS.ProcessEnv,
+	toolPath: ToolPathResolver
 ): Promise<number> {
 	const expoBinary = resolveExpoBinary(input.worktreePath);
 	if (!expoBinary) {
@@ -231,7 +271,13 @@ async function startMetro(
 		);
 	}
 	// Refuse a bad laneEnv before the log is created or anything spawns.
-	const env = metroEnvironment(inherited, input);
+	const laneEnv = checkedLaneEnv(input.laneEnv);
+	const env = metroEnvironment(
+		inherited,
+		input,
+		laneEnv,
+		await toolPath(inherited.PATH)
+	);
 	const log = openSync(input.logPath, 'a', 0o600);
 	try {
 		const child = spawnProcess(
@@ -253,6 +299,13 @@ async function startMetro(
 			}
 		);
 		child.unref();
+		try {
+			await spawned(child);
+		} catch (error) {
+			throw new Error(`Metro could not start: ${(error as Error).message}`, {
+				cause: error,
+			});
+		}
 		if (!child.pid) throw new Error('Metro did not return a process id.');
 		return child.pid;
 	} finally {
@@ -338,34 +391,320 @@ async function isMetroHealthy(
 	return listensOn(pid, port, runCommand);
 }
 
+/** A directory's device and inode, both unsigned, as lsof prints them. */
+type DirectoryIdentity = { device: bigint; inode: bigint };
+
+/** What lsof reports about a process's working directory. */
+type ProcessCwd = {
+	/** Its path as lsof printed it, in lsof's escapes (see printsPath). */
+	printed: string;
+	/** Its device and inode; undefined unless lsof printed both. */
+	identity: DirectoryIdentity | undefined;
+};
+
+/**
+ * lsof's -F report on a process's working directory. lsof 4.91 prints the
+ * process, the descriptor, then the device in hexadecimal, the inode in
+ * decimal and the name, in that order whatever order -F names them in.
+ */
+const LSOF_CWD_REPORT =
+	/^p(\d+)\nfcwd\n(?:D0x([0-9a-f]{1,8})\n)?(?:i(\d{1,20})\n)?n([^\n]+)\n$/;
+
+/**
+ * The working directory lsof reports for `pid`: its device and inode, and
+ * its path as lsof prints it, which the kernel resolved, free of symlinks and
+ * spelling each name as the disk stores it. Any other report fails. lsof
+ * runs in the C locale whatever the desktop's, so it escapes every non-ASCII
+ * byte. A legacy locale prints some bytes raw: in ja_JP.SJIS the backslash
+ * of `Á\t` is the second byte of a character, so the path reads as `Á` and
+ * a tab, and in fr_FR.ISO8859-1 `Á` and `ā` both read as U+FFFD and `\x81`.
+ */
+async function processCwd(
+	pid: number,
+	runCommand: CommandRunner
+): Promise<ProcessCwd> {
+	const result = await runCommand(
+		LSOF_PATH,
+		['-a', '-p', String(pid), '-d', 'cwd', '-FDin'],
+		{
+			timeoutMs: OWNER_PROBE_TIMEOUT_MS,
+			maxOutputBytes: OWNER_PROBE_MAX_OUTPUT_BYTES,
+			environment: { LC_ALL: 'C' },
+		}
+	);
+	const [, reported, device, inode, printed] =
+		LSOF_CWD_REPORT.exec(result.stdout) ?? [];
+	if (reported !== String(pid) || printed === undefined) {
+		throw new Error(`lsof reported no working directory for process ${pid}.`);
+	}
+	return {
+		printed,
+		identity:
+			device === undefined || inode === undefined
+				? undefined
+				: { device: BigInt(`0x${device}`), inode: BigInt(inode) },
+	};
+}
+
+const LSOF_CONTROL_ESCAPES: ReadonlyMap<number, string> = new Map([
+	[0x08, '\\b'],
+	[0x09, '\\t'],
+	[0x0a, '\\n'],
+	[0x0c, '\\f'],
+	[0x0d, '\\r'],
+]);
+
+/**
+ * How lsof prints a byte of a name: printable ASCII as itself, except the
+ * backslash, which it doubles; a control byte as \b \t \n \f \r, or ^@ to ^_
+ * for the others; and every other byte, DEL included, as \xNN. (It prints
+ * 0xff as ^?, but no UTF-8 path holds that byte.) A non-ASCII character its
+ * locale can print comes out whole instead (see printsPath).
+ */
+function lsofPrintedByte(byte: number): string {
+	if (byte === 0x5c) return '\\\\';
+	if (byte >= 0x20 && byte < 0x7f) return String.fromCharCode(byte);
+	const control = LSOF_CONTROL_ESCAPES.get(byte);
+	if (control !== undefined) return control;
+	if (byte < 0x20) return `^${String.fromCharCode(byte | 0x40)}`;
+	return `\\x${byte.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Whether `printed`, a path as lsof printed it, is `candidate`. lsof prints a
+ * character as it is only when its locale can print it, and otherwise
+ * escapes each of its bytes. processCwd runs it in the C locale, which
+ * escapes every non-ASCII byte: `À faire` is `\xc3\x80 faire`. A UTF-8 locale
+ * prints most characters as they are, but still escapes the ones it cannot
+ * print, such as a soft hyphen or a zero-width joiner. The text is read
+ * against a candidate rather than decoded on its own because lsof prints a
+ * caret as it is: its `^A` is a caret and an A, or the control byte 0x01.
+ */
+function printsPath(printed: string, candidate: string): boolean {
+	let at = 0;
+	for (const character of candidate) {
+		// Every escape is ASCII, so a non-ASCII character printed as it is
+		// cannot be part of one.
+		if (
+			(character.codePointAt(0) ?? 0) > 0x7f &&
+			printed.startsWith(character, at)
+		) {
+			at += character.length;
+			continue;
+		}
+		for (const byte of Buffer.from(character, 'utf8')) {
+			const expected = lsofPrintedByte(byte);
+			if (!printed.startsWith(expected, at)) return false;
+			at += expected.length;
+		}
+	}
+	return at === printed.length;
+}
+
+/**
+ * Decodes a run of escaped bytes. It fails on bytes that are no whole
+ * character (fatal), which then stay escaped: a single-byte locale can print
+ * some bytes of a character raw, which the runner reads back as U+FFFD, and
+ * escape the rest. It keeps a leading U+FEFF (ignoreBOM): by default the
+ * decoder drops it unseen, and `a\xef\xbb\xbfpp` would read as `app`.
+ */
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * What a message may not show as it is: controls, format characters such as
+ * the bidi overrides and isolates, line and paragraph separators, and the
+ * other default-ignorable code points, which render as nothing, such as the
+ * combining grapheme joiner, variation selectors and Hangul fillers. Any of
+ * them can make a path read as another one.
+ */
+const UNSAFE_IN_MESSAGE =
+	/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
+
+/**
+ * A path lsof printed, for a message: each run of non-ASCII bytes it escaped
+ * read back as UTF-8, and the rest as lsof printed it, a doubled backslash
+ * included. Every backslash then starts an escape or ends lsof's `^\` for
+ * U+001C, and paths lsof prints apart never read alike. That holds because
+ * processCwd runs lsof in the C locale (a UTF-8 one would do too), never in
+ * a legacy locale, which can print a backslash or a lone byte raw. `^\` is
+ * read as one escape wherever that lets the next `\x`, after any doubled
+ * backslashes, start a run: `\xd0\xa0^\\xd0\xb0` is Р, U+001C and а, and
+ * `^\\\\xd0\xb0` is U+001C, a backslash and а. Control bytes stay escaped,
+ * a run holding a character UNSAFE_IN_MESSAGE names stays escaped whole, and
+ * such a character lsof printed raw is escaped as lsof escapes it in the C
+ * locale. A UTF-8 locale prints the separators, the combining grapheme
+ * joiner, variation selectors and Hangul fillers raw, and a single-byte
+ * locale can print each byte of a character as a letter of its own, which
+ * the runner reads back as UTF-8: ru_RU.CP866 does so for a bidi override,
+ * kk_KZ.PT154 for C1 controls.
+ */
+function readableLsofPath(printed: string): string {
+	return printed.replace(
+		/\\\\|\^\\(?=(?:\\\\)*\\x[89a-f][0-9a-f])|(?:\\x[89a-f][0-9a-f])+|[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/gu,
+		(match) => {
+			if (match === '\\\\' || match === '^\\') return match;
+			if (!match.startsWith('\\x')) {
+				return Array.from(Buffer.from(match, 'utf8'), lsofPrintedByte).join('');
+			}
+			try {
+				const decoded = UTF8.decode(
+					Buffer.from(match.replaceAll('\\x', ''), 'hex')
+				);
+				return UNSAFE_IN_MESSAGE.test(decoded) ? match : decoded;
+			} catch {
+				return match;
+			}
+		}
+	);
+}
+
+/**
+ * A path for a message, shown as readableLsofPath shows what lsof prints for
+ * it in the C locale, so that the lane's own path reads in the same escapes
+ * as the one lsof printed beside it: a lane named `a\xef\xbb\xbfpp` shows as
+ * `a\\xef\\xbb\\xbfpp`, apart from a directory named a, U+FEFF and pp.
+ */
+function readablePath(directory: string): string {
+	return readableLsofPath(
+		Array.from(Buffer.from(directory, 'utf8'), lsofPrintedByte).join('')
+	);
+}
+
+/**
+ * The device and inode of `directory`, as lsof prints a working directory's,
+ * or undefined when it is gone (ENOENT). stat(2) resolves the path as the
+ * kernel resolved Metro's working directory, through symlinks, letter case
+ * and Unicode normalization alike, so its realpath has the same two numbers.
+ * A dev_t is 32 bits and lsof prints it unsigned, while Node reads both
+ * numbers as signed 64-bit ones: devfs's device, whose high bit is set, reads
+ * as negative.
+ */
+async function directoryIdentity(
+	directory: string
+): Promise<DirectoryIdentity | undefined> {
+	try {
+		const { dev, ino } = await stat(directory, { bigint: true });
+		return { device: BigInt.asUintN(32, dev), inode: BigInt.asUintN(64, ino) };
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+		throw error;
+	}
+}
+
+/**
+ * A caret escape lsof prints for a control byte from 0x01 to 0x1f other than
+ * \b \t \n \f and \r. Each but one is also how it prints a caret followed by
+ * that letter or sign: `^A` is 0x01, or a caret and an A. lsof doubles a
+ * backslash, so `^\` for 0x1c only begins how it prints a caret and a
+ * backslash, `^\\`: `^\\t` is 0x1c and a tab, or a caret, a backslash and a t.
+ */
+const LSOF_CARET_ESCAPE = /\^[A-GKN-Z[\\\]^_]/;
+
+/**
+ * Whether the working directory lsof reported is `appDirectory`: the same
+ * device and inode, which no spelling can stand in for, since lsof prints
+ * some paths alike (see LSOF_CARET_ESCAPE). Only an app directory that is
+ * gone leaves nothing to compare. lsof keeps printing a working directory
+ * deleted under its process, so then the path lsof printed must be the app
+ * directory as given, with no caret escape that another path prints alike.
+ * Throws when it cannot tell.
+ */
+async function isAppDirectory(
+	cwd: ProcessCwd,
+	appDirectory: string
+): Promise<boolean> {
+	const resolved = path.resolve(appDirectory);
+	const identity = await directoryIdentity(resolved);
+	if (identity === undefined) {
+		if (!printsPath(cwd.printed, resolved)) return false;
+		if (LSOF_CARET_ESCAPE.test(cwd.printed)) {
+			throw new Error(
+				"the app directory is gone, and the path lsof printed could be another directory's: lsof prints a control byte as a caret and a letter or sign."
+			);
+		}
+		return true;
+	}
+	if (cwd.identity === undefined) {
+		throw new Error(
+			'lsof printed no device and inode for its working directory.'
+		);
+	}
+	return (
+		cwd.identity.device === identity.device &&
+		cwd.identity.inode === identity.inode
+	);
+}
+
+/**
+ * Whether `printed`, a path lsof printed, reads as `appDirectory`, as given
+ * or as its realpath: the kernel spells each name in the path lsof reports as
+ * the disk stores it, and so does realpath(3).
+ */
+async function readsAsAppDirectory(
+	printed: string,
+	appDirectory: string
+): Promise<boolean> {
+	const resolved = path.resolve(appDirectory);
+	if (printsPath(printed, resolved)) return true;
+	try {
+		return printsPath(printed, await realpath(resolved));
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Stops only a Metro this lane owns. PIDs are recycled, so before signalling
- * the process group the command line must still name the worktree and Expo.
+ * the process group the PID must still be an Expo or Metro serving the lane's
+ * port (its command line carries the `--port` the lane passed) from the
+ * lane's app directory (its working directory, by device and inode: Expo and
+ * Metro never change it). A PID whose command line is anything else is left
+ * alone and throws NotLaneMetroError. One that cannot be inspected fails
+ * closed, and so does an Expo or Metro on the port serving from elsewhere:
+ * that may be another worktree's, but also the lane's own after its worktree
+ * was moved or renamed, which lsof then reports under the new path, or after
+ * its app directory was recreated.
  */
 async function stopMetro(
 	pid: number,
 	port: number,
+	appDirectory: string,
 	runCommand: CommandRunner
 ): Promise<void> {
 	if (!isProcessRunning(pid)) return;
-	let commandLine: string | undefined;
+	let cwd: ProcessCwd | undefined;
+	let servesHere = false;
 	try {
 		const result = await runCommand(
 			'/bin/ps',
 			['-p', String(pid), '-o', 'command='],
 			{ timeoutMs: 5_000, maxOutputBytes: 64 * 1024 }
 		);
-		commandLine = result.stdout;
+		if (isLaneMetroCommand(result.stdout, port)) {
+			cwd = await processCwd(pid, runCommand);
+			servesHere = await isAppDirectory(cwd, appDirectory);
+		}
 	} catch (error) {
-		// Without `ps` the PID cannot be proven to be ours. Fail closed and say
+		// A process that exited while it was inspected has nothing to stop.
+		if (!isProcessRunning(pid)) return;
+		// Otherwise the PID cannot be proven to be ours. Fail closed and say
 		// so: the lane keeps its lease and the operator can stop Metro by hand.
 		throw new Error(
 			`Could not inspect process ${pid} to confirm it is this lane's Metro (${(error as Error).message}); refusing to stop it. Stop the Metro on port ${port} manually, then stop the lane again.`
 		);
 	}
-	if (!isLaneMetroCommand(commandLine, port)) {
-		throw new Error(
+	if (cwd === undefined) {
+		throw new NotLaneMetroError(
 			`Process ${pid} is no longer the Metro serving port ${port}; refusing to stop it.`
+		);
+	}
+	if (!servesHere) {
+		// Not proof the lane's Metro is gone, so the lane keeps its lease.
+		const lanePath = readablePath(appDirectory);
+		throw new Error(
+			(await readsAsAppDirectory(cwd.printed, appDirectory))
+				? `Process ${pid} is an Expo or Metro on port ${port} serving from another directory than this lane's ${lanePath}, though lsof prints its path the same; refusing to stop it. If the app directory was recreated, it is likely this lane's Metro: stop it manually, then stop the lane again.`
+				: `Process ${pid} is an Expo or Metro on port ${port} serving from ${readableLsofPath(cwd.printed)}, not from this lane's ${lanePath}; refusing to stop it. If the worktree was moved or renamed, it is likely this lane's Metro: stop it manually, then stop the lane again.`
 		);
 	}
 	try {
@@ -415,6 +754,7 @@ export function createMetroSupervisor({
 	spawnProcess = spawn,
 	probe = fetch,
 	environment = process.env,
+	toolPath = resolveToolPath,
 }: {
 	/** The bounded runner `ps` and `lsof` go through. */
 	runCommand?: CommandRunner;
@@ -422,13 +762,16 @@ export function createMetroSupervisor({
 	probe?: PackagerProbe;
 	/** What a lane's Metro inherits before stripping: the desktop's own env. */
 	environment?: NodeJS.ProcessEnv;
+	/** The PATH Metro gets in place of the inherited one, so it finds Node. */
+	toolPath?: ToolPathResolver;
 } = {}): MetroSupervisorPort {
 	return {
 		isPortFree,
-		start: (input) => startMetro(input, spawnProcess, environment),
+		start: (input) => startMetro(input, spawnProcess, environment, toolPath),
 		isHealthy: (port, pid) => isMetroHealthy(port, pid, probe, runCommand),
 		isProcessRunning,
-		stop: (pid, port) => stopMetro(pid, port, runCommand),
+		stop: (pid, port, appDirectory) =>
+			stopMetro(pid, port, appDirectory, runCommand),
 		readLogTail,
 	};
 }

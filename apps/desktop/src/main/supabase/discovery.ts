@@ -17,7 +17,8 @@ import {
  * cadence, exposure verification, capacity). No Supabase CLI process is
  * involved: owner argv from pgrep, the per-user port registry through one
  * read-only SELECT, lsof over a stack's process tree, SysV shared-memory
- * capacity, and du/ps footprints. Every probe runs a fixed absolute
+ * capacity, du/ps footprints, and the ps command line of a CLI child a
+ * previous desktop left running. Every probe runs a fixed absolute
  * executable with a timeout and an output cap, and every function resolves to
  * a typed result with an `unavailable` reason instead of throwing.
  */
@@ -53,7 +54,6 @@ export type ProbeRunner = (request: {
 	maxOutputBytes: number;
 }) => Promise<ProbeRunResult>;
 
-/** @public */
 export type ProbeUnavailableReason =
 	| 'unsupported-platform'
 	| 'invalid-input'
@@ -74,7 +74,6 @@ export type ProbeUnavailableReason =
 	| 'unexpected-schema'
 	| 'sqlite-error';
 
-/** @public */
 export type ProbeUnavailable = {
 	status: 'unavailable';
 	reason: ProbeUnavailableReason;
@@ -85,8 +84,6 @@ export type ProbeUnavailable = {
 /**
  * A process running `<bin> __supabase_stack_host__ <state> <cache> <id>`.
  * argv is self-reported: any same-user process can claim this shape.
- *
- * @public
  */
 export type SupabaseOwnerProcess = {
 	pid: number;
@@ -99,12 +96,10 @@ export type SupabaseOwnerProcess = {
 	cacheRoot?: string;
 };
 
-/** @public */
 export type OwnerDiscoveryResult =
 	| { status: 'ok'; owners: SupabaseOwnerProcess[] }
 	| ProbeUnavailable;
 
-/** @public */
 export type ProcessTreeResult =
 	| {
 			status: 'ok';
@@ -116,7 +111,6 @@ export type ProcessTreeResult =
 	  }
 	| ProbeUnavailable;
 
-/** @public */
 export type PortReservation = {
 	stateRoot: string;
 	stackId: string;
@@ -124,7 +118,6 @@ export type PortReservation = {
 	port: number;
 };
 
-/** @public */
 export type PortReservationsResult =
 	| {
 			status: 'ok';
@@ -138,8 +131,6 @@ export type PortReservationsResult =
 
 /**
  * A TCP LISTEN or bound, unconnected UDP socket.
- *
- * @public
  */
 export type ExposureListener = {
 	pid: number;
@@ -153,7 +144,6 @@ export type ExposureListener = {
 	loopback: boolean;
 };
 
-/** @public */
 export type ExposureResult =
 	| {
 			status: 'ok';
@@ -163,7 +153,6 @@ export type ExposureResult =
 	  }
 	| ProbeUnavailable;
 
-/** @public */
 export type SysvCapacityResult =
 	| {
 			status: 'ok';
@@ -174,7 +163,6 @@ export type SysvCapacityResult =
 	  }
 	| ProbeUnavailable;
 
-/** @public */
 export type DiskUsageEntry =
 	| { path: string; status: 'ok'; bytes: number }
 	| {
@@ -187,12 +175,10 @@ export type DiskUsageEntry =
 				| 'not-reported';
 	  };
 
-/** @public */
 export type DiskUsageResult =
 	| { status: 'ok'; entries: DiskUsageEntry[] }
 	| ProbeUnavailable;
 
-/** @public */
 export type MemoryResult =
 	| {
 			status: 'ok';
@@ -203,13 +189,17 @@ export type MemoryResult =
 	  }
 	| ProbeUnavailable;
 
+/** A process's command line as `ps` prints it; none once it is gone. */
+export type ProcessCommandResult =
+	| { status: 'ok'; command: string | undefined }
+	| ProbeUnavailable;
+
 /** The read-only `ports.sqlite` connection discovery needs. */
 export type PortsDatabase = {
 	selectReservations: () => unknown[];
 	close: () => void;
 };
 
-/** @public */
 export type SupabaseDiscovery = {
 	discoverOwners: () => Promise<OwnerDiscoveryResult>;
 	processTree: (
@@ -221,9 +211,9 @@ export type SupabaseDiscovery = {
 	readSysvCapacity: () => Promise<SysvCapacityResult>;
 	measureDisk: (paths: readonly string[]) => Promise<DiskUsageResult>;
 	measureMemory: (pids: readonly number[]) => Promise<MemoryResult>;
+	processCommand: (pid: number) => Promise<ProcessCommandResult>;
 };
 
-/** @public */
 export type SupabaseDiscoveryOptions = {
 	run?: ProbeRunner;
 	/** Real user id for `pgrep -U`; defaults to process.getuid(). */
@@ -971,6 +961,30 @@ export function createSupabaseDiscovery(
 		};
 	};
 
+	/**
+	 * `ps -ww -o args=`: the binary and its arguments, space-joined, with the
+	 * escapes ps's locale calls for (in the C locale, every non-ASCII byte).
+	 * Compare it through supabaseArgvDigest, never as text.
+	 */
+	const processCommand = async (pid: number): Promise<ProcessCommandResult> => {
+		const guard = platformGuard();
+		if (guard) return guard;
+		if (!Number.isSafeInteger(pid) || pid <= 1) {
+			return unavailable('invalid-input');
+		}
+		const result = await run({
+			executable: PS,
+			args: ['-ww', '-o', 'args=', '-p', String(pid)],
+			...BUDGETS.ps,
+		});
+		if (result.kind === 'error') return runFailure(result);
+		// ps exits 1 when the pid is gone.
+		if (result.exitCode === 1) return { status: 'ok', command: undefined };
+		if (result.exitCode !== 0) return commandFailed(PS, result);
+		const command = result.stdout.replace(/\n+$/, '');
+		return { status: 'ok', command: command === '' ? undefined : command };
+	};
+
 	return {
 		discoverOwners,
 		processTree,
@@ -979,5 +993,6 @@ export function createSupabaseDiscovery(
 		readSysvCapacity,
 		measureDisk,
 		measureMemory,
+		processCommand,
 	};
 }

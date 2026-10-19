@@ -67,6 +67,7 @@ import {
 	redactSupabaseStoredText,
 	type SupabaseRequestRecord,
 	type SupabaseStackRecord,
+	supabaseRecreateError,
 } from './stack-store';
 
 /**
@@ -107,7 +108,6 @@ const UNTRACKED_REASON = "its repository isn't tracked in Lanes";
 
 /**
  * The last good `stack status` read of a stack, and the newest failure.
- * @public
  */
 export type SupabaseStatusCacheEntry = Readonly<{
 	status?: SupabaseStackStatus | undefined;
@@ -118,7 +118,6 @@ export type SupabaseStatusCacheEntry = Readonly<{
 
 /**
  * The lsof verdict over a stack's process tree.
- * @public
  */
 export type SupabaseExposureEntry = Readonly<{
 	verdict: 'loopback' | 'lan-exposed' | 'unknown';
@@ -127,7 +126,6 @@ export type SupabaseExposureEntry = Readonly<{
 
 /**
  * What the cheap tier found on disk for a stack.
- * @public
  */
 export type SupabasePathCheck = Readonly<{
 	worktreeExists: boolean;
@@ -136,8 +134,7 @@ export type SupabasePathCheck = Readonly<{
 	missingSince?: number | undefined;
 }>;
 
-/** @public */
-export type SupabaseMeasurements = Readonly<{
+type SupabaseMeasurements = Readonly<{
 	/** RSS over each running stack's process tree. */
 	memory?: ReadonlyMap<string, Readonly<{ bytes: number; measuredAt: number }>>;
 	disk?: ReadonlyMap<
@@ -159,7 +156,6 @@ export type SupabaseMeasurements = Readonly<{
 
 /**
  * A lane's attachment, as the service tracks it.
- * @public
  */
 export type SupabaseLaneAttachment = Readonly<{
 	stackId: string;
@@ -948,6 +944,10 @@ function buildStack(
 		inputs.credentials?.get(id) ?? statusEntry?.status?.credentials;
 	const memory = inputs.measurements?.memory?.get(id);
 	const disk = inputs.measurements?.disk?.get(id);
+	// From the failure behind the flag, not lastError, which moves on.
+	const recreateChanges = record
+		? supabaseRecreateError(record)?.details.stackChanges
+		: undefined;
 	const managedLike =
 		origin === 'managed' || origin === 'adopted' || origin === 'expected';
 	const appEnvNames = managedLike
@@ -1059,6 +1059,7 @@ function buildStack(
 		...(record?.lastError === undefined
 			? {}
 			: { lastError: redactSupabaseErrorView(record.lastError) }),
+		...(recreateChanges === undefined ? {} : { recreateChanges }),
 		known: {
 			publishableKey: credentials?.publishableKey !== undefined,
 			anonKey: credentials?.anonKey !== undefined,

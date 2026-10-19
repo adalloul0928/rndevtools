@@ -54,7 +54,7 @@ describe('attributeAgents', () => {
 					lastSeenAt: now - 1_000,
 				},
 			],
-			lanes: [{ simulatorUdid: B, appDirectory: '/Users/dev/app-onboarding' }],
+			lanes: [{ simulatorUdid: B, worktreePath: '/Users/dev/app-onboarding' }],
 			now,
 		});
 		expect(byDevice[A]?.map((agent) => [agent.sessionId, agent.via])).toEqual([
@@ -116,10 +116,71 @@ describe('attributeAgents', () => {
 			],
 			claims: [],
 			touches: [],
-			lanes: [{ simulatorUdid: A, appDirectory: '/Users/dev/app-checkout' }],
+			lanes: [{ simulatorUdid: A, worktreePath: '/Users/dev/app-checkout' }],
 			now,
 		});
 		expect(byDevice[A]?.map((agent) => agent.sessionId)).toEqual(['claude-1']);
+	});
+
+	it('matches a monorepo app lane to a session working from the checkout root', () => {
+		const byDevice = attributeAgents({
+			sessions: [{ ...codex, cwd: '/Users/dev/repo' }],
+			claims: [],
+			touches: [],
+			// The lane's app is /Users/dev/repo/examples/expo-demo.
+			lanes: [{ simulatorUdid: A, worktreePath: '/Users/dev/repo' }],
+			now,
+		});
+		expect(byDevice[A]?.map((agent) => [agent.sessionId, agent.via])).toEqual([
+			['codex-1', 'lane'],
+		]);
+	});
+
+	it('lists at most 32 agents per device, keeping the strongest, so the state always parses', () => {
+		const sessions = Array.from({ length: 40 }, (_, index) => ({
+			kind: 'codex' as const,
+			sessionId: `codex-${index}`,
+			title: `thread ${index}`,
+			cwd: '/Users/dev/app-checkout',
+			updatedAt: now - index,
+		}));
+		const byDevice = attributeAgents({
+			sessions,
+			claims: [
+				{
+					simulatorUdid: A,
+					kind: 'claude',
+					sessionId: 'claimer',
+					claimedAt: now - 60_000,
+				},
+			],
+			touches: Array.from({ length: 40 }, (_, index) => ({
+				simulatorUdid: A,
+				kind: 'claude' as const,
+				sessionId: `toucher-${index}`,
+				lastSeenAt: now - index,
+			})),
+			lanes: [{ simulatorUdid: A, worktreePath: '/Users/dev/app-checkout' }],
+			now,
+		});
+		const attached = byDevice[A] ?? [];
+		expect(attached).toHaveLength(32);
+		expect(attached[0]).toMatchObject({ sessionId: 'claimer', via: 'claim' });
+		// Then the newest touches; the lane matches are the weakest and drop out.
+		expect(attached.slice(1).every((agent) => agent.via === 'touch')).toBe(
+			true
+		);
+		expect(attached[1]?.sessionId).toBe('toucher-0');
+		expect(() =>
+			agentStateSchema.parse({
+				revision: 1,
+				updatedAt: now,
+				sessions,
+				byDevice,
+				claims: [],
+				discovery: { claude: 'ok', codex: 'ok' },
+			})
+		).not.toThrow();
 	});
 });
 

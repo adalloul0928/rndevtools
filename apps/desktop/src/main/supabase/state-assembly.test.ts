@@ -494,6 +494,63 @@ describe('assembleSupabaseState stacks', () => {
 		expect(resumed.apiUrl).toBe('http://127.0.0.1:26211');
 	});
 
+	it("keeps what a needs-recreate stack can't adopt once lastError moves on", () => {
+		const change = {
+			service: 'database',
+			path: 'config.version',
+			key: '[db] major_version',
+			saved: '15',
+			requested: '17',
+			editable: true,
+		};
+		const recreate = {
+			...supabaseDesktopError('refused', 'The saved stack cannot adopt it.'),
+			code: 'needs_recreate' as const,
+			details: { stackChanges: [change] },
+		};
+		const conflict = {
+			...supabaseDesktopError('refused', 'Port 54321 is in use.'),
+			code: 'ports_conflict' as const,
+		};
+		const summaryOf = (overrides: Partial<SupabaseStackRecord>) =>
+			stack(
+				assembleSupabaseState(
+					runningInputs({
+						list: list('list-stopped'),
+						statuses: new Map([
+							[REPO_ID, { status: status('status-stopped'), checkedAt: NOW }],
+						]),
+						credentials: new Map(),
+						records: [record(overrides)],
+					})
+				),
+				REPO_ID
+			);
+		// A retry failed for another reason, so lastError is that failure.
+		const retried = summaryOf({
+			flags: { needsRecreate: true },
+			lastError: conflict,
+			recreateError: recreate,
+		});
+		expect(retried).toMatchObject({
+			state: 'needs-recreate',
+			lastError: { code: 'ports_conflict' },
+			recreateChanges: [change],
+		});
+		expect(stackStatus(retried).explanation).toBe(
+			'The saved stack cannot adopt this configuration. Revert the change to keep it, or recreate it.'
+		);
+		// A record saved before recreateError existed.
+		expect(
+			summaryOf({ flags: { needsRecreate: true }, lastError: recreate })
+				.recreateChanges
+		).toEqual([change]);
+		// Without the flag nothing is listed, whatever the record kept.
+		const cleared = summaryOf({ lastError: conflict, recreateError: recreate });
+		expect(cleared.state).toBe('stopped');
+		expect(cleared).not.toHaveProperty('recreateChanges');
+	});
+
 	it('lists an unreadable stack as observed, revealable and never destroyable', () => {
 		const state = assembleSupabaseState(
 			runningInputs({

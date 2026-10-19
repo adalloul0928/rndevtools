@@ -352,7 +352,7 @@ export function describeSupabaseConfirmation(
 			const target = stack(operation.stackId);
 			if (!target) return undefined;
 			const branch = supabaseStackTitle(target);
-			const changes = (target.lastError?.details.stackChanges ?? [])
+			const changes = (target.recreateChanges ?? [])
 				.slice(0, 6)
 				.map(
 					(change) =>

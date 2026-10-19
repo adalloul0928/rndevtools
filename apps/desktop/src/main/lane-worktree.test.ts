@@ -2,7 +2,112 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseWorktreeList, readExpoIdentity } from './lane-worktree';
+import {
+	createWorktreeInspector,
+	parseWorktreeList,
+	readExpoIdentity,
+} from './lane-worktree';
+import {
+	SimulatorCommandError,
+	type SimulatorCommandResult,
+} from './simulator-command-runner';
+
+describe('worktree inspector', () => {
+	const WORKTREES = Array.from({ length: 10 }, (_, index) => ({
+		path: index === 0 ? '/Users/dev/app' : `/Users/dev/app-${index}`,
+		branch: index === 0 ? 'main' : `feature-${index}`,
+	}));
+	const LIST = WORKTREES.map(
+		(worktree) =>
+			`worktree ${worktree.path}\nHEAD ${'0'.repeat(40)}\nbranch refs/heads/${worktree.branch}\n`
+	).join('\n');
+
+	/** git through a fake runner: `status` answers per worktree path. */
+	function inspector(status: (cwd: string) => Promise<SimulatorCommandResult>) {
+		let clock = 1_000;
+		let running = 0;
+		const calls = { statuses: [] as string[][], mostAtOnce: 0 };
+		const worktrees = createWorktreeInspector({
+			now: () => clock,
+			runCommand: async (_executable, args) => {
+				const cwd = args[1] as string;
+				if (args.includes('worktree')) {
+					return { stdout: LIST, stderr: '', exitCode: 0 };
+				}
+				calls.statuses.push([...args]);
+				running += 1;
+				calls.mostAtOnce = Math.max(calls.mostAtOnce, running);
+				try {
+					await new Promise((resolve) => setTimeout(resolve, 5));
+					return await status(cwd);
+				} finally {
+					running -= 1;
+				}
+			},
+		});
+		return {
+			worktrees,
+			calls,
+			advance: (ms: number) => {
+				clock += ms;
+			},
+		};
+	}
+
+	const clean = async () => ({ stdout: '', stderr: '', exitCode: 0 });
+
+	it('asks git status without optional locks, a few worktrees at a time', async () => {
+		const { worktrees, calls } = inspector(async (cwd) => ({
+			stdout: cwd.endsWith('-3') ? ' M App.tsx\n' : '',
+			stderr: '',
+			exitCode: 0,
+		}));
+		const listed = await worktrees.listWorktrees('/Users/dev/app');
+		expect(listed.map((worktree) => worktree.dirty)).toEqual(
+			WORKTREES.map((worktree) => worktree.path.endsWith('-3'))
+		);
+		expect(calls.statuses[0]).toEqual([
+			'-C',
+			'/Users/dev/app',
+			'--no-optional-locks',
+			'status',
+			'--porcelain',
+			'--untracked-files=no',
+		]);
+		expect(calls.statuses).toHaveLength(WORKTREES.length);
+		expect(calls.mostAtOnce).toBeLessThanOrEqual(4);
+	});
+
+	it('reuses dirty flags between polls for a while, and asks git again when fresh', async () => {
+		const { worktrees, calls, advance } = inspector(clean);
+		await worktrees.listWorktrees('/Users/dev/app');
+		advance(10_000);
+		await worktrees.listWorktrees('/Users/dev/app');
+		expect(calls.statuses).toHaveLength(WORKTREES.length);
+		await worktrees.listWorktrees('/Users/dev/app', { fresh: true });
+		expect(calls.statuses).toHaveLength(2 * WORKTREES.length);
+		advance(30_000);
+		await worktrees.listWorktrees('/Users/dev/app');
+		expect(calls.statuses).toHaveLength(3 * WORKTREES.length);
+	});
+
+	it('reads a status too long to hold as dirty, and one that cannot run as clean', async () => {
+		const { worktrees } = inspector(async (cwd) => {
+			if (cwd.endsWith('-1')) {
+				throw new SimulatorCommandError('git exceeded its output limit.', {
+					kind: 'output-limit',
+				});
+			}
+			if (cwd.endsWith('-2')) {
+				throw new SimulatorCommandError('git timed out.', { kind: 'timeout' });
+			}
+			return { stdout: '', stderr: '', exitCode: 0 };
+		});
+		const listed = await worktrees.listWorktrees('/Users/dev/app');
+		expect(listed[1]).toMatchObject({ path: '/Users/dev/app-1', dirty: true });
+		expect(listed[2]).toMatchObject({ path: '/Users/dev/app-2', dirty: false });
+	});
+});
 
 describe('parseWorktreeList', () => {
 	it('parses porcelain output into checkouts with branch names', () => {

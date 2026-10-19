@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { chmod, lstat, mkdir, open } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
@@ -9,6 +9,7 @@ import { inspect } from 'node:util';
 import { sanitizeSupabaseText } from './cli-redact';
 import {
 	assertArgvAllowedForPhase,
+	SUPABASE_MAX_CLI_TIMEOUT_MS,
 	type SupabaseRolloutPhase,
 } from './dialect';
 
@@ -36,22 +37,15 @@ const STDERR_LINE_MAX_CHARS = 2_000;
 const DEFAULT_INTERRUPT_GRACE_MS = 45_000;
 const EXIT_DRAIN_GRACE_MS = 2_000;
 const DEFAULT_PROGRESS_POLL_MS = 250;
-const MAX_TIMEOUT_MS = 60 * 60 * 1000;
+const MAX_TIMEOUT_MS = SUPABASE_MAX_CLI_TIMEOUT_MS;
 const MAX_ARGV_LENGTH = 128;
 const MAX_ARGUMENT_LENGTH = 8192;
 const MAX_ENVIRONMENT_VALUE_LENGTH = 4096;
 const PINNED_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 const PROGRESS_LABEL = /^[a-z0-9][a-z0-9-]{0,31}$/;
-
-/**
- * Output bounds every run enforces.
- * @public
- */
-export const SUPABASE_CLI_OUTPUT_LIMITS = Object.freeze({
-	stdoutBytes: STDOUT_MAX_BYTES,
-	stderrBytes: STDERR_MAX_BYTES,
-	stderrLineCharacters: STDERR_LINE_MAX_CHARS,
-});
+/** `<label>-<ms>-<uuid>.log`, as spawnDetached names a progress file. */
+const PROGRESS_FILE_NAME =
+	/^[a-z0-9][a-z0-9-]{0,31}-(\d{1,16})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.log$/;
 
 const FIXED_ENVIRONMENT: Readonly<Record<string, string>> = Object.freeze({
 	SUPABASE_EXPERIMENTAL_STACK: '1',
@@ -97,7 +91,6 @@ const PORT_OVERRIDES: ReadonlySet<string> = new Set(
 	SUPABASE_PORT_OVERRIDE_NAMES
 );
 
-/** @public */
 export type SupabaseCliRunnerErrorKind =
 	| 'invalid-request'
 	| 'invalid-environment'
@@ -120,7 +113,6 @@ export class SupabaseCliRunnerError extends Error {
 	}
 }
 
-/** @public */
 export type SupabaseCliEnvironmentOptions = Readonly<{
 	/** SUPABASE_HOME, only when the operator chose one; never inherited. */
 	supabaseHome?: string;
@@ -281,7 +273,6 @@ function leasedPortValue(name: string, value: unknown): string {
 
 /**
  * The subset of a Node child process the runner uses.
- * @public
  */
 export type SupabaseChildProcess = {
 	readonly pid?: number | undefined;
@@ -297,7 +288,6 @@ export type SupabaseChildProcess = {
 	): unknown;
 };
 
-/** @public */
 export type SupabaseSpawnOptions = Readonly<{
 	cwd: string;
 	env: Readonly<Record<string, string>>;
@@ -305,14 +295,12 @@ export type SupabaseSpawnOptions = Readonly<{
 	stdio: readonly ['ignore', 'pipe', 'pipe' | number];
 }>;
 
-/** @public */
 export type SupabaseSpawnPort = (
 	command: string,
 	args: readonly string[],
 	options: SupabaseSpawnOptions
 ) => SupabaseChildProcess;
 
-/** @public */
 export type SupabaseClockPort = Readonly<{
 	now: () => number;
 	setTimeout: (callback: () => void, ms: number) => unknown;
@@ -425,7 +413,6 @@ export class SupabaseCliRunResult {
 	}
 }
 
-/** @public */
 export type SupabaseCliRunRequest = Readonly<{
 	/** A binary the resolver validated. */
 	binaryPath: string;
@@ -446,7 +433,6 @@ export type SupabaseCliRunRequest = Readonly<{
 	environment?: SupabaseCliEnvironmentOptions;
 }>;
 
-/** @public */
 export type SupabaseCliDetachedRequest = Readonly<
 	Omit<SupabaseCliRunRequest, 'signal'> & {
 		/** Private directory for 0600 progress files; created 0700 when missing. */
@@ -456,7 +442,6 @@ export type SupabaseCliDetachedRequest = Readonly<
 	}
 >;
 
-/** @public */
 export type SupabaseCliDetachedHandle = Readonly<{
 	pid: number;
 	progressFile: string;
@@ -466,7 +451,6 @@ export type SupabaseCliDetachedHandle = Readonly<{
 	interrupt: () => void;
 }>;
 
-/** @public */
 export type SupabaseCliRunnerOptions = Readonly<{
 	spawn?: SupabaseSpawnPort;
 	/** Signals a process or, with a negative pid, a process group. */
@@ -878,6 +862,54 @@ export class SupabaseCliOutputError extends Error {
 }
 
 /**
+ * Removes a progress file once nothing reads it, and only such a file: a
+ * regular file named the way spawnDetached names one, directly in
+ * `directory`. False when there was nothing to remove.
+ */
+export async function removeSupabaseProgressFile(
+	directory: string,
+	file: string
+): Promise<boolean> {
+	if (
+		path.dirname(file) !== directory ||
+		!PROGRESS_FILE_NAME.test(path.basename(file))
+	) {
+		return false;
+	}
+	try {
+		if (!(await lstat(file)).isFile()) return false;
+		await unlink(file);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Removes the progress files earlier runs left in `directory`: those written
+ * before `before` that `keep` does not name. Returns how many went.
+ */
+export async function pruneSupabaseProgressFiles(
+	directory: string,
+	options: Readonly<{ before: number; keep: ReadonlySet<string> }>
+): Promise<number> {
+	let names: string[];
+	try {
+		names = await readdir(directory);
+	} catch {
+		return 0;
+	}
+	let removed = 0;
+	for (const name of names) {
+		const written = Number(PROGRESS_FILE_NAME.exec(name)?.[1]);
+		const file = path.join(directory, name);
+		if (!(written < options.before) || options.keep.has(file)) continue;
+		if (await removeSupabaseProgressFile(directory, file)) removed += 1;
+	}
+	return removed;
+}
+
+/**
  * Reads the sanitized tail of a detached child's progress file, for example
  * after the desktop restarted and adopted a child that is still running.
  */
@@ -981,11 +1013,14 @@ export class SupabaseCliRunner {
 			this.#progressPollMs
 		);
 		const progress = await open(progressFile, PROGRESS_CREATE_FLAGS, 0o600);
-		let started: Readonly<{
-			child: SupabaseChildProcess;
-			escalation: InterruptEscalation;
-			supervision: Supervision;
-		}>;
+		const directory = path.dirname(progressFile);
+		let started:
+			| Readonly<{
+					child: SupabaseChildProcess;
+					escalation: InterruptEscalation;
+					supervision: Supervision;
+			  }>
+			| undefined;
 		try {
 			const child = this.#start(prepared, true, progress.fd);
 			const escalation = new InterruptEscalation(
@@ -1008,12 +1043,19 @@ export class SupabaseCliRunner {
 		} finally {
 			// The child holds its own copy of the descriptor once spawn returns.
 			await progress.close();
+			if (!started) await removeSupabaseProgressFile(directory, progressFile);
 		}
 		const { child, escalation, supervision } = started;
-		await supervision.spawned;
+		try {
+			await supervision.spawned;
+		} catch (error) {
+			await removeSupabaseProgressFile(directory, progressFile);
+			throw error;
+		}
 		const pid = child.pid;
 		if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 1) {
 			escalation.start();
+			await removeSupabaseProgressFile(directory, progressFile);
 			throw new SupabaseCliRunnerError(
 				'spawn',
 				'The Supabase CLI started without a process id.'
@@ -1024,7 +1066,11 @@ export class SupabaseCliRunner {
 		return Object.freeze({
 			pid,
 			progressFile,
-			result: supervision.result,
+			// Its lines are in the result; only a restarted desktop reads the
+			// file of a child still running.
+			result: supervision.result.finally(() =>
+				removeSupabaseProgressFile(directory, progressFile)
+			),
 			interrupt: () => escalation.start(),
 		});
 	}

@@ -5,9 +5,11 @@ import {
 } from '../../shared/supabase-protocol';
 import {
 	isSupabaseStackHeld,
+	nextSupabaseFollowRetry,
 	observeSupabaseHeads,
 	planSupabaseFollows,
 	SUPABASE_FOLLOW_DEBOUNCE_MS,
+	SUPABASE_FOLLOW_RETRY_MS,
 } from './branch-follow';
 import type { SupabaseWorktreeFacts } from './repositories';
 import type { SupabaseStackRecord } from './stack-store';
@@ -196,6 +198,42 @@ describe('planSupabaseFollows', () => {
 				force: OLD,
 			}).due.map((candidate) => candidate.fromStackIds)
 		).toEqual([[OLD]]);
+	});
+
+	it('waits longer after each failed follow to the same stack', () => {
+		const first = nextSupabaseFollowRetry(undefined, NEW, NOW);
+		expect(first).toEqual({
+			toStackId: NEW,
+			failures: 1,
+			retryAt: NOW + SUPABASE_FOLLOW_RETRY_MS,
+		});
+		const second = nextSupabaseFollowRetry(first, NEW, NOW);
+		expect(second.retryAt).toBe(NOW + 2 * SUPABASE_FOLLOW_RETRY_MS);
+		let many = second;
+		for (let index = 0; index < 20; index += 1) {
+			many = nextSupabaseFollowRetry(many, NEW, NOW);
+		}
+		expect(many.retryAt).toBe(NOW + 30 * 60_000);
+		// Another target starts over.
+		expect(nextSupabaseFollowRetry(many, OLD, NOW).failures).toBe(1);
+		const later = NOW + 5 * 60_000;
+		const retries = new Map([
+			[WORKTREE, { toStackId: NEW, failures: 3, retryAt: later + 60_000 }],
+		]);
+		expect(plan({ now: later, retries })).toEqual({
+			due: [],
+			nextDueAt: later + 60_000,
+		});
+		expect(plan({ now: later + 60_000, retries }).due).toHaveLength(1);
+		// HEAD moved on: the failures were for another stack.
+		const moved = new Map([
+			[WORKTREE, { toStackId: OLD, failures: 3, retryAt: later + 60_000 }],
+		]);
+		expect(plan({ now: later, retries: moved }).due).toHaveLength(1);
+		// The operator's Follow does not wait.
+		expect(
+			plan({ now: later, retries, headStableSince: new Map(), force: OLD }).due
+		).toHaveLength(1);
 	});
 
 	it('counts lanes and sessions working there as holders', () => {

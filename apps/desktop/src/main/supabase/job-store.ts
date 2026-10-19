@@ -41,9 +41,7 @@ const MAX_DETAIL_LENGTH = 256;
 /** Terminal jobs stay in the state this long so the tab can show how they ended. */
 const RECENT_JOB_MS = 10 * 60 * 1_000;
 
-/** @public */
 export type SupabaseJobStep = NonNullable<SupabaseJob['steps']>[number];
-/** @public */
 export type SupabaseJobStepState = SupabaseJobStep['state'];
 type JobRequester = SupabaseJob['requestedBy'];
 
@@ -53,9 +51,8 @@ type JobRequester = SupabaseJob['requestedBy'];
 /**
  * Step ids. The CLI's progress lines drive the CLI steps; the service marks
  * `room` (admission), `verify` (lsof) and `attach` (the lane) itself.
- * @public
  */
-export type SupabaseJobStepId =
+type SupabaseJobStepId =
 	| 'room'
 	| 'database'
 	| 'migrations'
@@ -101,7 +98,6 @@ const CLI_STEPS: ReadonlySet<string> = new Set([
 
 /**
  * What a job's step list depends on.
- * @public
  */
 export type SupabaseJobStepOptions = Readonly<{
 	/** Local migration files; no migrations step when 0. */
@@ -217,9 +213,8 @@ function safeDetail(value: string): string {
 
 /**
  * A progress line as one display-safe line: redacted, no controls, bounded.
- * @public
  */
-export function safeSupabaseProgressLine(line: string): string {
+function safeSupabaseProgressLine(line: string): string {
 	return sanitizeSupabaseDisplayText(
 		redactSupabaseStoredText(line, MAX_LINE_LENGTH * 2),
 		MAX_LINE_LENGTH
@@ -228,7 +223,6 @@ export function safeSupabaseProgressLine(line: string): string {
 
 /**
  * What one CLI stderr line means for progress.
- * @public
  */
 export type SupabaseProgressEvent =
 	| Readonly<{
@@ -507,7 +501,7 @@ const childSchema = z.strictObject({
 	/** Never 0 or 1: those would signal a process group or launchd. */
 	pid: z.number().int().min(2).max(2_147_483_647),
 	startedAt: z.number().int().nonnegative(),
-	/** sha256 of the argv, to recognize the process before adopting it. */
+	/** sha256 of its command line, to recognize the process before adopting it. */
 	argvDigest: z.string().regex(/^[0-9a-f]{64}$/),
 	/** The 0600 stderr progress file the child writes. */
 	progressFile: z
@@ -523,7 +517,6 @@ const childSchema = z.strictObject({
 		),
 	stackIds: z.array(supabaseStackIdSchema).max(32),
 });
-/** @public */
 export type SupabaseDetachedChild = z.infer<typeof childSchema>;
 
 const jobsFileSchema = z.strictObject({
@@ -541,14 +534,51 @@ function parseJobsFile(value: unknown): JobsFile | undefined {
 	return parsed.success ? parsed.data : undefined;
 }
 
-/** The sha256 the child bookkeeping keeps instead of the argv itself. */
-export function supabaseArgvDigest(argv: readonly string[]): string {
-	return createHash('sha256').update(argv.join('\0'), 'utf8').digest('hex');
+/**
+ * What strvis(3) with VIS_TAB | VIS_NL | VIS_NOSLASH, the encoding ps applies
+ * to a command line, writes for one byte in the C locale.
+ */
+function cLocaleVisByte(byte: number): string {
+	// Tab, newline and the high-bit space come out as `\` and three octal digits.
+	if (byte === 0x09 || byte === 0x0a || byte === 0xa0) {
+		return `\\${byte.toString(8).padStart(3, '0')}`;
+	}
+	if (byte >= 0x20 && byte < 0x7f) return String.fromCharCode(byte);
+	const meta = byte & 0x80 ? 'M' : '';
+	const low = byte & 0x7f;
+	if (low === 0x7f) return `${meta}^?`;
+	return low < 0x20
+		? `${meta}^${String.fromCharCode(low + 0x40)}`
+		: `${meta}-${String.fromCharCode(low)}`;
+}
+
+/**
+ * A command line in the form `ps -o args=` prints it in the C locale: every
+ * byte outside printable ASCII escaped, so `é` reads `M-CM-)`. That is the
+ * locale ps inherits from a desktop opened from the Dock or Finder, which has
+ * no LANG or LC_ALL. In a UTF-8 locale ps prints printable characters as they
+ * are; this maps that line to the same form, and leaves the escapes, which
+ * are printable ASCII, alone. Characters a UTF-8 locale counts unprintable
+ * (U+200B, say) it escapes differently, so such a line does not match.
+ */
+function cLocalePsLine(line: string): string {
+	return Array.from(Buffer.from(line, 'utf8'), cLocaleVisByte).join('');
+}
+
+/**
+ * The sha256 the child bookkeeping keeps instead of the argv itself: of the
+ * binary and its arguments space-joined, in the C-locale form ps prints. The
+ * argv a child was spawned with and the line ps shows for it later both pass
+ * through that form, so they match whichever locale ps runs in.
+ */
+export function supabaseArgvDigest(command: readonly string[]): string {
+	return createHash('sha256')
+		.update(cLocalePsLine(command.join(' ')), 'utf8')
+		.digest('hex');
 }
 
 /**
  * What a new job needs; the store fills in id, status and times.
- * @public
  */
 export type SupabaseJobInput = Readonly<{
 	kind: SupabaseJobKind;
@@ -832,6 +862,7 @@ export class SupabaseJobStore {
 			finished,
 			...this.#ring.filter((job) => job.id !== finished.id),
 		].slice(0, MAX_RING);
+		this.#forgetFinished();
 		this.#notify();
 		await this.#persist();
 		return structuredClone(finished);
@@ -868,7 +899,7 @@ export class SupabaseJobStore {
 		return structuredClone(revived);
 	}
 
-	/** A job by id: in flight, finished this session, or from the ring. A copy. */
+	/** A job by id: in flight, finished recently, or from the ring. A copy. */
 	job(jobId: string): SupabaseJob | undefined {
 		const job =
 			this.#entries.get(jobId)?.job ??
@@ -955,6 +986,25 @@ export class SupabaseJobStore {
 
 	children(): readonly SupabaseDetachedChild[] {
 		return [...this.#children];
+	}
+
+	/**
+	 * Drops finished jobs the state no longer lists (older than the recent
+	 * window, or past the newest 64) from memory; the ring answers for them.
+	 */
+	#forgetFinished(): void {
+		const now = this.#now();
+		// Newest first; jobs that ended at the same time, newest created first.
+		const finished = [...this.#entries.values()]
+			.map((entry) => entry.job)
+			.filter((job) => !isActiveSupabaseJob(job))
+			.reverse()
+			.sort((left, right) => right.updatedAt - left.updatedAt);
+		for (const [index, job] of finished.entries()) {
+			if (index >= MAX_RING || now - job.updatedAt > RECENT_JOB_MS) {
+				this.#entries.delete(job.id);
+			}
+		}
 	}
 
 	#activeJobs(): SupabaseJob[] {

@@ -8,6 +8,7 @@ import {
 	type SupabaseOperation,
 	type SupabaseState,
 	supabaseConfirmationRequired,
+	supabaseDesktopError,
 	supabaseOperationSchema,
 } from '../../shared/supabase-protocol';
 import { describeSupabaseConfirmation } from './service-confirmation';
@@ -185,6 +186,39 @@ describe('describeSupabaseConfirmation', () => {
 		const text = facts?.lines.join('\n') ?? '';
 		expect(text).toMatch(/asked to (?:destroy|reset) it/);
 		if (request?.note) expect(text).not.toContain(request.note);
+	});
+
+	it("lists what a needs-recreate stack can't adopt, after any later failure", () => {
+		const demo = createSupabaseDemoState({ now });
+		// A retry failed for another reason: lastError is that failure.
+		const state: SupabaseState = {
+			...demo,
+			stacks: demo.stacks.map((stack) =>
+				stack.id === ids.featSearch
+					? {
+							...stack,
+							state: 'needs-recreate',
+							recreateChanges: [
+								{
+									key: '[db] major_version',
+									saved: '15',
+									requested: '17',
+									editable: true,
+								},
+							],
+							lastError: {
+								...supabaseDesktopError('refused', 'Port 54321 is in use.'),
+								code: 'ports_conflict',
+							},
+						}
+					: stack
+			),
+		};
+		const facts = describeSupabaseConfirmation(
+			op({ kind: 'recreate', stackId: ids.featSearch }),
+			onState(state)
+		);
+		expect(facts?.lines[0]).toBe('[db] major_version: saved 15, requested 17.');
 	});
 
 	it('answers nothing for a stack that is not listed', () => {

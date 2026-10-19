@@ -109,7 +109,7 @@ async function setup(
 		fakeSession('session-b', '/Users/example/other', 'codex'),
 	];
 	await h.engine.start();
-	await h.settle();
+	await h.engine.settle();
 	return { h, repo, stackId: await h.identity(repo) };
 }
 
@@ -177,6 +177,48 @@ describe('supabase up', () => {
 		release();
 		const done = await h.engine.waitForJob(jobId ?? '', 2_000);
 		expect(done?.status).toBe('complete');
+	});
+
+	it('says an up queued behind an automatic start is queued, not to wait on that job', async () => {
+		const { h, repo, stackId } = await setup();
+		const facts = await h.engine.worktreeFacts(repo);
+		if (!facts) throw new Error('The worktree has no facts.');
+		const release = h.cli.hold('stack start');
+		const followJobs: string[] = [];
+		const follow = h.engine.ensureStack(facts, {
+			requestedBy: { kind: 'automatic', reason: 'follow' },
+			createdBy: { via: 'desktop' },
+			onJob: (jobId) => followJobs.push(jobId),
+		});
+		await h.cli.waitForCall('stack start');
+		const queued = await h.engine.runAgentOperation(
+			up(repo, 0),
+			context(),
+			SIGNAL
+		);
+		supabaseAgentResultSchema.parse(queued);
+		expect(queued).toMatchObject({
+			operation: 'up',
+			stack: { status: 'starting' },
+			next: "This up is queued behind RN Devtools' automatic start of the stack. Call supabase with operation up again in a few seconds.",
+		});
+		expect(queued).not.toHaveProperty('jobId');
+		// The follow's start fails, and the queued up then starts it itself.
+		h.cli.replyNext('stack start', {
+			exitCode: 1,
+			stdout: `${JSON.stringify({ _tag: 'Error', error: { code: 'ExperimentalStackStartError', message: 'database: initdb failed' } })}\n`,
+			stderr: [],
+		});
+		release();
+		await expect(follow).resolves.toMatchObject({ kind: 'refused' });
+		await h.engine.waitForJob(followJobs[0] ?? '', 10_000);
+		await h.settle();
+		expect(h.engine.job(followJobs[0] ?? '')?.status).toBe('failed');
+		await expect(agent(h, up(repo))).resolves.toMatchObject({
+			operation: 'up',
+			stack: { id: stackId, status: 'ready', yours: true },
+		});
+		expect(h.cli.count('stack start')).toBe(2);
 	});
 
 	it('gives a synthetic MCP caller a worktree hold', async () => {
@@ -363,6 +405,47 @@ describe('supabase down, ls, status, env, log', () => {
 		});
 		if (log.operation !== 'log') throw new Error('not log');
 		expect(log.records.length).toBeGreaterThan(0);
+	});
+
+	it('says local Supabase is off for a log read that waited for a CLI slot at the turn-off', async () => {
+		const { h, repo, stackId } = await setup();
+		await agent(h, up(repo));
+		const operator = { actor: { kind: 'operator', senderId: 1 } } as const;
+		// Four log reads take every CLI slot.
+		const release = h.cli.hold('stack logs');
+		const reads = [1, 2, 3, 4].map((index) =>
+			h.engine.runOperation(
+				supabaseOperationSchema.parse({
+					actionId: `action-logs-${index}`,
+					kind: 'read-logs',
+					stackId,
+					tail: 50,
+				}),
+				{ ...operator, confirmed: false }
+			)
+		);
+		await h.until(() => h.cli.count('stack logs') === 4);
+		const reading = vi.spyOn(h.engine, 'readLogs');
+		const log = failure(h, {
+			operation: 'log',
+			target: { worktreePath: repo },
+			tail: 50,
+		});
+		// Its read waits for a CLI slot.
+		await h.until(() => reading.mock.calls.length > 0);
+		await h.engine.runOperation(
+			supabaseOperationSchema.parse({
+				actionId: 'action-off',
+				kind: 'set-enabled',
+				enabled: false,
+			}),
+			{ ...operator, confirmed: true }
+		);
+		release();
+		await Promise.all(reads);
+		// As for a reset called off at the turn-off.
+		expect((await log).code).toBe('supabase_disabled');
+		expect(h.cli.count('stack logs')).toBe(4);
 	});
 
 	it('refuses an ambiguous stack id prefix', async () => {

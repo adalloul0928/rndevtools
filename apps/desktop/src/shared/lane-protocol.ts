@@ -24,7 +24,8 @@ const MAX_SHORT_TEXT_LENGTH = 4 * 1024;
 const MAX_LANES = 64;
 const MAX_WORKTREES = 128;
 const MAX_ENVIRONMENTS = 16;
-const MAX_DEVICE_REQUESTS = 16;
+/** How many device requests lane state lists; main never keeps more. */
+export const MAX_DEVICE_REQUESTS = 16;
 const MAX_LOG_CHARACTERS = 64 * 1024;
 
 export const LANE_METRO_HEALTH_TIMEOUT_MS = 15_000;
@@ -552,24 +553,6 @@ export function findLaneConflict(
 		if (reservation.simulatorUdid?.toUpperCase() === udid) {
 			return `Simulator ${candidate.simulatorUdid} is already assigned to a lane starting for ${reservation.appDirectory}.`;
 		}
-	}
-	return undefined;
-}
-
-export function laneAgentFromEnvironment(
-	env: Readonly<Record<string, string | undefined>>
-): Pick<LaneAgent, 'kind' | 'sessionId'> | undefined {
-	const claude = env.CLAUDE_CODE_SESSION_ID?.trim();
-	if (claude && identifierSchema.safeParse(claude).success) {
-		return { kind: 'claude', sessionId: claude };
-	}
-	const codex = env.CODEX_THREAD_ID?.trim();
-	if (codex && identifierSchema.safeParse(codex).success) {
-		return { kind: 'codex', sessionId: codex };
-	}
-	const other = env.RNDEVTOOLS_AGENT_SESSION_ID?.trim();
-	if (other && identifierSchema.safeParse(other).success) {
-		return { kind: 'other', sessionId: other };
 	}
 	return undefined;
 }

@@ -100,7 +100,6 @@ describe('SupabaseKeyStore', () => {
 		expect(
 			(await stat(path.join(root, 'supabase', '.env.local'))).mode & 0o777
 		).toBe(0o600);
-		await expect(keys.intact(root)).resolves.toBe(true);
 		await expect(
 			keys.applyToWorktree({ projectRoot: root, worktreeRoot: root })
 		).resolves.toBe('unchanged');
@@ -145,8 +144,10 @@ describe('SupabaseKeyStore', () => {
 			path.join(root, 'supabase', '.env.local'),
 			'KEEP=1\nSUPABASE_AUTH_JWT_SECRET=reverted\n'
 		);
-		await expect(keys.intact(root)).resolves.toBe(false);
-		await keys.applyToWorktree({ projectRoot: root, worktreeRoot: root });
+		// The reverted value is noticed and the managed block written again.
+		await expect(
+			keys.applyToWorktree({ projectRoot: root, worktreeRoot: root })
+		).resolves.toBe('written');
 		await expect(keys.removeFromWorktree(root)).resolves.toBe(true);
 		expect(
 			await readFile(path.join(root, 'supabase', '.env.local'), 'utf8')

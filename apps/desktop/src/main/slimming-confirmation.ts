@@ -19,8 +19,7 @@ function targetList(simulatorUdids: readonly string[]): string {
  * mutation: turning slimming off while restoring every managed service.
  */
 export function slimmingConfirmationCopy(
-	target: SlimmingConfirmationTarget,
-	_profileName?: string
+	target: SlimmingConfirmationTarget
 ): SlimmingConfirmationCopy | undefined {
 	if (
 		'enabled' in target &&

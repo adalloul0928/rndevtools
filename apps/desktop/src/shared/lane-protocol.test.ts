@@ -4,7 +4,6 @@ import {
 	DEFAULT_LANE_ENVIRONMENTS,
 	findLaneConflict,
 	type Lane,
-	laneAgentFromEnvironment,
 	laneDeepLink,
 	laneDevClientLaunchUrl,
 	laneHealth,
@@ -469,31 +468,6 @@ describe('findLaneConflict', () => {
 				{ worktreePath: '/Users/dev/app-feature-b', simulatorUdid: UDID },
 				[{ appDirectory: '/Users/dev/app-feature-c' }]
 			)
-		).toBeUndefined();
-	});
-});
-
-describe('laneAgentFromEnvironment', () => {
-	it('prefers Claude, then Codex, then the generic variable', () => {
-		expect(
-			laneAgentFromEnvironment({
-				CLAUDE_CODE_SESSION_ID: 'claude-1',
-				CODEX_THREAD_ID: 'codex-1',
-			})
-		).toEqual({ kind: 'claude', sessionId: 'claude-1' });
-		expect(laneAgentFromEnvironment({ CODEX_THREAD_ID: 'codex-1' })).toEqual({
-			kind: 'codex',
-			sessionId: 'codex-1',
-		});
-		expect(
-			laneAgentFromEnvironment({ RNDEVTOOLS_AGENT_SESSION_ID: 'kiro:abc' })
-		).toEqual({ kind: 'other', sessionId: 'kiro:abc' });
-	});
-
-	it('ignores malformed or missing identifiers', () => {
-		expect(laneAgentFromEnvironment({})).toBeUndefined();
-		expect(
-			laneAgentFromEnvironment({ CLAUDE_CODE_SESSION_ID: 'has spaces' })
 		).toBeUndefined();
 	});
 });

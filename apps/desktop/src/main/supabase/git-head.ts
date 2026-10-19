@@ -25,8 +25,7 @@ export const GIT_OPERATION_MARKERS = [
 	'BISECT_LOG',
 ] as const;
 
-/** @public */
-export type GitOperationMarker = (typeof GIT_OPERATION_MARKERS)[number];
+type GitOperationMarker = (typeof GIT_OPERATION_MARKERS)[number];
 
 type GitHeadUnavailableReason =
 	| 'missing-worktree'
@@ -37,7 +36,6 @@ type GitHeadUnavailableReason =
 	| 'unreadable-head'
 	| 'invalid-head';
 
-/** @public */
 export type GitHead =
 	| {
 			status: 'ok';

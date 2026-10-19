@@ -36,10 +36,7 @@ describe('slimming confirmation copy', () => {
 			},
 		]) {
 			expect(
-				slimmingConfirmationCopy(
-					slimmingConfirmationTargetSchema.parse(target),
-					'App Development'
-				)
+				slimmingConfirmationCopy(slimmingConfirmationTargetSchema.parse(target))
 			).toBeUndefined();
 		}
 	});

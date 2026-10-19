@@ -40,6 +40,22 @@ const SUPABASE_READ_TIMEOUT_MS = 30_000;
 const SUPABASE_QUICK_TIMEOUT_MS = 40_000;
 const MAX_REQUEST_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_ERROR_LENGTH = 4 * 1024;
+/**
+ * The CLI half-closes after its request, so by the time a handler runs the
+ * socket has read its EOF and is no longer polled: a client that then hangs
+ * up (a cancelled MCP call, a CLI deadline, a killed process) shows only when
+ * something is written. While a handler runs, one space goes out this often.
+ * A write to a closed peer fails at once (EPIPE), which closes the socket and
+ * aborts the handler. JSON allows whitespace before a value, so the answer
+ * still parses as one line.
+ */
+const LIVENESS_PROBE_INTERVAL_MS = 1_000;
+/**
+ * Bounds the probe spaces, which count toward MAX_RESPONSE_BYTES: more than
+ * the longest handler budget needs at one a second.
+ */
+const MAX_LIVENESS_PROBES = 1_024;
+const LIVENESS_PROBE = Buffer.from(' ', 'utf8');
 
 type AgentCliHandlerContext = {
 	requestId: string;
@@ -159,7 +175,14 @@ function failureResponse(
 	};
 }
 
-function encodeResponse(response: AgentCliResponse): Buffer {
+/**
+ * The response line, at most maxBytes long; the CLI counts the probe spaces
+ * already written ahead of it toward the same limit.
+ */
+function encodeResponse(
+	response: AgentCliResponse,
+	maxBytes = MAX_RESPONSE_BYTES
+): Buffer {
 	let encoded: Buffer;
 	try {
 		encoded = Buffer.from(`${JSON.stringify(response)}\n`, 'utf8');
@@ -175,7 +198,7 @@ function encodeResponse(response: AgentCliResponse): Buffer {
 			'utf8'
 		);
 	}
-	if (encoded.byteLength <= MAX_RESPONSE_BYTES) return encoded;
+	if (encoded.byteLength <= maxBytes) return encoded;
 	return Buffer.from(
 		`${JSON.stringify(
 			failureResponse(response.id, {
@@ -204,6 +227,7 @@ export class AgentCliService {
 	readonly #handler: AgentCliHandler;
 	readonly #platform: NodeJS.Platform;
 	readonly #readiness: (() => Promise<void>) | undefined;
+	readonly #livenessProbeMs: number;
 	readonly #connections = new Set<Socket>();
 	readonly #requestTimestamps: number[] = [];
 	#server: Server | undefined;
@@ -217,17 +241,21 @@ export class AgentCliService {
 		handler,
 		platform = process.platform,
 		readiness,
+		livenessProbeMs = LIVENESS_PROBE_INTERVAL_MS,
 	}: {
 		socketPath: string;
 		handler: AgentCliHandler;
 		platform?: NodeJS.Platform;
 		readiness?: () => Promise<void>;
+		/** How often a running handler's socket is probed; tests shorten it. */
+		livenessProbeMs?: number;
 	}) {
 		this.#socketPath = path.resolve(socketPath);
 		this.#socketDirectory = path.dirname(this.#socketPath);
 		this.#handler = handler;
 		this.#platform = platform;
 		this.#readiness = readiness;
+		this.#livenessProbeMs = livenessProbeMs;
 	}
 
 	getState(): AgentCliServiceState {
@@ -457,6 +485,17 @@ export class AgentCliService {
 		);
 		const onClose = () => controller.abort();
 		socket.once('close', onClose);
+		// A client that hung up is seen only by a write; see
+		// LIVENESS_PROBE_INTERVAL_MS.
+		let probes = 0;
+		const probe = setInterval(() => {
+			if (socket.destroyed || probes >= MAX_LIVENESS_PROBES) {
+				clearInterval(probe);
+				return;
+			}
+			probes += 1;
+			socket.write(LIVENESS_PROBE);
+		}, this.#livenessProbeMs);
 		try {
 			const result = await this.#handler(request.command, {
 				requestId: request.id || randomUUID(),
@@ -465,22 +504,29 @@ export class AgentCliService {
 			});
 			if (!socket.destroyed) {
 				socket.end(
-					encodeResponse({
-						protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
-						id: request.id,
-						ok: true,
-						result,
-					})
+					encodeResponse(
+						{
+							protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+							id: request.id,
+							ok: true,
+							result,
+						},
+						MAX_RESPONSE_BYTES - probes
+					)
 				);
 			}
 		} catch (error) {
 			if (!socket.destroyed) {
 				socket.end(
-					encodeResponse(failureResponse(request.id, safeErrorBody(error)))
+					encodeResponse(
+						failureResponse(request.id, safeErrorBody(error)),
+						MAX_RESPONSE_BYTES - probes
+					)
 				);
 			}
 		} finally {
 			clearTimeout(timer);
+			clearInterval(probe);
 			socket.off('close', onClose);
 		}
 	}

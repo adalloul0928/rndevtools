@@ -5,12 +5,18 @@ import type { Lane } from './lane-protocol';
  * Who may touch a Simulator.
  *
  * A device is **free** or **held**. It is held while a lane runs on it or an
- * agent has claimed it, and only the holder may boot, slim, drive, or release
- * it. Metro status and agent attribution are details shown on a held device,
- * not states of their own. A hold whose holder has gone away (the agent
- * session exited, the lane's Metro died) is **abandoned**; after
- * {@link DEVICE_HOLD_GRACE_MS} the desktop releases it so the device returns to
- * the pool without anyone's cooperation.
+ * agent has claimed it, and only the holder may claim it, start, launch or
+ * stop a lane on it, send it input, install on it, slim it, run a recipe on
+ * it, cancel its jobs, or stop its recordings. A session may always stop or
+ * cancel a recording it started, even on a device another session holds. The
+ * ungated operations are act, network set and clear, record start, recipe
+ * cancel, and the reads, so a hold does not keep other sessions out of the
+ * app itself. Metro status and agent attribution are details shown on a held
+ * device, not states of their own: a lane whose Metro died still holds it. A
+ * hold whose holder has gone away (its agent session exited) is **abandoned**
+ * and still enforced until its releaseAt, {@link DEVICE_HOLD_GRACE_MS} after
+ * the holder was first missed, when the desktop releases it so the device
+ * returns to the pool without anyone's cooperation.
  *
  * Both the lane service and the slimming service ask this one resolver, so a
  * device cannot be rebooted by a slim while another agent's lane is on it.
@@ -150,8 +156,12 @@ export type DeviceHoldInputs = HolderLivenessInputs & {
 		'id' | 'simulatorUdid' | 'metro' | 'startedAt'
 	> & {
 		agent?: DeviceHolder | undefined;
-		/** Where the lane's app lives; synthetic holders are judged against it. */
-		appDirectory?: string | undefined;
+		/**
+		 * The lane's checkout, which synthetic holders are judged against. Not
+		 * the app directory inside it: in a monorepo the agent's session works
+		 * from the checkout root, above the app.
+		 */
+		worktreePath?: string | undefined;
 	})[];
 	/** Agent claims: a device, and the session that claimed it. */
 	claims: readonly {
@@ -180,7 +190,7 @@ export function resolveDeviceHolds(
 			finish(
 				inputs,
 				{ simulatorUdid: udid, via: 'lane', laneId: lane.id, holder },
-				lane.appDirectory
+				lane.worktreePath
 			)
 		);
 	}
@@ -234,15 +244,16 @@ export type DeviceAccessDecision =
  * holds, or a device whose hold is abandoned and past its grace period.
  *
  * A synthetic holder stands for every MCP session of its kind. A session of
- * that kind working inside the held lane (`scope`) is the one keeping the hold
- * alive, so it may use the device too, whether it calls over MCP or the CLI.
+ * that kind working inside the held lane's checkout (`scope`) is the one
+ * keeping the hold alive, so it may use the device too, whether it calls over
+ * MCP or the CLI.
  */
 export function decideDeviceAccess(
 	hold: DeviceHold | undefined,
 	requester: DeviceHolder | undefined,
 	now: number,
 	scope?: {
-		/** The held lane's app directory. */
+		/** The held lane's checkout (its worktree root). */
 		directory?: string | undefined;
 		/** Where the requesting session works, when it was discovered. */
 		requesterCwd?: string | undefined;

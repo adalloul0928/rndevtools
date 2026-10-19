@@ -33,6 +33,7 @@ import {
 	type SupabaseMigrationsView,
 	type SupabaseOperation,
 	type SupabaseStackAction,
+	type SupabaseStackChangeView,
 	type SupabaseStackSummary,
 	type SupabaseState,
 	sanitizeSupabaseDisplayText,
@@ -68,6 +69,7 @@ import {
 	supabasePolicyTrustChanges,
 	supabaseRepositoryActionAvailability,
 	supabaseRequestActionAvailability,
+	supabaseRevertKeepsStack,
 	supabaseStackSummarySchema,
 	supabaseStackTitle,
 	supabaseStateSchema,
@@ -95,6 +97,47 @@ function stackWith(
 	overrides: Partial<SupabaseStackSummary>
 ): SupabaseStackSummary {
 	return { ...base, ...overrides };
+}
+
+const MAJOR_VERSION: SupabaseStackChangeView = {
+	key: '[db] major_version',
+	saved: '15',
+	requested: '17',
+	editable: true,
+};
+/** What a CLI upgrade reports: no setting controls the pinned build. */
+const POSTGRES_BUILD: SupabaseStackChangeView = {
+	key: 'Postgres build',
+	saved: '17.4.1',
+	requested: '17.6.1',
+	editable: false,
+};
+
+/** A stack whose start the CLI refused over changes it can't adopt. */
+function needsRecreate(
+	stackChanges?: SupabaseStackChangeView[],
+	base: SupabaseStackSummary = stopped
+): SupabaseStackSummary {
+	return stackWith(base, {
+		state: 'needs-recreate',
+		lastError: {
+			...supabaseDesktopError('refused', 'x'),
+			code: 'needs_recreate',
+			details: stackChanges ? { stackChanges } : {},
+		},
+		...(stackChanges ? { recreateChanges: stackChanges } : {}),
+	});
+}
+
+/** The same stack once a retry failed for another reason: lastError moved on. */
+function retriedOtherwise(stack: SupabaseStackSummary): SupabaseStackSummary {
+	return stackWith(stack, {
+		lastError: {
+			...supabaseDesktopError('refused', 'Port 54321 is in use.'),
+			code: 'ports_conflict',
+			details: { port: 54_321, portProblem: 'held-by-process' },
+		},
+	});
 }
 
 function job(overrides: Partial<SupabaseJob> = {}): SupabaseJob {
@@ -628,6 +671,10 @@ describe('agent surface', () => {
 			'RN Devtools is not managing this worktree. Start it yourself from the worktree with `pnpm exec supabase start --runtime native` (never without --runtime native).'
 		);
 		expect(supabaseAgentRecovery('cli_mismatch')).toMatch(/Never destroy/);
+		// Reverting keeps the stack; an up tries the start again.
+		expect(supabaseAgentRecovery('needs_recreate')).toMatch(
+			/revert that setting and call supabase with operation up again/
+		);
 	});
 
 	it('computes local stats from activity, warm starts only for percentiles', () => {
@@ -961,6 +1008,30 @@ describe('stackStatus (status model A)', () => {
 			stackStatus(demoStack(ids.fixAuthRedirect), { jobs: demo.jobs }).label
 		).toBe('Starting…');
 	});
+
+	it('advises reverting a needs-recreate stack only when every change is editable', () => {
+		expect(supabaseRevertKeepsStack([MAJOR_VERSION])).toBe(true);
+		const revert =
+			'The saved stack cannot adopt this configuration. Revert the change to keep it, or recreate it.';
+		expect(stackStatus(needsRecreate([MAJOR_VERSION])).explanation).toBe(
+			revert
+		);
+		// A retry that failed for another reason changes nothing here.
+		expect(
+			stackStatus(retriedOtherwise(needsRecreate([MAJOR_VERSION]))).explanation
+		).toBe(revert);
+		for (const changes of [
+			[POSTGRES_BUILD],
+			[MAJOR_VERSION, POSTGRES_BUILD],
+			[],
+			undefined,
+		]) {
+			expect(supabaseRevertKeepsStack(changes)).toBe(false);
+			expect(stackStatus(needsRecreate(changes)).explanation).toBe(
+				'The saved stack cannot adopt this configuration. Recreate it.'
+			);
+		}
+	});
 });
 
 describe('serviceStateLabel (status model D)', () => {
@@ -1197,6 +1268,50 @@ describe('attentionItems and sidebarBadge', () => {
 		).toEqual(['1 stack failed to start and left an empty stack.']);
 	});
 
+	it('advises reverting needs-recreate stacks only when every change is editable', () => {
+		const textOf = (...stacks: SupabaseStackSummary[]) =>
+			attentionItems(
+				{
+					...demo,
+					stacks,
+					requests: [],
+					jobs: [],
+					prune: { ...demo.prune, groups: [] },
+				},
+				now
+			).find((item) => item.id === 'start-failed')?.text;
+		const other = demoStack(ids.featGone);
+		expect(textOf(needsRecreate([MAJOR_VERSION]))).toBe(
+			"1 stack can't adopt its configuration: revert the change or recreate it."
+		);
+		expect(textOf(retriedOtherwise(needsRecreate([MAJOR_VERSION])))).toBe(
+			"1 stack can't adopt its configuration: revert the change or recreate it."
+		);
+		expect(
+			textOf(
+				needsRecreate([MAJOR_VERSION]),
+				needsRecreate([MAJOR_VERSION], other)
+			)
+		).toBe(
+			"2 stacks can't adopt their configuration: revert the change or recreate them."
+		);
+		expect(textOf(needsRecreate([POSTGRES_BUILD]))).toBe(
+			"1 stack can't adopt its configuration and must be recreated."
+		);
+		expect(
+			textOf(
+				needsRecreate(),
+				needsRecreate([MAJOR_VERSION, POSTGRES_BUILD], other)
+			)
+		).toBe("2 stacks can't adopt their configuration and must be recreated.");
+		expect(
+			textOf(
+				needsRecreate([MAJOR_VERSION]),
+				needsRecreate([POSTGRES_BUILD], other)
+			)
+		).toBe("2 stacks can't adopt their configuration.");
+	});
+
 	it('aggregates warnings into one item with a breakdown', () => {
 		const mismatch = {
 			ownerRelease: '0.1.0+8b6cc1ef8a8469e7',
@@ -1217,7 +1332,7 @@ describe('attentionItems and sidebarBadge', () => {
 			],
 		};
 		expect(attentionItems(state, now).map((item) => item.text)).toEqual([
-			"2 stacks can't start: 1 was interrupted, 1 must be recreated.",
+			"2 stacks can't start: 1 was interrupted, 1 can't adopt its configuration.",
 			"3 stacks need attention: 1 is partly stopped, 1 runs another CLI release, 1 isn't responding.",
 		]);
 		expect(sidebarBadge(state, now)?.tone).toBe('danger');
@@ -1855,25 +1970,27 @@ describe('supabaseActionAvailability', () => {
 		],
 		[
 			'resume a stack that needs recreating',
-			stackWith(stopped, {
-				state: 'needs-recreate',
-				lastError: {
-					...supabaseDesktopError('refused', 'x'),
-					code: 'needs_recreate',
-					details: {
-						stackChanges: [
-							{
-								key: '[db] major_version',
-								saved: '15',
-								requested: '17',
-								editable: true,
-							},
-						],
-					},
-				},
-			}),
+			needsRecreate([MAJOR_VERSION]),
 			'resume',
-			'This stack must be recreated: [db] major_version changed from 15 to 17.',
+			'[db] major_version changed from 15 to 17. Revert it to keep this stack, or recreate it.',
+		],
+		[
+			'resume it once a retry failed for another reason',
+			retriedOtherwise(needsRecreate([MAJOR_VERSION])),
+			'resume',
+			'[db] major_version changed from 15 to 17. Revert it to keep this stack, or recreate it.',
+		],
+		[
+			'resume a stack whose Postgres build changed',
+			needsRecreate([POSTGRES_BUILD]),
+			'resume',
+			'This stack must be recreated: Postgres build changed from 17.4.1 to 17.6.1.',
+		],
+		[
+			'start a stack whose changes are not all editable',
+			needsRecreate([MAJOR_VERSION, POSTGRES_BUILD]),
+			'start',
+			'This stack must be recreated: Postgres build changed from 17.4.1 to 17.6.1.',
 		],
 		[
 			'resume an interrupted stack',
@@ -2188,6 +2305,25 @@ describe('global, repository, request and clean-up availability', () => {
 				pending: true,
 			})
 		).toEqual({ allowed: false, check: 'in-flight', reason: 'Turning on…' });
+		// Off already, but a turn-off that stops managed stacks still runs.
+		for (const waitingForStarts of [true, false]) {
+			expect(
+				supabaseGlobalActionAvailability('turn-on', {
+					bridgeAvailable: true,
+					state: {
+						...offState,
+						feature: {
+							...offState.feature,
+							disabling: { remaining: 2, total: 2, waitingForStarts },
+						},
+					},
+				})
+			).toEqual({
+				allowed: false,
+				check: 'in-flight',
+				reason: 'Local Supabase is still turning off.',
+			});
+		}
 		expect(
 			supabaseGlobalActionAvailability('turn-off', {
 				bridgeAvailable: true,
@@ -2505,6 +2641,74 @@ describe('operations against the rules', () => {
 		).toMatchObject({
 			allowed: false,
 			error: { message: SUPABASE_REASONS.metroCurrent },
+		});
+	});
+
+	it('makes room only by stopping a stack the capacity request offers', () => {
+		const ctx = { bridgeAvailable: true, now };
+		const [template] = demo.requests;
+		const [job] = demo.jobs;
+		if (!template || !job) throw new Error('missing demo request or job');
+		const request = {
+			...template,
+			id: 'supabase-request-00000000-0000-4000-8000-0000000000aa',
+			kind: 'start-capacity' as const,
+			capacity: {
+				running: 12,
+				cap: 12,
+				candidates: [
+					{
+						stackId: ids.featCheckout,
+						branch: 'feat-checkout',
+						liveHolder: true,
+					},
+				],
+			},
+		};
+		const state = { ...demo, requests: [request] };
+		const approve = (stopStackId: string, from = state) =>
+			checkSupabaseOperation(
+				op({ kind: 'request.approve', requestId: request.id, stopStackId }),
+				from,
+				ctx
+			);
+		expect(approve(ids.featCheckout)).toEqual({ allowed: true });
+		// An external stack, a running one it doesn't offer, an unlisted id.
+		for (const stopStackId of [ids.legacyMain, ids.main, 'f'.repeat(64)]) {
+			expect(approve(stopStackId)).toEqual({
+				allowed: false,
+				error: supabaseDesktopError(
+					'refused',
+					"That stack isn't one to stop to make room. Choose another."
+				),
+			});
+		}
+		// The stop waits for the candidate's own operation, like a plain stop.
+		const busy = {
+			...state,
+			jobs: [
+				...state.jobs,
+				{
+					...job,
+					id: 'supabase-job-00000000-0000-4000-8000-0000000000bb',
+					stackIds: [ids.featCheckout],
+				},
+			],
+		};
+		expect(approve(ids.featCheckout, busy)).toEqual({
+			allowed: false,
+			error: supabaseDesktopError('refused', SUPABASE_REASONS.inFlight),
+		});
+		expect(
+			supabaseRequestActionAvailability(request, 'approve', {
+				bridgeAvailable: true,
+				state,
+				stopStackId: ids.legacyMain,
+			})
+		).toEqual({
+			allowed: false,
+			check: 'state',
+			reason: "That stack isn't one to stop to make room. Choose another.",
 		});
 	});
 

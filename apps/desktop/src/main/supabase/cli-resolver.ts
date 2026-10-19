@@ -36,8 +36,7 @@ const MAX_CACHED_PROBES = 64;
 const SEMVER =
 	/^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,64})?(?:\+[0-9A-Za-z.-]{1,64})?$/;
 
-/** @public */
-export type SupabaseCliUnavailableReason =
+type SupabaseCliUnavailableReason =
 	| 'unsupported-platform'
 	| 'not-installed'
 	| 'invalid-package'
@@ -134,7 +133,6 @@ const REASON_COPY: Readonly<
 
 /**
  * The minimal file metadata the resolver checks.
- * @public
  */
 export type SupabaseResolverFileStats = Readonly<{
 	isFile(): boolean;
@@ -148,7 +146,6 @@ export type SupabaseResolverFileStats = Readonly<{
 	dev: number;
 }>;
 
-/** @public */
 export type SupabaseResolverFsPort = Readonly<{
 	stat: (filePath: string) => Promise<SupabaseResolverFileStats>;
 	lstat: (filePath: string) => Promise<SupabaseResolverFileStats>;
@@ -184,7 +181,6 @@ const nodeResolverFs: SupabaseResolverFsPort = {
 	readTextFile: readBoundedTextFile,
 };
 
-/** @public */
 export type ResolvedSupabaseCli = Readonly<{
 	/** Realpath of the platform binary; the only path the runner should spawn. */
 	binaryPath: string;
@@ -203,7 +199,6 @@ export type ResolvedSupabaseCli = Readonly<{
 	}>;
 }>;
 
-/** @public */
 export type SupabaseCliResolution =
 	| Readonly<{ ok: true; cli: ResolvedSupabaseCli }>
 	| Readonly<{
@@ -216,7 +211,6 @@ export type SupabaseCliResolution =
 			path: string | undefined;
 	  }>;
 
-/** @public */
 export type SupabaseCliResolveInput = Readonly<{
 	/** The app directory a lane runs. */
 	appPath: string;
@@ -230,7 +224,6 @@ export type SupabaseCliResolveInput = Readonly<{
 	allowUnverifiedPatch?: boolean;
 }>;
 
-/** @public */
 export type SupabaseCliResolverOptions = Readonly<{
 	runner: Pick<SupabaseCliRunner, 'run'>;
 	/** Neutral directory the version probe runs in. */

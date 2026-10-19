@@ -696,6 +696,9 @@ export class DesktopBroker {
 			existing.socket.close(1008, 'replaced by a newer connection');
 		}
 		if (existing) this.#releaseSnapshot(existing);
+		// A new session starts from empty tools under a new connectedAt, which
+		// tells the preload's state parser to validate its tools afresh; see
+		// #handleDeviceMessage for the rule.
 		const device: DeviceSession = {
 			info,
 			status: 'online',
@@ -739,6 +742,11 @@ export class DesktopBroker {
 			}
 			session.device.sequence = message.sequence;
 			session.device.latencyMs = Math.max(0, now - message.sentAt);
+			// Tools change only together with a higher sequence (here, and in
+			// tickDemoDevice) or a new connectedAt (#registerDevice). The preload's
+			// state parser reuses the tools it already validated while a session's
+			// id, connectedAt and sequence are unchanged, so tools edited in place
+			// without a new sequence would leave the renderer showing stale ones.
 			session.device.tools = message.tools;
 			this.#scheduleEmit();
 			return;

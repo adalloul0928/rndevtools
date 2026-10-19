@@ -5,6 +5,7 @@ import {
 	chmod,
 	mkdir,
 	mkdtemp,
+	readdir,
 	realpath,
 	rm,
 	stat,
@@ -20,7 +21,9 @@ import { realisticSecrets } from './cli-fixtures.test-support';
 import {
 	buildSupabaseCliEnvironment,
 	parseSupabaseJsonLine,
+	pruneSupabaseProgressFiles,
 	readSupabaseProgressLines,
+	removeSupabaseProgressFile,
 	type SupabaseCliEnvironmentOptions,
 	SupabaseCliOutputError,
 	SupabaseCliRunner,
@@ -35,6 +38,7 @@ import {
 import {
 	buildSupabaseArgv,
 	resolveSupabaseDialect,
+	SUPABASE_MAX_CLI_TIMEOUT_MS,
 	SupabaseArgvError,
 } from './dialect';
 
@@ -719,6 +723,8 @@ describe('SupabaseCliRunner.run', () => {
 			{ timeoutMs: 1.5 },
 			{ timeoutMs: 1_000, interruptGraceMs: -1 },
 			{ timeoutMs: 1_000, forceKillAfterMs: Number.NaN },
+			// Past the largest budget any operation is given.
+			{ timeoutMs: SUPABASE_MAX_CLI_TIMEOUT_MS + 1 },
 		];
 		for (const budget of budgets) {
 			await expect(
@@ -879,6 +885,8 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 		expect(result.takeStdout()).toBe('{"id":"x"}\n');
 		expect(setup.kills).toEqual([]);
 		expect(call.child.signals).toEqual([]);
+		// Its lines are in the result, so the file is gone.
+		expect(await readdir(setup.progressDirectory)).toEqual([]);
 	});
 
 	it('interrupts the whole group, waits, then terminates, and never SIGKILLs a lifecycle child', async () => {
@@ -959,6 +967,7 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 		).rejects.toMatchObject({ kind: 'spawn' });
 		expect(setup.kills).toEqual([]);
 		expect(zero.calls[0]?.child.signals).toEqual(['SIGINT']);
+		expect(await readdir(setup.progressDirectory)).toEqual([]);
 	});
 
 	it('validates the progress label and reports spawn failures', async () => {
@@ -986,6 +995,7 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 				progressLabel: 'start',
 			})
 		).rejects.toMatchObject({ kind: 'spawn' });
+		expect(await readdir(setup.progressDirectory)).toEqual([]);
 		await expect(
 			setup.runner.spawnDetached({
 				binaryPath: BINARY,
@@ -997,6 +1007,45 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 				progressLabel: 'start',
 			})
 		).rejects.toMatchObject({ reason: 'phase' });
+	});
+});
+
+describe('progress file clean up', () => {
+	const UUID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+	it('removes only progress files earlier runs left', async () => {
+		const directory = await tempDirectory();
+		const old = path.join(directory, `create-1000-${UUID}.log`);
+		const kept = path.join(directory, `start-1500-${UUID}.log`);
+		const current = path.join(directory, `stop-3000-${UUID}.log`);
+		const other = path.join(directory, 'notes.txt');
+		const linked = path.join(directory, `reset-1200-${UUID}.log`);
+		for (const file of [old, kept, current, other]) {
+			await writeFile(file, '[task] done: Stack is ready.\n');
+		}
+		await symlink(other, linked);
+		await expect(
+			pruneSupabaseProgressFiles(directory, {
+				before: 2_000,
+				keep: new Set([kept]),
+			})
+		).resolves.toBe(1);
+		expect((await readdir(directory)).sort()).toEqual(
+			[kept, current, other, linked].map((file) => path.basename(file)).sort()
+		);
+		// Nothing outside the directory, or not named like a progress file.
+		await expect(removeSupabaseProgressFile(directory, other)).resolves.toBe(
+			false
+		);
+		await expect(
+			removeSupabaseProgressFile(path.dirname(directory), kept)
+		).resolves.toBe(false);
+		await expect(
+			pruneSupabaseProgressFiles(path.join(directory, 'missing'), {
+				before: 2_000,
+				keep: new Set(),
+			})
+		).resolves.toBe(0);
 	});
 });
 

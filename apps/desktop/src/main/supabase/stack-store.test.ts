@@ -10,7 +10,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { supabaseDesktopError } from '../../shared/supabase-protocol';
 import { realisticSecrets, SECRET_SHAPED } from './cli-fixtures.test-support';
 import {
@@ -21,7 +21,13 @@ import {
 	SupabaseStackStore,
 	sanitizeSupabaseRequestNote,
 	supabaseKeyFingerprint,
+	supabaseRecreateError,
 } from './stack-store';
+
+// Every saved change here is an fsync'd write, which a faster CPU doesn't
+// speed up and a busy disk slows down. The slowest test on this timeout takes
+// about 1.8 s in a full desktop run, under a tenth of it.
+vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = 1_792_245_785_000;
 const MINUTE = 60_000;
@@ -420,6 +426,12 @@ describe('SupabaseStackStore', () => {
 					...leaky,
 					message: `failed with ${secrets.secretKey} at ${secrets.dbUrl}`,
 				},
+				recreateError: {
+					...leaky,
+					code: 'needs_recreate',
+					message: `cannot adopt ${secrets.secretKey}`,
+				},
+				flags: { needsRecreate: true },
 			})
 		);
 		const file = await readFile(path.join(directory, 'stacks.json'), 'utf8');
@@ -435,6 +447,66 @@ describe('SupabaseStackStore', () => {
 		expect(stacks.record(hex(1))?.lastError?.message).toBe(
 			'failed with [REDACTED KEY] at postgresql://…@127.0.0.1:30630/postgres'
 		);
+		expect(stacks.record(hex(1))?.recreateError?.message).toBe(
+			'cannot adopt [REDACTED KEY]'
+		);
+	});
+
+	it("keeps what a needs-recreate stack can't adopt, and loads older records", async () => {
+		const recreate = {
+			...supabaseDesktopError('refused', 'The saved stack cannot adopt it.'),
+			code: 'needs_recreate' as const,
+			details: {
+				stackChanges: [
+					{
+						key: '[db] major_version',
+						saved: '15',
+						requested: '17',
+						editable: true,
+					},
+				],
+			},
+		};
+		const conflict = {
+			...supabaseDesktopError('refused', 'Port 54321 is in use.'),
+			code: 'ports_conflict' as const,
+		};
+		const directory = await root();
+		await mkdir(directory, { recursive: true });
+		// Saved before recreateError existed: the details are its lastError.
+		await writeFile(
+			path.join(directory, 'stacks.json'),
+			JSON.stringify({
+				version: 1,
+				records: [
+					record(1, { flags: { needsRecreate: true }, lastError: recreate }),
+					record(2, { lastError: recreate }),
+				],
+				requests: [],
+				activity: [],
+			})
+		);
+		const stacks = stackStore(directory);
+		expect(await stacks.load()).toBe('ok');
+		const older = stacks.record(hex(1));
+		expect(older?.recreateError).toBeUndefined();
+		expect(older && supabaseRecreateError(older)).toEqual(recreate);
+		// Without the flag the saved stack has nothing it can't adopt.
+		const unflagged = stacks.record(hex(2));
+		expect(unflagged && supabaseRecreateError(unflagged)).toBeUndefined();
+		// Kept in its own field, a later failure's lastError leaves it alone.
+		await stacks.upsertRecord(
+			record(3, {
+				flags: { needsRecreate: true },
+				lastError: conflict,
+				recreateError: recreate,
+			})
+		);
+		const reloaded = stackStore(directory);
+		expect(await reloaded.load()).toBe('ok');
+		const kept = reloaded.record(hex(3));
+		expect(kept?.lastError?.code).toBe('ports_conflict');
+		expect(kept && supabaseRecreateError(kept)).toEqual(recreate);
 	});
 
 	it('expires pending requests and drops old settled ones', async () => {
@@ -478,7 +550,8 @@ describe('SupabaseStackStore', () => {
 		expect(await stacks.updateRequest('nope', () => undefined)).toBeUndefined();
 	});
 
-	// 205 outcomes, each persisted durably (fsync).
+	// 205 outcomes, each persisted durably (fsync): up to about 6 s in a full
+	// desktop run, under a tenth of its own timeout.
 	it('keeps an activity ring of the newest 200 outcomes', async () => {
 		const directory = await root();
 		const stacks = stackStore(directory);
@@ -509,7 +582,7 @@ describe('SupabaseStackStore', () => {
 				requestedBy: 'lane',
 			})
 		).rejects.toThrow();
-	}, 30_000);
+	}, 75_000);
 
 	it('notifies subscribers after each saved change', async () => {
 		const directory = await root();

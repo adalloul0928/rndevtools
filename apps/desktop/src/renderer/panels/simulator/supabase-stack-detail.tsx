@@ -276,6 +276,28 @@ export function supabaseStudioControls(
 	].filter((item): item is SupabaseControl => item !== undefined);
 }
 
+/**
+ * Folds an auto-refresh read into the logs on screen, but only into the read
+ * it started from. A service or window change, a manual read or its error
+ * replaces that read, and the tick's lines are dropped instead of being shown
+ * under a filter they were not read for.
+ */
+export function supabaseLogsAfterRefresh(
+	reads: SupabaseStackReads,
+	started: SupabaseLogsRead,
+	next: SupabaseLogsPayload
+): SupabaseStackReads {
+	if (reads.logs !== started || !started.payload) return reads;
+	return {
+		...reads,
+		logs: {
+			...started,
+			status: 'ready',
+			payload: mergeSupabaseLogs(started.payload, next),
+		},
+	};
+}
+
 function useDebouncedValue<T>(value: T, delayMs: number): T {
 	const [debounced, setDebounced] = useState(value);
 	useEffect(() => {
@@ -1521,31 +1543,22 @@ function LogsSection({
 				return;
 			}
 			if (document.visibilityState !== 'visible') return;
-			const current = latest.current;
-			if (!current?.payload || current.status === 'reading') return;
-			const previous = current.payload;
+			const started = latest.current;
+			if (!started?.payload || started.status === 'reading') return;
+			// A background run never refuses the operator's own read, which
+			// then supersedes this tick.
 			void run(
 				supabaseLogsRefreshOperation(
 					stack.id,
-					current.service,
-					previous,
+					started.service,
+					started.payload,
 					Date.now()
-				)
+				),
+				{ background: true }
 			).then((receipt) => {
 				const next = receipt.logs;
 				if (!next) return;
-				onReads((reads) =>
-					reads.logs?.payload
-						? {
-								...reads,
-								logs: {
-									...reads.logs,
-									status: 'ready',
-									payload: mergeSupabaseLogs(reads.logs.payload, next),
-								},
-							}
-						: reads
-				);
+				onReads((reads) => supabaseLogsAfterRefresh(reads, started, next));
 			});
 		}, LOG_AUTO_REFRESH_MS);
 		return () => globalThis.clearInterval(timer);
