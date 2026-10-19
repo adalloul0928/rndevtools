@@ -156,8 +156,9 @@ export function AgentsView({
 						? 'Live Claude Code and Codex sessions on this Mac and the Simulators and local Supabase stacks each one is attached to.'
 						: 'Live Claude Code and Codex sessions on this Mac and the Simulators each one is attached to.'}{' '}
 					Attribution comes from explicit claims, recent CLI commands, and lanes
-					whose app directory is the session’s working directory. Claims are a
-					convention agents follow, not a lock.
+					whose worktree holds the session’s working directory. A claim is a
+					hold: until it is released, other agents can’t run lanes on, send
+					input to, install on, slim, or run recipes on the claimed Simulator.
 				</p>
 				<Button
 					aria-label="Refresh agents"

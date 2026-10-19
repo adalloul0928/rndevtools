@@ -3,7 +3,6 @@ import {
 	formatDuration,
 	formatRelativeTime as formatElapsed,
 } from '@rndevtools/core/format';
-import { formatHoldDuration } from '../../shared/device-hold';
 
 // Byte and duration rendering is shared with the on-device panels so the same
 // value never reads differently on the two surfaces. The local copies also
@@ -35,34 +34,6 @@ export function formatRelativeTime(
 	const elapsed = formatElapsed(timestamp, now);
 	if (elapsed === undefined) return '—';
 	return elapsed === 'now' ? elapsed : `${elapsed} ago`;
-}
-
-const WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
-
-const dayFormat = new Intl.DateTimeFormat(undefined, {
-	month: 'short',
-	day: 'numeric',
-});
-const dayWithYearFormat = new Intl.DateTimeFormat(undefined, {
-	month: 'short',
-	day: 'numeric',
-	year: 'numeric',
-});
-
-/**
- * A future time the way countdowns read it: `in 45 s`, `in 7 min`, `in 3 h`,
- * `in 3 days`, then a date (`Oct 31`) a week or more out. It rounds up like
- * hold clocks do, so a countdown never reads as done before it is; a time
- * that has passed reads `now`.
- */
-export function formatUntil(timestamp: number, now = Date.now()): string {
-	if (!Number.isFinite(timestamp)) return '—';
-	const remaining = timestamp - (Number.isFinite(now) ? now : timestamp);
-	if (remaining <= 0) return 'now';
-	if (remaining < WEEK_MS) return `in ${formatHoldDuration(remaining)}`;
-	const sameYear =
-		new Date(timestamp).getFullYear() === new Date(now).getFullYear();
-	return (sameYear ? dayFormat : dayWithYearFormat).format(timestamp);
 }
 
 /**

@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { ControllableScreen } from '@/components/controllable-screen';
-import { VisibleDeviceScreen } from '@/components/device-screen';
+import { DeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
 	AgentGlyph,
@@ -227,6 +227,7 @@ export function FleetPanel() {
 				lanes: lanes.state.lanes,
 				sessions: desktop.state?.devices ?? [],
 				agentsByDevice: agents.state.byDevice,
+				supabase,
 			}),
 		[
 			state.devices,
@@ -236,6 +237,7 @@ export function FleetPanel() {
 			lanes.state.lanes,
 			agents.state.byDevice,
 			desktop.state?.devices,
+			supabase,
 		]
 	);
 	const filterCounts = useMemo(() => fleetFilterCounts(rows), [rows]);
@@ -348,7 +350,6 @@ export function FleetPanel() {
 					</>
 				}
 				description="Create a simulator, open it, and run your app. Select a row to inspect it, or use Select multiple for batch actions."
-				eyebrow="Targets"
 				meta={`${state.devices.length} discovered`}
 				title="Simulators"
 			/>
@@ -580,6 +581,7 @@ export function FleetPanel() {
 								emptyTitle="No targets match these filters"
 								items={targets}
 								getId={(target) => target.udid}
+								dependencies={[rowByUdid, runtimeById]}
 								rowHeight={64}
 								selectedId={selectedDevice?.udid}
 								selectedIds={batchMode ? batchUdids : undefined}
@@ -764,7 +766,7 @@ function DeviceWall({
 						key={row.device.udid}
 						className={`device-tile ${selected ? 'is-selected' : ''} ${row.live ? 'is-live' : ''}`}
 					>
-						<VisibleDeviceScreen
+						<DeviceScreen
 							className="device-tile-screen"
 							live={row.live}
 							name={row.device.name}

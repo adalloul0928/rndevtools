@@ -288,7 +288,6 @@ export function SlimmingPanel() {
 					</div>
 				}
 				description="Reduce background services on existing simulators. Create a test simulator in Simulators first, then choose a profile, preview its changes, and apply. SimSlim is experimental and may restart the simulator. A checkpoint allows you to undo changes."
-				eyebrow="Experimental resource profiles"
 				meta={<HelperStatus status={state.helper.status} />}
 				title="SimSlim"
 			/>

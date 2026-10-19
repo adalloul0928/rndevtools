@@ -346,7 +346,6 @@ export function NetworkPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Inspect"
 				title="Network"
 				description="Every instrumented request, with privacy-safe headers, bodies, timing, and failure context."
 				meta={

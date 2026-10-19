@@ -141,8 +141,11 @@ export function buildFleetRows({
 	lanes: readonly LaneView[];
 	sessions: readonly DeviceSession[];
 	agentsByDevice?: Readonly<Record<string, readonly DeviceAgent[]>>;
-	/** Local Supabase, for each lane's backend chip; none hides them. */
-	supabase?: Pick<SupabaseState, 'feature' | 'stacks' | 'jobs'> | undefined;
+	/**
+	 * Local Supabase, for each lane's backend chip; undefined hides them.
+	 * Required, so a caller cannot drop the chips by leaving it out.
+	 */
+	supabase: Pick<SupabaseState, 'feature' | 'stacks' | 'jobs'> | undefined;
 }): FleetRow[] {
 	const runtimeById = new Map(
 		runtimes.map((runtime) => [runtime.identifier, runtime.name])

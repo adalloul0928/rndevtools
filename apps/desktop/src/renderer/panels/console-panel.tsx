@@ -54,6 +54,21 @@ export function copyFeedbackLabel(
 	return 'Copy visible';
 }
 
+/**
+ * Drops bookmarks whose entries left the buffer. Returns `previous` itself
+ * when none did, so a push that only adds entries renders the grid once, not
+ * twice with rebuilt columns.
+ */
+export function retainedBookmarks(
+	previous: ReadonlySet<string>,
+	entries: readonly Pick<ConsoleEntry, 'id'>[]
+): ReadonlySet<string> {
+	if (previous.size === 0) return previous;
+	const retained = new Set(entries.map((entry) => entry.id));
+	const kept = [...previous].filter((id) => retained.has(id));
+	return kept.length === previous.size ? previous : new Set(kept);
+}
+
 export function ConsolePanel() {
 	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
 	const entries = selectedDevice?.tools.console ?? [];
@@ -110,10 +125,7 @@ export function ConsolePanel() {
 		if (selectedDevice?.info.id === undefined) setSelectedId(null);
 	}, [selectedDevice?.info.id]);
 	useEffect(() => {
-		const retained = new Set(entries.map((entry) => entry.id));
-		setBookmarkedIds(
-			(previous) => new Set([...previous].filter((id) => retained.has(id)))
-		);
+		setBookmarkedIds((previous) => retainedBookmarks(previous, entries));
 	}, [entries]);
 	const toggleBookmark = (id: string): void => {
 		setBookmarkedIds((previous) => {
@@ -190,7 +202,6 @@ export function ConsolePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Inspect"
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
 				meta={

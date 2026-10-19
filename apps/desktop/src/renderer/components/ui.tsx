@@ -3,7 +3,6 @@ import { Button } from '@heroui/react/button';
 import { Popover } from '@heroui/react/popover';
 import { SearchField } from '@heroui/react/search-field';
 import { Tooltip } from '@heroui/react/tooltip';
-import { DataGrid } from '@heroui-pro/react/data-grid';
 import { EmptyState } from '@heroui-pro/react/empty-state';
 import {
 	AlertTriangle,
@@ -102,13 +101,11 @@ export function Disclosure({
 }
 
 export function PanelHeader({
-	eyebrow: _eyebrow,
 	title,
 	description,
 	meta,
 	actions,
 }: {
-	eyebrow: string;
 	title: string;
 	description: string;
 	meta?: ReactNode;
@@ -481,7 +478,6 @@ export function DisabledReason({
  * A block-layout card for something waiting on a decision, such as an agent's
  * request. Unlike PanelNotice, whose body is an inline span, it holds facts,
  * a quoted note and a row of actions.
- * @public
  */
 export function RequestCard({
 	tone = 'warning',
@@ -632,9 +628,6 @@ export function DetailPlaceholder({
  * spans so tone tints stay consistent across panels. `StatusPill` is the
  * mono/uppercase status variant; `Badge` is the softer sentence-case label used
  * for categories and counts.
-
- *
- * @public
  */
 export function Badge({
 	children,
@@ -648,24 +641,7 @@ export function Badge({
 	return <span className={`ui-badge is-${tone} ${className}`}>{children}</span>;
 }
 
-/** Keyboard shortcut hint, styled to match the sidebar and titlebar kbd chips.
- *
- * @public
- */
-export function Kbd({
-	children,
-	className = '',
-}: {
-	children: ReactNode;
-	className?: string;
-}) {
-	return <kbd className={`ui-kbd ${className}`}>{children}</kbd>;
-}
-
-/** Inline monospace token for ids, keys, paths, and small code fragments.
- *
- * @public
- */
+/** Inline monospace token for ids, keys, paths, and small code fragments. */
 export function InlineCode({
 	children,
 	className = '',
@@ -680,9 +656,6 @@ export function InlineCode({
  * Bordered content region with an optional header row. Standardizes the
  * hairline card used throughout the panels (title + optional actions + body)
  * so sections do not each re-derive border/padding/spacing.
-
- *
- * @public
  */
 export function SectionCard({
 	title,
@@ -724,9 +697,6 @@ export function SectionCard({
 /**
  * Loading placeholder. Use in place of a blank region while a projection or
  * native probe is still resolving, so panels share one shimmer treatment.
-
- *
- * @public
  */
 export function Skeleton({
 	className = '',
@@ -739,83 +709,6 @@ export function Skeleton({
 		<span
 			aria-hidden="true"
 			className={`ui-skeleton is-${rounded} ${className}`}
-		/>
-	);
-}
-
-/**
- * Thin wrapper over the HeroUI Pro DataGrid pattern used across panels. It
- * fixes the shared `desktop-grid` class, dense heading/row heights, and a
- * consistent in-grid empty state so every data table reads the same. Panels
- * still pass their own typed columns and data.
-
- *
- * @public
- */
-export function DataTable<T extends object>({
-	ariaLabel,
-	columns,
-	data,
-	getRowId,
-	selectedId,
-	onSelect,
-	selectionMode = 'single',
-	emptyIcon,
-	emptyTitle = 'Nothing to show',
-	emptyDescription = 'Adjust the filters, or interact with the app to generate data.',
-	headingHeight = 36,
-	rowHeight = 42,
-	className = '',
-}: {
-	ariaLabel: string;
-	// biome-ignore lint/suspicious/noExplicitAny: column/cell generics are owned by the DataGrid type; the wrapper is column-shape agnostic.
-	columns: any[];
-	data: T[];
-	getRowId: (row: T) => string;
-	selectedId?: string | null;
-	onSelect?: (id: string | null) => void;
-	selectionMode?: 'single' | 'none';
-	emptyIcon?: ReactNode;
-	emptyTitle?: string;
-	emptyDescription?: string;
-	headingHeight?: number;
-	rowHeight?: number;
-	className?: string;
-}) {
-	if (data.length === 0) {
-		return (
-			<EmptyPanel
-				description={emptyDescription}
-				icon={emptyIcon}
-				title={emptyTitle}
-			/>
-		);
-	}
-	return (
-		<DataGrid
-			aria-label={ariaLabel}
-			className={`desktop-grid ${className}`}
-			columns={columns}
-			data={data}
-			getRowId={getRowId}
-			headingHeight={headingHeight}
-			rowHeight={rowHeight}
-			selectedKeys={
-				selectionMode === 'single' && selectedId
-					? new Set([selectedId])
-					: new Set()
-			}
-			selectionMode={selectionMode}
-			virtualized
-			onSelectionChange={(selection) => {
-				if (!onSelect) return;
-				if (selection === 'all') {
-					onSelect(getRowId(data[0] as T) ?? null);
-					return;
-				}
-				const key = [...selection][0];
-				onSelect(key === undefined ? null : String(key));
-			}}
 		/>
 	);
 }

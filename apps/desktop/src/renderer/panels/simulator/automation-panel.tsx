@@ -174,6 +174,17 @@ export function AutomationPanel() {
 					.includes(normalized)
 		);
 	}, [query, recipeSummaries]);
+	// The catalog rows that show the unsaved dot, as a key that changes only
+	// when one of them does.
+	const dirtyRecipeIds = useMemo(
+		() =>
+			Object.entries(drafts)
+				.filter(([, entry]) => entry.dirty)
+				.map(([id]) => id)
+				.sort()
+				.join('\n'),
+		[drafts]
+	);
 	const selectedSummary = selectedRecipeId
 		? (recipeSummaries.find((summary) => summary.id === selectedRecipeId) ??
 			null)
@@ -556,7 +567,6 @@ export function AutomationPanel() {
 					</Button>
 				}
 				description="Combine simulator actions into reusable recipes. Choose your simulators, review the steps, and run. Execution history and captured results stay on this Mac."
-				eyebrow="Recipes"
 				meta={`${recipeRuntime.state.recipes.length} saved · ${recipeRuntime.state.runs.length} runs`}
 				title="Automation"
 			/>
@@ -628,6 +638,7 @@ export function AutomationPanel() {
 							emptyTitle={query ? 'No recipes match' : 'No recipes yet'}
 							items={visibleRecipes}
 							getId={(summary) => summary.id}
+							dependencies={[dirtyRecipeIds]}
 							rowHeight={72}
 							selectedId={selectedRecipeId ?? undefined}
 							textValue={(summary) => `${summary.name} ${summary.id}`}

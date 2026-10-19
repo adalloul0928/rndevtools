@@ -195,7 +195,6 @@ export function QueryPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="State"
 				title="React Query"
 				description="Inspect the live TanStack Query cache and run narrowly scoped refetch or invalidation actions on the selected device."
 				meta={

@@ -280,7 +280,6 @@ export function SettingsPanel() {
 			<SimulatorPanelHeader
 				actions={<RefreshSimulatorsButton />}
 				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected app."
-				eyebrow="Capability onboarding"
 				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
 				title="Settings"
 			/>

@@ -45,8 +45,10 @@ import {
 } from '@/simulator/capture-composition-model';
 import {
 	type CaptureRetentionFields,
+	type CaptureRetentionForm,
 	captureRetentionFieldsFromPolicy,
 	captureRetentionPolicyFromFields,
+	refillCaptureRetentionForm,
 	runningRecordingJobForDevice,
 } from '@/simulator/capture-model';
 import {
@@ -96,11 +98,16 @@ export function CapturesPanel() {
 	const accessRequestRef = useRef(0);
 	const [access, setAccess] = useState<CaptureAccessState>({ kind: 'idle' });
 	const [retention, setRetention] = useState<RetentionState>({ kind: 'idle' });
-	const [retentionFields, setRetentionFields] =
-		useState<CaptureRetentionFields>({
-			maxAgeDays: '30',
-			maxTotalGiB: '10',
-		});
+	const retentionRequestRef = useRef(0);
+	const [retentionForm, setRetentionForm] = useState<CaptureRetentionForm>({
+		fields: { maxAgeDays: '30', maxTotalGiB: '10' },
+	});
+	const retentionFields = retentionForm.fields;
+	const editRetentionFields = useCallback(
+		(fields: CaptureRetentionFields) =>
+			setRetentionForm((form) => ({ ...form, fields })),
+		[]
+	);
 	const [pendingOperation, setPendingOperation] = useState<
 		SimulatorCaptureOperationInput['kind'] | null
 	>(null);
@@ -182,6 +189,8 @@ export function CapturesPanel() {
 				setRetention({ kind: 'idle' });
 				return;
 			}
+			const requestId = retentionRequestRef.current + 1;
+			retentionRequestRef.current = requestId;
 			setRetention((current) =>
 				current.kind === 'ready' && optimisticInventory
 					? {
@@ -192,9 +201,14 @@ export function CapturesPanel() {
 			);
 			try {
 				const value = await getCaptureRetention();
+				if (retentionRequestRef.current !== requestId) return;
 				setRetention({ kind: 'ready', value });
-				setRetentionFields(captureRetentionFieldsFromPolicy(value.policy));
+				// An inventory change reloads this; an unapplied edit survives it.
+				setRetentionForm((form) =>
+					refillCaptureRetentionForm(form, value.policy)
+				);
 			} catch (error) {
+				if (retentionRequestRef.current !== requestId) return;
 				setRetention({ kind: 'error', error: captureErrorText(error) });
 			}
 		},
@@ -372,10 +386,14 @@ export function CapturesPanel() {
 					message: messages.success,
 				});
 				if (receipt.retention) {
+					const { policy } = receipt.retention;
+					// Newer than any reload still in flight; the form shows what applied.
+					retentionRequestRef.current += 1;
 					setRetention({ kind: 'ready', value: receipt.retention });
-					setRetentionFields(
-						captureRetentionFieldsFromPolicy(receipt.retention.policy)
-					);
+					setRetentionForm({
+						fields: captureRetentionFieldsFromPolicy(policy),
+						filledFrom: policy,
+					});
 				}
 				if (operation.kind === 'capture.delete') {
 					setSelectedCaptureId('');
@@ -399,7 +417,6 @@ export function CapturesPanel() {
 			<SimulatorPanelHeader
 				actions={<SimulatorTargetSelect />}
 				description="Capture screenshots and recordings from booted targets, preview them through a private desktop protocol, and explicitly export or reveal local originals. No filesystem path crosses into the renderer."
-				eyebrow="Media"
 				meta={`${state.captures.length} capture${state.captures.length === 1 ? '' : 's'}`}
 				title="Captures"
 			/>
@@ -615,7 +632,7 @@ export function CapturesPanel() {
 							isPolicyValid={parsedRetentionPolicy !== null}
 							isSaving={pendingOperation === 'capture.retention.update'}
 							retention={retention}
-							onChange={setRetentionFields}
+							onChange={editRetentionFields}
 							onRefresh={() => void loadRetention()}
 							onSave={() =>
 								parsedRetentionPolicy

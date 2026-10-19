@@ -7,6 +7,7 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from 'react';
 import type {
 	SimulatorStreamBridge,
@@ -24,10 +25,22 @@ export type LiveScreen = {
 
 type ScreenRequest = { udid: string; quality: SimulatorStreamQuality };
 
+type ObjectUrls = Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>;
+
+type LiveScreens = {
+	screen: (udid: string) => LiveScreen | undefined;
+	status: (udid: string) => SimulatorStreamStatus | undefined;
+	/** Calls `listener` whenever this Simulator's frame or status changes. */
+	subscribe: (udid: string, listener: () => void) => () => void;
+	addFrame: (frame: SimulatorStreamFrame, bytes: Uint8Array) => void;
+	setStatus: (status: SimulatorStreamStatus) => void;
+	/** Revokes every frame's URL and forgets every Simulator. */
+	clear: () => void;
+};
+
 type SimulatorStreamRuntimeValue = {
 	isAvailable: boolean;
-	screens: ReadonlyMap<string, LiveScreen>;
-	statuses: ReadonlyMap<string, SimulatorStreamStatus>;
+	screens: LiveScreens;
 	/**
 	 * Registers interest in a screen for as long as the returned disposer is
 	 * not called. Many components may want the same UDID; the strongest
@@ -76,12 +89,84 @@ export function resolveStreamSubscriptions(
 		.map(([udid, quality]) => ({ udid, quality }));
 }
 
+/**
+ * The latest frame and status of each Simulator, kept outside React state.
+ * A frame becomes an object URL here, in the IPC callback: StrictMode runs
+ * state updaters twice, and a URL made in one would pin its JPEG for good.
+ * Listeners subscribe per Simulator, so a frame re-renders the screens that
+ * show that device, not the whole wall.
+ */
+export function createLiveScreens(urls: ObjectUrls = URL): LiveScreens {
+	const screens = new Map<string, LiveScreen>();
+	const statuses = new Map<string, SimulatorStreamStatus>();
+	// The newest sequence shown per Simulator. Main restarts a poller, and its
+	// count, whenever a device's quality changes, and announces each new poller
+	// with `starting`, which clears this so the new count is not dropped.
+	const sequences = new Map<string, number>();
+	const listeners = new Map<string, Set<() => void>>();
+	const notify = (key: string) => {
+		for (const listener of listeners.get(key) ?? []) listener();
+	};
+	return {
+		screen: (udid) => screens.get(udid.toUpperCase()),
+		status: (udid) => statuses.get(udid.toUpperCase()),
+		subscribe: (udid, listener) => {
+			const key = udid.toUpperCase();
+			const forKey = listeners.get(key) ?? new Set<() => void>();
+			forKey.add(listener);
+			listeners.set(key, forKey);
+			return () => {
+				forKey.delete(listener);
+				if (forKey.size === 0 && listeners.get(key) === forKey) {
+					listeners.delete(key);
+				}
+			};
+		},
+		addFrame: (frame, bytes) => {
+			const key = frame.udid.toUpperCase();
+			const newest = sequences.get(key);
+			if (newest !== undefined && newest >= frame.sequence) return;
+			sequences.set(key, frame.sequence);
+			// Copy into a fresh ArrayBuffer-backed view: the structured-clone
+			// result may be a view over a larger (or shared) buffer.
+			const copy = new Uint8Array(bytes.byteLength);
+			copy.set(bytes);
+			const previous = screens.get(key);
+			screens.set(key, {
+				url: urls.createObjectURL(new Blob([copy], { type: frame.mimeType })),
+				frame,
+			});
+			if (previous) urls.revokeObjectURL(previous.url);
+			notify(key);
+		},
+		setStatus: (status) => {
+			const key = status.udid.toUpperCase();
+			if (status.status === 'stopped') {
+				const screen = screens.get(key);
+				if (screen) urls.revokeObjectURL(screen.url);
+				screens.delete(key);
+				statuses.delete(key);
+				sequences.delete(key);
+			} else {
+				if (status.status === 'starting') sequences.delete(key);
+				statuses.set(key, status);
+			}
+			notify(key);
+		},
+		clear: () => {
+			const keys = new Set([...screens.keys(), ...statuses.keys()]);
+			for (const { url } of screens.values()) urls.revokeObjectURL(url);
+			screens.clear();
+			statuses.clear();
+			sequences.clear();
+			for (const key of keys) notify(key);
+		},
+	};
+}
+
 export function SimulatorStreamProvider({ children }: { children: ReactNode }) {
 	const bridge = useMemo(streamBridge, []);
-	const [screens, setScreens] = useState<Map<string, LiveScreen>>(new Map());
-	const [statuses, setStatuses] = useState<Map<string, SimulatorStreamStatus>>(
-		new Map()
-	);
+	const [screens] = useState(() => createLiveScreens());
 	const requests = useRef(new Map<symbol, ScreenRequest>());
 	const lastSent = useRef<string>('[]');
 	const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -119,47 +204,10 @@ export function SimulatorStreamProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		if (!bridge) return;
 		const unsubscribeFrames = bridge.subscribeSimulatorStreamFrames(
-			(frame, bytes) => {
-				const key = frame.udid.toUpperCase();
-				setScreens((current) => {
-					const previous = current.get(key);
-					if (previous && previous.frame.sequence >= frame.sequence) {
-						return current;
-					}
-					// Copy into a fresh ArrayBuffer-backed view: the structured-clone
-					// result may be a view over a larger (or shared) buffer.
-					const copy = new Uint8Array(bytes.byteLength);
-					copy.set(bytes);
-					const url = URL.createObjectURL(
-						new Blob([copy], { type: frame.mimeType })
-					);
-					if (previous) URL.revokeObjectURL(previous.url);
-					const next = new Map(current);
-					next.set(key, { url, frame });
-					return next;
-				});
-			}
+			(frame, bytes) => screens.addFrame(frame, bytes)
 		);
-		const unsubscribeStatus = bridge.subscribeSimulatorStreamStatus(
-			(status) => {
-				const key = status.udid.toUpperCase();
-				setStatuses((current) => {
-					const next = new Map(current);
-					if (status.status === 'stopped') next.delete(key);
-					else next.set(key, status);
-					return next;
-				});
-				if (status.status === 'stopped') {
-					setScreens((current) => {
-						const previous = current.get(key);
-						if (!previous) return current;
-						URL.revokeObjectURL(previous.url);
-						const next = new Map(current);
-						next.delete(key);
-						return next;
-					});
-				}
-			}
+		const unsubscribeStatus = bridge.subscribeSimulatorStreamStatus((status) =>
+			screens.setStatus(status)
 		);
 		return () => {
 			unsubscribeFrames();
@@ -167,13 +215,16 @@ export function SimulatorStreamProvider({ children }: { children: ReactNode }) {
 			if (debounce.current) clearTimeout(debounce.current);
 			requests.current.clear();
 			lastSent.current = '[]';
+			screens.clear();
 			void bridge.setSimulatorStreamSubscriptions([]).catch(() => undefined);
 		};
-	}, [bridge]);
+	}, [bridge, screens]);
 
+	// Frames never change this value; they reach the screens that show their
+	// Simulator through `screens.subscribe`.
 	const value = useMemo<SimulatorStreamRuntimeValue>(
-		() => ({ isAvailable: Boolean(bridge), screens, statuses, request }),
-		[bridge, screens, statuses, request]
+		() => ({ isAvailable: Boolean(bridge), screens, request }),
+		[bridge, screens, request]
 	);
 	return (
 		<SimulatorStreamContext.Provider value={value}>
@@ -194,7 +245,7 @@ function useSimulatorStream(): SimulatorStreamRuntimeValue {
 
 /**
  * Subscribes to one Simulator's screen while `active` is true and returns the
- * latest frame. Components pass `active=false` for tiles that are scrolled
+ * latest frame. Components pass `active=false` for screens that are scrolled
  * out of view, so a long wall only streams what is on screen.
  */
 export function useLiveScreen(
@@ -205,14 +256,21 @@ export function useLiveScreen(
 	screen: LiveScreen | undefined;
 	status: SimulatorStreamStatus | undefined;
 } {
-	const stream = useSimulatorStream();
+	const { isAvailable, request, screens } = useSimulatorStream();
 	useEffect(() => {
-		if (!udid || !active || !stream.isAvailable) return undefined;
-		return stream.request({ udid, quality });
-	}, [udid, quality, active, stream]);
-	const key = udid?.toUpperCase();
-	return {
-		screen: key ? stream.screens.get(key) : undefined,
-		status: key ? stream.statuses.get(key) : undefined,
-	};
+		if (!udid || !active || !isAvailable) return undefined;
+		return request({ udid, quality });
+	}, [udid, quality, active, isAvailable, request]);
+	const subscribe = useCallback(
+		(listener: () => void) =>
+			udid ? screens.subscribe(udid, listener) : () => undefined,
+		[screens, udid]
+	);
+	const screen = useSyncExternalStore(subscribe, () =>
+		udid ? screens.screen(udid) : undefined
+	);
+	const status = useSyncExternalStore(subscribe, () =>
+		udid ? screens.status(udid) : undefined
+	);
+	return { screen, status };
 }

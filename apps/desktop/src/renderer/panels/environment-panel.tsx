@@ -49,8 +49,6 @@ export function statusLabel(status: EnvironmentEntry['status']): string {
 /**
  * Reduces the validated entries to a health summary. Pure so it can be unit
  * tested independently of the rendered panel.
- *
- * @public
  */
 export function environmentHealth(entries: readonly EnvironmentEntry[]): {
 	hasChecks: boolean;
@@ -122,7 +120,6 @@ export function EnvironmentPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="App"
 				title="Environment"
 				description="Declared build, update, device, backend, and observability values with explicit validation results."
 				meta={

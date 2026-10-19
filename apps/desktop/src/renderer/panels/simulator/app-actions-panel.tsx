@@ -416,7 +416,6 @@ export function AppActionsPanel() {
 			<SimulatorPanelHeader
 				actions={<SimulatorTargetSelect />}
 				description="Compose safe, explicit simulator commands without adding debug code to the mobile app. Semantic input is capability-gated and always visible in the action receipt."
-				eyebrow="Control plane"
 				meta={`${APP_ACTIONS.length} actions`}
 				title="App Actions"
 			/>

@@ -102,7 +102,6 @@ export function DiagnosticsPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="System"
 				title="Diagnostics"
 				description="Desktop broker health, device transport, runtime versions, privacy guarantees, and internal diagnostic events in one place."
 				meta={

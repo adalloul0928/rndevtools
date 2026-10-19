@@ -1,7 +1,7 @@
 import { Button } from '@heroui/react/button';
 import { diagnosticErrorText } from '@rndevtools/core/redact';
 import { CircleAlert, RotateCcw, Smartphone } from 'lucide-react';
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ReactNode } from 'react';
 import { panelRecovery, SIMULATORS_PANEL } from '@/lib/shell-navigation';
 
 type ErrorBoundaryState = {
@@ -20,6 +20,10 @@ function reloadIntoSimulators(): void {
 	window.location.reload();
 }
 
+/**
+ * The root fallback. It is intentionally local: renderer details never cross
+ * into the device broker or an external telemetry service automatically.
+ */
 export class DesktopErrorBoundary extends Component<
 	{ children: ReactNode },
 	ErrorBoundaryState
@@ -28,11 +32,6 @@ export class DesktopErrorBoundary extends Component<
 
 	static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
 		return { failure: { error } };
-	}
-
-	override componentDidCatch(_error: Error, _info: ErrorInfo): void {
-		// The fallback is intentionally local. Renderer details never cross into
-		// the device broker or an external telemetry service automatically.
 	}
 
 	override render(): ReactNode {

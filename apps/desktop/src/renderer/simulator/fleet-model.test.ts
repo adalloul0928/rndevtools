@@ -109,6 +109,7 @@ describe('buildFleetRows', () => {
 				lane(A, { agent: { kind: 'claude', sessionId: 's1', lastSeenAt: 1 } }),
 			],
 			sessions: [session(A, 'online'), session(B, 'online')],
+			supabase: undefined,
 		});
 		expect(rows).toHaveLength(1);
 		const row = rows[0];
@@ -136,6 +137,7 @@ describe('buildFleetRows', () => {
 				lane(B, { agent: { kind: 'codex', sessionId: 't1', lastSeenAt: 1 } }),
 			],
 			sessions: [session(A, 'online')],
+			supabase: undefined,
 		});
 		expect(rows.map((row) => row.device.name)).toEqual([
 			'Lane with agent',
@@ -153,6 +155,7 @@ describe('buildFleetRows', () => {
 			slimmingByDevice: {},
 			lanes: [lane(A.toLowerCase(), { metro: 'stopped' })],
 			sessions: [],
+			supabase: undefined,
 		});
 		expect(rows[0]?.memoryBytes).toBeUndefined();
 		expect(rows[0]?.lane).toBeDefined();
@@ -204,6 +207,7 @@ describe('fleetRowMatches and counts', () => {
 			}),
 		],
 		sessions: [],
+		supabase: undefined,
 	});
 
 	it('filters by state, lane, and agent', () => {
@@ -260,6 +264,7 @@ describe('agent attachments on rows', () => {
 			slimmingByDevice: {},
 			lanes: [],
 			sessions: [],
+			supabase: undefined,
 			agentsByDevice: {
 				[A]: [
 					{
@@ -297,6 +302,7 @@ describe('agent attachments on rows', () => {
 				}),
 			],
 			sessions: [],
+			supabase: undefined,
 			agentsByDevice: {
 				[A]: [
 					{
@@ -439,6 +445,7 @@ describe('lane backends on rows', () => {
 			slimmingByDevice: {},
 			lanes: [checkout],
 			sessions: [],
+			supabase: undefined,
 		});
 		expect(rows[0]?.backend).toBeUndefined();
 		expect(fleetFilterCounts(rows)['with-backend']).toBe(0);

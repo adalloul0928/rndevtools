@@ -120,7 +120,6 @@ export function CameraPanel() {
 					</Button>
 				}
 				description="Send an explicit still, QR, video, unavailable, or error fixture to the app's instrumented development camera provider."
-				eyebrow="App / Instrumented input"
 				meta={
 					<Badge tone={fixture.active ? 'success' : 'default'}>
 						{fixture.active ? 'Fixture active' : 'Live provider'}

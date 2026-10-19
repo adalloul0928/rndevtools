@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ControllableScreen } from '@/components/controllable-screen';
-import { VisibleDeviceScreen } from '@/components/device-screen';
+import { DeviceScreen } from '@/components/device-screen';
 import {
 	AgentBadge,
 	AgentGlyph,
@@ -292,7 +292,6 @@ export function LanesPanel() {
 					</>
 				}
 				description="One worktree on one Simulator, served by one Metro on a leased port. Lanes let several branches, and the agents working on them, run side by side."
-				eyebrow="Lanes"
 				meta={`${counts.lanes} active`}
 				title="Lanes"
 			/>
@@ -465,7 +464,7 @@ export function LanesPanel() {
 												id={laneRowId(lane.id)}
 												onClick={() => setSelectedLaneId(lane.id)}
 											>
-												<VisibleDeviceScreen
+												<DeviceScreen
 													className="lane-row-thumb"
 													live={device?.state === 'booted'}
 													name={device?.name ?? lane.branch}

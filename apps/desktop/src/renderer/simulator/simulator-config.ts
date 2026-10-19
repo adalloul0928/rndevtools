@@ -24,7 +24,6 @@ export type SimulatorToolId =
 
 /**
  * The sidebar section a tool is listed under.
- * @public
  */
 export type SimulatorToolGroup = 'simulator' | 'backend' | 'system';
 

@@ -41,8 +41,6 @@ function transitionTone(
 /**
  * Explains why the on-device navigate action is disabled, so the button never
  * looks inert without a reason. Returns null when navigation is available.
- *
- * @public
  */
 export function navigateDisabledReason(
 	route: RouteEntry | null,
@@ -97,7 +95,6 @@ export function RoutesPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="App"
 				title="Routes"
 				description="See the current Expo Router stack, browse the generated sitemap, and navigate to explicit static routes."
 				meta={

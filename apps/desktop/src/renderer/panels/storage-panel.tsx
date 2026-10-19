@@ -178,7 +178,6 @@ export function StoragePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Inspect"
 				title="Storage"
 				description="Browse standard and encrypted MMKV keys, edit explicitly writable values, and review recent changes."
 				meta={

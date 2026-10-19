@@ -55,7 +55,6 @@ export function IdentityPanel() {
 					) : null
 				}
 				description="Run allowlisted seeded identities as reversible sessions while keeping the original actor recoverable on the device."
-				eyebrow="App / Identity"
 				meta={
 					<StatusPill
 						dot

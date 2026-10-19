@@ -182,7 +182,6 @@ export function ComponentsPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="UI"
 				title="Components"
 				description="Inspect only components the app explicitly registers, with stable target keys, source locations, safe instance projections, and optional measured bounds."
 				meta={

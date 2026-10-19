@@ -23,8 +23,6 @@
 @import '@heroui-pro/react/css/components/empty-state.css';
 @import '@heroui-pro/react/css/components/native-select.css';
 @import '@heroui-pro/react/css/components/list-view.css';
-@import '@heroui-pro/react/css/components/kpi.css';
-@import '@heroui-pro/react/css/components/stepper.css';
 @import '@heroui-pro/react/css/components/timeline.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -61,8 +59,6 @@
 		 * green is used as a restrained highlight, not a flood fill.
 		 */
 		--brand: #3ecf8e;
-		--brand-foreground: #000;
-		--brand-strong: #34b87d;
 		--brand-soft: rgb(62 207 142 / 14%);
 		--brand-border: rgb(62 207 142 / 40%);
 		--success: #3ecf8e;
@@ -1276,19 +1272,6 @@ button:disabled {
 	min-height: 100%;
 }
 
-.sim-selection-box {
-	display: grid;
-	width: 22px;
-	height: 22px;
-	flex: 0 0 22px;
-	place-items: center;
-	color: #929292;
-}
-
-.sim-selection-box.is-selected {
-	color: #3ecf8e;
-}
-
 .sim-slimming-workspace {
 	padding: 16px;
 }
@@ -1335,12 +1318,6 @@ button:disabled {
 	background: rgb(244 185 66 / 4%);
 	text-align: left;
 	color: #b79858;
-}
-
-.sim-unknown-ack.is-acknowledged {
-	border-color: rgb(62 207 142 / 20%);
-	background: rgb(62 207 142 / 5%);
-	color: #79aee0;
 }
 
 .sim-unknown-ack strong,
@@ -2212,8 +2189,7 @@ button:disabled {
 	color: #929292;
 }
 
-.sim-state-pill,
-.sim-category-tag {
+.sim-state-pill {
 	display: inline-flex;
 	height: 20px;
 	flex: 0 0 auto;
@@ -2317,8 +2293,7 @@ button:disabled {
 .sim-surface-header h2,
 .sim-capture-inspector h2,
 .sim-automation-inspector h2,
-.sim-report-heading h2,
-.sim-onboarding-surface h2 {
+.sim-report-heading h2 {
 	margin: 3px 0 0;
 	font-size: 16px;
 	font-weight: 600;
@@ -2475,41 +2450,6 @@ button:disabled {
 	border-radius: 8px;
 	background: rgb(62 207 142 / 7%);
 	color: #79baff;
-}
-
-.sim-workbench-description,
-.sim-onboarding-surface header p {
-	max-width: 620px;
-	margin: 6px 0 0;
-	font-size: var(--font-size-control);
-	line-height: 1.55;
-	color: #929292;
-}
-
-.sim-command-preview {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	margin-top: 18px;
-	padding: 8px 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
-	border-radius: 6px;
-	background: #020202;
-}
-
-.sim-command-preview span,
-.sim-command-preview code {
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-caption);
-}
-
-.sim-command-preview span {
-	text-transform: uppercase;
-	color: #929292;
-}
-
-.sim-command-preview code {
-	color: #8ebef0;
 }
 
 .sim-form-stack {
@@ -3179,70 +3119,12 @@ button:disabled {
 	background: #020202;
 }
 
-.sim-onboarding-surface,
 .sim-settings-layout > .sim-surface,
 .sim-settings-aside > .sim-surface,
 .sim-security-boundary {
 	border: 1px solid rgb(255 255 255 / 8%);
 	border-radius: 8px;
 	background: #070707;
-}
-
-.sim-onboarding-surface {
-	max-width: 1160px;
-	margin: 0 auto;
-	padding: 16px;
-}
-
-.sim-onboarding-surface > header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 20px;
-}
-
-.sim-readiness-ring {
-	display: grid;
-	width: 54px;
-	height: 54px;
-	flex: 0 0 54px;
-	place-items: center;
-	align-content: center;
-	border: 1px solid rgb(244 185 66 / 20%);
-	border-radius: 50%;
-	background: rgb(244 185 66 / 5%);
-}
-
-.sim-readiness-ring.is-ready {
-	border-color: rgb(62 207 142 / 20%);
-	background: rgb(62 207 142 / 6%);
-}
-
-.sim-readiness-ring strong {
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 14px;
-	font-weight: 550;
-	color: #d2b16a;
-}
-
-.sim-readiness-ring.is-ready strong {
-	color: #79d4a0;
-}
-
-.sim-readiness-ring small {
-	font-size: var(--font-size-caption);
-	color: #929292;
-}
-
-.sim-onboarding-stepper {
-	margin-top: 18px;
-	padding-top: 15px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
-}
-
-.sim-onboarding-stepper svg {
-	width: 11px;
-	height: 11px;
 }
 
 .sim-settings-layout {
@@ -3344,17 +3226,6 @@ button:disabled {
 	align-items: flex-end;
 	flex-direction: column;
 	gap: 4px;
-}
-
-.sim-capability-guidance {
-	display: inline-flex;
-	min-height: 24px;
-	align-items: center;
-	gap: 5px;
-	padding: 0 6px;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-caption);
-	color: #929292;
 }
 
 .sim-capability-feature-link {
@@ -3978,8 +3849,7 @@ button:disabled {
 
 .recipe-run-section,
 .recipe-approval-preview,
-.recipe-run-history,
-.recipe-agent-safety {
+.recipe-run-history {
 	margin-top: 13px;
 	padding-top: 13px;
 	border-top: 1px solid rgb(255 255 255 / 8%);
@@ -4173,8 +4043,7 @@ button:disabled {
 .recipe-approval-preview li span,
 .recipe-approval-preview > p,
 .recipe-run-actions > p,
-.recipe-run-history > p,
-.recipe-agent-safety p {
+.recipe-run-history > p {
 	margin: 4px 0 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
@@ -4334,18 +4203,6 @@ button:disabled {
 .recipe-run-history button code {
 	font-size: var(--font-size-caption);
 	color: #929292;
-}
-
-.recipe-agent-safety {
-	display: flex;
-	align-items: flex-start;
-	gap: 7px;
-	color: #6f8eae;
-}
-
-.recipe-agent-safety strong {
-	font-size: var(--font-size-caption);
-	font-weight: 550;
 }
 
 .recipe-inspector-footer-actions {
@@ -4536,41 +4393,6 @@ button:disabled {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-}
-
-.sim-build-notice {
-	display: flex;
-	align-items: flex-start;
-	gap: 8px;
-	padding: 8px 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #050505;
-	font-size: var(--font-size-caption);
-	line-height: 1.45;
-	color: #8a8a8a;
-}
-
-.sim-build-notice svg {
-	margin-top: 1px;
-	flex: 0 0 auto;
-}
-
-.sim-build-notice.is-error {
-	border-color: rgb(212 105 105 / 20%);
-	background: rgb(212 105 105 / 5%);
-	color: #cf8585;
-}
-
-.sim-build-notice.is-success {
-	border-color: rgb(88 188 123 / 16%);
-	background: rgb(88 188 123 / 4%);
-	color: #82b794;
-}
-
-.sim-build-notice.is-info {
-	border-color: rgb(62 207 142 / 18%);
-	background: rgb(62 207 142 / 5%);
-	color: #91b9df;
 }
 
 .sim-build-report {
@@ -4959,23 +4781,6 @@ button:disabled {
 	color: #93c5fd;
 }
 
-.ui-kbd {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-width: 18px;
-	height: 18px;
-	padding: 0 5px;
-	border: 1px solid rgb(255 255 255 / 12%);
-	border-radius: 4px;
-	background: rgb(255 255 255 / 4%);
-	color: var(--text-3);
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 11px;
-	line-height: 1;
-	white-space: nowrap;
-}
-
 .ui-inline-code {
 	padding: 1px 5px;
 	border: 1px solid rgb(255 255 255 / 8%);
@@ -5277,10 +5082,6 @@ button:disabled {
 	margin: 0;
 }
 
-.lane-start-hint-range {
-	font-variant-numeric: tabular-nums;
-}
-
 .lane-list {
 	margin: 0;
 	padding: 6px;
@@ -5353,22 +5154,6 @@ button:disabled {
 	padding: 24px;
 	text-align: center;
 	color: #8a8a8a;
-}
-
-.lane-empty-title {
-	font-size: var(--font-size-control);
-	color: #cfcfcf;
-}
-
-.lane-empty-copy {
-	max-width: 320px;
-	font-size: var(--font-size-caption);
-	line-height: 1.5;
-}
-
-.lane-empty-command {
-	font-family: 'Geist Mono Variable', monospace;
-	color: #b5b5b5;
 }
 
 .lane-agent-card {
@@ -5516,10 +5301,6 @@ button:disabled {
 
 .device-screen.is-stalled .device-screen-frame {
 	filter: grayscale(0.6) brightness(0.6);
-}
-
-.device-screen-visibility {
-	display: contents;
 }
 
 /* Toolbar: layout toggle + tile slider */
@@ -6670,15 +6451,11 @@ button:disabled {
 	color: var(--foreground);
 }
 
-/* Requests and Settings are scrolling columns, not the list/detail grid. */
+/* Requests is a scrolling column, not the list/detail grid. */
 .supabase-column {
 	max-width: 820px;
 	margin: 0 auto;
 	padding: 18px 22px 28px;
-}
-
-.supabase-column.is-wide {
-	max-width: 960px;
 }
 
 /* List rows: a status dot, then the two lines; the holder badge never wraps. */

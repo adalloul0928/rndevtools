@@ -79,8 +79,6 @@ function receiptTone(status: string): 'success' | 'warning' | 'danger' {
 /**
  * Validates the import textarea without mutating device state, so the panel can
  * surface inline feedback and gate the merge trigger before a round-trip.
- *
- * @public
  */
 export function validateScenarioImport(text: string): {
 	ok: boolean;
@@ -165,7 +163,6 @@ export function ScenariosPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Automation"
 				title="Scenarios"
 				description="Run bounded, versioned app-state transactions with full preflight, rollback capture, active-state visibility, and one-tap undo."
 				meta={

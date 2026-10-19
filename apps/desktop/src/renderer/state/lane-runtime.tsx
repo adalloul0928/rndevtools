@@ -17,11 +17,90 @@ import {
 	type LaneState,
 } from '../../shared/lane-protocol';
 
-export type LaneActionStatus =
+type LaneActionStatus =
 	| { kind: 'idle'; message: '' }
 	| { kind: 'pending'; message: string }
 	| { kind: 'success'; message: string }
 	| { kind: 'error'; message: string };
+
+/**
+ * The run that put a notice up, and the operation it ran: its kind and the
+ * lane, worktree, device request or repository it acts on. Runs that share
+ * a subject are retries of one operation.
+ */
+type LaneNoticeOwner = Readonly<{ actionId: string; subject: string }>;
+
+/** The shared Lanes notice and the run that put it up, if any. */
+type LaneNotice = Readonly<{
+	status: LaneActionStatus;
+	owner: LaneNoticeOwner | null;
+}>;
+
+const IDLE_NOTICE: LaneNotice = {
+	status: { kind: 'idle', message: '' },
+	owner: null,
+};
+
+function laneOperationSubject(operation: LaneOperation): string {
+	switch (operation.kind) {
+		case 'lane.start':
+			return `${operation.kind}:${operation.worktreePath}`;
+		case 'lane.provide-device':
+			return `${operation.kind}:${operation.requestId}`;
+		case 'lane.launch':
+		case 'lane.stop':
+		case 'lane.log':
+			return `${operation.kind}:${operation.laneId}`;
+		case 'lane.remove-repository':
+			return `${operation.kind}:${operation.repositoryRoot}`;
+		case 'lane.refresh':
+		case 'lane.add-repository':
+			return operation.kind;
+	}
+}
+
+export function laneNoticeOwner(operation: LaneOperation): LaneNoticeOwner {
+	return {
+		actionId: operation.actionId,
+		subject: laneOperationSubject(operation),
+	};
+}
+
+/**
+ * The notice once a run settles. A failure or an explicit success takes it.
+ * Anything else, a cancel included, clears only a notice no operation owns
+ * (such as a failed first load), this run's own progress, or the outcome an
+ * earlier run of the same operation left. So reading the Metro log never
+ * wipes the launch error it is meant to explain, while a retry that works
+ * clears the error of the attempt it replaces.
+ */
+export function settleLaneNotice(
+	notice: LaneNotice,
+	operation: LaneOperation,
+	receipt: Pick<LaneOperationReceipt, 'completed' | 'cancelled' | 'error'>,
+	successMessage?: string
+): LaneNotice {
+	const owner = laneNoticeOwner(operation);
+	if (!receipt.cancelled && !receipt.completed) {
+		return {
+			status: {
+				kind: 'error',
+				message: receipt.error ?? 'The lane operation did not complete.',
+			},
+			owner,
+		};
+	}
+	if (!receipt.cancelled && successMessage) {
+		return { status: { kind: 'success', message: successMessage }, owner };
+	}
+	const current = notice.owner;
+	const replaced =
+		current === null ||
+		current.actionId === owner.actionId ||
+		// Another run's progress stays up until that run settles itself.
+		(notice.status.kind !== 'pending' && current.subject === owner.subject);
+	return replaced ? IDLE_NOTICE : notice;
+}
 
 type WithoutActionId<T> = T extends { actionId: string }
 	? Omit<T, 'actionId'>
@@ -32,7 +111,6 @@ type LaneOperationInput = WithoutActionId<LaneOperation>;
  * Where another panel sends the operator in Lanes: a lane by id (a bare
  * string), or the Agents view, optionally at one session's card, keyed
  * `kind:sessionId` like agentSessionKey.
- * @public
  */
 export type LaneFocusTarget =
 	| string
@@ -174,10 +252,7 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 	const [pendingOperation, setPendingOperation] = useState<
 		LaneOperation['kind'] | null
 	>(null);
-	const [actionStatus, setActionStatus] = useState<LaneActionStatus>({
-		kind: 'idle',
-		message: '',
-	});
+	const [notice, setNotice] = useState<LaneNotice>(IDLE_NOTICE);
 
 	useEffect(() => {
 		if (!bridge) return;
@@ -188,7 +263,10 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 				if (active) setState(next);
 			});
 		} catch (error) {
-			setActionStatus({ kind: 'error', message: errorText(error) });
+			setNotice({
+				status: { kind: 'error', message: errorText(error) },
+				owner: null,
+			});
 		}
 		void bridge
 			.getLaneState()
@@ -196,8 +274,12 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 				if (active) setState(next);
 			})
 			.catch((error: unknown) => {
-				if (active)
-					setActionStatus({ kind: 'error', message: errorText(error) });
+				if (active) {
+					setNotice({
+						status: { kind: 'error', message: errorText(error) },
+						owner: null,
+					});
+				}
 			})
 			.finally(() => {
 				if (active) setIsLoading(false);
@@ -215,9 +297,12 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 	const runOperation = useCallback<LaneRuntimeValue['runOperation']>(
 		async (input, messages = {}) => {
 			if (!bridge) {
-				setActionStatus({
-					kind: 'error',
-					message: 'Lanes require the secure desktop bridge.',
+				setNotice({
+					status: {
+						kind: 'error',
+						message: 'Lanes require the secure desktop bridge.',
+					},
+					owner: null,
 				});
 				return undefined;
 			}
@@ -227,29 +312,23 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 			} as LaneOperation;
 			setPendingOperation(operation.kind);
 			if (messages.pendingMessage) {
-				setActionStatus({ kind: 'pending', message: messages.pendingMessage });
+				setNotice({
+					status: { kind: 'pending', message: messages.pendingMessage },
+					owner: laneNoticeOwner(operation),
+				});
 			}
 			try {
 				const receipt = await bridge.runLaneOperation(operation);
 				if (receipt.state) setState(receipt.state);
-				if (receipt.cancelled) {
-					setActionStatus({ kind: 'idle', message: '' });
-				} else if (!receipt.completed) {
-					setActionStatus({
-						kind: 'error',
-						message: receipt.error ?? 'The lane operation did not complete.',
-					});
-				} else if (messages.successMessage) {
-					setActionStatus({
-						kind: 'success',
-						message: messages.successMessage,
-					});
-				} else {
-					setActionStatus({ kind: 'idle', message: '' });
-				}
+				setNotice((current) =>
+					settleLaneNotice(current, operation, receipt, messages.successMessage)
+				);
 				return receipt;
 			} catch (error) {
-				setActionStatus({ kind: 'error', message: errorText(error) });
+				setNotice({
+					status: { kind: 'error', message: errorText(error) },
+					owner: laneNoticeOwner(operation),
+				});
 				return undefined;
 			} finally {
 				setPendingOperation(null);
@@ -283,8 +362,8 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 			isLoading,
 			isBridgeAvailable: Boolean(bridge),
 			pendingOperation,
-			actionStatus,
-			clearActionStatus: () => setActionStatus({ kind: 'idle', message: '' }),
+			actionStatus: notice.status,
+			clearActionStatus: () => setNotice(IDLE_NOTICE),
 			refresh,
 			runOperation,
 			laneForSimulator: (udid) =>
@@ -300,7 +379,7 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 			isLoading,
 			bridge,
 			pendingOperation,
-			actionStatus,
+			notice.status,
 			refresh,
 			runOperation,
 			focus,

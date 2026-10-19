@@ -64,7 +64,6 @@ export function RestorePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="State"
 				title="Restore Points"
 				description="Persist, selectively restore, and roll back only state sources the app explicitly declares as safe."
 				meta={

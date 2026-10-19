@@ -410,7 +410,6 @@ export function SupabasePanel() {
 					/>
 				}
 				description={ABOUT}
-				eyebrow="Supabase"
 				meta={
 					<span className="supabase-header-meta">
 						<Badge>Alpha</Badge>

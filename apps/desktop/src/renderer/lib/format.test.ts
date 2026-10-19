@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatSupabaseSize } from '../../shared/supabase-protocol';
-import {
-	boundedTextExport,
-	formatAgo,
-	formatSize,
-	formatUntil,
-} from './format';
+import { boundedTextExport, formatAgo, formatSize } from './format';
 
 describe('boundedTextExport', () => {
 	it('joins entries without changing an export inside the limit', () => {
@@ -20,49 +15,6 @@ describe('boundedTextExport', () => {
 		expect(result.truncated).toBe(true);
 		expect(result.text).toHaveLength(64);
 		expect(result.text).toContain('[Export truncated');
-	});
-});
-
-describe('formatUntil', () => {
-	const now = Date.UTC(2026, 9, 17, 14, 3, 5);
-	const SECOND = 1_000;
-	const MINUTE = 60 * SECOND;
-	const HOUR = 60 * MINUTE;
-	const DAY = 24 * HOUR;
-
-	it('reads seconds, minutes, hours and days the way countdowns do', () => {
-		expect(formatUntil(now + 45 * SECOND, now)).toBe('in 45 s');
-		expect(formatUntil(now + 7 * MINUTE, now)).toBe('in 7 min');
-		expect(formatUntil(now + 3 * HOUR, now)).toBe('in 3 h');
-		expect(formatUntil(now + 3 * DAY, now)).toBe('in 3 days');
-	});
-
-	it('rounds up, so a clock never reads as done early', () => {
-		expect(formatUntil(now + 200, now)).toBe('in 1 s');
-		expect(formatUntil(now + 6 * MINUTE + 1, now)).toBe('in 7 min');
-	});
-
-	it('shows a date a week or more out', () => {
-		const target = now + 14 * DAY;
-		const expected = new Intl.DateTimeFormat(undefined, {
-			month: 'short',
-			day: 'numeric',
-		}).format(target);
-		expect(formatUntil(target, now)).toBe(expected);
-		const nextYear = now + 120 * DAY;
-		expect(formatUntil(nextYear, now)).toBe(
-			new Intl.DateTimeFormat(undefined, {
-				month: 'short',
-				day: 'numeric',
-				year: 'numeric',
-			}).format(nextYear)
-		);
-	});
-
-	it('reads a passed time as now and an invalid one as a dash', () => {
-		expect(formatUntil(now, now)).toBe('now');
-		expect(formatUntil(now - MINUTE, now)).toBe('now');
-		expect(formatUntil(Number.NaN, now)).toBe('—');
 	});
 });
 

@@ -176,7 +176,6 @@ export function PerformancePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Review"
 				title="Performance"
 				description="Record interactions to inspect JavaScript responsiveness. The app supplies the overall grade, including severe stalls that averages can hide. CPU and memory appear only when a native sampler reports them. Use a release build for representative measurements."
 				meta={

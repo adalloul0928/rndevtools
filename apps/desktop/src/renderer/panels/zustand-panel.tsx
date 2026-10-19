@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 import {
 	Badge,
 	CodePreview,
+	ConfirmAction,
 	EmptyPanel,
 	InlineCode,
 	KeyValue,
@@ -76,7 +77,6 @@ export function ZustandPanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="State"
 				title="Zustand"
 				description="Explicit privacy-safe projections, with validated reversible edits only for stores that opt in—never a blind global store crawl."
 				meta={
@@ -273,14 +273,19 @@ export function ZustandPanel() {
 													Enter a JSON patch to apply.
 												</span>
 											) : null}
-											<Button
+											<ConfirmAction
+												confirmLabel="Apply patch"
+												description="The connected app validates the patch, applies it to the live store and verifies it. The current state is checkpointed first, so Restore can undo it."
 												isDisabled={
 													!canRunAction('zustand', 'patch') ||
 													!patchDraft.trim()
 												}
-												size="sm"
-												variant="primary"
-												onPress={() =>
+												title={`Apply this patch to ${selected.title}?`}
+												tone="warning"
+												triggerIcon={<Save className="h-3.5 w-3.5" />}
+												triggerLabel="Apply patch"
+												triggerVariant="primary"
+												onConfirm={() =>
 													void runAction(
 														'zustand',
 														'patch',
@@ -288,9 +293,7 @@ export function ZustandPanel() {
 														'Zustand patch applied and verified.'
 													)
 												}
-											>
-												<Save className="h-3.5 w-3.5" /> Apply patch
-											</Button>
+											/>
 										</div>
 										{selectedSnapshots.length > 0 ? (
 											<div className="mt-4 border-t border-(--separator) pt-3">
@@ -307,11 +310,19 @@ export function ZustandPanel() {
 																{formatClock(snapshot.createdAt)} ·{' '}
 																{snapshot.stateBytes} B
 															</span>
-															<Button
+															<ConfirmAction
+																ariaLabel={`Restore the state captured at ${formatClock(snapshot.createdAt)}`}
+																confirmLabel="Restore"
+																description={`Restore the state captured at ${formatClock(snapshot.createdAt)}? The current state is checkpointed first.`}
 																isDisabled={!canRunAction('zustand', 'jump')}
-																size="sm"
-																variant="secondary"
-																onPress={() =>
+																title={`Restore ${selected.title}?`}
+																tone="warning"
+																triggerIcon={
+																	<RotateCcw className="h-3.5 w-3.5" />
+																}
+																triggerLabel="Restore"
+																triggerVariant="secondary"
+																onConfirm={() =>
 																	void runAction(
 																		'zustand',
 																		'jump',
@@ -322,9 +333,7 @@ export function ZustandPanel() {
 																		'Zustand state restored and verified.'
 																	)
 																}
-															>
-																<RotateCcw className="h-3.5 w-3.5" /> Restore
-															</Button>
+															/>
 														</div>
 													))}
 												</div>

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ConsoleEntry } from '../../shared/protocol';
-import { copyFeedbackLabel, exportLine, levelTone } from './console-panel';
+import {
+	copyFeedbackLabel,
+	exportLine,
+	levelTone,
+	retainedBookmarks,
+} from './console-panel';
 
 function entry(overrides: Partial<ConsoleEntry> = {}): ConsoleEntry {
 	return {
@@ -54,5 +59,28 @@ describe('copyFeedbackLabel', () => {
 		expect(copyFeedbackLabel({ ok: false, truncated: false })).toBe(
 			'Copy failed'
 		);
+	});
+});
+
+describe('retainedBookmarks', () => {
+	const pushed = [
+		entry({ id: 'log-1' }),
+		entry({ id: 'log-2' }),
+		entry({ id: 'log-3' }),
+	];
+
+	it('keeps the same set when a push drops no bookmarked entry', () => {
+		// React bails out on an identical state, so the grid renders once.
+		const bookmarks = new Set(['log-2']);
+		expect(retainedBookmarks(bookmarks, pushed)).toBe(bookmarks);
+		const none = new Set<string>();
+		expect(retainedBookmarks(none, pushed)).toBe(none);
+	});
+
+	it('drops bookmarks whose entries left the bounded buffer', () => {
+		const bookmarks = new Set(['log-0', 'log-3']);
+		const retained = retainedBookmarks(bookmarks, pushed);
+		expect(retained).not.toBe(bookmarks);
+		expect([...retained]).toEqual(['log-3']);
 	});
 });

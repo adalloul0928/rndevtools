@@ -197,7 +197,6 @@ export function BuildInsightsPanel() {
 					</div>
 				}
 				description={`Review local Xcode build times and errors. Import an .xcresult file or choose a DerivedData folder to scan. ${BUILD_INSIGHTS_FOUNDATION_COPY}`}
-				eyebrow="Xcode"
 				meta={`${state.stats.totalBuilds} builds · ${state.retentionMonths} month retention`}
 				title="Build Insights"
 			/>
