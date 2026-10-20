@@ -22,11 +22,11 @@ A desktop workspace for React Native diagnostics, iOS Simulator fleets, and para
 
 ## Install
 
-**Preview: public downloads and npm packages have not been published yet.**
+Download the signed and notarized [RN Devtools 0.2.0 preview for Apple silicon](https://github.com/adalloul0928/rndevtools/releases/download/desktop-v0.2.0/RN-Devtools-0.2.0-arm64.dmg). Open the DMG, drag **RN Devtools** into **Applications**, and launch it. The [release page](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0) includes checksums and preview notes.
 
-The planned macOS download is an Apple silicon DMG on the [GitHub Releases page](https://github.com/adalloul0928/rndevtools/releases). Once available, open the DMG, drag **RN Devtools** into **Applications**, and launch it. Homebrew installation is not available yet.
+The declared minimum is macOS 14. This preview has been tested on one Apple silicon Mac with macOS 27 and Xcode 27; a separate clean-Mac installation and broader version coverage are still pending.
 
-Public distribution requires Developer ID signing and Apple notarization. A local development build is not the public installer. See the [release guide](docs/RELEASING.md) for packaging and release requirements.
+React Native npm packages remain unpublished. Homebrew installation is not available yet. Use the repository's Expo example below to try connected-app diagnostics.
 
 ### Requirements
 
@@ -38,7 +38,7 @@ Public distribution requires Developer ID signing and Apple notarization. A loca
 | Local Supabase | The project's own Supabase CLI; the verified example pins 2.121.0 and uses the native runtime |
 | On-device panels | Compatible React Native/Expo dependencies; see the [core package](packages/core/README.md) |
 
-The prebuilt app will include its native helpers. Node.js, pnpm, Go, and a HeroUI Pro license are not needed merely to install the desktop app; source builds and your app's development workflow have their own requirements.
+The prebuilt app includes its native helpers. Node.js, pnpm, Go, and a HeroUI Pro license are not needed merely to install the desktop app; source builds and your app's development workflow have their own requirements.
 
 ## Try the demo
 
