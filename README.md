@@ -1,14 +1,12 @@
 <img src="apps/desktop/build/icon.png" alt="RN Devtools app icon" width="80" height="80" />
 
-*App icon for the next release. The v0.2.0 download uses the previous icon.*
-
 # RN Devtools
 
 A desktop workspace for React Native diagnostics, iOS Simulators, and parallel development across git worktrees.
 
 **[Download the macOS preview](https://github.com/adalloul0928/rndevtools/releases/download/desktop-v0.2.0/RN-Devtools-0.2.0-arm64.dmg)** · Apple silicon · Version 0.2.0
 
-The app is signed and notarized. **No HeroUI account or license is needed to download or run the packaged app.** [Release notes and checksums](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0).
+Signed and notarized. No HeroUI account or license is needed to run the app. [Release notes and checksums](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0).
 
 ![RN Devtools Simulator fleet and worktree lanes](docs/images/simulator-fleet.png)
 
@@ -22,30 +20,21 @@ The app is signed and notarized. **No HeroUI account or license is needed to dow
 
 ![Local Supabase stacks and their Simulator lanes](docs/images/local-supabase.png)
 
-*Per-worktree backends with their Simulator, Metro port, and lifecycle controls.*
-
 ![Connected app network inspector](docs/images/network-inspector.png)
-
-*Network requests and redacted payload details. All screenshots show the running desktop app with synthetic demo data.*
 
 ## Install
 
-Open the DMG, drag **RN Devtools** into **Applications**, and launch it. The download includes the native helpers; installing it does not require Node.js, pnpm, or Go.
+Open the DMG, drag **RN Devtools** into **Applications**, and launch it.
 
 | Feature | Requires |
 | --- | --- |
-| Desktop app | Apple silicon Mac; declared minimum macOS 14 |
+| Desktop app | Apple silicon Mac with macOS 14 or later |
 | Simulator management | Xcode and an installed iOS Simulator runtime |
 | Worktree lanes | Git, Node.js, project dependencies, and a compatible Expo development build installed on each Simulator |
-| Local Supabase | The project's pinned Supabase CLI; the example verifies 2.121.0 with the native runtime |
+| Local Supabase | The project's pinned Supabase CLI with the native runtime |
 | Connected diagnostics | An app using the [React Native host integration](packages/react-native/README.md) |
 
-### Preview limits
-
-- Tested on one Apple silicon Mac with macOS 27 and Xcode 27. Clean-Mac installation and broader version coverage are still pending.
-- Supabase databases and ports are separate, but default local signing keys are public and shared. Enable **per-stack keys** for JWT signing isolation. These are single-user development stacks.
-- SimSlim is off by default. Unverified platform combinations require experimental acknowledgement.
-- React Native npm packages remain unpublished. Homebrew, Intel Mac, Windows, and Linux downloads are unavailable.
+Local Supabase uses separate databases with shared default signing keys. Enable **per-stack keys** for JWT signing isolation. See the [Supabase setup guide](apps/desktop/README.md#local-supabase-per-worktree-alpha).
 
 ## Try the demo
 
@@ -58,7 +47,7 @@ pnpm install
 pnpm --dir examples/expo-demo exec expo run:ios
 ```
 
-Open RN Devtools alongside the demo. For your own app, follow the [host integration and production pruning guide](packages/react-native/README.md); keep diagnostics behind a development-only import seam and verify the production bundle.
+Open RN Devtools alongside the demo. To connect your own app, follow the [React Native integration guide](packages/react-native/README.md).
 
 ## Build the desktop app from source
 
@@ -70,7 +59,7 @@ pnpm --filter @rndevtools/desktop native:build
 pnpm --filter @rndevtools/desktop dev
 ```
 
-Privileged Simulator mutations require a signed packaged app. Follow the [release guide](docs/RELEASING.md) for signing and packaging, and the [desktop guide](apps/desktop/README.md) for development checks.
+Simulator mutations require a signed packaged app. See the [release guide](docs/RELEASING.md) for signing and packaging and the [desktop guide](apps/desktop/README.md) for development.
 
 Package guides: [Core diagnostics](packages/core/README.md) · [React Native integration](packages/react-native/README.md).
 
