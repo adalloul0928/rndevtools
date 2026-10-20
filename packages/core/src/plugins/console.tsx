@@ -113,6 +113,7 @@ export type ConsolePluginOptions = {
 	/** Optional host sanitizer. Built-in credential and identifier redaction runs after it. */
 	sanitize?: (event: ConsoleLogInput) => ConsoleLogInput | null;
 	maxEvents?: number;
+	/** Total estimated bytes retained across all events, not a per-event cap. */
 	maxEventBytes?: number;
 	maxMessageBytes?: number;
 	maxAttributesBytes?: number;

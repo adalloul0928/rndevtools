@@ -474,6 +474,145 @@ describe('createRestorePointsPlugin', () => {
 			failing: 1,
 		});
 	});
+
+	it('needs attention when a failed restore cannot be rolled back', async () => {
+		let steady = 1;
+		let fragile = 1;
+		const diagnostics = createRestorePointsPlugin({
+			sources: [
+				{
+					id: 'steady',
+					title: 'Steady',
+					capture: () => steady,
+					restore: (value) => {
+						steady = value as number;
+					},
+				},
+				{
+					id: 'fragile',
+					title: 'Fragile',
+					capture: () => fragile,
+					restore: (value) => {
+						throw new Error(`cannot restore ${String(value)}`);
+					},
+				},
+			],
+		});
+		const point = await diagnostics.capture('Before');
+		steady = 2;
+		fragile = 2;
+
+		const receipt = await diagnostics.restoreDetailed(point.id);
+
+		expect(Object.keys(receipt)).toEqual([
+			'id',
+			'pointId',
+			'pointLabel',
+			'startedAt',
+			'completedAt',
+			'status',
+			'sourceResults',
+			'error',
+		]);
+		expect(receipt).toMatchObject({
+			pointId: point.id,
+			pointLabel: 'Before',
+			status: 'needs-attention',
+			error: 'cannot restore 1',
+		});
+		expect(receipt.sourceResults).toEqual([
+			{
+				sourceId: 'steady',
+				sourceTitle: 'Steady',
+				preflight: 'passed',
+				apply: 'succeeded',
+				rollback: 'succeeded',
+			},
+			{
+				sourceId: 'fragile',
+				sourceTitle: 'Fragile',
+				preflight: 'passed',
+				apply: 'failed',
+				rollback: 'failed',
+				error: 'cannot restore 1',
+				rollbackError: 'cannot restore 2',
+			},
+		]);
+		expect({ steady, fragile }).toEqual({ steady: 2, fragile: 2 });
+		await expect(diagnostics.restore(point.id)).rejects.toThrow(
+			'Restore failed and rollback needs attention. Fragile: cannot restore 2',
+		);
+	});
+
+	it('needs attention when a failed reset to baseline cannot be rolled back', async () => {
+		let steady = 1;
+		let fragile = 1;
+		const diagnostics = createRestorePointsPlugin({
+			sources: [
+				{
+					id: 'steady',
+					title: 'Steady',
+					capture: () => steady,
+					restore: (value) => {
+						steady = value as number;
+					},
+					resetToBaseline: () => {
+						steady = 0;
+					},
+				},
+				{
+					id: 'fragile',
+					title: 'Fragile',
+					capture: () => fragile,
+					restore: (value) => {
+						throw new Error(`cannot restore ${String(value)}`);
+					},
+					resetToBaseline: () => {
+						fragile = 0;
+						throw new Error('baseline rejected');
+					},
+				},
+			],
+		});
+
+		const receipt = await diagnostics.resetToBaseline();
+
+		expect(Object.keys(receipt)).toEqual([
+			'id',
+			'pointId',
+			'pointLabel',
+			'startedAt',
+			'completedAt',
+			'status',
+			'sourceResults',
+			'error',
+		]);
+		expect(receipt).toMatchObject({
+			pointId: 'baseline',
+			pointLabel: 'Reset to baseline',
+			status: 'needs-attention',
+			error: 'baseline rejected',
+		});
+		expect(receipt.sourceResults).toEqual([
+			{
+				sourceId: 'steady',
+				sourceTitle: 'Steady',
+				preflight: 'passed',
+				apply: 'succeeded',
+				rollback: 'succeeded',
+			},
+			{
+				sourceId: 'fragile',
+				sourceTitle: 'Fragile',
+				preflight: 'passed',
+				apply: 'failed',
+				rollback: 'failed',
+				error: 'baseline rejected',
+				rollbackError: 'cannot restore 1',
+			},
+		]);
+		expect({ steady, fragile }).toEqual({ steady: 1, fragile: 0 });
+	});
 });
 
 describe('canonicalizeRestoreValue', () => {

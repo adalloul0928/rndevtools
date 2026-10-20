@@ -51,6 +51,15 @@ type OrderedSource = Readonly<{
 	snapshot: RestorePointSourceSnapshot;
 }>;
 
+type CaptureSource = (
+	source: RestorePointSource,
+) => Promise<RestorePointSourceSnapshot>;
+
+type ReceiptBase = Pick<
+	RestoreTransactionReceipt,
+	'id' | 'pointId' | 'pointLabel' | 'startedAt'
+>;
+
 const MAX_SELECTED_SOURCE_COUNT = 50;
 const MAX_SOURCE_ID_LENGTH = 256;
 const SOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -189,25 +198,114 @@ function finalizeResults(
 	return results.map((result) => ({ ...result }));
 }
 
+/**
+ * Captures a rollback snapshot of every source, then applies them in order.
+ * Once one fails, the sources attempted so far are restored from their
+ * rollback snapshots in reverse.
+ */
+async function applyWithRollback<
+	Entry extends Readonly<{ source: RestorePointSource }>,
+>(
+	ordered: readonly Entry[],
+	apply: (entry: Entry) => void | Promise<void>,
+	captureSource: CaptureSource,
+	results: readonly MutableSourceResult[],
+	receiptBase: ReceiptBase,
+): Promise<RestoreTransactionReceipt> {
+	const resultById = new Map(
+		results.map((result) => [result.sourceId, result]),
+	);
+	const rollback = new Map<string, RestorePointSourceSnapshot>();
+	for (const { source } of ordered) {
+		try {
+			rollback.set(source.id, await captureSource(source));
+		} catch (error) {
+			const result = resultById.get(source.id);
+			if (result) {
+				result.preflight = 'failed';
+				result.error = diagnosticErrorText(error);
+			}
+			return {
+				...receiptBase,
+				completedAt: Date.now(),
+				status: 'preflight-failed',
+				sourceResults: finalizeResults(results),
+				error: `Rollback capture failed for ${source.title}: ${diagnosticErrorText(error)}`,
+			};
+		}
+	}
+
+	const attempted: RestorePointSource[] = [];
+	let applyError: string | undefined;
+	for (const entry of ordered) {
+		const { source } = entry;
+		const result = resultById.get(source.id);
+		attempted.push(source);
+		try {
+			await apply(entry);
+			if (result) result.apply = 'succeeded';
+		} catch (error) {
+			applyError = diagnosticErrorText(error);
+			if (result) {
+				result.apply = 'failed';
+				result.error = applyError;
+			}
+			break;
+		}
+	}
+	if (!applyError) {
+		return {
+			...receiptBase,
+			completedAt: Date.now(),
+			status: 'complete',
+			sourceResults: finalizeResults(results),
+		};
+	}
+
+	let rollbackFailed = false;
+	for (const source of attempted.reverse()) {
+		const result = resultById.get(source.id);
+		const snapshot = rollback.get(source.id);
+		if (!snapshot) continue;
+		try {
+			await source.restore(cloneSnapshot(snapshot));
+			if (result) result.rollback = 'succeeded';
+		} catch (error) {
+			rollbackFailed = true;
+			if (result) {
+				result.rollback = 'failed';
+				result.rollbackError = diagnosticErrorText(error);
+			}
+		}
+	}
+	return {
+		...receiptBase,
+		completedAt: Date.now(),
+		status: rollbackFailed ? 'needs-attention' : 'rolled-back',
+		sourceResults: finalizeResults(results),
+		error: applyError,
+	};
+}
+
 export async function runRestoreTransaction(
 	point: RestorePoint,
 	sources: readonly RestorePointSource[],
-	captureSource: (
-		source: RestorePointSource,
-	) => Promise<RestorePointSourceSnapshot>,
+	captureSource: CaptureSource,
 	options: RestoreTransactionOptions = {},
 ): Promise<RestoreTransactionReceipt> {
 	const startedAt = Date.now();
-	const receiptId = `${startedAt.toString(36)}-${point.id}`;
+	const receiptBase: ReceiptBase = {
+		id: `${startedAt.toString(36)}-${point.id}`,
+		pointId: point.id,
+		pointLabel: point.label,
+		startedAt,
+	};
 	let ordered: readonly OrderedSource[];
 	try {
 		ordered = resolveOrder(point, sources, options.sourceIds);
 	} catch (error) {
 		return {
-			id: receiptId,
-			pointId: point.id,
-			pointLabel: point.label,
-			startedAt,
+			...receiptBase,
 			completedAt: Date.now(),
 			status: 'preflight-failed',
 			sourceResults: [],
@@ -236,10 +334,7 @@ export async function runRestoreTransaction(
 				result.error = diagnosticErrorText(error);
 			}
 			return {
-				id: receiptId,
-				pointId: point.id,
-				pointLabel: point.label,
-				startedAt,
+				...receiptBase,
 				completedAt: Date.now(),
 				status: 'preflight-failed',
 				sourceResults: finalizeResults(results),
@@ -248,105 +343,34 @@ export async function runRestoreTransaction(
 		}
 	}
 
-	const rollback = new Map<string, RestorePointSourceSnapshot>();
-	for (const { source } of ordered) {
-		try {
-			rollback.set(source.id, await captureSource(source));
-		} catch (error) {
-			const result = resultById.get(source.id);
-			if (result) {
-				result.preflight = 'failed';
-				result.error = diagnosticErrorText(error);
-			}
-			return {
-				id: receiptId,
-				pointId: point.id,
-				pointLabel: point.label,
-				startedAt,
-				completedAt: Date.now(),
-				status: 'preflight-failed',
-				sourceResults: finalizeResults(results),
-				error: `Rollback capture failed for ${source.title}: ${diagnosticErrorText(error)}`,
-			};
-		}
-	}
-
-	const attempted: RestorePointSource[] = [];
-	let applyError: string | undefined;
-	for (const { source, snapshot } of ordered) {
-		const result = resultById.get(source.id);
-		attempted.push(source);
-		try {
-			await source.restore(cloneSnapshot(snapshot));
-			if (result) result.apply = 'succeeded';
-		} catch (error) {
-			applyError = diagnosticErrorText(error);
-			if (result) {
-				result.apply = 'failed';
-				result.error = applyError;
-			}
-			break;
-		}
-	}
-	if (!applyError) {
-		return {
-			id: receiptId,
-			pointId: point.id,
-			pointLabel: point.label,
-			startedAt,
-			completedAt: Date.now(),
-			status: 'complete',
-			sourceResults: finalizeResults(results),
-		};
-	}
-
-	let rollbackFailed = false;
-	for (const source of attempted.reverse()) {
-		const result = resultById.get(source.id);
-		const snapshot = rollback.get(source.id);
-		if (!snapshot) continue;
-		try {
-			await source.restore(cloneSnapshot(snapshot));
-			if (result) result.rollback = 'succeeded';
-		} catch (error) {
-			rollbackFailed = true;
-			if (result) {
-				result.rollback = 'failed';
-				result.rollbackError = diagnosticErrorText(error);
-			}
-		}
-	}
-	return {
-		id: receiptId,
-		pointId: point.id,
-		pointLabel: point.label,
-		startedAt,
-		completedAt: Date.now(),
-		status: rollbackFailed ? 'needs-attention' : 'rolled-back',
-		sourceResults: finalizeResults(results),
-		error: applyError,
-	};
+	return applyWithRollback(
+		ordered,
+		({ source, snapshot }) => source.restore(cloneSnapshot(snapshot)),
+		captureSource,
+		results,
+		receiptBase,
+	);
 }
 
 export async function runResetToBaselineTransaction(
 	sources: readonly RestorePointSource[],
-	captureSource: (
-		source: RestorePointSource,
-	) => Promise<RestorePointSourceSnapshot>,
+	captureSource: CaptureSource,
 	options: RestoreTransactionOptions = {},
 ): Promise<RestoreTransactionReceipt> {
 	const startedAt = Date.now();
-	const receiptId = `${startedAt.toString(36)}-baseline`;
+	const receiptBase: ReceiptBase = {
+		id: `${startedAt.toString(36)}-baseline`,
+		pointId: 'baseline',
+		pointLabel: 'Reset to baseline',
+		startedAt,
+	};
 	let requested: Set<string> | undefined;
 	try {
 		const requestedIds = normalizeRequestedSourceIds(options.sourceIds);
 		requested = requestedIds ? new Set(requestedIds) : undefined;
 	} catch (error) {
 		return {
-			id: receiptId,
-			pointId: 'baseline',
-			pointLabel: 'Reset to baseline',
-			startedAt,
+			...receiptBase,
 			completedAt: Date.now(),
 			status: 'preflight-failed',
 			sourceResults: [],
@@ -362,10 +386,7 @@ export async function runResetToBaselineTransaction(
 		for (const sourceId of requested) {
 			if (!selected.some((source) => source.id === sourceId)) {
 				return {
-					id: receiptId,
-					pointId: 'baseline',
-					pointLabel: 'Reset to baseline',
-					startedAt,
+					...receiptBase,
 					completedAt: Date.now(),
 					status: 'preflight-failed',
 					sourceResults: [],
@@ -376,10 +397,7 @@ export async function runResetToBaselineTransaction(
 	}
 	if (selected.length === 0) {
 		return {
-			id: receiptId,
-			pointId: 'baseline',
-			pointLabel: 'Reset to baseline',
-			startedAt,
+			...receiptBase,
 			completedAt: Date.now(),
 			status: 'preflight-failed',
 			sourceResults: [],
@@ -393,83 +411,11 @@ export async function runResetToBaselineTransaction(
 		apply: 'not-run',
 		rollback: 'not-needed',
 	}));
-	const resultById = new Map(
-		results.map((result) => [result.sourceId, result]),
+	return applyWithRollback(
+		selected.map((source) => ({ source })),
+		({ source }) => source.resetToBaseline?.(),
+		captureSource,
+		results,
+		receiptBase,
 	);
-	const rollback = new Map<string, RestorePointSourceSnapshot>();
-	for (const source of selected) {
-		try {
-			rollback.set(source.id, await captureSource(source));
-		} catch (error) {
-			const result = resultById.get(source.id);
-			if (result) {
-				result.preflight = 'failed';
-				result.error = diagnosticErrorText(error);
-			}
-			return {
-				id: receiptId,
-				pointId: 'baseline',
-				pointLabel: 'Reset to baseline',
-				startedAt,
-				completedAt: Date.now(),
-				status: 'preflight-failed',
-				sourceResults: finalizeResults(results),
-				error: `Rollback capture failed for ${source.title}: ${diagnosticErrorText(error)}`,
-			};
-		}
-	}
-	const attempted: RestorePointSource[] = [];
-	let applyError: string | undefined;
-	for (const source of selected) {
-		const result = resultById.get(source.id);
-		attempted.push(source);
-		try {
-			await source.resetToBaseline?.();
-			if (result) result.apply = 'succeeded';
-		} catch (error) {
-			applyError = diagnosticErrorText(error);
-			if (result) {
-				result.apply = 'failed';
-				result.error = applyError;
-			}
-			break;
-		}
-	}
-	if (!applyError) {
-		return {
-			id: receiptId,
-			pointId: 'baseline',
-			pointLabel: 'Reset to baseline',
-			startedAt,
-			completedAt: Date.now(),
-			status: 'complete',
-			sourceResults: finalizeResults(results),
-		};
-	}
-	let rollbackFailed = false;
-	for (const source of attempted.reverse()) {
-		const result = resultById.get(source.id);
-		const snapshot = rollback.get(source.id);
-		if (!snapshot) continue;
-		try {
-			await source.restore(cloneSnapshot(snapshot));
-			if (result) result.rollback = 'succeeded';
-		} catch (error) {
-			rollbackFailed = true;
-			if (result) {
-				result.rollback = 'failed';
-				result.rollbackError = diagnosticErrorText(error);
-			}
-		}
-	}
-	return {
-		id: receiptId,
-		pointId: 'baseline',
-		pointLabel: 'Reset to baseline',
-		startedAt,
-		completedAt: Date.now(),
-		status: rollbackFailed ? 'needs-attention' : 'rolled-back',
-		sourceResults: finalizeResults(results),
-		error: applyError,
-	};
 }

@@ -329,10 +329,6 @@ function abortMessage(signal: AbortSignal): string {
 			: 'Scenario operation was cancelled.';
 }
 
-function byteLength(value: string): number {
-	return new TextEncoder().encode(value).byteLength;
-}
-
 function copyReceipts(
 	results: readonly MutableStepReceipt[],
 ): readonly ScenarioStepReceipt[] {
@@ -363,10 +359,7 @@ function resolveVariables(
 	scenario: ScenarioDefinition,
 	provided: Readonly<Record<string, ScenarioPrimitive>> | undefined,
 ): Readonly<Record<string, ScenarioPrimitive>> {
-	if (
-		provided &&
-		(!provided || typeof provided !== 'object' || Array.isArray(provided))
-	) {
+	if (provided && (typeof provided !== 'object' || Array.isArray(provided))) {
 		throw new Error('Scenario variables must be an object.');
 	}
 	const providedEntries = Object.entries(provided ?? {});
@@ -396,7 +389,7 @@ function resolveVariables(
 		if (typeof value !== variable.type) {
 			throw new Error(`Scenario variable has wrong type: ${variable.id}`);
 		}
-		if (typeof value === 'string' && byteLength(value) > MAX_STRING_BYTES) {
+		if (typeof value === 'string' && utf8ByteLength(value) > MAX_STRING_BYTES) {
 			throw new Error(`Scenario variable is oversized: ${variable.id}`);
 		}
 		if (variable.options && !variable.options.includes(value)) {
@@ -995,7 +988,7 @@ export class ScenarioEngine {
 			label: stepLabel(preparedStep.step),
 			preflight: 'passed',
 			apply: 'not-run',
-			rollback: preparedStep.preflight.reversible ? 'not-needed' : 'not-needed',
+			rollback: 'not-needed',
 			reversible: preparedStep.preflight.reversible,
 		}));
 		const resultById = new Map(

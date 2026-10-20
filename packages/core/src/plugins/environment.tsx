@@ -25,13 +25,16 @@ import { serializeValue, truncateText } from '../core/serialize';
 import { shareDiagnosticContent } from '../core/share';
 import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
 import {
-	assertEnvironmentRules as assertTypedEnvironmentRules,
+	assertEnvironmentRules,
+	type EnvironmentSection,
+	type EnvironmentValidationResult,
+	type EnvironmentValueRule,
+	environmentSectionEntries,
 	summarizeEnvironmentHealth,
 	validateEnvironmentValues as validateTypedEnvironmentValues,
 } from './environment-model';
 
 const MAX_ENVIRONMENT_RENDERED_VALUE_BYTES = 16 * 1024;
-const MAX_ENVIRONMENT_TEXT_LENGTH = 4 * 1024;
 
 export function formatEnvironmentValue(value: unknown): string {
 	if (value === undefined || value === null || value === '') return 'Not set';
@@ -51,39 +54,6 @@ function formatEnvironmentEntry(key: string, value: unknown): string {
 		: formatEnvironmentValue(value);
 }
 
-type EnvironmentValueType =
-	| 'string'
-	| 'number'
-	| 'boolean'
-	| 'object'
-	| 'array';
-
-type EnvironmentValueRule = {
-	key: string;
-	section?: string;
-	description?: string;
-	required?: boolean;
-	expectedType?: EnvironmentValueType;
-	expectedValue?: unknown;
-};
-
-type EnvironmentValidationStatus =
-	| 'valid'
-	| 'missing'
-	| 'typeMismatch'
-	| 'valueMismatch';
-
-type EnvironmentValidationResult = EnvironmentValueRule & {
-	status: EnvironmentValidationStatus;
-	actualValue?: unknown;
-	actualType?: string;
-};
-
-type EnvironmentSection = {
-	title: string;
-	values: Readonly<Record<string, unknown>>;
-};
-
 export type EnvironmentPluginOptions = {
 	values?: Readonly<Record<string, unknown>>;
 	sections?: ReadonlyArray<EnvironmentSection>;
@@ -95,112 +65,6 @@ export type EnvironmentPluginOptions = {
 	systemImage?: DevToolsSystemImage;
 	tint?: string;
 };
-
-const MAX_ENVIRONMENT_ENTRIES_PER_SECTION = 5_000;
-
-function environmentSectionEntries(
-	section: EnvironmentSection,
-	rejectOverflow = false,
-): readonly (readonly [string, unknown])[] {
-	let descriptors: Record<string, PropertyDescriptor>;
-	try {
-		descriptors = Object.getOwnPropertyDescriptors(section.values);
-	} catch {
-		return [];
-	}
-	const entries = Object.entries(descriptors).filter(
-		([, descriptor]) => descriptor.enumerable,
-	);
-	if (entries.length > MAX_ENVIRONMENT_ENTRIES_PER_SECTION) {
-		if (rejectOverflow) {
-			throw new Error(
-				`Environment sections support at most ${MAX_ENVIRONMENT_ENTRIES_PER_SECTION} values.`,
-			);
-		}
-		entries.length = MAX_ENVIRONMENT_ENTRIES_PER_SECTION;
-	}
-	return entries.map(
-		([key, descriptor]) =>
-			[
-				key,
-				'value' in descriptor ? descriptor.value : '[Accessor omitted]',
-			] as const,
-	);
-}
-
-const environmentValueTypes = new Set<EnvironmentValueType>([
-	'string',
-	'number',
-	'boolean',
-	'object',
-	'array',
-]);
-
-function assertEnvironmentRules(
-	sections: readonly EnvironmentSection[],
-	rules: readonly EnvironmentValueRule[],
-): void {
-	const sectionTitles = new Set(sections.map((entry) => entry.title));
-	const signatures = new Set<string>();
-	const scopesByKey = new Map<string, Set<string>>();
-	for (const rule of rules) {
-		if (
-			!rule ||
-			typeof rule !== 'object' ||
-			typeof rule.key !== 'string' ||
-			!rule.key.trim() ||
-			rule.key.length > 4 * 1024
-		) {
-			throw new Error('Environment rule keys must be 1–4096 characters.');
-		}
-		if (
-			rule.description !== undefined &&
-			(typeof rule.description !== 'string' ||
-				rule.description.length > MAX_ENVIRONMENT_TEXT_LENGTH)
-		) {
-			throw new Error(
-				'Environment rule descriptions cannot exceed 4096 characters.',
-			);
-		}
-		if (rule.section && !sectionTitles.has(rule.section)) {
-			throw new Error(`Unknown environment rule section: ${rule.section}`);
-		}
-		if (
-			rule.expectedType !== undefined &&
-			!environmentValueTypes.has(rule.expectedType)
-		) {
-			throw new Error(
-				`Invalid expected type for environment rule ${rule.key}.`,
-			);
-		}
-		const signature = `${rule.section ?? '*'}\u0000${rule.key}`;
-		if (signatures.has(signature)) {
-			throw new Error(
-				`Duplicate environment rule: ${rule.section ?? '*'}:${rule.key}`,
-			);
-		}
-		signatures.add(signature);
-		const scope = rule.section ?? '*';
-		const existingScopes = scopesByKey.get(rule.key) ?? new Set<string>();
-		if (existingScopes.size > 0 && (scope === '*' || existingScopes.has('*'))) {
-			throw new Error(
-				`Overlapping environment rules require explicit, non-global sections: ${rule.key}`,
-			);
-		}
-		existingScopes.add(scope);
-		scopesByKey.set(rule.key, existingScopes);
-		if (!rule.section) {
-			const matchingSectionCount = sections.filter((entry) =>
-				environmentSectionEntries(entry).some(([key]) => key === rule.key),
-			).length;
-			if (matchingSectionCount > 1) {
-				throw new Error(
-					`Environment rule ${rule.key} is ambiguous; specify its section.`,
-				);
-			}
-		}
-	}
-}
 
 /**
  * Collapsed-row summary. Deliberately short: a serialized expected value would
@@ -273,7 +137,6 @@ export function createEnvironmentPlugin({
 		sectionTitles.add(declaredSection.title);
 	}
 	assertEnvironmentRules(declaredSections, rules);
-	assertTypedEnvironmentRules(declaredSections, rules);
 
 	function EnvironmentPanel({ onBack }: { onBack: () => void }) {
 		const validationResults = validateTypedEnvironmentValues(
