@@ -856,26 +856,7 @@ final class SystemSimulatorMutationProcessRunner: SimulatorMutationProcessRunnin
   private func terminateAndReap(_ processID: pid_t, graceSeconds: TimeInterval) {
     guard processID > 1 else { return }
     _ = kill(-processID, SIGTERM)
-    let deadline = Date().addingTimeInterval(graceSeconds)
-    var leaderReaped = false
-    while Date() < deadline {
-      if !leaderReaped {
-        var status: Int32 = 0
-        let result = waitpid(processID, &status, WNOHANG)
-        if result == processID || (result == -1 && errno == ECHILD) {
-          leaderReaped = true
-        } else if result == -1, errno != EINTR {
-          break
-        }
-      }
-      if !processGroupExists(processID) { return }
-      usleep(20_000)
-    }
-    _ = kill(-processID, SIGKILL)
-    if !leaderReaped {
-      var status: Int32 = 0
-      while waitpid(processID, &status, 0) == -1, errno == EINTR {}
-    }
+    waitForGracefulExitThenKill(processID, graceSeconds: graceSeconds)
   }
 
   private func waitForGracefulExitThenKill(_ processID: pid_t, graceSeconds: TimeInterval) {

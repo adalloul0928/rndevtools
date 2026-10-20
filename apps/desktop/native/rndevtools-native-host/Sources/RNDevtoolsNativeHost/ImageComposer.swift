@@ -23,7 +23,7 @@ struct SystemImageComposer: ImageComposing {
     let secondaryURL = request.secondaryInput.map(workspace.inputs.appendingPathComponent)
     let outputURL = workspace.outputs.appendingPathComponent(request.output)
     let temporaryURL = workspace.outputs.appendingPathComponent(
-      ".composition-(UUID().uuidString.lowercased()).tmp"
+      ".composition-\(UUID().uuidString.lowercased()).tmp"
     )
     defer {
       try? FileManager.default.removeItem(at: primaryURL)

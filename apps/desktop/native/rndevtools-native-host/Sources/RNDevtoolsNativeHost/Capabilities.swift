@@ -2,8 +2,6 @@ import AVFoundation
 import CoreMedia
 import CoreServices
 import Foundation
-import NetworkExtension
-import ScreenCaptureKit
 import Security
 import VideoToolbox
 
@@ -129,24 +127,21 @@ struct SystemCapabilityReader: CapabilityReading {
     let accessibilityPermission = permissions["accessibility"] ?? .unknown
     let cameraDeviceAvailable = AVCaptureDevice.default(for: .video) != nil
     let microphoneDeviceAvailable = AVCaptureDevice.default(for: .audio) != nil
-    let screenCaptureFrameworkAvailable =
-      Self.classAvailable(SCStream.self)
-      && Self.classAvailable(SCStreamConfiguration.self)
 
     return NativeCapabilityStatusResult(
       checkedAtMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000),
       architecture: Self.architecture,
       operatingSystemVersion: Self.operatingSystemVersion,
       screenCaptureKit: ScreenCaptureKitCapabilityStatus(
-        frameworkAvailable: screenCaptureFrameworkAvailable,
+        frameworkAvailable: true,
         screenRecordingPermission: screenPermission,
         liveWindowCapture: Self.availability(
-          frameworkAvailable: screenCaptureFrameworkAvailable,
+          frameworkAvailable: true,
           deviceAvailable: true,
           permission: screenPermission
         ),
         systemAudioCapture: Self.availability(
-          frameworkAvailable: screenCaptureFrameworkAvailable,
+          frameworkAvailable: true,
           deviceAvailable: true,
           permission: screenPermission
         ),
@@ -316,29 +311,17 @@ struct SystemCapabilityReader: CapabilityReading {
   }
 
   private static func networkExtensionStatus() -> NetworkExtensionCapabilityStatus {
-    let vpnManagerAPIAvailable = classAvailable(NEVPNManager.self)
-    let packetTunnelProviderAPIAvailable = classAvailable(NEPacketTunnelProvider.self)
-    let appProxyProviderAPIAvailable = classAvailable(NEAppProxyProvider.self)
-    let contentFilterAPIAvailable = classAvailable(NEFilterManager.self)
-    let frameworkAvailable =
-      vpnManagerAPIAvailable || packetTunnelProviderAPIAvailable
-      || appProxyProviderAPIAvailable || contentFilterAPIAvailable
-    let entitlementPresent = networkExtensionEntitlementPresent()
-    return NetworkExtensionCapabilityStatus(
-      frameworkAvailable: frameworkAvailable,
-      vpnManagerAPIAvailable: vpnManagerAPIAvailable,
-      packetTunnelProviderAPIAvailable: packetTunnelProviderAPIAvailable,
-      appProxyProviderAPIAvailable: appProxyProviderAPIAvailable,
-      contentFilterAPIAvailable: contentFilterAPIAvailable,
-      entitlementPresent: entitlementPresent,
+    NetworkExtensionCapabilityStatus(
+      frameworkAvailable: true,
+      vpnManagerAPIAvailable: true,
+      packetTunnelProviderAPIAvailable: true,
+      appProxyProviderAPIAvailable: true,
+      contentFilterAPIAvailable: true,
+      entitlementPresent: networkExtensionEntitlementPresent(),
       configurationInspection: .gated,
       trafficInterception: .gated,
       preferenceReadsPerformed: false
     )
-  }
-
-  private static func classAvailable(_ type: AnyClass) -> Bool {
-    !NSStringFromClass(type).isEmpty
   }
 
   private static func networkExtensionEntitlementPresent() -> Bool {
