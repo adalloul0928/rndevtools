@@ -1,5 +1,16 @@
 # Third-party notices
 
+The packaged app includes `THIRD_PARTY_LICENSES.txt` beside this file, generated
+from its bundled JavaScript, CSS, and fonts. It preserves the dependencies'
+copyright notices and license texts, including the Geist fonts' SIL Open Font
+License. Electron and Chromium carry their own bundled license files.
+
+HeroUI Pro remains the property of NextUI Inc. and is used under the developer's
+commercial license. It is not covered by RN Devtools' MIT license. Building from
+source requires a separate HeroUI Pro license; the app distribution contains no
+licensed package archive, source maps, or authentication tokens. See
+<https://heroui.pro/terms> for the published terms.
+
 ## SimSlim
 
 The bundled simulator helper includes and links the complete non-test root Go
