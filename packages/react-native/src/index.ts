@@ -11,6 +11,7 @@ export {
 	type AsyncStorageLike,
 	createAsyncStorageDevtoolsAdapter,
 	createSecureStoreDevtoolsAdapter,
+	type DevtoolsStorageAdapterOptions,
 	type SecureStoreLike,
 	type SecureStoreManifestEntry,
 } from './adapters/storage';
@@ -48,6 +49,7 @@ export {
 	projectDesktopHeaders,
 	projectDesktopQueryKey,
 } from './desktop/projection';
+export { simulatorUdidFromPath } from './desktop/simulator-identity';
 
 export {
 	type ComponentVisualState,
@@ -56,6 +58,8 @@ export {
 
 export {
 	clearImageOverlay,
+	configureImageOverlay,
+	type ImageOverlayOptions,
 	imageOverlay,
 	RNDEVTOOLS_IMAGE_OVERLAY_LIMITS,
 	setLocalImageOverlaySource,

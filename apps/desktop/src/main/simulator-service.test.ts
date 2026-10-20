@@ -1160,6 +1160,40 @@ describe('simulator service', () => {
 		await service.stop();
 	});
 
+	it('takes screenshots and lists apps while a recording runs, and queues a second recording behind it', async () => {
+		const provider = new FakeProvider();
+		provider.blockVideo = true;
+		const { service } = await createService(provider);
+		const status = (jobId: string | undefined) =>
+			service.getState().jobs.find((job) => job.id === jobId)?.status;
+		const recording = service.runAction(
+			parsedAction({ actionId: 'video', kind: 'capture.video', udid: UDID })
+		);
+		await vi.waitFor(() => expect(status(recording.jobId)).toBe('running'));
+
+		const screenshot = service.runAction(
+			parsedAction({
+				actionId: 'screenshot',
+				kind: 'capture.screenshot',
+				udid: UDID,
+			})
+		);
+		const apps = service.runAction(
+			parsedAction({ actionId: 'apps', kind: 'app.list', udid: UDID })
+		);
+		await waitForJob(service, screenshot.jobId ?? '');
+		await waitForJob(service, apps.jobId ?? '');
+		expect(status(recording.jobId)).toBe('running');
+
+		const second = service.runAction(
+			parsedAction({ actionId: 'video-2', kind: 'capture.video', udid: UDID })
+		);
+		expect(status(second.jobId)).toBe('queued');
+		expect(service.cancelJob(recording.jobId ?? '')).toBe(true);
+		await vi.waitFor(() => expect(status(second.jobId)).toBe('running'));
+		await service.stop();
+	});
+
 	it('bounds the active job queue and finalizes queued work during shutdown', async () => {
 		const provider = new FakeProvider();
 		provider.blockVideo = true;

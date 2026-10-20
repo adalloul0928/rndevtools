@@ -1,20 +1,13 @@
-import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-	chmod,
-	lstat,
-	mkdir,
-	open,
-	realpath,
-	rename,
-	unlink,
-} from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { UDID_PATTERN } from '../shared/simulator-protocol';
 import type {
 	SlimmingCheckpointMetadata,
 	SlimmingOperationMetadata,
 } from '../shared/slimming-protocol';
+import { writeFileAtomic } from './private-files';
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_CHECKPOINT_BYTES = 32 * 1024;
@@ -23,9 +16,7 @@ const MAX_OPERATIONS = 20;
 const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(4 * 1024);
 const timestampSchema = z.number().finite().nonnegative();
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 
 const checkpointMetadataSchema = z.strictObject({
 	id: identifierSchema,
@@ -270,10 +261,6 @@ export class SlimmingPersistence {
 		});
 	}
 
-	async acknowledge(key: string, acknowledgedAt: number): Promise<void> {
-		await this.acknowledgeAll([key], acknowledgedAt);
-	}
-
 	async acknowledgeAll(
 		keys: readonly string[],
 		acknowledgedAt: number
@@ -298,26 +285,6 @@ export class SlimmingPersistence {
 				changed = true;
 			}
 			return changed;
-		});
-	}
-
-	async putCheckpoint(
-		simulatorUdid: string,
-		token: string,
-		metadata: SlimmingCheckpointMetadata
-	): Promise<void> {
-		const udid = udidSchema.parse(simulatorUdid).toUpperCase();
-		const checkpoint = checkpointSchema.parse({ metadata, token });
-		await this.#update((draft) => {
-			if (
-				!draft.checkpoints[udid] &&
-				Object.keys(draft.checkpoints).length >= MAX_SIMULATORS
-			) {
-				throw new Error(
-					`Checkpoint store cannot exceed ${MAX_SIMULATORS} simulators.`
-				);
-			}
-			draft.checkpoints[udid] = checkpoint;
 		});
 	}
 
@@ -479,40 +446,10 @@ export class SlimmingPersistence {
 		}
 		await mkdir(this.#directory, { recursive: true, mode: 0o700 });
 		const canonicalDirectory = await realpath(this.#directory);
-		const temporaryPath = path.join(
-			canonicalDirectory,
-			`.state-v1.${process.pid}.${randomUUID()}.tmp`
+		await writeFileAtomic(
+			path.join(canonicalDirectory, path.basename(this.#filePath)),
+			serialized,
+			'state-v1'
 		);
-		const destinationPath = path.join(
-			canonicalDirectory,
-			path.basename(this.#filePath)
-		);
-		const handle = await open(
-			temporaryPath,
-			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-			0o600
-		);
-		try {
-			await handle.writeFile(serialized, 'utf8');
-			await handle.sync();
-		} catch (error) {
-			await handle.close().catch(() => undefined);
-			await unlink(temporaryPath).catch(() => undefined);
-			throw error;
-		}
-		await handle.close();
-		try {
-			await rename(temporaryPath, destinationPath);
-		} catch (error) {
-			await unlink(temporaryPath).catch(() => undefined);
-			throw error;
-		}
-		await chmod(destinationPath, 0o600);
-		const directoryHandle = await open(canonicalDirectory, constants.O_RDONLY);
-		try {
-			await directoryHandle.sync();
-		} finally {
-			await directoryHandle.close();
-		}
 	}
 }

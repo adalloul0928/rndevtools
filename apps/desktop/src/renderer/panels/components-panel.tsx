@@ -1,5 +1,4 @@
 import { Button } from '@heroui/react/button';
-import { Card } from '@heroui/react/card';
 import { Input } from '@heroui/react/input';
 import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
@@ -18,12 +17,15 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	EmptyPanel,
+	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
+	SectionCard,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
@@ -31,6 +33,15 @@ import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { ComponentTarget } from '../../shared/protocol';
 
 const MAX_RENDERED_TARGETS = 250;
+
+const KIND_TONE: Record<
+	string,
+	'default' | 'brand' | 'info' | 'success' | 'warning'
+> = {
+	screen: 'info',
+	component: 'default',
+	overlay: 'brand',
+};
 
 export function canMutateSemanticTarget(
 	target: Pick<ComponentTarget, 'isFocused'> | null,
@@ -61,7 +72,8 @@ function boundsStyle(
 }
 
 export function ComponentsPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const targets = selectedDevice?.tools.components ?? [];
 	const renderEvents = selectedDevice?.tools.componentRenders ?? [];
 	const summary = selectedDevice?.tools.componentSummary;
@@ -143,16 +155,39 @@ export function ComponentsPanel() {
 		);
 	});
 
+	// Resolve a single, human-readable reason for a gated semantic mutation so a
+	// disabled control always explains itself (device/capability/screen-hash).
+	function semanticReason(
+		command: string,
+		action: 'activate' | 'focus' | 'setText' | 'scroll'
+	): string | null {
+		const runtimeReason = actionUnavailableReason('components', command);
+		if (runtimeReason) return runtimeReason;
+		if (!selected?.isFocused) {
+			return 'The target is not currently visible on device.';
+		}
+		if (!currentScreenHash) {
+			return 'No current screen hash is bound to this snapshot.';
+		}
+		if (!semanticActions.includes(action)) {
+			return `This target does not advertise the ${action} action.`;
+		}
+		return null;
+	}
+
+	const highlightReason = selected?.isFocused
+		? actionUnavailableReason('components', 'highlight')
+		: 'The target is not currently visible on device.';
+
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="UI"
 				title="Components"
 				description="Inspect only components the app explicitly registers, with stable target keys, source locations, safe instance projections, and optional measured bounds."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<Badge tone="brand">
 						<ShieldCheck className="h-3 w-3" /> Targeted registry
-					</span>
+					</Badge>
 				}
 				actions={
 					<Button
@@ -249,7 +284,7 @@ export function ComponentsPanel() {
 							{visibleTargets.map((target) => (
 								<button
 									aria-pressed={selected?.id === target.id}
-									className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${selected?.id === target.id ? 'border-blue-400/30 bg-blue-400/[0.08]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+									className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${selected?.id === target.id ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
 									key={target.id}
 									type="button"
 									onClick={() => setSelectedId(target.id)}
@@ -258,16 +293,16 @@ export function ComponentsPanel() {
 										<span className="truncate text-xs font-medium text-(--foreground)">
 											{target.name}
 										</span>
-										<StatusPill tone={target.bounds ? 'info' : 'default'}>
+										<Badge tone={KIND_TONE[target.kind] ?? 'default'}>
 											{target.kind}
-										</StatusPill>
+										</Badge>
 									</div>
 									<p className="mb-0 mt-1.5 truncate font-mono text-xs text-(--text-3)">
 										{target.route ?? target.feature ?? 'No route'}
 									</p>
 									<div className="mt-2 flex items-center gap-2 text-xs text-(--text-3)">
 										{target.bounds ? (
-											<Crosshair className="h-3 w-3 text-blue-300" />
+											<Crosshair className="h-3 w-3 text-(--brand)" />
 										) : null}
 										<span className="truncate">
 											{target.testID ?? target.targetKey ?? target.id}
@@ -304,14 +339,15 @@ export function ComponentsPanel() {
 								return target.bounds ? (
 									<button
 										aria-label={`Inspect ${target.name}`}
-										className={`absolute z-10 border transition-colors ${isSelected ? 'border-blue-300 bg-blue-400/15 shadow-[0_0_0_1px_rgba(82,168,255,.3)]' : 'border-blue-400/35 bg-blue-400/[0.04] hover:bg-blue-400/10'}`}
+										aria-pressed={isSelected}
+										className={`absolute z-10 border transition-colors ${isSelected ? 'border-(--brand) bg-(--brand-soft) shadow-[0_0_0_1px_var(--brand-border)]' : 'border-(--brand-border) bg-(--brand-soft) hover:bg-[color-mix(in_srgb,var(--brand)_16%,transparent)]'}`}
 										key={target.id}
 										style={boundsStyle(target.bounds, viewport)}
 										type="button"
 										onClick={() => setSelectedId(target.id)}
 									>
 										{isSelected ? (
-											<span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-blue-400 px-1.5 py-0.5 font-mono text-xs font-semibold text-black">
+											<span className="absolute -top-5 left-0 whitespace-nowrap rounded-sm bg-(--brand) px-1.5 py-0.5 font-mono text-xs font-semibold text-black">
 												{target.name}
 											</span>
 										) : null}
@@ -324,8 +360,8 @@ export function ComponentsPanel() {
 
 				<div className="panel-scroll p-5">
 					{selected ? (
-						<>
-							<div className="mb-4 flex items-start justify-between gap-4">
+						<div className="space-y-4">
+							<div className="flex items-start justify-between gap-4">
 								<div>
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Selected target
@@ -334,109 +370,91 @@ export function ComponentsPanel() {
 										{selected.name}
 									</h2>
 								</div>
-								<StatusPill
-									tone={selected.isFocused ? 'success' : 'default'}
-									dot
-								>
+								<Badge tone={selected.isFocused ? 'success' : 'default'}>
 									{selected.isFocused ? 'Focused' : 'Background'}
-								</StatusPill>
+								</Badge>
 							</div>
-							<Card
-								className="mb-4 rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-								variant="secondary"
-							>
-								<Card.Content className="px-3 py-0">
-									<dl>
-										<KeyValue label="Kind" value={selected.kind} />
-										<KeyValue label="Instance ID" value={selected.id} mono />
-										<KeyValue
-											label="Target ID"
-											value={selected.targetId ?? selected.id}
-											mono
-										/>
-										<KeyValue
-											label="Parent instance"
-											value={selected.parentId ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Depth / z-index"
-											value={`${selected.depth ?? 0} / ${selected.zIndex ?? 0}`}
-											mono
-										/>
-										<KeyValue
-											label="Feature"
-											value={selected.feature ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Route"
-											value={selected.route ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Test ID"
-											value={selected.testID ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Target key"
-											value={selected.targetKey ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Screen hash"
-											value={currentScreenHash ?? 'Not reported (v1 snapshot)'}
-											mono
-										/>
-										<KeyValue
-											label="Bounds"
-											mono
-											value={
-												selected.bounds
-													? `${selected.bounds.x}, ${selected.bounds.y} · ${selected.bounds.width} × ${selected.bounds.height}`
-													: 'Not measured'
-											}
-										/>
-									</dl>
-								</Card.Content>
-							</Card>
+							<SectionCard>
+								<dl>
+									<KeyValue label="Kind" value={selected.kind} />
+									<KeyValue label="Instance ID" value={selected.id} mono />
+									<KeyValue
+										label="Target ID"
+										value={selected.targetId ?? selected.id}
+										mono
+									/>
+									<KeyValue
+										label="Parent instance"
+										value={selected.parentId ?? '—'}
+										mono
+									/>
+									<KeyValue
+										label="Depth / z-index"
+										value={`${selected.depth ?? 0} / ${selected.zIndex ?? 0}`}
+										mono
+									/>
+									<KeyValue
+										label="Feature"
+										value={selected.feature ?? '—'}
+										mono
+									/>
+									<KeyValue label="Route" value={selected.route ?? '—'} mono />
+									<KeyValue
+										label="Test ID"
+										value={selected.testID ?? '—'}
+										mono
+									/>
+									<KeyValue
+										label="Target key"
+										value={selected.targetKey ?? '—'}
+										mono
+									/>
+									<KeyValue
+										label="Screen hash"
+										value={currentScreenHash ?? 'Not reported (v1 snapshot)'}
+										mono
+									/>
+									<KeyValue
+										label="Bounds"
+										mono
+										value={
+											selected.bounds
+												? `${selected.bounds.x}, ${selected.bounds.y} · ${selected.bounds.width} × ${selected.bounds.height}`
+												: 'Not measured'
+										}
+									/>
+								</dl>
+							</SectionCard>
 							{selectedRenderEvents.length > 0 ? (
-								<Card
-									className="mb-4 rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-									variant="secondary"
+								<SectionCard
+									icon={<Clock3 />}
+									title="Recent renders"
+									bodyClassName="space-y-2"
 								>
-									<Card.Header className="border-b border-white/8 px-3 py-2.5">
-										<Card.Title className="flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
-											<Clock3 className="h-3.5 w-3.5" /> Recent renders
-										</Card.Title>
-									</Card.Header>
-									<Card.Content className="space-y-2 px-3 py-3">
-										{selectedRenderEvents.map((event) => (
-											<div
-												className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
-												key={event.id}
-											>
-												<div className="min-w-0">
-													<p className="m-0 truncate text-xs font-medium text-(--foreground)">
-														{event.phase} · {event.cause}
-													</p>
-													<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
-														Render #{event.renderCount} · base{' '}
-														{event.baseDuration.toFixed(1)} ms
-													</p>
-												</div>
-												<StatusPill
-													tone={
-														event.actualDuration >= 16 ? 'warning' : 'success'
-													}
-												>
-													{event.actualDuration.toFixed(1)} ms
-												</StatusPill>
+									{selectedRenderEvents.map((event) => (
+										<div
+											className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
+											key={event.id}
+										>
+											<div className="min-w-0">
+												<p className="m-0 truncate text-xs font-medium text-(--foreground)">
+													{event.phase} · {event.cause}
+												</p>
+												<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
+													Render #{event.renderCount} · base{' '}
+													{event.baseDuration.toFixed(1)} ms
+												</p>
 											</div>
-										))}
-									</Card.Content>
-								</Card>
+											<StatusPill
+												tone={
+													event.actualDuration >= 16 ? 'warning' : 'success'
+												}
+											>
+												{event.actualDuration.toFixed(1)} ms
+											</StatusPill>
+										</div>
+									))}
+								</SectionCard>
 							) : null}
 							{selected.styleText ? (
 								<CodePreview
@@ -448,86 +466,81 @@ export function ComponentsPanel() {
 									value={selected.styleText}
 								/>
 							) : null}
-							<Button
-								className="mb-4"
-								fullWidth
-								isDisabled={
-									!selected.isFocused ||
-									!canRunAction('components', 'highlight')
-								}
-								variant="secondary"
-								onPress={() =>
-									void runAction(
-										'components',
-										'highlight',
-										{ id: selected.id },
-										`Highlighted ${selected.name} on device.`
-									)
-								}
+							<div>
+								<Button
+									fullWidth
+									isDisabled={
+										!selected.isFocused ||
+										!canRunAction('components', 'highlight')
+									}
+									variant="secondary"
+									onPress={() =>
+										void runAction(
+											'components',
+											'highlight',
+											{ id: selected.id },
+											`Highlighted ${selected.name} on device.`
+										)
+									}
+								>
+									<Crosshair className="h-3.5 w-3.5" />
+									{selected.isFocused
+										? 'Highlight on device'
+										: 'Target is not currently visible'}
+								</Button>
+								{highlightReason ? (
+									<p className="mb-0 mt-1.5 text-xs leading-4 text-(--text-3)">
+										{highlightReason}
+									</p>
+								) : null}
+							</div>
+							<SectionCard
+								icon={<BadgeCheck />}
+								title="Accessibility semantics"
 							>
-								<Crosshair className="h-3.5 w-3.5" />
-								{selected.isFocused
-									? 'Highlight on device'
-									: 'Target is not currently visible'}
-							</Button>
-							<Card
-								className="mb-4 rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-								variant="secondary"
-							>
-								<Card.Header className="border-b border-white/8 px-3 py-2.5">
-									<Card.Title className="flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
-										<BadgeCheck className="h-3.5 w-3.5" /> Accessibility
-										semantics
-									</Card.Title>
-								</Card.Header>
-								<Card.Content className="px-3 py-0">
-									<dl>
-										<KeyValue
-											label="Label"
-											value={selected.accessibilityLabel ?? '—'}
-										/>
-										<KeyValue
-											label="Hint"
-											value={selected.accessibilityHint ?? '—'}
-										/>
-										<KeyValue
-											label="Role"
-											value={selected.accessibilityRole ?? '—'}
-											mono
-										/>
-										<KeyValue
-											label="Value"
-											value={selected.accessibilityValue ?? '—'}
-										/>
-										<KeyValue
-											label="State"
-											value={
-												selected.accessibilityState
-													? JSON.stringify(selected.accessibilityState)
-													: '—'
-											}
-											mono
-										/>
-									</dl>
-								</Card.Content>
-							</Card>
-							<section className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
-								<div className="mb-3 flex items-center justify-between gap-3">
-									<div>
-										<p className="m-0 text-xs uppercase tracking-[0.07em] text-(--text-3)">
-											Semantic actions
-										</p>
-										<p className="mb-0 mt-1 text-xs leading-4 text-(--text-3)">
-											{selected.isFocused
-												? 'Every mutation is bound to the exact current screen hash.'
-												: "Open this target's route before using semantic mutations."}
-										</p>
-									</div>
-									<StatusPill tone={currentScreenHash ? 'success' : 'warning'}>
+								<dl>
+									<KeyValue
+										label="Label"
+										value={selected.accessibilityLabel ?? '—'}
+									/>
+									<KeyValue
+										label="Hint"
+										value={selected.accessibilityHint ?? '—'}
+									/>
+									<KeyValue
+										label="Role"
+										value={selected.accessibilityRole ?? '—'}
+										mono
+									/>
+									<KeyValue
+										label="Value"
+										value={selected.accessibilityValue ?? '—'}
+									/>
+									<KeyValue
+										label="State"
+										value={
+											selected.accessibilityState
+												? JSON.stringify(selected.accessibilityState)
+												: '—'
+										}
+										mono
+									/>
+								</dl>
+							</SectionCard>
+							<SectionCard
+								title="Semantic actions"
+								actions={
+									<Badge tone={currentScreenHash ? 'success' : 'warning'}>
 										{currentScreenHash ? 'Snapshot bound' : 'Hash required'}
-									</StatusPill>
-								</div>
-								<div className="flex flex-wrap gap-2">
+									</Badge>
+								}
+							>
+								<p className="m-0 text-xs leading-4 text-(--text-3)">
+									{selected.isFocused
+										? 'Every mutation is bound to the exact current screen hash.'
+										: "Open this target's route before using semantic mutations."}
+								</p>
+								<div className="mt-3 flex flex-wrap gap-2">
 									<Button
 										isDisabled={
 											!semanticMutationEnabled ||
@@ -687,30 +700,37 @@ export function ComponentsPanel() {
 										<Move className="h-3.5 w-3.5" /> Scroll 75%
 									</Button>
 								</div>
-							</section>
-							<div className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] p-3">
-								<div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[0.07em] text-(--text-3)">
-									<FileCode2 className="h-3.5 w-3.5" /> Source
-								</div>
+								{(() => {
+									const reason = semanticReason('activate', 'activate');
+									return reason ? (
+										<p
+											className="mb-0 mt-3 text-xs leading-4 text-(--text-3)"
+											role="note"
+										>
+											Semantic mutations are disabled: {reason}
+										</p>
+									) : null;
+								})()}
+							</SectionCard>
+							<SectionCard icon={<FileCode2 />} title="Source">
 								{selected.sourceFiles.length === 0 ? (
 									<span className="text-xs text-(--text-3)">Not reported</span>
 								) : (
-									selected.sourceFiles.map((file) => (
-										<code
-											className="block break-all py-1 text-xs text-blue-200/75"
-											key={file}
-										>
-											{file}
-										</code>
-									))
+									<div className="space-y-1.5">
+										{selected.sourceFiles.map((file) => (
+											<InlineCode className="block" key={file}>
+												{file}
+											</InlineCode>
+										))}
+									</div>
 								)}
-							</div>
+							</SectionCard>
 							<CodePreview
 								label="Safe instance projection"
 								value={selected.instanceText}
 								maxHeight={340}
 							/>
-						</>
+						</div>
 					) : (
 						<EmptyPanel
 							icon={<Focus className="h-5 w-5" />}

@@ -7,18 +7,21 @@ struct NativeHost {
   private let capabilityReader: any CapabilityReading
   private let imageComposer: any ImageComposing
   private let mutationBroker: any SimulatorMutationBrokering
+  private let inputDriver: any SimulatorInputDriving
 
   init(
     permissionReader: any PermissionReading = SystemPermissionReader(),
     capabilityReader: (any CapabilityReading)? = nil,
     imageComposer: any ImageComposing = SystemImageComposer(),
-    mutationBroker: any SimulatorMutationBrokering = SystemSimulatorMutationBroker()
+    mutationBroker: any SimulatorMutationBrokering = SystemSimulatorMutationBroker(),
+    inputDriver: any SimulatorInputDriving = SimulatorKitInputDriver()
   ) {
     self.permissionReader = permissionReader
     self.capabilityReader =
       capabilityReader ?? SystemCapabilityReader(permissionReader: permissionReader)
     self.imageComposer = imageComposer
     self.mutationBroker = mutationBroker
+    self.inputDriver = inputDriver
   }
 
   func process(
@@ -74,13 +77,18 @@ struct NativeHost {
                 ? [.handshake, .permissionStatus, .capabilityStatus]
                 : request.protocolVersion == NativeProtocol.compositionVersion
                   ? [.handshake, .permissionStatus, .capabilityStatus, .composeImage]
-                  : [
-                    .handshake, .permissionStatus, .capabilityStatus, .composeImage,
-                    .runSimulatorMutation,
-                  ],
+                  : request.protocolVersion == NativeProtocol.mutationBrokerVersion
+                    ? [
+                      .handshake, .permissionStatus, .capabilityStatus, .composeImage,
+                      .runSimulatorMutation,
+                    ]
+                    : [
+                      .handshake, .permissionStatus, .capabilityStatus, .composeImage,
+                      .runSimulatorMutation, .sendSimulatorInput,
+                    ],
             permissionInspection: true,
             permissionPrompting: false,
-            simulatorMutation: request.protocolVersion == NativeProtocol.mutationBrokerVersion
+            simulatorMutation: request.protocolVersion >= NativeProtocol.mutationBrokerVersion
               ? mutationBroker.isAvailable() : false,
             runtimeDownloads: false,
             capabilityInspection: request.protocolVersion >= NativeProtocol.inspectionVersion
@@ -88,6 +96,8 @@ struct NativeHost {
             liveCaptureSessions: request.protocolVersion >= NativeProtocol.inspectionVersion
               ? false : nil,
             imageComposition: request.protocolVersion >= NativeProtocol.compositionVersion
+              ? true : nil,
+            simulatorInput: request.protocolVersion >= NativeProtocol.simulatorInputVersion
               ? true : nil
           )
         )
@@ -157,6 +167,35 @@ struct NativeHost {
           error: NativeHostError(
             code: "mutation_authorization_required",
             message: "The authenticated simulator mutation could not be brokered."
+          ),
+          exitCode: 1
+        )
+      }
+    case .sendSimulatorInput:
+      do {
+        return success(
+          protocolVersion: request.protocolVersion,
+          requestID: request.requestID,
+          result: try inputDriver.send(
+            SimulatorInputRequest.decode(request.payload),
+            cancellation: cancellation
+          )
+        )
+      } catch let error as NativeHostError {
+        return failure(
+          protocolVersion: request.protocolVersion,
+          requestID: request.requestID,
+          error: error,
+          exitCode: error.code == "cancelled" ? 130 : 1
+        )
+      } catch {
+        return failure(
+          protocolVersion: request.protocolVersion,
+          requestID: request.requestID,
+          error: NativeHostError(
+            code: "simulator_input_failed",
+            message: "The Simulator input could not be delivered.",
+            retryable: true
           ),
           exitCode: 1
         )
@@ -246,6 +285,9 @@ struct NativeCapabilities: Encodable {
   let capabilityInspection: Bool?
   let liveCaptureSessions: Bool?
   let imageComposition: Bool?
+  /// Native Simulator input (tap/swipe/text/key/button) over SimulatorKit HID. Reported as
+  /// supported by the host; whether the toolchain actually provides it is learned on first use.
+  let simulatorInput: Bool?
 }
 
 struct HandshakeResult: Encodable {

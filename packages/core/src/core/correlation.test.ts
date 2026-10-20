@@ -36,7 +36,7 @@ describe('correlation scopes', () => {
 		});
 		expect(
 			correlateDevToolsEvent(
-				{ source: 'routes', kind: 'committed', title: 'Opened workout' },
+				{ source: 'routes', kind: 'committed', title: 'Opened item' },
 				scope,
 			),
 		).toMatchObject({

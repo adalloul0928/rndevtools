@@ -24,6 +24,12 @@ export type SimulatorCommandOptions = {
 		timeZone?: string;
 		slowAnimations?: boolean;
 	};
+	/**
+	 * Set over the allowlisted environment for this call alone. Only the
+	 * locale can be pinned, and only to C, so that a tool prints the same
+	 * bytes whatever locale the desktop was launched in.
+	 */
+	environment?: { LC_ALL: 'C' };
 };
 
 export type SimulatorCommandErrorKind =
@@ -80,7 +86,8 @@ function closeReservedAuthorizationFd(fd: number | undefined): void {
 
 function simulatorCommandEnvironment(
 	appEnvironment: SimulatorCommandOptions['simulatorAppEnvironment'],
-	gracefulCancellationPipe: boolean
+	gracefulCancellationPipe: boolean,
+	overrides: SimulatorCommandOptions['environment']
 ): NodeJS.ProcessEnv {
 	const environment: NodeJS.ProcessEnv = {
 		PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -97,6 +104,8 @@ function simulatorCommandEnvironment(
 		const value = process.env[name];
 		if (value !== undefined) environment[name] = value;
 	}
+	// LC_ALL outranks LANG and every LC_* variable.
+	if (overrides?.LC_ALL === 'C') environment.LC_ALL = 'C';
 	if (gracefulCancellationPipe) {
 		environment.RNDEVTOOLS_HELPER_CONTROL_FD = '4';
 	}
@@ -180,7 +189,8 @@ export async function runSimulatorCommand(
 			child = spawn(executable, [...args], {
 				env: simulatorCommandEnvironment(
 					options.simulatorAppEnvironment,
-					options.gracefulCancellationPipe === true
+					options.gracefulCancellationPipe === true,
+					options.environment
 				),
 				stdio:
 					options.gracefulCancellationPipe &&

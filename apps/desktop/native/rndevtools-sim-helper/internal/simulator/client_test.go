@@ -3,8 +3,12 @@ package simulator
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -114,7 +118,7 @@ func TestPinnedForkParsesDisabledOverridesAndPIDOnlySimulatorProcessOutput(t *te
 
 func TestUDIDValidationRejectsArgumentInjection(t *testing.T) {
 	badValues := []string{"booted", testUDID + ";delete", "--set", "../../devices"}
-	if slices.ContainsFunc(badValues, udidPattern.MatchString) {
+	if slices.ContainsFunc(badValues, UDIDPattern.MatchString) {
 		t.Fatal("unsafe simulator identifier passed validation")
 	}
 }
@@ -495,5 +499,59 @@ func TestManagedStateValidationRejectsLabelsOutsidePinnedSimSlim(t *testing.T) {
 	}
 	if err := validateManagedIDs([]string{"com.apple.apsd", "com.apple.apsd"}); err == nil {
 		t.Fatal("duplicate label passed mutation validation")
+	}
+}
+
+func TestBoundedCommandCapturesOutputAndExitCode(t *testing.T) {
+	result, err := runBounded(context.Background(), 5*time.Second, "/bin/sh", "-c", "echo out; echo err >&2; exit 3")
+	if err != nil || string(result.stdout) != "out\n" || string(result.stderr) != "err\n" || result.exitCode != 3 {
+		t.Fatalf("unexpected command result: %#v, %v", result, err)
+	}
+}
+
+// runWithOrphanHoldingOutput runs script after starting a background sleep that
+// inherits the command's stdout and stderr, as a process that simctl starts
+// inside the Simulator does, and kills that orphan when the test ends.
+func runWithOrphanHoldingOutput(t *testing.T, timeout time.Duration, script string) (time.Duration, error) {
+	t.Helper()
+	previousWaitDelay := commandWaitDelay
+	commandWaitDelay = 100 * time.Millisecond
+	t.Cleanup(func() { commandWaitDelay = previousWaitDelay })
+	pidFile := filepath.Join(t.TempDir(), "orphan.pid")
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 1 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	started := time.Now()
+	_, err := runBounded(
+		context.Background(),
+		timeout,
+		"/bin/sh", "-c", `/bin/sleep 30 & echo $! > "$1"; `+script, "sh", pidFile,
+	)
+	return time.Since(started), err
+}
+
+func TestBoundedCommandTimesOutWhileAnOrphanHoldsItsOutput(t *testing.T) {
+	elapsed, err := runWithOrphanHoldingOutput(t, 200*time.Millisecond, "wait")
+	if err == nil || err.Error() != "native command timed out" {
+		t.Fatalf("timed-out command returned %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("timed-out command waited %s for the orphan holding its output", elapsed)
+	}
+}
+
+func TestBoundedCommandFailsWhenAnOrphanKeepsItsOutputOpenAfterExit(t *testing.T) {
+	elapsed, err := runWithOrphanHoldingOutput(t, 20*time.Second, "exit 0")
+	if err == nil || !strings.Contains(err.Error(), "kept its output open") {
+		t.Fatalf("exited command returned %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("exited command waited %s for the orphan holding its output", elapsed)
 	}
 }

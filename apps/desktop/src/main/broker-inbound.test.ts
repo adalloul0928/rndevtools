@@ -57,4 +57,19 @@ describe('broker inbound boundary', () => {
 		expect(message).toContain('[REDACTED]');
 		expect(Buffer.byteLength(message, 'utf8')).toBeLessThanOrEqual(8 * 1024);
 	});
+
+	it('says where a schema-incompatible message failed', () => {
+		let rejected: unknown;
+		try {
+			parseBrokerDeviceMessage(
+				Buffer.from(JSON.stringify({ ...helloMessage(), unexpected: true }))
+			);
+		} catch (error) {
+			rejected = error;
+		}
+		const message = safeBrokerErrorText(rejected);
+		expect(message).toMatch(/^The device message does not match the protocol/);
+		expect(message).not.toBe('ZodError');
+		expect(Buffer.byteLength(message, 'utf8')).toBeLessThanOrEqual(8 * 1024);
+	});
 });

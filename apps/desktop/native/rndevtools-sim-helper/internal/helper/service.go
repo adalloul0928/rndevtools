@@ -2,7 +2,6 @@ package helper
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"runtime"
 	"sort"
@@ -170,12 +169,12 @@ func NewService(backend simulator.Backend, helperVersion, buildCommit string) *S
 func (service *Service) Handle(ctx context.Context, request protocol.Request) (any, *protocol.APIError) {
 	switch request.Operation {
 	case protocol.OperationHandshake:
-		if apiError := decodePayload(request.Payload, &emptyPayload{}); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &emptyPayload{}); apiError != nil {
 			return nil, apiError
 		}
 		return service.handshake(), nil
 	case protocol.OperationListSimulators:
-		if apiError := decodePayload(request.Payload, &emptyPayload{}); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &emptyPayload{}); apiError != nil {
 			return nil, apiError
 		}
 		devices, err := service.backend.List(ctx)
@@ -187,7 +186,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		}{Simulators: devices}, nil
 	case protocol.OperationCloneSimulator:
 		var payload clonePayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		cloneID, normalizedName, err := service.backend.Clone(ctx, payload.SimulatorID, payload.Name)
@@ -205,7 +204,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		}, nil
 	case protocol.OperationDiskCleanupPlan:
 		var payload simulatorPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		plan, err := service.backend.PlanDiskCleanup(ctx, payload.SimulatorID)
@@ -225,7 +224,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		}, nil
 	case protocol.OperationDiskCleanup:
 		var payload diskCleanupPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		if payload.Confirmation != "CLEAN_SIMULATOR_DISK" {
@@ -271,7 +270,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 			BootStateRestored: result.BootStateRestored,
 		}, nil
 	case protocol.OperationListProfiles:
-		if apiError := decodePayload(request.Payload, &emptyPayload{}); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &emptyPayload{}); apiError != nil {
 			return nil, apiError
 		}
 		return ProfilesResult{
@@ -282,7 +281,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		}, nil
 	case protocol.OperationSimulatorStatus:
 		var payload simulatorPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		status, err := service.backend.Status(ctx, payload.SimulatorID)
@@ -292,25 +291,25 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		return status, nil
 	case protocol.OperationPreviewProfile:
 		var payload profilePayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		return service.profilePlan(ctx, payload.SimulatorID, payload.ProfileID)
 	case protocol.OperationVerifyProfile:
 		var payload profilePayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		return service.verifyProfile(ctx, payload)
 	case protocol.OperationDoctor:
 		var payload doctorPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		return service.doctor(ctx, payload)
 	case protocol.OperationPrepareMutation:
 		var payload prepareMutationPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		var desired []string
@@ -357,7 +356,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		})
 	case protocol.OperationApplyProfile:
 		var payload applyProfilePayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		if payload.Confirmation != "APPLY_EXPERIMENTAL_PROFILE" {
@@ -385,7 +384,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		return result, nil
 	case protocol.OperationRestoreManaged:
 		var payload restorePayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		if payload.Confirmation != "RESTORE_ALL_MANAGED_SERVICES" {
@@ -404,7 +403,7 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		return result, nil
 	case protocol.OperationUndoLast:
 		var payload undoPayload
-		if apiError := decodePayload(request.Payload, &payload); apiError != nil {
+		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
 		if payload.Confirmation != "UNDO_EXPERIMENTAL_MUTATION" {
@@ -414,14 +413,17 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		if err != nil {
 			return nil, protocol.NewError("invalid_checkpoint", "checkpointToken is invalid or incompatible with this helper.", false)
 		}
+		// Undo restores the checkpoint's managed services, not the boot state
+		// recorded with it: like apply and restore, it ends in the boot state
+		// the Simulator had when the undo started, so it never shuts down a
+		// device that was booted for use after the original change.
 		result, apiError := service.mutate(ctx, mutationRequest{
-			Operation:            protocol.OperationUndoLast,
-			SimulatorID:          payload.SimulatorID,
-			Desired:              checkpoint.ManagedDisabledServiceIDs,
-			Acknowledgement:      payload.Acknowledgement,
-			PreparedToken:        payload.PreparedCheckpointToken,
-			UndoCheckpoint:       &checkpoint,
-			FinalBootStateTarget: checkpoint.OriginalBootState,
+			Operation:       protocol.OperationUndoLast,
+			SimulatorID:     payload.SimulatorID,
+			Desired:         checkpoint.ManagedDisabledServiceIDs,
+			Acknowledgement: payload.Acknowledgement,
+			PreparedToken:   payload.PreparedCheckpointToken,
+			UndoCheckpoint:  &checkpoint,
 		})
 		if apiError != nil {
 			return nil, apiError
@@ -549,18 +551,14 @@ func buildPlan(simulatorID, profileID string, current, desired []string) Plan {
 	return Plan{
 		SimulatorID:        simulatorID,
 		ProfileID:          profileID,
-		CurrentDisabled:    sortedCopy(current),
-		DesiredDisabled:    sortedCopy(desired),
+		CurrentDisabled:    canonicalManagedIDs(current),
+		DesiredDisabled:    canonicalManagedIDs(desired),
 		ToDisable:          toDisable,
 		ToEnable:           toEnable,
 		RequiresCheckpoint: changes,
 		RequiresReboot:     changes,
 		Executable:         true,
 	}
-}
-
-func decodePayload(raw json.RawMessage, destination any) *protocol.APIError {
-	return protocol.DecodePayload(raw, destination)
 }
 
 func backendError(err error) *protocol.APIError {
@@ -582,12 +580,6 @@ func difference(left, right map[string]struct{}) []string {
 			out = append(out, value)
 		}
 	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedCopy(values []string) []string {
-	out := append([]string{}, values...)
 	sort.Strings(out)
 	return out
 }

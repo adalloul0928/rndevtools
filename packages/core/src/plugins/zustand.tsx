@@ -34,7 +34,6 @@ import { formatBytes, formatRelativeTime } from '../core/format';
 import { assertPositiveFinite, assertPositiveInteger } from '../core/options';
 import {
 	diagnosticErrorText,
-	sanitizeDiagnosticValue,
 	sanitizeDiagnosticValueWithMetadata,
 } from '../core/redact';
 import {
@@ -146,6 +145,7 @@ export type ZustandPluginOptions = {
 	maxStores?: number;
 	maxSnapshotBytes?: number;
 	maxEvents?: number;
+	/** Total estimated bytes retained across all events, not a per-event cap. */
 	maxEventBytes?: number;
 	maxStateSnapshots?: number;
 	maxMutationReceipts?: number;
@@ -378,10 +378,7 @@ function validateTimestamp(value: number): number {
  * `truncated` flag records.
  */
 function fingerprintValue(value: unknown, maxValueBytes: number): string {
-	const { text, truncated } = serializeValue(
-		sanitizeDiagnosticValue(value),
-		maxValueBytes,
-	);
+	const { text, truncated } = serializeValue(value, maxValueBytes);
 	let hash = 2_166_136_261;
 	for (let index = 0; index < text.length; index += 1) {
 		hash ^= text.charCodeAt(index);
@@ -1269,7 +1266,7 @@ export function createZustandPlugin(
 					if (!subscription.active || installCount === 0) return;
 					// A capture sanitizes and serializes the whole projection several
 					// times over. Host stores can call set() many times per frame (a
-					// running workout ticks every second plus once per set edit), so
+					// store that updates every second plus once per edit), so
 					// coalesce to one capture per task instead of one per set().
 					scheduleCapture(subscription);
 				});

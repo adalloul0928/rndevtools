@@ -1,10 +1,6 @@
 import { constants } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	SimulatorOnboardingOperation,
@@ -14,6 +10,7 @@ import {
 	simulatorOnboardingOperationSchema,
 	simulatorOnboardingReceiptSchema,
 } from '../shared/simulator-protocol';
+import { safeErrorText } from './security';
 
 const MAX_PATH_BYTES = 4 * 1024;
 
@@ -99,6 +96,8 @@ type SimulatorOnboardingIpcDependencies = {
 		>['permission']
 	) => Promise<void>;
 	revealAgentCli: () => Promise<void>;
+	/** Runs `rndevtools setup` and returns its per-file outcome lines. */
+	setupAgentCli: () => Promise<string[]>;
 };
 
 function failed(
@@ -109,7 +108,7 @@ function failed(
 		actionId: operation.actionId,
 		kind: operation.kind,
 		completed: false,
-		error: redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024),
+		error: safeErrorText(error),
 	});
 }
 
@@ -119,6 +118,7 @@ export function createSimulatorOnboardingIpcHandlers({
 	activateXcodeDeveloperDirectory,
 	openPrivacySettings,
 	revealAgentCli,
+	setupAgentCli,
 }: SimulatorOnboardingIpcDependencies) {
 	return {
 		runOperation: async (
@@ -146,6 +146,17 @@ export function createSimulatorOnboardingIpcHandlers({
 						kind: operation.kind,
 						completed: true,
 						requiresRefresh: true,
+					});
+				}
+				if (operation.kind === 'agentCli.setup') {
+					const summary = await setupAgentCli();
+					return simulatorOnboardingReceiptSchema.parse({
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						summary: summary
+							.slice(0, 32)
+							.map((line) => line.slice(0, 4 * 1024)),
 					});
 				}
 				if (operation.kind === 'privacy.openSettings') {

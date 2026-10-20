@@ -43,16 +43,16 @@ async function fixture() {
 		protocolVersion: 2,
 		compatibilityMatrixVersion: '2026-09-03-v2',
 		catalog: {
-			version: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
+			version: 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3',
 			upstreamRepository: 'https://github.com/MobAI-App/simslim',
-			upstreamCommit: '09fc9cbbca35db5230e6d571a0a366fe6876266e',
+			upstreamCommit: '6518ba7eab1123d7e1d7797b0e05f51043b42a5b',
 			patchSet: 'pumpd.1',
 			upstreamSourceManifestSha256:
-				'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08',
+				'bbd7640e2738197be54564d9f9926710a0dc5e13ee674d6e00e48bd5714b6172',
 			patchSha256:
-				'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083',
+				'f58830a4f4cde1dcd609286d416e9c4d33f472ca6bb32fc38fc4bbac7fa37a4c',
 			vendoredSourceManifestSha256:
-				'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7',
+				'eb5317fe41e6a987ceaa2d6da5097a7b561e90214328a639eeac2c2599bce269',
 		},
 		helpers: {
 			simulator: entry('rndevtools-sim-helper', 'simulator helper'),

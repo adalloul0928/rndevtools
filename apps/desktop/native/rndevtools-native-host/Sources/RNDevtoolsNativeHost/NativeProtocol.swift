@@ -5,9 +5,10 @@ enum NativeProtocol {
   static let inspectionVersion = 2
   static let compositionVersion = 3
   static let mutationBrokerVersion = 4
-  static let currentVersion = mutationBrokerVersion
+  static let simulatorInputVersion = 5
   static let supportedVersions: Set<Int> = [
     legacyVersion, inspectionVersion, compositionVersion, mutationBrokerVersion,
+    simulatorInputVersion,
   ]
   static let maximumRequestBytes = 96 * 1024
   static let maximumResponseBytes = 256 * 1024
@@ -20,6 +21,7 @@ enum NativeOperation: String, Encodable {
   case capabilityStatus = "capability_status"
   case composeImage = "compose_image"
   case runSimulatorMutation = "run_simulator_mutation"
+  case sendSimulatorInput = "send_simulator_input"
 }
 
 struct NativeRequest {
@@ -84,7 +86,7 @@ struct NativeRequest {
         message: "compose_image requires native-host protocol version 3."
       )
     }
-    if protocolVersion != NativeProtocol.mutationBrokerVersion,
+    if protocolVersion < NativeProtocol.mutationBrokerVersion,
       operation == .runSimulatorMutation
     {
       throw NativeHostError(
@@ -92,12 +94,20 @@ struct NativeRequest {
         message: "run_simulator_mutation requires native-host protocol version 4."
       )
     }
+    if protocolVersion < NativeProtocol.simulatorInputVersion, operation == .sendSimulatorInput {
+      throw NativeHostError(
+        code: "unsupported_operation",
+        message: "send_simulator_input requires native-host protocol version 5."
+      )
+    }
     guard let payload = object["payload"] as? [String: Any] else {
       throw NativeHostError(
         code: "invalid_payload", message: "payload must be a JSON object."
       )
     }
-    if operation != .composeImage, operation != .runSimulatorMutation, !payload.isEmpty {
+    if operation != .composeImage, operation != .runSimulatorMutation,
+      operation != .sendSimulatorInput, !payload.isEmpty
+    {
       throw NativeHostError(
         code: "invalid_payload", message: "payload must be an empty JSON object for this operation."
       )

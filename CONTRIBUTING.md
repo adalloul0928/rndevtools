@@ -18,9 +18,11 @@ license.
 
 Pull requests from forks cannot read repository secrets, so CI skips the
 Electron gate for them and says so in a notice. Everything else runs: both npm
-packages, the example app, and the full Go and Swift helper gate. If your
-change touches the renderer under `apps/desktop`, say so in the PR and a
-maintainer will run that job.
+packages, the example app, the full Go helper gate and a Swift build. The Swift
+tests hang on GitHub's hosted runners, so they run locally
+(`pnpm --filter @rndevtools/desktop native:check:swift`) or in the manual
+"Swift tests" workflow. If your change touches the renderer under
+`apps/desktop`, say so in the PR and a maintainer will run that job.
 
 ## Ground rules
 

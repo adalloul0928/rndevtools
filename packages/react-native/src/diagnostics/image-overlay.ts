@@ -1,38 +1,62 @@
 import {
 	createImageOverlayController,
 	type ImageOverlaySourceInput,
-} from '@rndevtools/core/plugins';
+} from '@rndevtools/core/plugins/image-overlay';
 import {
 	deletePreparedRemoteImage,
 	type PreparedRemoteImage,
 	prepareRemoteImageOverlay,
 } from './image-overlay-import';
 
-function configuredRemoteHost(value: string | undefined): string | undefined {
-	if (!value) return undefined;
+export type ImageOverlayOptions = Readonly<{
+	/**
+	 * Hosts that remote reference images may be downloaded from, as hostnames
+	 * or HTTPS URLs (an app can pass its own storage URL). Unset, blank, and
+	 * non-HTTPS entries are ignored. Defaults to none, which refuses every
+	 * remote reference.
+	 */
+	allowedRemoteHosts?: readonly (string | null | undefined)[];
+}>;
+
+function remoteHost(value: string | null | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
 	try {
-		const url = new URL(value);
+		const url = new URL(
+			trimmed.includes('://') ? trimmed : `https://${trimmed}`,
+		);
 		return url.protocol === 'https:' ? url.hostname.toLowerCase() : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-const configuredRemoteHosts = [
-	configuredRemoteHost(process.env.EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN),
-	configuredRemoteHost(process.env.EXPO_PUBLIC_SUPABASE_URL),
-].filter((host): host is string => Boolean(host));
+let allowedRemoteHosts: readonly string[] = Object.freeze([]);
 
 export const RNDEVTOOLS_IMAGE_OVERLAY_LIMITS = Object.freeze({
 	maxBytes: 20 * 1024 * 1024,
 	maxDimension: 8_192,
 	maxPixels: 40_000_000,
-	allowedRemoteHosts: Object.freeze([...new Set(configuredRemoteHosts)]),
+	// Read on every validation, so the controller sees later configuration.
+	get allowedRemoteHosts(): readonly string[] {
+		return allowedRemoteHosts;
+	},
 });
 
 export const imageOverlay = createImageOverlayController(
 	RNDEVTOOLS_IMAGE_OVERLAY_LIMITS,
 );
+
+/**
+ * Replaces the image overlay options. Later remote imports use the new
+ * allowlist; an image already on screen stays until it is replaced.
+ */
+export function configureImageOverlay(options: ImageOverlayOptions): void {
+	const hosts = (options.allowedRemoteHosts ?? [])
+		.map(remoteHost)
+		.filter((host): host is string => host !== undefined);
+	allowedRemoteHosts = Object.freeze([...new Set(hosts)]);
+}
 
 let remoteImportGeneration = 0;
 let activeRemoteImage: PreparedRemoteImage | null = null;

@@ -67,10 +67,7 @@ export type {
 	QueryPluginSnapshot,
 	QuerySnapshot,
 } from './query-model';
-export {
-	createMutationSnapshot,
-	createQuerySnapshot,
-} from './query-model';
+export { createMutationSnapshot } from './query-model';
 export {
 	type ActiveQuerySimulation,
 	createQuerySimulationController,

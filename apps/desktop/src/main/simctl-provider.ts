@@ -6,6 +6,7 @@ import type {
 	SimulatorDeviceType,
 	SimulatorRuntime,
 } from '../shared/simulator-protocol';
+import { UDID_PATTERN } from '../shared/simulator-protocol';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
@@ -23,7 +24,6 @@ const MAX_TEXT_LENGTH = 4 * 1024;
 const MAX_RUNTIME_ITEMS = 500;
 const MAX_DEVICE_TYPE_ITEMS = 500;
 const MAX_DEVICE_ITEMS = 2_000;
-const UDID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 const IOS_RUNTIME_PATTERN =
 	/^com\.apple\.CoreSimulator\.SimRuntime\.iOS-[A-Za-z0-9.-]+$/;
 const DEVICE_TYPE_PATTERN =

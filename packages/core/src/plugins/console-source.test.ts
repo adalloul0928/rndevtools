@@ -75,6 +75,34 @@ describe('optional console method source', () => {
 		expect(target.warn).toBe(warn);
 	});
 
+	it('prints but does not capture a log made while a listener handles one', () => {
+		const log = jest.fn();
+		const target: ConsoleMethodTarget = { log };
+		const source = createConsoleMethodSource({
+			target,
+			enabled: true,
+			development: true,
+		});
+		const messages: string[] = [];
+		const dispose = source.subscribe((event) => {
+			messages.push(event.message);
+			// A forwarder that logs would otherwise recurse until the stack overflows.
+			target.log?.(`forwarded ${event.message}`);
+		});
+
+		target.log?.('first');
+		target.log?.('second');
+
+		expect(messages).toEqual(['first', 'second']);
+		expect(log.mock.calls).toEqual([
+			['first'],
+			['forwarded first'],
+			['second'],
+			['forwarded second'],
+		]);
+		dispose();
+	});
+
 	it('does not overwrite a method another owner installed later', () => {
 		const error = jest.fn();
 		const replacement = jest.fn();

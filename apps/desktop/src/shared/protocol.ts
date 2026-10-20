@@ -15,6 +15,7 @@ import {
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 export const DESKTOP_PROTOCOL_VERSION = RNDEVTOOLS_PROTOCOL_VERSION;
 export const DESKTOP_SUPPORTED_PROTOCOL_VERSIONS =
@@ -94,9 +95,7 @@ const devicePlatformSchema = z.enum([
 	'simulator',
 	'unknown',
 ]);
-const simulatorUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const simulatorUdidSchema = z.string().regex(UDID_PATTERN);
 const bundleIdentifierSchema = z
 	.string()
 	.trim()
@@ -217,8 +216,11 @@ const storageEntrySchema = z
 			entry.valueText === undefined
 				? undefined
 				: redactDiagnosticText(entry.valueText);
+		// As with header and environment names, a credential-named key hides its
+		// value: opaque refresh tokens and passwords have no shape to recognize.
 		const mustHide =
 			entry.sensitive ||
+			isSensitiveDiagnosticKey(entry.key) ||
 			(entry.valueText !== undefined && redactedValue !== entry.valueText);
 		if (mustHide) {
 			const { valueText: _valueText, ...entryWithoutValue } = entry;
@@ -1012,13 +1014,22 @@ type ContractCompatibleDeviceTools =
 		? DeviceToolsObject
 		: never;
 
+function storageKeyId(adapterId: string, key: string): string {
+	return JSON.stringify([adapterId, key]);
+}
+
 function scrubSensitiveStorage(
 	tools: ContractCompatibleDeviceTools
 ): DeviceToolsObject {
-	const sensitiveAdapterIds = new Set(
+	// Events carry no sensitivity of their own, so one keeps its value text only
+	// while this snapshot lists its key in clear. Events of a hidden entry lose
+	// it, and so do events of a removed key or of an adapter with no entries
+	// here, such as a secure store emptied on sign-out. The storage panel shows
+	// history only for a listed entry, so those last two were never visible.
+	const visibleKeyIds = new Set(
 		tools.storage
-			.filter((entry) => entry.sensitive)
-			.map((entry) => entry.adapterId)
+			.filter((entry) => !entry.sensitive)
+			.map((entry) => storageKeyId(entry.adapterId, entry.key))
 	);
 	return {
 		...tools,
@@ -1033,16 +1044,16 @@ function scrubSensitiveStorage(
 		}),
 		storageEvents: tools.storageEvents.map((event) => ({
 			...event,
-			...(sensitiveAdapterIds.has(event.adapterId)
+			...(visibleKeyIds.has(storageKeyId(event.adapterId, event.key))
 				? {
-						previousText: undefined,
-						nextText: undefined,
-						structuralDiff: undefined,
-					}
-				: {
 						structuralDiff: event.structuralDiff
 							? [...event.structuralDiff]
 							: undefined,
+					}
+				: {
+						previousText: undefined,
+						nextText: undefined,
+						structuralDiff: undefined,
 					}),
 		})),
 	};
@@ -1124,7 +1135,7 @@ export function createEmptyDeviceTools(): DeviceTools {
 	};
 }
 
-const deviceSessionSchema = z.strictObject({
+export const deviceSessionSchema = z.strictObject({
 	info: deviceInfoSchema,
 	status: z.enum(['online', 'offline', 'simulated']),
 	connectedAt: timestampSchema,
@@ -1145,13 +1156,85 @@ const brokerInfoSchema = z.strictObject({
 	urls: z.array(rawShortTextSchema).max(50),
 	error: longTextSchema.optional(),
 });
+const MAX_DESKTOP_DEVICES = 50;
 export const desktopStateSchema = z.strictObject({
 	protocolVersion: z.literal(DESKTOP_PROTOCOL_VERSION),
 	broker: brokerInfoSchema,
-	devices: z.array(deviceSessionSchema).max(50),
+	devices: z.array(deviceSessionSchema).max(MAX_DESKTOP_DEVICES),
 	diagnostics: z.array(diagnosticEntrySchema).max(2_000),
 });
 export type DesktopState = z.infer<typeof desktopStateSchema>;
+
+// Everything `desktopStateSchema` checks except each device's tools.
+const desktopStateEnvelopeSchema = desktopStateSchema.extend({
+	devices: z
+		.array(deviceSessionSchema.extend({ tools: z.unknown() }))
+		.max(MAX_DESKTOP_DEVICES),
+});
+
+type AcceptedDeviceTools = {
+	connectedAt: number;
+	sequence: number;
+	tools: DeviceTools;
+};
+
+type DesktopStateParseResult =
+	| { success: true; data: DesktopState }
+	| { success: false; error: z.ZodError };
+
+/**
+ * Accepts and returns what `desktopStateSchema` would, but parses a device's
+ * tools only when they changed. The broker re-sends every device's tools on
+ * each emit, up to several MiB each with every text field redacted again,
+ * although main replaces a session's tools only together with a higher
+ * sequence and starts a reconnected session with a new `connectedAt`. A device
+ * whose id, `connectedAt` and `sequence` match the last accepted state reuses
+ * the tools parsed then; the incoming copy is discarded, so nothing reaches the
+ * listener unvalidated.
+ */
+export function createDesktopStateParser(): (
+	value: unknown
+) => DesktopStateParseResult {
+	let accepted = new Map<string, AcceptedDeviceTools>();
+	return (value) => {
+		const envelope = desktopStateEnvelopeSchema.safeParse(value);
+		if (!envelope.success) return { success: false, error: envelope.error };
+		const next = new Map<string, AcceptedDeviceTools>();
+		const devices: DeviceSession[] = [];
+		for (const [index, device] of envelope.data.devices.entries()) {
+			const previous = accepted.get(device.info.id);
+			let tools: DeviceTools;
+			if (
+				previous?.connectedAt === device.connectedAt &&
+				previous.sequence === device.sequence
+			) {
+				tools = previous.tools;
+			} else {
+				const parsed = deviceToolsSchema.safeParse(device.tools);
+				if (!parsed.success) {
+					return {
+						success: false,
+						error: new z.ZodError(
+							parsed.error.issues.map((issue) => ({
+								...issue,
+								path: ['devices', index, 'tools', ...issue.path],
+							}))
+						),
+					};
+				}
+				tools = parsed.data;
+			}
+			next.set(device.info.id, {
+				connectedAt: device.connectedAt,
+				sequence: device.sequence,
+				tools,
+			});
+			devices.push({ ...device, tools });
+		}
+		accepted = next;
+		return { success: true, data: { ...envelope.data, devices } };
+	};
+}
 
 export const deviceHelloMessageSchema = z.strictObject({
 	type: z.literal('hello'),

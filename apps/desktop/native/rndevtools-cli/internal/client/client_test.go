@@ -58,7 +58,11 @@ func TestClientHalfClosesAfterExactlyOneRequestBeforeReadingResponse(t *testing.
 		if _, err := bufio.NewReader(connection).ReadString('\n'); err != nil {
 			return err
 		}
-		if err := connection.SetReadDeadline(time.Now().Add(25 * time.Millisecond)); err != nil {
+		// The end of the stream is the event to wait for. The deadline only
+		// ends the wait for a client that never half-closes, so it is far past
+		// the microseconds the half-close takes here, not a window it has to
+		// fit in.
+		if err := connection.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			return err
 		}
 		buffer := make([]byte, 1)
@@ -66,9 +70,10 @@ func TestClientHalfClosesAfterExactlyOneRequestBeforeReadingResponse(t *testing.
 		if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("expected the client write half to close: %w", err)
 		}
-		return writeAllForTest(connection, []byte(
-			`{"protocol":"rndevtools/1","id":"`+testID+`","ok":true,"result":{}}`+"\n",
+		_, err = connection.Write([]byte(
+			`{"protocol":"rndevtools/1","id":"` + testID + `","ok":true,"result":{}}` + "\n",
 		))
+		return err
 	})
 	localClient, err := New(socketPath, time.Second)
 	if err != nil {
@@ -168,9 +173,16 @@ func TestClientReportsStaleSocketAndTimeout(t *testing.T) {
 	})
 	assertClientError(t, err, ErrorUnavailable)
 
+	// The desktop never answers: it holds the connection open until the client
+	// has given up, however long that takes, so that only the timeout can end
+	// the call. The fallback only frees the handler if the client never returns.
+	givenUp := make(chan struct{})
 	socketPath, _ := testServer(t, func(connection net.Conn) error {
 		defer connection.Close()
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-givenUp:
+		case <-time.After(15 * time.Second):
+		}
 		return nil
 	})
 	localClient, _ = New(socketPath, 50*time.Millisecond)
@@ -179,7 +191,149 @@ func TestClientReportsStaleSocketAndTimeout(t *testing.T) {
 		ID:       testID,
 		Command:  json.RawMessage(`{"kind":"doctor"}`),
 	})
+	close(givenUp)
 	assertClientError(t, err, ErrorTimeout)
+}
+
+func TestCancellingTheContextEndsTheReadAndClosesTheConnection(t *testing.T) {
+	// The desktop is still working when the caller gives up: an MCP client
+	// cancelled the tool call. The connection must close then, not at the
+	// deadline, so the desktop's next liveness probe finds it closed and
+	// aborts the handler (agent-cli-service.test.ts covers that side).
+	reading := make(chan struct{})
+	returned := make(chan struct{})
+	socketPath, serverErrors := testServer(t, func(connection net.Conn) error {
+		defer connection.Close()
+		if _, err := bufio.NewReader(connection).ReadString('\n'); err != nil {
+			return err
+		}
+		close(reading)
+		// Answer only after the client gave up; it closed the connection by
+		// then, so the answer has nowhere to go.
+		select {
+		case <-returned:
+		case <-time.After(15 * time.Second):
+			return errors.New("the client never returned")
+		}
+		_, err := connection.Write([]byte(`{"protocol":"rndevtools/1","id":"` + testID + `","ok":true,"result":{}}` + "\n"))
+		if err == nil {
+			return errors.New("the client left the connection open after it was cancelled")
+		}
+		return nil
+	})
+	localClient, err := New(socketPath, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-reading
+		cancel()
+	}()
+	started := time.Now()
+	_, err = localClient.Do(ctx, protocol.Request{
+		Protocol: protocol.Name,
+		ID:       testID,
+		Command:  json.RawMessage(`{"kind":"doctor"}`),
+	})
+	close(returned)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Do() error = %v, want the cancellation", err)
+	}
+	// A cancel returns in under a millisecond here, and a missed one at the
+	// 10 s deadline: three seconds tells them apart with a wide margin on both
+	// sides.
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("Do() returned after %s, not when cancelled", elapsed)
+	}
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientReadsAnAnswerLedByLivenessProbes(t *testing.T) {
+	// While a handler runs the desktop writes a space now and then, the only
+	// way it can tell that this side hung up. JSON allows the whitespace, so
+	// the answer is still one line the client must accept.
+	socketPath, serverErrors := testServer(t, func(connection net.Conn) error {
+		defer connection.Close()
+		if _, err := bufio.NewReader(connection).ReadString('\n'); err != nil {
+			return err
+		}
+		for range 3 {
+			if _, err := connection.Write([]byte(" ")); err != nil {
+				return err
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_, err := connection.Write([]byte(
+			`{"protocol":"rndevtools/1","id":"` + testID + `","ok":true,"result":{"slow":true}}` + "\n",
+		))
+		return err
+	})
+	localClient, err := New(socketPath, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := localClient.Do(context.Background(), protocol.Request{
+		Protocol: protocol.Name,
+		ID:       testID,
+		Command:  json.RawMessage(`{"kind":"wait"}`),
+	})
+	if err != nil || !response.OK || string(response.Result) != `{"slow":true}` {
+		t.Fatalf("Do() = %#v, %v", response, err)
+	}
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReachableProbesWithoutSending(t *testing.T) {
+	received := make(chan []byte, 1)
+	socketPath, serverErrors := testServer(t, func(connection net.Conn) error {
+		defer connection.Close()
+		data, err := io.ReadAll(connection)
+		received <- data
+		return err
+	})
+	if !Reachable(socketPath, time.Second) {
+		t.Fatal("a listening private socket must be reachable")
+	}
+	if err := <-serverErrors; err != nil {
+		t.Fatal(err)
+	}
+	if data := <-received; len(data) != 0 {
+		t.Fatalf("the probe must send nothing, sent %q", data)
+	}
+
+	// A socket file a crash left behind, a public socket, and no socket at
+	// all are all unreachable.
+	directory := shortTempDir(t)
+	stalePath := filepath.Join(directory, "stale.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: stalePath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := os.Chmod(stalePath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if Reachable(stalePath, 200*time.Millisecond) {
+		t.Fatal("a stale socket must not be reachable")
+	}
+	public, _ := testServer(t, func(connection net.Conn) error { return connection.Close() })
+	if err := os.Chmod(public, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if Reachable(public, 200*time.Millisecond) {
+		t.Fatal("a socket with group or other permissions must not be probed")
+	}
+	if Reachable(filepath.Join(directory, "missing.sock"), 200*time.Millisecond) || Reachable("relative.sock", time.Second) {
+		t.Fatal("missing or relative sockets are unreachable")
+	}
 }
 
 func testServer(t *testing.T, handler func(net.Conn) error) (string, <-chan error) {
@@ -223,18 +377,4 @@ func assertClientError(t *testing.T, err error, kind ErrorKind) {
 	if !errors.As(err, &clientError) || clientError.Kind != kind {
 		t.Fatalf("error = %v, want kind %s", err, kind)
 	}
-}
-
-func writeAllForTest(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		written, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[written:]
-	}
-	return nil
 }

@@ -7,12 +7,11 @@ const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const optionalShortTextSchema = shortTextSchema.optional();
 const timestampSchema = z.number().finite().nonnegative();
+/** A Simulator UDID, in either letter case. */
+export const UDID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 export const udidSchema = z
 	.string()
-	.regex(
-		/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
-		'Invalid simulator UDID.'
-	);
+	.regex(UDID_PATTERN, 'Invalid simulator UDID.');
 const bundleIdentifierSchema = z
 	.string()
 	.trim()
@@ -1109,6 +1108,14 @@ export const simulatorOnboardingOperationSchema = z.discriminatedUnion('kind', [
 		actionId: identifierSchema,
 		kind: z.literal('agentCli.reveal'),
 	}),
+	z.strictObject({
+		actionId: identifierSchema,
+		/**
+		 * Run the verified CLI's `setup`: register the MCP server, install the
+		 * lanes skill, and add the simctl guard for the coding agents on this Mac.
+		 */
+		kind: z.literal('agentCli.setup'),
+	}),
 ]);
 export type SimulatorOnboardingOperation = z.infer<
 	typeof simulatorOnboardingOperationSchema
@@ -1120,11 +1127,14 @@ export const simulatorOnboardingReceiptSchema = z.strictObject({
 		'toolchain.selectXcode',
 		'privacy.openSettings',
 		'agentCli.reveal',
+		'agentCli.setup',
 	]),
 	completed: z.boolean(),
 	cancelled: z.boolean().optional(),
 	requiresRefresh: z.boolean().optional(),
 	error: shortTextSchema.optional(),
+	/** Human-readable outcome lines, e.g. one per file `agentCli.setup` touched. */
+	summary: z.array(shortTextSchema).max(32).optional(),
 });
 export type SimulatorOnboardingReceipt = z.infer<
 	typeof simulatorOnboardingReceiptSchema

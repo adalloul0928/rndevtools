@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/adalloul0928/rndevtools-sim-helper/internal/compatibility"
 	"github.com/adalloul0928/rndevtools-sim-helper/internal/protocol"
 )
 
@@ -26,7 +27,6 @@ const (
 var (
 	noncePattern       = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	simulatorIDPattern = regexp.MustCompile(`^[A-Fa-f0-9-]{8,64}$`)
-	buildCommitPattern = regexp.MustCompile(`^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$`)
 )
 
 type Envelope struct {
@@ -59,23 +59,18 @@ type Authorizer struct {
 	expectedBuildCommit string
 }
 
-func New(reader io.Reader, attestor ParentAttestor) *Authorizer {
+func New(reader io.Reader, attestor ParentAttestor, expectedBuildCommit string) *Authorizer {
 	return &Authorizer{
-		reader:    reader,
-		attestor:  attestor,
-		now:       time.Now,
-		parentPID: os.Getppid,
+		reader:              reader,
+		attestor:            attestor,
+		now:                 time.Now,
+		parentPID:           os.Getppid,
+		expectedBuildCommit: expectedBuildCommit,
 	}
 }
 
-func NewBound(reader io.Reader, attestor ParentAttestor, expectedBuildCommit string) *Authorizer {
-	authorizer := New(reader, attestor)
-	authorizer.expectedBuildCommit = expectedBuildCommit
-	return authorizer
-}
-
 func NewInheritedFDAuthorizer(attestor ParentAttestor, expectedBuildCommit string) *Authorizer {
-	return NewBound(
+	return New(
 		inheritedFDReader(os.NewFile(InheritedFD, "rndevtools-mutation-authorization"), time.Now().Add(5*time.Second)),
 		attestor,
 		expectedBuildCommit,
@@ -131,9 +126,8 @@ func (authorizer *Authorizer) Authorize(ctx context.Context, request protocol.Re
 	if envelope.Version != Version || envelope.RequestID != request.RequestID || envelope.Operation != request.Operation {
 		return denied("The mutation authorization does not match this request.")
 	}
-	if authorizer.expectedBuildCommit != "" &&
-		(!buildCommitPattern.MatchString(authorizer.expectedBuildCommit) ||
-			envelope.BrokerBuildCommit != authorizer.expectedBuildCommit) {
+	if !compatibility.SourceCommitPattern.MatchString(authorizer.expectedBuildCommit) ||
+		envelope.BrokerBuildCommit != authorizer.expectedBuildCommit {
 		return denied("The mutation authorization was issued by a different native-helper build.")
 	}
 	simulatorID, err := simulatorID(request.Payload)
@@ -163,20 +157,25 @@ func (authorizer *Authorizer) Authorize(ctx context.Context, request protocol.Re
 	return nil
 }
 
+// simulatorID reads the target with the same struct decoding the helper
+// service uses to act on it, where field names match case-insensitively and
+// the last match wins. An exact-key lookup would let a payload carrying both
+// "simulatorId" and "SIMULATORID" authorize one Simulator while the operation
+// runs against the other.
 func simulatorID(payload json.RawMessage) (string, error) {
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &object); err != nil {
+	var target struct {
+		SimulatorID *string `json:"simulatorId"`
+	}
+	if err := json.Unmarshal(payload, &target); err != nil {
 		return "", err
 	}
-	raw, ok := object["simulatorId"]
-	if !ok {
+	if target.SimulatorID == nil {
 		return "", fmt.Errorf("simulatorId is missing")
 	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil || value == "" {
+	if *target.SimulatorID == "" {
 		return "", fmt.Errorf("simulatorId is invalid")
 	}
-	return value, nil
+	return *target.SimulatorID, nil
 }
 
 func denied(message string) *protocol.APIError {

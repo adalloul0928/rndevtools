@@ -1,6 +1,6 @@
 import { Host, Image } from '@expo/ui/swift-ui';
 import { frame, glassEffect, padding } from '@expo/ui/swift-ui/modifiers';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
 	Platform,
 	PlatformColor,
@@ -64,12 +64,21 @@ export function FloatingLauncher({
 	const translateY = useSharedValue(resolvedY);
 	const startX = useSharedValue(resolvedX);
 	const startY = useSharedValue(resolvedY);
+	const committedPosition = useRef<DevToolsPosition | null>(null);
 	const commitPosition = useCallback(
-		(x: number, y: number) => onPositionChange?.({ x, y }),
+		(x: number, y: number) => {
+			committedPosition.current = { x, y };
+			onPositionChange?.({ x, y });
+		},
 		[onPositionChange],
 	);
 
 	useEffect(() => {
+		const committed = committedPosition.current;
+		committedPosition.current = null;
+		// The host echoing the position a drag just committed must not restart
+		// the launcher there: that write cancels the running snap spring.
+		if (committed?.x === resolvedX && committed.y === resolvedY) return;
 		translateX.value = resolvedX;
 		translateY.value = resolvedY;
 		startX.value = resolvedX;

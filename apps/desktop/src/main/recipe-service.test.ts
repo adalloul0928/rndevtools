@@ -20,7 +20,6 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import {
-	createRecipePort,
 	type RecipeBrokerPort,
 	RecipeService,
 	type RecipeSimulatorPort,
@@ -79,7 +78,11 @@ function desktopState(udids = [UDID_ONE, UDID_TWO]): DesktopState {
 				name: `Device ${index}`,
 				platform: 'simulator',
 				simulatorUdid: udid,
-				capabilities: ['components.activate', 'network.clearProfile'],
+				capabilities: [
+					'components.activate',
+					'components.waitForElement',
+					'network.clearProfile',
+				],
 			},
 			status: 'online',
 			connectedAt: 1,
@@ -449,6 +452,105 @@ describe('RecipeService', () => {
 		});
 	});
 
+	it('spaces wait-for attempts with a timer, so failures answered at once never starve the event loop', async () => {
+		const { broker, service } = await serviceFixture(
+			definition([
+				{
+					id: 'wait-refused',
+					kind: 'wait-for',
+					timeoutMs: 600,
+					waitFor: { condition: 'component.exists', componentId: 'button' },
+				},
+			])
+		);
+		// Refused at once, as the broker does while another action is in flight.
+		broker.waitFailuresRemaining = Number.POSITIVE_INFINITY;
+		let ticks = 0;
+		const ticker = setInterval(() => {
+			ticks += 1;
+		}, 20);
+		try {
+			const receipt = await service.runRecipe({
+				actionId: 'refused-wait-run',
+				recipeId: 'service-test',
+				targetUdids: [UDID_ONE],
+			});
+			const run = await waitForTerminal(service, receipt.runId ?? '');
+			expect(run.targets[0]?.status).toBe('failed');
+			// The broker's answer or the step timeout, never a contract error.
+			expect(run.targets[0]?.message).toMatch(/Wait slice elapsed|timed out/);
+		} finally {
+			clearInterval(ticker);
+		}
+		const attempts = broker.dispatched.filter(
+			(action) => action.command === 'waitForElement'
+		).length;
+		expect(attempts).toBeGreaterThanOrEqual(2);
+		expect(attempts).toBeLessThanOrEqual(4);
+		expect(ticks).toBeGreaterThanOrEqual(10);
+	});
+
+	it('fails a wait-for step at once when the app does not advertise it or goes offline', async () => {
+		const { broker, service } = await serviceFixture(
+			definition([
+				{
+					id: 'wait-screen',
+					kind: 'wait-for',
+					timeoutMs: 60_000,
+					waitFor: { condition: 'screen.change' },
+				},
+			])
+		);
+		const unadvertised = await service.runRecipe({
+			actionId: 'unadvertised-wait-run',
+			recipeId: 'service-test',
+			targetUdids: [UDID_ONE],
+		});
+		expect(
+			(await waitForTerminal(service, unadvertised.runId ?? '')).targets[0]
+		).toMatchObject({
+			status: 'failed',
+			message:
+				'The connected app does not advertise components.waitForScreenChange.',
+		});
+		expect(broker.dispatched).toEqual([]);
+
+		await service.saveRecipe({
+			...definition([
+				{
+					id: 'wait-button',
+					kind: 'wait-for',
+					timeoutMs: 60_000,
+					waitFor: { condition: 'component.exists', componentId: 'button' },
+				},
+			]),
+			revision: 2,
+		});
+		broker.waitFailuresRemaining = Number.POSITIVE_INFINITY;
+		broker.beforeDispatch = async () => {
+			// The app disconnects while its first slice is out.
+			broker.state = {
+				...broker.state,
+				devices: broker.state.devices.map((device) => ({
+					...device,
+					status: 'offline' as const,
+				})),
+			};
+		};
+		const offline = await service.runRecipe({
+			actionId: 'offline-wait-run',
+			recipeId: 'service-test',
+			targetUdids: [UDID_ONE],
+		});
+		expect(
+			(await waitForTerminal(service, offline.runId ?? '')).targets[0]
+		).toMatchObject({
+			status: 'failed',
+			message: 'The exact connected app instance went offline.',
+		});
+		expect(broker.dispatched).toHaveLength(1);
+	});
+
 	it('resolves a fresh exact inventory and runs targets concurrently but steps sequentially', async () => {
 		const { broker, service, simulator } = await serviceFixture(
 			definition([
@@ -658,7 +760,6 @@ describe('RecipeService', () => {
 			},
 		});
 		expect(slimming.mutations).toBe(0);
-		expect(createRecipePort(service).run).toBeTypeOf('function');
 		await expect(
 			service.runRecipe({ ...request, concurrency: 1 }, { runApproved: true })
 		).resolves.toMatchObject({

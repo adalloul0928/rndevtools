@@ -556,7 +556,8 @@ private func validateGeometry(
     throw invalidPayload("cornerRadius exceeds half of the smallest image-frame dimension.")
   }
   if layout.bezel == .genericV1, min(frameWidth, contentHeight) < 64 {
-    throw invalidPayload("rndevtools-generic-v1 requires each image frame to be at least 64 pixels.")
+    throw invalidPayload(
+      "rndevtools-generic-v1 requires each image frame to be at least 64 pixels.")
   }
   if let metadata {
     let lineHeight = Int(ceil(Double(metadata.fontSize) * 1.25))

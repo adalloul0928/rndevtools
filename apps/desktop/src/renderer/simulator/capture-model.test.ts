@@ -3,6 +3,7 @@ import type { SimulatorJob } from '../../shared/simulator-protocol';
 import {
 	captureRetentionFieldsFromPolicy,
 	captureRetentionPolicyFromFields,
+	refillCaptureRetentionForm,
 	runningRecordingJobForDevice,
 } from './capture-model';
 
@@ -33,6 +34,45 @@ describe('capture retention model', () => {
 				maxTotalBytes: 25 * 1024 ** 3,
 			})
 		).toEqual({ maxAgeDays: '90', maxTotalGiB: '25' });
+	});
+});
+
+describe('capture retention form', () => {
+	const stored = { maxAgeDays: 30, maxTotalBytes: 10 * 1024 ** 3 };
+	const loaded = refillCaptureRetentionForm(
+		{ fields: { maxAgeDays: '30', maxTotalGiB: '10' } },
+		stored
+	);
+
+	it('fills the form from the first policy main reports', () => {
+		expect(
+			refillCaptureRetentionForm(
+				{ fields: { maxAgeDays: '30', maxTotalGiB: '10' } },
+				{ maxAgeDays: 90, maxTotalBytes: 25 * 1024 ** 3 }
+			).fields
+		).toEqual({ maxAgeDays: '90', maxTotalGiB: '25' });
+	});
+
+	it('keeps an unapplied edit when a new capture reloads the policy', () => {
+		const edited = {
+			...loaded,
+			fields: { ...loaded.fields, maxTotalGiB: '20' },
+		};
+		expect(refillCaptureRetentionForm(edited, stored)).toBe(edited);
+		// Typing the same value differently still counts as the operator's.
+		const retyped = {
+			...loaded,
+			fields: { ...loaded.fields, maxTotalGiB: '10.0' },
+		};
+		expect(refillCaptureRetentionForm(retyped, stored)).toBe(retyped);
+	});
+
+	it('follows the stored policy while the form is untouched', () => {
+		const changed = { maxAgeDays: 14, maxTotalBytes: 2.5 * 1024 ** 3 };
+		expect(refillCaptureRetentionForm(loaded, changed)).toEqual({
+			fields: { maxAgeDays: '14', maxTotalGiB: '2.5' },
+			filledFrom: changed,
+		});
 	});
 });
 

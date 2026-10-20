@@ -1,5 +1,4 @@
 import { Button } from '@heroui/react/button';
-import { Card } from '@heroui/react/card';
 import {
 	Activity,
 	Cpu,
@@ -14,6 +13,7 @@ import {
 	InfoPopover,
 	PanelHeader,
 	PanelNotice,
+	SectionCard,
 	StatusPill,
 } from '@/components/ui';
 import { formatDuration, formatPercent } from '@/lib/format';
@@ -48,13 +48,31 @@ function sparklinePoints(
 		.join(' ');
 }
 
+// Series palette: JS FPS is the headline metric and uses the brand green; lag,
+// CPU, and memory are distinct secondary series (amber / green / violet) so the
+// four KPIs stay visually separable. Brand is drawn from the CSS token.
+const SERIES = {
+	brand: {
+		line: 'var(--brand)',
+		tint: 'bg-(--brand-soft)',
+		text: 'text-(--brand)',
+	},
+	amber: { line: '#f4b942', tint: 'bg-amber-400/10', text: 'text-amber-300' },
+	green: { line: '#4ade80', tint: 'bg-green-400/10', text: 'text-green-300' },
+	violet: {
+		line: '#a78bfa',
+		tint: 'bg-violet-400/10',
+		text: 'text-violet-300',
+	},
+} as const;
+
 function MetricCard({
 	label,
 	value,
 	suffix,
 	icon,
 	values,
-	tone = 'blue',
+	tone = 'brand',
 	description,
 	maxValue,
 }: {
@@ -63,30 +81,13 @@ function MetricCard({
 	suffix?: string | undefined;
 	icon: React.ReactNode;
 	values: number[];
-	tone?: 'blue' | 'green' | 'amber' | 'violet';
+	tone?: keyof typeof SERIES;
 	description: string;
 	maxValue?: number;
 }) {
-	const colors = {
-		blue: { line: '#52a8ff', bg: 'bg-blue-400/10', text: 'text-blue-300' },
-		green: {
-			line: '#45d483',
-			bg: 'bg-emerald-400/10',
-			text: 'text-emerald-300',
-		},
-		amber: { line: '#f4b942', bg: 'bg-amber-400/10', text: 'text-amber-300' },
-		violet: {
-			line: '#a78bfa',
-			bg: 'bg-violet-400/10',
-			text: 'text-violet-300',
-		},
-	};
-	const color = colors[tone];
+	const color = SERIES[tone];
 	return (
-		<Card
-			className="relative overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
-			variant="secondary"
-		>
+		<div className="relative overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] p-4">
 			<div className="flex items-start justify-between gap-3">
 				<div>
 					<div className="flex items-center gap-1 text-xs text-(--text-3)">
@@ -103,7 +104,7 @@ function MetricCard({
 					</p>
 				</div>
 				<div
-					className={`grid h-8 w-8 place-items-center rounded-md ${color.bg} ${color.text}`}
+					className={`grid h-8 w-8 place-items-center rounded-md ${color.tint} ${color.text}`}
 				>
 					{icon}
 				</div>
@@ -131,7 +132,7 @@ function MetricCard({
 					vectorEffect="non-scaling-stroke"
 				/>
 			</svg>
-		</Card>
+		</div>
 	);
 }
 
@@ -175,7 +176,6 @@ export function PerformancePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Review"
 				title="Performance"
 				description="Record interactions to inspect JavaScript responsiveness. The app supplies the overall grade, including severe stalls that averages can hide. CPU and memory appear only when a native sampler reports them. Use a release build for representative measurements."
 				meta={
@@ -244,6 +244,7 @@ export function PerformancePanel() {
 						icon={<Gauge className="h-4 w-4" />}
 						values={samples.slice(-60).map((sample) => sample.jsFps)}
 						maxValue={60}
+						tone="brand"
 						description="Animation-frame cadence on the JavaScript runtime."
 					/>
 					<MetricCard
@@ -292,40 +293,23 @@ export function PerformancePanel() {
 				</div>
 
 				<div className="mb-4 grid grid-cols-[minmax(0,1.6fr)_minmax(320px,.8fr)] gap-4 max-[1120px]:grid-cols-1">
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-						variant="secondary"
-					>
-						<Card.Header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
-							<div>
-								<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
-									Interaction trace
-								</Card.Title>
-								<Card.Description className="mb-0 mt-1 text-xs text-(--text-3)">
-									JS FPS and event-loop lag over the current review
-								</Card.Description>
-							</div>
+					<SectionCard
+						title="Interaction trace"
+						actions={
 							<span className="flex items-center gap-1.5 font-mono text-xs text-(--text-3)">
 								<span
-									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-red-400' : 'bg-white/20'}`}
+									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-(--danger)' : 'bg-white/20'}`}
 								/>
 								{review?.isActive ? 'Recording' : `${samples.length} samples`}
 							</span>
-						</Card.Header>
-						<Card.Content className="p-4">
-							<PerformanceTrace samples={samples.slice(-120)} />
-						</Card.Content>
-					</Card>
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
-						variant="secondary"
+						}
 					>
-						<div className="mb-4 flex items-center gap-2">
-							<Activity className="h-4 w-4 text-blue-300" />
-							<h2 className="m-0 text-xs font-semibold text-(--foreground)">
-								Review summary
-							</h2>
-						</div>
+						<p className="m-0 mb-3 text-xs text-(--text-3)">
+							JS FPS and event-loop lag over the current review
+						</p>
+						<PerformanceTrace samples={samples.slice(-120)} />
+					</SectionCard>
+					<SectionCard icon={<Activity />} title="Review summary">
 						<div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/8 bg-white/8">
 							{[
 								['Duration', formatDuration(summary?.durationMs)],
@@ -349,61 +333,43 @@ export function PerformancePanel() {
 								</div>
 							))}
 						</div>
-					</Card>
+					</SectionCard>
 				</div>
 
 				<div className="grid grid-cols-[minmax(0,1fr)_minmax(420px,1.4fr)] gap-4 max-[1120px]:grid-cols-1">
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-						variant="secondary"
-					>
-						<Card.Header className="border-b border-white/8 px-4 py-3">
-							<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
-								Route ranking
-							</Card.Title>
-						</Card.Header>
-						<Card.Content className="p-0">
-							{routeStats.length === 0 ? (
-								<p className="m-0 p-4 text-xs leading-5 text-(--text-3)">
-									Record an interaction to compare responsiveness by route.
-								</p>
-							) : (
-								routeStats.map((route) => (
-									<div
-										className="grid grid-cols-[minmax(0,1fr)_70px_70px] items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
-										key={route.route}
-									>
-										<div className="min-w-0">
-											<p className="m-0 truncate font-mono text-xs text-(--foreground)">
-												{route.route}
-											</p>
-											<p className="mb-0 mt-1 text-xs text-(--text-3)">
-												{route.samples} samples · {route.longFrames} long frames
-											</p>
-										</div>
-										<span className="text-right font-mono text-xs text-(--muted)">
-											{route.jsFps.toFixed(1)} fps
-										</span>
-										<span
-											className={`text-right font-mono text-xs ${route.lag > 32 ? 'text-amber-300' : 'text-emerald-300'}`}
-										>
-											{route.lag.toFixed(1)} ms
-										</span>
+					<SectionCard title="Route ranking" bodyClassName="p-0">
+						{routeStats.length === 0 ? (
+							<p className="m-0 p-4 text-xs leading-5 text-(--text-3)">
+								Record an interaction to compare responsiveness by route.
+							</p>
+						) : (
+							routeStats.map((route) => (
+								<div
+									className="grid grid-cols-[minmax(0,1fr)_70px_70px] items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+									key={route.route}
+								>
+									<div className="min-w-0">
+										<p className="m-0 truncate font-mono text-xs text-(--foreground)">
+											{route.route}
+										</p>
+										<p className="mb-0 mt-1 text-xs text-(--text-3)">
+											{route.samples} samples · {route.longFrames} long frames
+										</p>
 									</div>
-								))
-							)}
-						</Card.Content>
-					</Card>
-					<Card
-						className="rounded-lg border border-white/8 bg-white/[0.025] p-0 shadow-none"
-						variant="secondary"
-					>
-						<Card.Header className="border-b border-white/8 px-4 py-3">
-							<Card.Title className="m-0 text-xs font-semibold text-(--foreground)">
-								Latest samples
-							</Card.Title>
-						</Card.Header>
-						<Card.Content className="max-h-[340px] overflow-auto p-0">
+									<span className="text-right font-mono text-xs text-(--muted)">
+										{route.jsFps.toFixed(1)} fps
+									</span>
+									<span
+										className={`text-right font-mono text-xs ${route.lag > 32 ? 'text-amber-300' : 'text-(--brand)'}`}
+									>
+										{route.lag.toFixed(1)} ms
+									</span>
+								</div>
+							))
+						)}
+					</SectionCard>
+					<SectionCard title="Latest samples" bodyClassName="p-0">
+						<div className="max-h-[340px] overflow-auto">
 							<table className="w-full border-collapse text-left">
 								<thead className="sticky top-0 bg-[#0b0b0b] text-xs uppercase tracking-[0.06em] text-(--text-3)">
 									<tr>
@@ -451,8 +417,8 @@ export function PerformancePanel() {
 									)}
 								</tbody>
 							</table>
-						</Card.Content>
-					</Card>
+						</div>
+					</SectionCard>
 				</div>
 			</div>
 		</section>
@@ -480,7 +446,7 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 		<div>
 			<div className="mb-3 flex items-center gap-4 text-xs uppercase tracking-[0.06em] text-(--text-3)">
 				<span className="flex items-center gap-1.5">
-					<span className="h-1.5 w-3 rounded-full bg-blue-400" /> JS FPS
+					<span className="h-1.5 w-3 rounded-full bg-(--brand)" /> JS FPS
 				</span>
 				<span className="flex items-center gap-1.5">
 					<span className="h-1.5 w-3 rounded-full bg-amber-400" /> Loop lag
@@ -517,7 +483,7 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 				<polyline
 					fill="none"
 					points={jsPoints}
-					stroke="#52a8ff"
+					stroke="var(--brand)"
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					strokeWidth="1.75"

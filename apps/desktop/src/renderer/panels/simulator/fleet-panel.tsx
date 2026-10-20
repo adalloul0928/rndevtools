@@ -6,19 +6,32 @@ import {
 	ChevronDown,
 	Copy,
 	Cpu,
+	DatabaseZap,
 	HardDrive,
+	LayoutGrid,
+	List,
 	MemoryStick,
 	Pencil,
 	Play,
 	Plus,
 	Power,
 	RotateCcw,
+	ScrollText,
 	Smartphone,
 	Square,
 	SquareCheckBig,
 	Trash2,
+	Waypoints,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { ControllableScreen } from '@/components/controllable-screen';
+import { DeviceScreen } from '@/components/device-screen';
+import {
+	AgentBadge,
+	AgentGlyph,
+	LaneChip,
+	SlimChip,
+} from '@/components/lane-ui';
 import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
@@ -26,14 +39,15 @@ import {
 	NoSimulatorTarget,
 	RefreshSimulatorsButton,
 	SimulatorMetric,
-	SimulatorPanelHeader,
 	TargetStatePill,
 } from '@/components/simulator-ui';
+import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	ConfirmAction,
 	Disclosure,
 	InfoPopover,
 	KeyValue,
+	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	StatusPill,
@@ -44,12 +58,31 @@ import {
 	diskInventorySelectionRevision,
 	sanitizeDiskCleanupCategoryIds,
 } from '@/simulator/disk-inventory-model';
+import {
+	buildFleetRows,
+	connectedSessionsForSimulator,
+	type FleetRow,
+	type FleetStateFilter,
+	fleetFilterCounts,
+	fleetRowMatches,
+	primaryAgent,
+	shortPath,
+} from '@/simulator/fleet-model';
+import { supabaseChipsVisible } from '@/simulator/supabase-cross-panel';
 import { targetConfig } from '@/simulator/target-config';
+import { useAgentRuntime } from '@/state/agent-runtime';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
+import { useLaneRuntime } from '@/state/lane-runtime';
 import {
 	type SimulatorActionInput,
 	useSimulatorRuntime,
 } from '@/state/simulator-runtime';
+import { useSlimmingRuntime } from '@/state/slimming-runtime';
+import {
+	useSupabaseNavigation,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
+import type { Lane, LaneView } from '../../../shared/lane-protocol';
 import type { DeviceSession } from '../../../shared/protocol';
 import type {
 	SimulatorApp,
@@ -60,8 +93,6 @@ import type {
 	SimulatorDiskInventory,
 	SimulatorRuntime,
 } from '../../../shared/simulator-protocol';
-
-type TargetFilter = 'all' | SimulatorDevice['state'];
 
 export function parseSimulatorCreateCount(value: string): number | null {
 	const trimmed = value.trim();
@@ -111,24 +142,39 @@ export function simulatorOpenPresentation(
 	};
 }
 
-export function connectedSessionsForSimulator(
-	udid: string,
-	sessions: readonly DeviceSession[]
-): DeviceSession[] {
-	const normalizedUdid = udid.toUpperCase();
-	const statusRank: Record<DeviceSession['status'], number> = {
-		online: 0,
-		simulated: 1,
-		offline: 2,
-	};
-	return sessions
-		.filter(
-			(session) => session.info.simulatorUdid?.toUpperCase() === normalizedUdid
-		)
-		.sort((left, right) => {
-			const rankDifference = statusRank[left.status] - statusRank[right.status];
-			return rankDifference || right.lastSeenAt - left.lastSeenAt;
-		});
+type FleetLayout = 'wall' | 'list';
+const FLEET_LAYOUT_KEY = 'rndevtools.desktop.fleet.layout';
+const FLEET_TILE_KEY = 'rndevtools.desktop.fleet.tile';
+export const FLEET_TILE_RANGE = { min: 140, max: 320, step: 20, default: 200 };
+
+function readStoredLayout(): FleetLayout {
+	try {
+		return window.localStorage.getItem(FLEET_LAYOUT_KEY) === 'list'
+			? 'list'
+			: 'wall';
+	} catch {
+		return 'wall';
+	}
+}
+
+export function clampFleetTile(value: number): number {
+	if (!Number.isFinite(value)) return FLEET_TILE_RANGE.default;
+	const stepped =
+		Math.round((value - FLEET_TILE_RANGE.min) / FLEET_TILE_RANGE.step) *
+			FLEET_TILE_RANGE.step +
+		FLEET_TILE_RANGE.min;
+	return Math.min(
+		FLEET_TILE_RANGE.max,
+		Math.max(FLEET_TILE_RANGE.min, stepped)
+	);
+}
+
+function readStoredTile(): number {
+	try {
+		return clampFleetTile(Number(window.localStorage.getItem(FLEET_TILE_KEY)));
+	} catch {
+		return FLEET_TILE_RANGE.default;
+	}
 }
 
 export function FleetPanel() {
@@ -141,8 +187,16 @@ export function FleetPanel() {
 		setSelectedDeviceUdid,
 		state,
 	} = useSimulatorRuntime();
+	const slimming = useSlimmingRuntime();
+	const lanes = useLaneRuntime();
+	const agents = useAgentRuntime();
+	const { state: supabase } = useSupabaseState();
+	const { openInSupabase } = useSupabaseNavigation();
+	const backendsShown = supabaseChipsVisible(supabase);
 	const [query, setQuery] = useState('');
-	const [filter, setFilter] = useState<TargetFilter>('all');
+	const [filter, setFilter] = useState<FleetStateFilter>('all');
+	const [layout, setLayout] = useState<FleetLayout>(readStoredLayout);
+	const [tile, setTile] = useState<number>(readStoredTile);
 	const [batchUdids, setBatchUdids] = useState<string[]>([]);
 	const [showCreate, setShowCreate] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
@@ -158,11 +212,38 @@ export function FleetPanel() {
 			setCreatedJobId(null);
 		}
 	}, [createdJobId, state.jobs, setSelectedDeviceUdid]);
-	const normalizedQuery = query.trim().toLowerCase();
 	const runtimeById = useMemo(
 		() =>
 			new Map(state.runtimes.map((runtime) => [runtime.identifier, runtime])),
 		[state.runtimes]
+	);
+	const rows = useMemo(
+		() =>
+			buildFleetRows({
+				devices: state.devices,
+				runtimes: state.runtimes,
+				metricsByDevice: state.metrics.byDevice,
+				slimmingByDevice: slimming.state.statusBySimulator,
+				lanes: lanes.state.lanes,
+				sessions: desktop.state?.devices ?? [],
+				agentsByDevice: agents.state.byDevice,
+				supabase,
+			}),
+		[
+			state.devices,
+			state.runtimes,
+			state.metrics.byDevice,
+			slimming.state.statusBySimulator,
+			lanes.state.lanes,
+			agents.state.byDevice,
+			desktop.state?.devices,
+			supabase,
+		]
+	);
+	const filterCounts = useMemo(() => fleetFilterCounts(rows), [rows]);
+	const rowByUdid = useMemo(
+		() => new Map(rows.map((row) => [row.device.udid, row])),
+		[rows]
 	);
 	const deviceTypeById = useMemo(
 		() =>
@@ -176,21 +257,10 @@ export function FleetPanel() {
 	);
 	const targets = useMemo(
 		() =>
-			state.devices.filter((target) => {
-				const matchesFilter = filter === 'all' ? true : target.state === filter;
-				const runtimeName =
-					runtimeById.get(target.runtimeIdentifier)?.name ?? '';
-				const deviceTypeName = target.deviceTypeIdentifier
-					? (deviceTypeById.get(target.deviceTypeIdentifier)?.name ?? '')
-					: '';
-				const matchesQuery =
-					normalizedQuery.length === 0 ||
-					`${target.name} ${runtimeName} ${deviceTypeName} ${target.udid}`
-						.toLowerCase()
-						.includes(normalizedQuery);
-				return matchesFilter && matchesQuery;
-			}),
-		[deviceTypeById, filter, normalizedQuery, runtimeById, state.devices]
+			rows
+				.filter((row) => fleetRowMatches(row, filter, query))
+				.map((row) => row.device),
+		[filter, query, rows]
 	);
 	const booted = state.devices.filter(
 		(target) => target.state === 'booted'
@@ -216,6 +286,14 @@ export function FleetPanel() {
 		[desktop.state?.devices, selectedDevice]
 	);
 
+	useEffect(() => {
+		try {
+			window.localStorage.setItem(FLEET_LAYOUT_KEY, layout);
+			window.localStorage.setItem(FLEET_TILE_KEY, String(tile));
+		} catch {
+			// Preferences are best-effort.
+		}
+	}, [layout, tile]);
 	useEffect(() => {
 		const known = new Set(state.devices.map((device) => device.udid));
 		setBatchUdids((current) => {
@@ -255,7 +333,7 @@ export function FleetPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<>
 						<RefreshSimulatorsButton compact />
@@ -272,7 +350,6 @@ export function FleetPanel() {
 					</>
 				}
 				description="Create a simulator, open it, and run your app. Select a row to inspect it, or use Select multiple for batch actions."
-				eyebrow="Targets"
 				meta={`${state.devices.length} discovered`}
 				title="Simulators"
 			/>
@@ -305,7 +382,11 @@ export function FleetPanel() {
 					}
 				/>
 				<SimulatorMetric
-					detail={`${available} usable targets`}
+					detail={
+						lanes.state.lanes.length > 0
+							? `${filterCounts['with-lane']} with a lane · ${filterCounts['with-agent']} driven by agents`
+							: `${available} usable targets`
+					}
 					icon={<Cpu className="h-3.5 w-3.5" />}
 					label="Processes"
 					value={
@@ -338,8 +419,8 @@ export function FleetPanel() {
 			</div>
 			<Toolbar>
 				<SearchControl
-					ariaLabel="Search Simulator targets"
-					placeholder="Search simulators"
+					ariaLabel="Search Simulator targets, branches, and agents"
+					placeholder="Search name, branch, :port, agent"
 					value={query}
 					onChange={setQuery}
 				/>
@@ -348,17 +429,76 @@ export function FleetPanel() {
 						aria-label="Filter targets"
 						value={filter}
 						onChange={(event) =>
-							setFilter(event.currentTarget.value as TargetFilter)
+							setFilter(event.currentTarget.value as FleetStateFilter)
 						}
 					>
-						<NativeSelect.Option value="all">All targets</NativeSelect.Option>
-						<NativeSelect.Option value="booted">Booted</NativeSelect.Option>
-						<NativeSelect.Option value="shutdown">Shutdown</NativeSelect.Option>
+						<NativeSelect.Option value="all">
+							All targets ({filterCounts.all})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="booted">
+							Booted ({filterCounts.booted})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="shutdown">
+							Shut down ({filterCounts.shutdown})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="with-lane">
+							With lane ({filterCounts['with-lane']})
+						</NativeSelect.Option>
+						<NativeSelect.Option value="with-agent">
+							With agent ({filterCounts['with-agent']})
+						</NativeSelect.Option>
+						{backendsShown || filter === 'with-backend' ? (
+							<NativeSelect.Option value="with-backend">
+								With backend ({filterCounts['with-backend']})
+							</NativeSelect.Option>
+						) : null}
 						<NativeSelect.Indicator>
 							<ChevronDown className="h-3 w-3" />
 						</NativeSelect.Indicator>
 					</NativeSelect.Trigger>
 				</NativeSelect>
+				<span className="sim-toolbar-separator" />
+				<fieldset className="sim-layout-toggle">
+					<legend className="sr-only">Fleet layout</legend>
+					<Button
+						aria-label="Show as wall of live screens"
+						aria-pressed={layout === 'wall'}
+						className="sim-icon-button"
+						isIconOnly
+						size="sm"
+						variant={layout === 'wall' ? 'secondary' : 'ghost'}
+						onPress={() => setLayout('wall')}
+					>
+						<LayoutGrid className="h-3.5 w-3.5" />
+					</Button>
+					<Button
+						aria-label="Show as list"
+						aria-pressed={layout === 'list'}
+						className="sim-icon-button"
+						isIconOnly
+						size="sm"
+						variant={layout === 'list' ? 'secondary' : 'ghost'}
+						onPress={() => setLayout('list')}
+					>
+						<List className="h-3.5 w-3.5" />
+					</Button>
+				</fieldset>
+				{layout === 'wall' ? (
+					<label className="sim-tile-size">
+						<span>Tile</span>
+						<input
+							aria-label="Tile size"
+							max={FLEET_TILE_RANGE.max}
+							min={FLEET_TILE_RANGE.min}
+							step={FLEET_TILE_RANGE.step}
+							type="range"
+							value={tile}
+							onChange={(event) =>
+								setTile(clampFleetTile(Number(event.currentTarget.value)))
+							}
+						/>
+					</label>
+				) : null}
 				{batchMode ? (
 					<>
 						<span className="sim-toolbar-separator" />
@@ -425,40 +565,57 @@ export function FleetPanel() {
 			) : (
 				<div className="sim-fleet-layout">
 					<div className="sim-list-pane">
-						<DenseVirtualList
-							ariaLabel="Simulator fleet"
-							emptyDescription="Try a different name, state, runtime, or device identifier."
-							emptyTitle="No targets match these filters"
-							items={targets}
-							getId={(target) => target.udid}
-							rowHeight={58}
-							selectedId={selectedDevice?.udid}
-							selectedIds={batchMode ? batchUdids : undefined}
-							onSelectedIdsChange={
-								batchMode ? (ids) => setBatchUdids(ids.slice(0, 20)) : undefined
-							}
-							textValue={(target) =>
-								`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
-							}
-							onSelect={(target) => setSelectedDeviceUdid(target.udid)}
-							renderItem={(target) => (
-								<>
-									{!batchMode ? (
-										<div className="sim-list-leading">
-											<Smartphone className="h-4 w-4" />
-										</div>
-									) : null}
-									<ListRowText
-										description={
-											runtimeById.get(target.runtimeIdentifier)?.name ??
-											target.runtimeIdentifier
-										}
-										title={target.name}
-									/>
-									<TargetStatePill state={target.state} />
-								</>
-							)}
-						/>
+						{layout === 'wall' && !batchMode ? (
+							<DeviceWall
+								rows={targets
+									.map((target) => rowByUdid.get(target.udid))
+									.filter((row): row is FleetRow => Boolean(row))}
+								selectedUdid={selectedDevice?.udid}
+								tile={tile}
+								onSelect={setSelectedDeviceUdid}
+							/>
+						) : (
+							<DenseVirtualList
+								ariaLabel="Simulator fleet"
+								emptyDescription="Try a different name, state, runtime, or device identifier."
+								emptyTitle="No targets match these filters"
+								items={targets}
+								getId={(target) => target.udid}
+								dependencies={[rowByUdid, runtimeById]}
+								rowHeight={64}
+								selectedId={selectedDevice?.udid}
+								selectedIds={batchMode ? batchUdids : undefined}
+								onSelectedIdsChange={
+									batchMode
+										? (ids) => setBatchUdids(ids.slice(0, 20))
+										: undefined
+								}
+								textValue={(target) =>
+									`${target.name} ${runtimeById.get(target.runtimeIdentifier)?.name ?? ''}`
+								}
+								onSelect={(target) => setSelectedDeviceUdid(target.udid)}
+								renderItem={(target) => {
+									const row = rowByUdid.get(target.udid);
+									return (
+										<>
+											{!batchMode ? (
+												<div className="sim-list-leading">
+													{row && primaryAgent(row) ? (
+														<AgentGlyph
+															kind={primaryAgent(row)?.kind ?? 'other'}
+														/>
+													) : (
+														<Smartphone className="h-4 w-4" />
+													)}
+												</div>
+											) : null}
+											<FleetRowText row={row} target={target} />
+											<FleetRowTrailing row={row} target={target} />
+										</>
+									);
+								}}
+							/>
+						)}
 					</div>
 					<div className="sim-detail-pane panel-scroll">
 						{selectedDevice ? (
@@ -466,6 +623,38 @@ export function FleetPanel() {
 								connectedSessions={associatedSessions}
 								key={selectedDevice.udid}
 								isBridgeAvailable={isBridgeAvailable}
+								lane={rowByUdid.get(selectedDevice.udid)?.lane}
+								backend={rowByUdid.get(selectedDevice.udid)?.backend}
+								onOpenInSupabase={(stackId) =>
+									openInSupabase(stackId === undefined ? {} : { stackId })
+								}
+								attachedAgents={
+									rowByUdid.get(selectedDevice.udid)?.agents ?? []
+								}
+								laneBusy={lanes.pendingOperation !== null}
+								onLaneLaunch={(lane) =>
+									void lanes.runOperation(
+										{ kind: 'lane.launch', laneId: lane.id },
+										{
+											pendingMessage: `Waiting for Metro on :${lane.port}…`,
+											successMessage: `${lane.branch} launched.`,
+										}
+									)
+								}
+								onLaneStop={(lane) =>
+									void lanes.runOperation(
+										{ kind: 'lane.stop', laneId: lane.id },
+										{ successMessage: `Lane ${lane.branch} stopped.` }
+									)
+								}
+								onOpenLanes={(laneId) => {
+									if (laneId === undefined) {
+										window.location.hash = 'simulator/lanes';
+									} else {
+										lanes.focusLane(laneId);
+									}
+								}}
+								slim={rowByUdid.get(selectedDevice.udid)?.slim}
 								target={selectedDevice}
 								runtime={runtimeById.get(selectedDevice.runtimeIdentifier)}
 								deviceTypeName={
@@ -540,17 +729,188 @@ export function FleetPanel() {
 	);
 }
 
-function ListRowText({
-	title,
-	description,
+/**
+ * The wall: every Simulator as a live tile, busiest first. Tiles stream only
+ * while on screen (IntersectionObserver), the selected tile gets the focus
+ * profile, and the tile slider sets the column width.
+ */
+function DeviceWall({
+	rows,
+	selectedUdid,
+	tile,
+	onSelect,
 }: {
-	title: string;
-	description: string;
+	rows: readonly FleetRow[];
+	selectedUdid: string | undefined;
+	tile: number;
+	onSelect: (udid: string) => void;
+}) {
+	if (rows.length === 0) {
+		return (
+			<div className="sim-list-empty">
+				<strong>No targets match these filters</strong>
+				<span>Try a different name, state, branch, or agent.</span>
+			</div>
+		);
+	}
+	return (
+		<ul
+			className="device-wall panel-scroll"
+			aria-label="Simulator wall"
+			style={{ '--tile': `${tile}px` } as React.CSSProperties}
+		>
+			{rows.map((row) => {
+				const selected = row.device.udid === selectedUdid;
+				return (
+					<li
+						key={row.device.udid}
+						className={`device-tile ${selected ? 'is-selected' : ''} ${row.live ? 'is-live' : ''}`}
+					>
+						<DeviceScreen
+							className="device-tile-screen"
+							live={row.live}
+							name={row.device.name}
+							quality="tile"
+							udid={row.device.udid}
+							onActivate={() => onSelect(row.device.udid)}
+						/>
+						<button
+							type="button"
+							className="device-tile-body"
+							aria-current={selected ? 'true' : undefined}
+							onClick={() => onSelect(row.device.udid)}
+						>
+							<span className="device-tile-title">
+								{primaryAgent(row) ? (
+									<AgentGlyph kind={primaryAgent(row)?.kind ?? 'other'} />
+								) : null}
+								<strong className="device-tile-name">{row.device.name}</strong>
+								<span
+									className={`device-tile-dot ${row.live ? 'is-live' : row.transitioning ? 'is-transitioning' : ''}`}
+									aria-hidden="true"
+								/>
+								<span className="sr-only">{row.device.state}</span>
+							</span>
+							<span className="device-tile-meta">
+								<span className="sim-list-subtitle-item">
+									{row.runtimeName}
+								</span>
+								{row.memoryBytes !== undefined ? (
+									<>
+										<span aria-hidden="true">·</span>
+										<span className="sim-list-memory">
+											{formatBytes(row.memoryBytes)}
+										</span>
+									</>
+								) : null}
+							</span>
+							<span className="device-tile-chips">
+								{row.lane ? <LaneChip lane={row.lane} compact /> : null}
+								{row.backend ? (
+									<SupabaseChip summary={row.lane?.backend} />
+								) : null}
+								{row.live && row.slim.level !== 'unknown' ? (
+									<SlimChip slim={row.slim} />
+								) : null}
+							</span>
+							{row.lane ? (
+								<code
+									className="device-tile-branch"
+									title={row.lane.worktreePath}
+								>
+									{row.lane.branch}
+								</code>
+							) : null}
+						</button>
+					</li>
+				);
+			})}
+		</ul>
+	);
+}
+
+/**
+ * A row's two lines. With a backend chip the trailing cluster no longer fits
+ * at 1080 px and below, so there the chips move to line 2 and the state pill
+ * joins the name on line 1 (styles.css, Supabase in other panels).
+ */
+function FleetRowText({
+	row,
+	target,
+}: {
+	row: FleetRow | undefined;
+	target: SimulatorDevice;
+}) {
+	const backend = row?.backend;
+	return (
+		<div className={`sim-list-copy ${backend ? 'fleet-row-copy' : ''}`}>
+			{backend ? (
+				<span className="fleet-row-line">
+					<strong className="fleet-row-name">{target.name}</strong>
+					<span className="fleet-row-narrow">
+						<TargetStatePill state={target.state} />
+					</span>
+				</span>
+			) : (
+				<strong>{target.name}</strong>
+			)}
+			{backend && row ? (
+				<span className="fleet-row-chips fleet-row-narrow">
+					{row.lane ? <LaneChip lane={row.lane} compact /> : null}
+					<SupabaseChip summary={row.lane?.backend} />
+					{row.live && row.slim.level !== 'unknown' ? (
+						<SlimChip slim={row.slim} />
+					) : null}
+				</span>
+			) : null}
+			<span className={`sim-list-subtitle ${backend ? 'fleet-row-wide' : ''}`}>
+				<span className="sim-list-subtitle-item">
+					{row?.runtimeName ?? target.runtimeIdentifier}
+				</span>
+				{row?.memoryBytes !== undefined ? (
+					<>
+						<span aria-hidden="true">·</span>
+						<span
+							className="sim-list-subtitle-item sim-list-memory"
+							title={`${row.processCount ?? '?'} processes · physical footprint of the Simulator process tree`}
+						>
+							{formatBytes(row.memoryBytes)}
+						</span>
+					</>
+				) : null}
+				{row?.lane ? (
+					<>
+						<span aria-hidden="true">·</span>
+						<code
+							className="sim-list-subtitle-item sim-list-branch"
+							title={row.lane.worktreePath}
+						>
+							{row.lane.branch}
+						</code>
+					</>
+				) : null}
+			</span>
+		</div>
+	);
+}
+
+function FleetRowTrailing({
+	row,
+	target,
+}: {
+	row: FleetRow | undefined;
+	target: SimulatorDevice;
 }) {
 	return (
-		<div className="sim-list-copy">
-			<strong>{title}</strong>
-			<span>{description}</span>
+		<div
+			className={`sim-list-trailing ${row?.backend ? 'fleet-row-wide' : ''}`}
+		>
+			{row?.lane ? <LaneChip lane={row.lane} compact /> : null}
+			{row?.backend ? <SupabaseChip summary={row.lane?.backend} /> : null}
+			{row?.live && row.slim.level !== 'unknown' ? (
+				<SlimChip slim={row.slim} />
+			) : null}
+			<TargetStatePill state={target.state} />
 		</div>
 	);
 }
@@ -744,8 +1104,17 @@ function TargetDetail({
 	metrics,
 	connectedSessions,
 	isBridgeAvailable,
+	lane,
+	backend,
+	attachedAgents,
+	laneBusy,
+	slim,
 	onRunAction,
 	onOpenConnectedSession,
+	onLaneLaunch,
+	onLaneStop,
+	onOpenLanes,
+	onOpenInSupabase,
 }: {
 	target: SimulatorDevice;
 	runtime: SimulatorRuntime | undefined;
@@ -755,8 +1124,18 @@ function TargetDetail({
 	metrics: SimulatorDeviceMetrics | undefined;
 	connectedSessions: DeviceSession[];
 	isBridgeAvailable: boolean;
+	lane: LaneView | undefined;
+	backend: FleetRow['backend'];
+	attachedAgents: FleetRow['agents'];
+	laneBusy: boolean;
+	slim: FleetRow['slim'] | undefined;
 	onRunAction: (action: SimulatorActionInput, successMessage: string) => void;
 	onOpenConnectedSession: (deviceId: string) => void;
+	onLaneLaunch: (lane: Lane) => void;
+	onLaneStop: (lane: Lane) => void;
+	/** Opens Lanes on this lane, or on the start form without one. */
+	onOpenLanes: (laneId?: string) => void;
+	onOpenInSupabase: (stackId?: string) => void;
 }) {
 	const [renameName, setRenameName] = useState(target.name);
 	const [cloneName, setCloneName] = useState(`${target.name} Copy`);
@@ -779,8 +1158,27 @@ function TargetDetail({
 					<h2>{target.name}</h2>
 					<span>{deviceTypeName ?? 'iOS Simulator'}</span>
 				</div>
-				<TargetStatePill state={target.state} />
+				<div className="sim-detail-heading-pills">
+					{slim && target.state === 'booted' && slim.level !== 'unknown' ? (
+						<SlimChip slim={slim} />
+					) : null}
+					<TargetStatePill state={target.state} />
+				</div>
 			</div>
+			<Disclosure defaultOpen title="Live screen">
+				<div className="sim-focus-screen">
+					<ControllableScreen
+						live={target.state === 'booted'}
+						name={target.name}
+						udid={target.udid}
+					/>
+					<p className="sim-inline-note">
+						Frames come from bounded <code>simctl io screenshot</code> polling,
+						about four a second for this view and one a second per wall tile.
+						Nothing is recorded; the view pauses when the window is unfocused.
+					</p>
+				</div>
+			</Disclosure>
 			<div className="sim-action-row">
 				<Button
 					isDisabled={!openPresentation.allowed}
@@ -855,6 +1253,100 @@ function TargetDetail({
 					/>
 				</dl>
 			</Disclosure>
+			<section className="sim-detail-section">
+				<div className="sim-section-heading">
+					<div>
+						<h3>Lane</h3>
+						<InfoPopover label="Lanes">
+							A lane runs one worktree on this Simulator with its own Metro
+							port, so several branches and agents can work in parallel.
+						</InfoPopover>
+					</div>
+					<Waypoints className="h-3.5 w-3.5" />
+				</div>
+				{attachedAgents.length > 0 ? (
+					<ul className="sim-agent-list">
+						{attachedAgents.map((agent) => (
+							<li
+								key={`${agent.kind}:${agent.sessionId}`}
+								className="sim-agent-row"
+							>
+								<AgentBadge
+									agent={{ ...agent, lastSeenAt: agent.lastSeenAt }}
+								/>
+								<span className="sim-inline-note">
+									{agent.title} · {agent.via}
+									{agent.live ? '' : ' · session gone'}
+									{agent.note ? ` · ${agent.note}` : ''}
+								</span>
+							</li>
+						))}
+					</ul>
+				) : null}
+				{lane ? (
+					<div className="sim-lane-section">
+						<div className="sim-lane-summary">
+							<LaneChip lane={lane} />
+							{lane.agent ? <AgentBadge agent={lane.agent} /> : null}
+						</div>
+						<p className="sim-inline-note" title={lane.worktreePath}>
+							{shortPath(lane.worktreePath)} · Metro http://127.0.0.1:
+							{lane.port}
+							{lane.metroPid ? ` · pid ${lane.metroPid}` : ''}
+						</p>
+						{backend ? (
+							<div className="sim-lane-backend">
+								<span className="sim-lane-backend-label">Backend</span>
+								<SupabaseChip summary={lane.backend} />
+								<span className="sim-lane-backend-line">{backend.line}</span>
+								<Button
+									aria-label={`Open the backend of ${lane.branch} in Supabase`}
+									size="sm"
+									variant="ghost"
+									onPress={() => onOpenInSupabase(backend.stackId)}
+								>
+									<DatabaseZap className="h-3.5 w-3.5" /> Open in Supabase
+								</Button>
+							</div>
+						) : null}
+						<div className="sim-action-row">
+							<Button
+								isDisabled={
+									laneBusy || lane.metro === 'stopped' || !lane.scheme
+								}
+								size="sm"
+								variant="primary"
+								onPress={() => onLaneLaunch(lane)}
+							>
+								<Play className="h-3.5 w-3.5" /> Launch app
+							</Button>
+							<Button
+								size="sm"
+								variant="secondary"
+								onPress={() => onOpenLanes(lane.id)}
+							>
+								<ScrollText className="h-3.5 w-3.5" /> Open in Lanes
+							</Button>
+							<ConfirmAction
+								confirmLabel="Stop lane"
+								description={`Metro on port ${lane.port} stops and ${target.name} is released for another worktree.`}
+								isDisabled={laneBusy}
+								title={`Stop lane ${lane.branch}?`}
+								triggerIcon={<Square className="h-3.5 w-3.5" />}
+								triggerLabel="Stop lane"
+								onConfirm={() => onLaneStop(lane)}
+							/>
+						</div>
+					</div>
+				) : (
+					<div className="sim-lane-section">
+						<p className="sim-section-empty">No lane runs on this Simulator.</p>
+						<Button size="sm" variant="secondary" onPress={() => onOpenLanes()}>
+							<Waypoints className="h-3.5 w-3.5" /> Start a lane here
+						</Button>
+					</div>
+				)}
+			</section>
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>

@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/adalloul0928/rndevtools-cli/internal/protocol"
@@ -251,8 +252,8 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
 			return err
 		}
-		if !oneOf(value.Operation, "status", "preview", "doctor", "verify") {
-			return errors.New("slimming operation must be status, preview, doctor, or verify")
+		if !oneOf(value.Operation, "status", "preview", "doctor", "verify", "apply", "undo", "restore") {
+			return errors.New("slimming operation must be status, preview, doctor, verify, apply, undo, or restore")
 		}
 		if err := validateUDIDs(value.UDIDs); err != nil {
 			return err
@@ -263,23 +264,341 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 				return errors.New("slimming status does not accept udids or profileId")
 			}
 			return nil
-		case "doctor":
+		case "doctor", "undo", "restore":
 			if len(value.UDIDs) == 0 {
-				return errors.New("slimming doctor requires udids")
+				return fmt.Errorf("slimming %s requires udids", value.Operation)
 			}
 			if value.ProfileID != nil {
-				return errors.New("slimming doctor inspects current state and does not accept profileId")
+				return fmt.Errorf("slimming %s does not accept profileId", value.Operation)
 			}
 			return nil
 		default:
 			if len(value.UDIDs) == 0 || value.ProfileID == nil {
-				return errors.New("slimming preview and verify require udids and profileId")
+				return errors.New("slimming preview, verify, and apply require udids and profileId")
 			}
 			return validateIdentifier(*value.ProfileID, "profileId")
 		}
+	case protocol.CommandLane:
+		var value struct {
+			Kind          string             `json:"kind"`
+			Operation     string             `json:"operation"`
+			WorktreePath  *string            `json:"worktreePath,omitempty"`
+			UDID          *string            `json:"udid,omitempty"`
+			Environment   *string            `json:"environment,omitempty"`
+			PreferredPort *int               `json:"preferredPort,omitempty"`
+			Launch        *bool              `json:"launch,omitempty"`
+			SlimProfileID *string            `json:"slimProfileId,omitempty"`
+			LaneID        *string            `json:"laneId,omitempty"`
+			URL           *string            `json:"url,omitempty"`
+			MaxCharacters *int               `json:"maxCharacters,omitempty"`
+			Agent         *map[string]string `json:"agent,omitempty"`
+			// Backend is the worktree's local Supabase policy for up.
+			Backend *string `json:"backend,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if value.Backend != nil {
+			if value.Operation != "up" {
+				return errors.New("only lane up accepts backend")
+			}
+			if !oneOf(*value.Backend, "auto", "off", "required") {
+				return errors.New("backend must be auto, off, or required")
+			}
+		}
+		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
+			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+	case protocol.CommandSupabase:
+		var value supabaseCommand
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		return value.validate()
+	case protocol.CommandAgents:
+		var value struct {
+			Kind string `json:"kind"`
+		}
+		return decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind))
+	case protocol.CommandClaim, protocol.CommandRelease:
+		var value struct {
+			Kind string  `json:"kind"`
+			UDID *string `json:"udid,omitempty"`
+			Note *string `json:"note,omitempty"`
+			All  *bool   `json:"all,omitempty"`
+			// SessionCwd is the ending session's working directory, which the
+			// session-end hook sends with all so the desktop can release
+			// worktree holds recorded under a shared MCP identity.
+			SessionCwd *string `json:"sessionCwd,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if value.SessionCwd != nil {
+			if expectedKind != protocol.CommandRelease {
+				return errors.New("claim does not accept sessionCwd")
+			}
+			if value.All == nil {
+				return errors.New("sessionCwd is accepted only with all")
+			}
+			if !validAbsolutePath(*value.SessionCwd) {
+				return errors.New("sessionCwd must be an absolute path")
+			}
+		}
+		if value.All != nil {
+			if expectedKind != protocol.CommandRelease {
+				return errors.New("claim does not accept all")
+			}
+			if value.UDID != nil {
+				return errors.New("release takes exactly one of udid or all")
+			}
+			if !*value.All {
+				return errors.New("all must be true when given")
+			}
+			return nil
+		}
+		if value.UDID == nil {
+			if expectedKind == protocol.CommandRelease {
+				return errors.New("release requires udid or all")
+			}
+			return fmt.Errorf("%s requires udid", expectedKind)
+		}
+		if err := validateUDID(*value.UDID); err != nil {
+			return err
+		}
+		if value.Note != nil {
+			if expectedKind == protocol.CommandRelease {
+				return errors.New("release does not accept note")
+			}
+			if utf8.RuneCountInString(*value.Note) > 4096 {
+				return errors.New("note must be at most 4096 characters")
+			}
+		}
+		return nil
+	case protocol.CommandInput:
+		var value struct {
+			Kind  string `json:"kind"`
+			Input *struct {
+				Kind                 string   `json:"kind"`
+				UDID                 string   `json:"udid"`
+				X                    *float64 `json:"x,omitempty"`
+				Y                    *float64 `json:"y,omitempty"`
+				FromX                *float64 `json:"fromX,omitempty"`
+				FromY                *float64 `json:"fromY,omitempty"`
+				ToX                  *float64 `json:"toX,omitempty"`
+				ToY                  *float64 `json:"toY,omitempty"`
+				HoldMilliseconds     *int     `json:"holdMilliseconds,omitempty"`
+				DurationMilliseconds *int     `json:"durationMilliseconds,omitempty"`
+				Steps                *int     `json:"steps,omitempty"`
+				Text                 *string  `json:"text,omitempty"`
+				Usage                *int     `json:"usage,omitempty"`
+				Modifiers            []string `json:"modifiers,omitempty"`
+				Button               *string  `json:"button,omitempty"`
+			} `json:"input"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if value.Input == nil {
+			return errors.New("input requires --udid and --kind")
+		}
+		return validateSimulatorInput(value.Input.Kind, value.Input.UDID, value.Input.X, value.Input.Y,
+			value.Input.FromX, value.Input.FromY, value.Input.ToX, value.Input.ToY,
+			value.Input.HoldMilliseconds, value.Input.DurationMilliseconds, value.Input.Steps,
+			value.Input.Text, value.Input.Usage, value.Input.Modifiers, value.Input.Button)
+	case protocol.CommandNative:
+		var value struct {
+			Kind          string  `json:"kind"`
+			Operation     string  `json:"operation"`
+			WorktreePath  *string `json:"worktreePath,omitempty"`
+			UDID          *string `json:"udid,omitempty"`
+			Configuration *string `json:"configuration,omitempty"`
+		}
+		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
+			return err
+		}
+		if !oneOf(value.Operation, "plan", "install") {
+			return errors.New("native operation must be plan or install")
+		}
+		if value.WorktreePath == nil || !validAbsolutePath(*value.WorktreePath) {
+			return errors.New("native requires an absolute worktreePath")
+		}
+		if value.UDID != nil {
+			if err := validateUDID(*value.UDID); err != nil {
+				return err
+			}
+		} else if value.Operation == "install" {
+			return errors.New("native install requires udid")
+		}
+		if value.Configuration != nil && !oneOf(*value.Configuration, "Debug", "Release") {
+			return errors.New("configuration must be Debug or Release")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported command %q", expectedKind)
 	}
+}
+
+var (
+	laneIDPattern          = regexp.MustCompile(`(?i)^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+	laneEnvironmentPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+)
+
+func validateLane(
+	operation string,
+	worktreePath, udid, environment *string,
+	preferredPort *int,
+	launch *bool,
+	slimProfileID, laneID, url *string,
+	maxCharacters *int,
+	agent *map[string]string,
+) error {
+	if !oneOf(operation, "up", "down", "ls", "launch", "log") {
+		return errors.New("lane operation must be up, down, ls, launch, or log")
+	}
+	if worktreePath != nil && !validAbsolutePath(*worktreePath) {
+		return errors.New("worktreePath must be an absolute path")
+	}
+	if udid != nil {
+		if err := validateUDID(*udid); err != nil {
+			return err
+		}
+	}
+	if environment != nil && !laneEnvironmentPattern.MatchString(*environment) {
+		return errors.New("environment must be a lowercase slug")
+	}
+	if preferredPort != nil && (*preferredPort < 1024 || *preferredPort > 65535) {
+		return errors.New("preferredPort must be between 1024 and 65535")
+	}
+	if slimProfileID != nil {
+		if err := validateIdentifier(*slimProfileID, "slimProfileId"); err != nil {
+			return err
+		}
+	}
+	if laneID != nil && !laneIDPattern.MatchString(*laneID) {
+		return errors.New("laneId is invalid")
+	}
+	if url != nil && (len(*url) == 0 || utf8.RuneCountInString(*url) > 2048) {
+		return errors.New("url must contain 1..2048 characters")
+	}
+	if maxCharacters != nil && (*maxCharacters < 256 || *maxCharacters > 64000) {
+		return errors.New("maxCharacters must be between 256 and 64000")
+	}
+	if agent != nil {
+		kind := (*agent)["kind"]
+		if !oneOf(kind, "claude", "codex", "other") {
+			return errors.New("agent kind must be claude, codex, or other")
+		}
+		if err := validateIdentifier((*agent)["sessionId"], "agent.sessionId"); err != nil {
+			return err
+		}
+		if len(*agent) != 2 {
+			return errors.New("agent accepts only kind and sessionId")
+		}
+	}
+	targetsLane := (laneID != nil) != (worktreePath != nil)
+	switch operation {
+	case "up":
+		if worktreePath == nil {
+			return errors.New("lane up requires worktreePath")
+		}
+		if laneID != nil || url != nil || maxCharacters != nil {
+			return errors.New("lane up does not accept laneId, url, or maxCharacters")
+		}
+	case "ls":
+		if worktreePath != nil || udid != nil || environment != nil || preferredPort != nil ||
+			launch != nil || slimProfileID != nil || laneID != nil || url != nil || maxCharacters != nil || agent != nil {
+			return errors.New("lane ls does not accept other fields")
+		}
+	case "down":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || maxCharacters != nil || agent != nil {
+			return errors.New("lane down takes exactly one of laneId or worktreePath")
+		}
+	case "launch":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || maxCharacters != nil {
+			return errors.New("lane launch takes exactly one of laneId or worktreePath, plus an optional url")
+		}
+	case "log":
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || agent != nil {
+			return errors.New("lane log takes exactly one of laneId or worktreePath, plus an optional maxCharacters")
+		}
+	}
+	return nil
+}
+
+func ratioOK(value *float64) bool {
+	return value != nil && *value >= 0 && *value <= 1
+}
+
+func validateSimulatorInput(
+	kind, udid string,
+	x, y, fromX, fromY, toX, toY *float64,
+	hold, duration, steps *int,
+	text *string, usage *int, modifiers []string, button *string,
+) error {
+	if err := validateUDID(udid); err != nil {
+		return err
+	}
+	coords := x != nil || y != nil
+	swipeCoords := fromX != nil || fromY != nil || toX != nil || toY != nil
+	switch kind {
+	case "tap":
+		if !ratioOK(x) || !ratioOK(y) {
+			return errors.New("tap requires --x and --y between 0 and 1")
+		}
+		if hold != nil && (*hold < 0 || *hold > 10000) {
+			return errors.New("hold-ms must be between 0 and 10000")
+		}
+		if swipeCoords || duration != nil || steps != nil || text != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("tap accepts only --x, --y, and --hold-ms")
+		}
+	case "swipe":
+		if !ratioOK(fromX) || !ratioOK(fromY) || !ratioOK(toX) || !ratioOK(toY) {
+			return errors.New("swipe requires --from-x, --from-y, --to-x, and --to-y between 0 and 1")
+		}
+		if duration != nil && (*duration < 1 || *duration > 10000) {
+			return errors.New("duration-ms must be between 1 and 10000")
+		}
+		if steps != nil && (*steps < 2 || *steps > 120) {
+			return errors.New("steps must be between 2 and 120")
+		}
+		if coords || hold != nil || text != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("swipe accepts only its coordinates, --duration-ms, and --steps")
+		}
+	case "text":
+		if text == nil || *text == "" || utf8.RuneCountInString(*text) > 2048 {
+			return errors.New("text requires --text with 1..2048 characters")
+		}
+		for _, r := range *text {
+			if !(r == '\n' || r == '\t' || (r >= 0x20 && r <= 0x7e)) {
+				return errors.New("text must be printable ASCII (plus newline and tab)")
+			}
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || usage != nil || modifiers != nil || button != nil {
+			return errors.New("text accepts only --text")
+		}
+	case "key":
+		if usage == nil || *usage < 0x04 || *usage > 0xE7 {
+			return errors.New("key requires --usage, a USB HID keyboard usage between 4 and 231")
+		}
+		for _, modifier := range modifiers {
+			if !oneOf(modifier, "shift", "control", "option", "command") {
+				return errors.New("modifiers may only contain shift, control, option, and command")
+			}
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || text != nil || button != nil {
+			return errors.New("key accepts only --usage and --modifiers")
+		}
+	case "button":
+		if button == nil || !oneOf(*button, "home", "lock", "siri", "volume-up", "volume-down", "apple-pay") {
+			return errors.New("button requires --button: home, lock, siri, volume-up, volume-down, or apple-pay")
+		}
+		if coords || swipeCoords || hold != nil || duration != nil || steps != nil || text != nil || usage != nil || modifiers != nil {
+			return errors.New("button accepts only --button")
+		}
+	default:
+		return errors.New("input kind must be tap, swipe, text, key, or button")
+	}
+	return nil
 }
 
 func rejectUnsupportedNulls(encoded json.RawMessage, kind protocol.Command) error {
@@ -405,8 +724,19 @@ func (condition WaitCondition) validate() error {
 	}
 }
 
+// validAbsolutePath is the path shape the desktop accepts for worktrees and
+// working directories: absolute, 2..1024 bytes, no NUL.
+func validAbsolutePath(value string) bool {
+	return strings.HasPrefix(value, "/") && len(value) >= 2 && len(value) <= 1024 && !strings.ContainsRune(value, 0)
+}
+
+// ValidUDID reports whether value has the shape of a Simulator UDID.
+func ValidUDID(value string) bool {
+	return udidPattern.MatchString(value)
+}
+
 func validateUDID(value string) error {
-	if !udidPattern.MatchString(value) {
+	if !ValidUDID(value) {
 		return errors.New("udid is invalid")
 	}
 	return nil
@@ -456,4 +786,170 @@ func oneOf(value string, allowed ...string) bool {
 		}
 	}
 	return false
+}
+
+// supabaseCommand is `rndevtools supabase` on the wire, mirroring the
+// desktop's agent CLI schema field for field: one operation, the worktree or
+// stack it acts on, and that operation's own options. The agent's identity
+// rides on the request envelope only, never in the command.
+type supabaseCommand struct {
+	Kind         string    `json:"kind"`
+	Operation    string    `json:"operation"`
+	WorktreePath *string   `json:"worktreePath,omitempty"`
+	StackID      *string   `json:"stackId,omitempty"`
+	WaitMS       *int      `json:"waitMs,omitempty"`
+	Seed         *bool     `json:"seed,omitempty"`
+	Services     *[]string `json:"services,omitempty"`
+	Tail         *int      `json:"tail,omitempty"`
+	Since        *string   `json:"since,omitempty"`
+	Note         *string   `json:"note,omitempty"`
+}
+
+const (
+	supabaseMaxWaitMS      = 45_000
+	supabaseMaxLogServices = 16
+	supabaseMaxTail        = 1_000
+	supabaseMaxSinceLength = 64
+	supabaseMaxNoteLength  = 240
+)
+
+var (
+	supabaseStackIDPattern  = regexp.MustCompile(`^[0-9a-f]{8,64}$`)
+	supabaseInstancePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	supabaseDurationPattern = regexp.MustCompile(`^(?:\d{1,6}(?:\.\d{1,3})?(?:ms|s|m|h|d)){1,6}$`)
+	supabaseInstantPattern  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$`)
+	// supabaseLogServices are the service kinds a log read may name, plus the
+	// API gateway; instance ids (lowercase UUIDs) are accepted too.
+	supabaseLogServices = map[string]struct{}{
+		"database": {}, "rest": {}, "auth": {}, "realtime": {}, "storage": {},
+		"imgproxy": {}, "functions": {}, "studio": {}, "pgmeta": {}, "mail": {},
+		"analytics": {}, "pooler": {}, "gateway": {},
+	}
+)
+
+// validate applies the desktop's per-operation rules: ls takes no target,
+// every other operation exactly one of worktreePath or stackId, and each
+// option belongs to the one operation that reads it.
+func (value supabaseCommand) validate() error {
+	operation := value.Operation
+	if !oneOf(operation, "up", "down", "ls", "status", "env", "reset", "log", "destroy") {
+		return errors.New("supabase operation must be up, down, ls, status, env, reset, log, or destroy")
+	}
+	if value.WorktreePath != nil && !validControlFreePath(*value.WorktreePath) {
+		return errors.New("worktreePath must be an absolute path")
+	}
+	if value.StackID != nil && !supabaseStackIDPattern.MatchString(*value.StackID) {
+		return errors.New("stackId must be 8 to 64 lowercase hex characters")
+	}
+	if operation == "ls" {
+		if value.WorktreePath != nil || value.StackID != nil {
+			return errors.New("supabase ls lists every stack and takes no worktreePath or stackId")
+		}
+	} else if (value.WorktreePath == nil) == (value.StackID == nil) {
+		return fmt.Errorf("supabase %s takes exactly one of worktreePath or stackId", operation)
+	}
+	if value.WaitMS != nil {
+		if operation != "up" {
+			return errors.New("only supabase up accepts waitMs")
+		}
+		if *value.WaitMS < 0 || *value.WaitMS > supabaseMaxWaitMS {
+			return fmt.Errorf("waitMs must be between 0 and %d", supabaseMaxWaitMS)
+		}
+	}
+	if value.Seed != nil && operation != "reset" {
+		return errors.New("only supabase reset accepts seed")
+	}
+	if (value.Services != nil || value.Tail != nil || value.Since != nil) && operation != "log" {
+		return errors.New("only supabase log accepts services, tail, and since")
+	}
+	if value.Services != nil {
+		if err := validateLogServices(*value.Services); err != nil {
+			return err
+		}
+	}
+	if value.Tail != nil && (*value.Tail < 1 || *value.Tail > supabaseMaxTail) {
+		return fmt.Errorf("tail must be between 1 and %d", supabaseMaxTail)
+	}
+	if value.Since != nil && !validLogSince(*value.Since) {
+		return errors.New("since must be start, a duration such as 10m, or an ISO-8601 time")
+	}
+	if value.Note != nil {
+		if operation != "destroy" && operation != "reset" {
+			return errors.New("only supabase destroy and reset accept note")
+		}
+		if utf16Length(*value.Note) > supabaseMaxNoteLength {
+			return fmt.Errorf("note must be at most %d characters", supabaseMaxNoteLength)
+		}
+	}
+	return nil
+}
+
+func validateLogServices(services []string) error {
+	if len(services) == 0 || len(services) > supabaseMaxLogServices {
+		return fmt.Errorf("services must name between 1 and %d services", supabaseMaxLogServices)
+	}
+	seen := make(map[string]struct{}, len(services))
+	for _, service := range services {
+		if _, known := supabaseLogServices[service]; !known && !supabaseInstancePattern.MatchString(service) {
+			return fmt.Errorf("unknown log service %q: name a service kind, gateway, or an instance id", service)
+		}
+		if _, duplicate := seen[service]; duplicate {
+			return fmt.Errorf("log service %q is named twice", service)
+		}
+		seen[service] = struct{}{}
+	}
+	return nil
+}
+
+// validLogSince accepts what the desktop does: `start`, a CLI duration, or
+// an ISO-8601 time that names a real instant.
+func validLogSince(value string) bool {
+	if len(value) > supabaseMaxSinceLength {
+		return false
+	}
+	if value == "start" || supabaseDurationPattern.MatchString(value) {
+		return true
+	}
+	if !supabaseInstantPattern.MatchString(value) {
+		return false
+	}
+	// time.Parse takes a +24:00 offset that the desktop's parser refuses.
+	if offset := value[len(value)-6:]; offset[0] == '+' || offset[0] == '-' {
+		if offset[1:3] > "23" || offset[4:6] > "59" {
+			return false
+		}
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04Z07:00"} {
+		if _, err := time.Parse(layout, value); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// validControlFreePath is validAbsolutePath without control characters,
+// the stricter path shape the desktop's Supabase schemas accept.
+func validControlFreePath(value string) bool {
+	if !validAbsolutePath(value) {
+		return false
+	}
+	for _, character := range value {
+		if character <= 0x1f || (character >= 0x7f && character <= 0x9f) {
+			return false
+		}
+	}
+	return true
+}
+
+// utf16Length is a string's length as the desktop's validators count it,
+// in UTF-16 code units.
+func utf16Length(value string) int {
+	length := 0
+	for _, character := range value {
+		length++
+		if character > 0xffff {
+			length++
+		}
+	}
+	return length
 }

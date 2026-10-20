@@ -23,9 +23,6 @@ func TestExperimentalFoundationHasNoVerifiedMutationTuples(t *testing.T) {
 	if tuples := VerifiedTuples(); len(tuples) != 0 {
 		t.Fatalf("mutation tuples require real-simulator evidence: %#v", tuples)
 	}
-	if IsVerified(validTestTuple("com.apple.CoreSimulator.SimRuntime.iOS-99-0")) {
-		t.Fatal("an unknown tuple was accepted")
-	}
 }
 
 func TestUnknownValidTupleRequiresExactExperimentalAcknowledgement(t *testing.T) {

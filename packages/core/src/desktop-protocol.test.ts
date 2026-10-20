@@ -106,7 +106,7 @@ describe('desktop action protocol', () => {
 			'setFixture',
 			{
 				kind: 'still',
-				label: 'Workout card',
+				label: 'Example card',
 				mimeType: 'image/png',
 				dataBase64: 'iVBORw==',
 				width: 320,

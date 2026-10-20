@@ -1,5 +1,4 @@
 import { desktopActionCapability } from '@rndevtools/core/desktop-protocol';
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -10,7 +9,9 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import type { ActionStatus } from '@/lib/action-notice';
 import { createBrowserBridge } from '@/lib/browser-bridge';
+import { errorText, nextActionId } from '@/lib/runtime-action';
 import type {
 	DesktopActionResult,
 	DesktopBootstrap,
@@ -19,12 +20,6 @@ import type {
 	DeviceSession,
 	ToolId,
 } from '../../shared/protocol';
-
-type ActionStatus =
-	| { kind: 'idle'; message: '' }
-	| { kind: 'pending'; message: string }
-	| { kind: 'success'; message: string }
-	| { kind: 'error'; message: string };
 
 type DesktopRuntimeValue = {
 	bootstrap: DesktopBootstrap | null;
@@ -71,14 +66,6 @@ function persistSelectedDeviceId(deviceId: string): void {
 	}
 }
 
-function nextActionId(): string {
-	return `desktop-${crypto.randomUUID()}`;
-}
-
-function runtimeErrorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
-
 export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 	const bridge = useMemo(runtimeBridge, []);
 	const [bootstrap, setBootstrap] = useState<DesktopBootstrap | null>(null);
@@ -114,7 +101,7 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 			});
 		} catch (error) {
 			subscriptionFailed = true;
-			setRuntimeError(runtimeErrorText(error));
+			setRuntimeError(errorText(error));
 		}
 		void bridge
 			.getBootstrap()
@@ -126,7 +113,7 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 			})
 			.catch((error: unknown) => {
 				if (active) {
-					setRuntimeError(runtimeErrorText(error));
+					setRuntimeError(errorText(error));
 				}
 			});
 		return () => {
@@ -195,7 +182,7 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 					: actionUnavailableReason(tool, command);
 			if (unavailable || !selectedDevice || !bridge) {
 				const result = {
-					actionId: nextActionId(),
+					actionId: nextActionId('desktop'),
 					ok: false,
 					error: unavailable ?? 'The desktop bridge is unavailable.',
 				};
@@ -203,7 +190,7 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 				setActionStatus({ kind: 'error', message: result.error });
 				return result;
 			}
-			const actionId = nextActionId();
+			const actionId = nextActionId('desktop');
 			actionPendingRef.current = true;
 			setActionPending(true);
 			latestActionId.current = actionId;
@@ -227,14 +214,14 @@ export function DesktopRuntimeProvider({ children }: { children: ReactNode }) {
 							: {
 									kind: 'error',
 									message: result.error
-										? runtimeErrorText(result.error)
+										? errorText(result.error)
 										: 'The device rejected the action.',
 								}
 					);
 				}
 				return result;
 			} catch (error) {
-				const message = runtimeErrorText(error);
+				const message = errorText(error);
 				if (latestActionId.current === actionId) {
 					setActionStatus({ kind: 'error', message });
 				}

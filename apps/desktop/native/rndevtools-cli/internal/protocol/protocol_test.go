@@ -23,6 +23,40 @@ func TestEncodeRequestUsesFrozenEnvelope(t *testing.T) {
 	}
 }
 
+func TestSupabaseIsACommandListedAfterLane(t *testing.T) {
+	if command, err := ParseCommand("supabase"); err != nil || command != CommandSupabase {
+		t.Fatalf("ParseCommand(supabase) = %q, %v", command, err)
+	}
+	commands := Commands()
+	for index, command := range commands {
+		if command == CommandLane {
+			if index+1 >= len(commands) || commands[index+1] != CommandSupabase {
+				t.Fatalf("supabase must follow lane: %v", commands)
+			}
+		}
+	}
+	if _, err := EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"supabase","operation":"ls"}`)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewRequestIDIsAPrefixedRandomIdentifier(t *testing.T) {
+	first, err := NewRequestID("mcp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewRequestID("mcp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first, "mcp-") || len(first) != len("mcp-")+32 || first == second {
+		t.Fatalf("request ids %q and %q", first, second)
+	}
+	if _, err := EncodeRequest(Request{Protocol: Name, ID: first, Command: json.RawMessage(`{"kind":"doctor"}`)}); err != nil {
+		t.Fatalf("a generated id must be a valid request id: %v", err)
+	}
+}
+
 func TestEncodeRequestRejectsUnknownCommandAndOversize(t *testing.T) {
 	for name, request := range map[string]Request{
 		"unknown": {

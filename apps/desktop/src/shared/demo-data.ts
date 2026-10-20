@@ -1,3 +1,4 @@
+import { RNDEVTOOLS_SNAPSHOT_LIMITS } from '@rndevtools/core/desktop-protocol';
 import {
 	DEFAULT_SCENARIO_USER_LIMIT,
 	parseScenarioDocumentJson,
@@ -9,6 +10,7 @@ import {
 	type DesktopAction,
 	type DeviceSession,
 	type DeviceTools,
+	deviceSessionSchema,
 	type PerformanceReview,
 	type PerformanceSample,
 	type ScenarioDefinitionSummary,
@@ -937,10 +939,57 @@ function importedDemoScenarios(
 	return [...bundled, ...nextUser];
 }
 
+/**
+ * Keeps the newest rows of every collection a demo action adds to, as a real
+ * device's bounded projection does. Most collections list the newest row first;
+ * the Zustand history lists it last.
+ */
+function boundDemoTools(tools: DeviceTools): void {
+	const limits = RNDEVTOOLS_SNAPSHOT_LIMITS;
+	tools.storageEvents = tools.storageEvents.slice(0, limits.storageEvents);
+	tools.routeEvents = tools.routeEvents.slice(0, limits.routeEvents);
+	tools.restorePoints = tools.restorePoints.slice(0, limits.restorePoints);
+	tools.restoreReceipts = tools.restoreReceipts.slice(
+		0,
+		limits.restoreReceipts
+	);
+	tools.scenarioReceipts = tools.scenarioReceipts.slice(
+		0,
+		limits.scenarioReceipts
+	);
+	tools.diagnostics = tools.diagnostics.slice(0, limits.diagnostics);
+	tools.zustandChanges = tools.zustandChanges.slice(-limits.zustandChanges);
+	tools.zustandStateSnapshots = tools.zustandStateSnapshots.slice(
+		-limits.zustandStateSnapshots
+	);
+	tools.zustandMutationReceipts = tools.zustandMutationReceipts.slice(
+		-limits.zustandMutationReceipts
+	);
+}
+
+/**
+ * The broker stores a demo action's result without the inbound parse a real
+ * device's snapshot gets, and one state outside the schema makes the preload
+ * drop every later broadcast. So the result is bounded, and an action whose
+ * result still does not fit fails and leaves the device as it was.
+ */
 export function applyDemoAction(
 	device: DeviceSession,
 	action: DesktopAction,
 	now = Date.now()
+): DeviceSession {
+	const next = applyUnboundedDemoAction(device, action, now);
+	boundDemoTools(next.tools);
+	if (!deviceSessionSchema.safeParse(next).success) {
+		throw new Error('The demo device cannot hold the result of this action.');
+	}
+	return next;
+}
+
+function applyUnboundedDemoAction(
+	device: DeviceSession,
+	action: DesktopAction,
+	now: number
 ): DeviceSession {
 	const next = structuredClone(device);
 	next.lastSeenAt = now;

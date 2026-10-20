@@ -14,7 +14,7 @@ private let controlFDEnvironment = "RNDEVTOOLS_HELPER_CONTROL_FD"
 private let expectedApplicationIdentifier = "io.github.adalloul0928.rndevtools"
 private let expectedNativeHostIdentifier = "rndevtools-native-host"
 private let expectedSimulatorHelperIdentifier = "rndevtools-sim-helper"
-private let expectedTeamIdentifier = "434X69L4Z5"
+private let teamIdentifierPattern = "^[A-Z0-9]{10}$"
 private let maximumNativeManifestBytes = 64 * 1024
 private let maximumSimulatorHelperBytes = 64 * 1024 * 1024
 
@@ -152,8 +152,30 @@ private func codeDirectoryHash(from information: [String: Any]) throws -> Data {
   return value
 }
 
+/// The broker requires the Electron parent and the Go helper to carry the team that signed
+/// this native host, so it pins no team of its own and cannot drift from the build: the Go
+/// helper's `APPLE_TEAM_ID` pin, checked against this host's live signature, stays the single
+/// source of truth. An unsigned or ad-hoc host has no team and brokers no mutation.
+func signingTeamIdentifier(from information: [String: Any]) throws -> String {
+  guard let teamIdentifier = information[kSecCodeInfoTeamIdentifier as String] as? String,
+    teamIdentifier.range(of: teamIdentifierPattern, options: .regularExpression) != nil
+  else {
+    throw brokerError("The native host is not signed by an Apple Developer team.")
+  }
+  return teamIdentifier
+}
+
+private func nativeHostSigningTeamIdentifier() throws -> String {
+  var liveCode: SecCode?
+  guard SecCodeCopySelf([], &liveCode) == errSecSuccess, let liveCode else {
+    throw brokerError("The running native host code identity could not be inspected.")
+  }
+  return try signingTeamIdentifier(from: signingInformation(for: liveCode))
+}
+
 func designatedRequirement(
   identifier: String,
+  teamIdentifier: String,
   codeDirectoryHash: Data? = nil
 ) throws -> SecRequirement {
   guard
@@ -162,8 +184,11 @@ func designatedRequirement(
   else {
     throw brokerError("An unexpected code identifier cannot become a trust requirement.")
   }
+  guard teamIdentifier.range(of: teamIdentifierPattern, options: .regularExpression) != nil else {
+    throw brokerError("An invalid signing team cannot become a trust requirement.")
+  }
   var text =
-    "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(expectedTeamIdentifier)\""
+    "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
   if let codeDirectoryHash {
     guard codeDirectoryHash.count == 20 else {
       throw brokerError("A CodeDirectory trust requirement must use the canonical 20-byte hash.")
@@ -246,7 +271,10 @@ private func trustedNativeResources(
   )
 }
 
-private func verifyRunningNativeHost(_ resources: TrustedNativeResources) throws {
+private func verifyRunningNativeHost(
+  _ resources: TrustedNativeResources,
+  teamIdentifier: String
+) throws {
   let hostURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
   guard hostURL.lastPathComponent == expectedNativeHostIdentifier,
     hostURL.deletingLastPathComponent() == resources.directory.resolvingSymlinksInPath()
@@ -257,7 +285,8 @@ private func verifyRunningNativeHost(_ resources: TrustedNativeResources) throws
   guard SecCodeCopySelf([], &liveCode) == errSecSuccess, let liveCode else {
     throw brokerError("The running native host code identity could not be inspected.")
   }
-  let requirement = try designatedRequirement(identifier: expectedNativeHostIdentifier)
+  let requirement = try designatedRequirement(
+    identifier: expectedNativeHostIdentifier, teamIdentifier: teamIdentifier)
   guard SecCodeCheckValidity(liveCode, [], requirement) == errSecSuccess else {
     throw brokerError("The running native host failed its live designated requirement.")
   }
@@ -297,6 +326,7 @@ struct SystemBrokerParentAttestor: BrokerParentAttesting {
     guard parentPID > 1 else {
       throw brokerError("The native host has no trusted desktop parent.")
     }
+    let expectedTeamIdentifier = try nativeHostSigningTeamIdentifier()
     var guestCode: SecCode?
     let attributes = [kSecGuestAttributePid as String: NSNumber(value: parentPID)] as CFDictionary
     guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &guestCode) == errSecSuccess,
@@ -314,7 +344,8 @@ struct SystemBrokerParentAttestor: BrokerParentAttesting {
     else {
       throw brokerError("The desktop parent is not a production-signed desktop application.")
     }
-    let requirement = try designatedRequirement(identifier: expectedApplicationIdentifier)
+    let requirement = try designatedRequirement(
+      identifier: expectedApplicationIdentifier, teamIdentifier: expectedTeamIdentifier)
     guard SecCodeCheckValidity(guestCode, [], requirement) == errSecSuccess else {
       throw brokerError("The desktop parent failed its live designated requirement.")
     }
@@ -338,7 +369,7 @@ struct SystemBrokerParentAttestor: BrokerParentAttesting {
       mainExecutableURL: mainExecutableURL,
       parentStaticCode: parentStaticCode
     )
-    try verifyRunningNativeHost(trustedResources)
+    try verifyRunningNativeHost(trustedResources, teamIdentifier: expectedTeamIdentifier)
     guard
       SecCodeCheckValidity(guestCode, [], requirement) == errSecSuccess,
       try codeDirectoryHash(from: signingInformation(for: guestCode)) == liveCodeDirectoryHash,
@@ -382,7 +413,10 @@ struct SystemSimulatorHelperVerifier: SimulatorHelperVerifying {
     else {
       throw brokerError("The packaged simulator helper signature could not be inspected.")
     }
-    let requirement = try designatedRequirement(identifier: expectedSimulatorHelperIdentifier)
+    let requirement = try designatedRequirement(
+      identifier: expectedSimulatorHelperIdentifier,
+      teamIdentifier: nativeHostSigningTeamIdentifier()
+    )
     guard
       SecStaticCodeCheckValidity(
         staticCode,
@@ -422,6 +456,7 @@ struct SystemSpawnedSimulatorHelperVerifier: SpawnedSimulatorHelperVerifying {
     }
     let requirement = try designatedRequirement(
       identifier: expectedSimulatorHelperIdentifier,
+      teamIdentifier: nativeHostSigningTeamIdentifier(),
       codeDirectoryHash: identity.codeDirectoryHash
     )
     guard
@@ -821,26 +856,7 @@ final class SystemSimulatorMutationProcessRunner: SimulatorMutationProcessRunnin
   private func terminateAndReap(_ processID: pid_t, graceSeconds: TimeInterval) {
     guard processID > 1 else { return }
     _ = kill(-processID, SIGTERM)
-    let deadline = Date().addingTimeInterval(graceSeconds)
-    var leaderReaped = false
-    while Date() < deadline {
-      if !leaderReaped {
-        var status: Int32 = 0
-        let result = waitpid(processID, &status, WNOHANG)
-        if result == processID || (result == -1 && errno == ECHILD) {
-          leaderReaped = true
-        } else if result == -1, errno != EINTR {
-          break
-        }
-      }
-      if !processGroupExists(processID) { return }
-      usleep(20_000)
-    }
-    _ = kill(-processID, SIGKILL)
-    if !leaderReaped {
-      var status: Int32 = 0
-      while waitpid(processID, &status, 0) == -1, errno == EINTR {}
-    }
+    waitForGracefulExitThenKill(processID, graceSeconds: graceSeconds)
   }
 
   private func waitForGracefulExitThenKill(_ processID: pid_t, graceSeconds: TimeInterval) {

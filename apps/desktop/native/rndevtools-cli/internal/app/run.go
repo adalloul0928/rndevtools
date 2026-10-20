@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/adalloul0928/rndevtools-cli/internal/client"
 	"github.com/adalloul0928/rndevtools-cli/internal/command"
+	"github.com/adalloul0928/rndevtools-cli/internal/mcp"
 	"github.com/adalloul0928/rndevtools-cli/internal/protocol"
 )
 
@@ -35,6 +34,17 @@ type Config struct {
 	Stdout         io.Writer
 	Stderr         io.Writer
 	SocketPath     string
+	// Lookup reads environment variables; nil means os.Getenv. Tests inject it
+	// so a developer's own agent session variables cannot leak into them.
+	Lookup func(string) string
+}
+
+// lookup returns the environment reader this run uses.
+func (c Config) lookup() func(string) string {
+	if c.Lookup != nil {
+		return c.Lookup
+	}
+	return os.Getenv
 }
 
 func Run(config Config) int {
@@ -55,7 +65,15 @@ func Run(config Config) int {
 		})
 		return ExitSuccess
 	}
-	requestID, err := newRequestID()
+	switch config.Arguments[0] {
+	case "mcp":
+		return runMCP(config)
+	case "setup":
+		return runSetup(config)
+	case "hook":
+		return runHook(config)
+	}
+	requestID, err := protocol.NewRequestID("cli-")
 	if err != nil {
 		writeLocalError(config.Stderr, "internal_error", err.Error(), false, "", "")
 		return ExitInternal
@@ -73,11 +91,13 @@ func Run(config Config) int {
 		)
 		return ExitUsage
 	}
-	parsed, err := command.Parse(
+	getenv := config.lookup()
+	parsed, err := command.ParseWithEnvironment(
 		kind,
 		config.Arguments[1:],
 		config.Stdin,
 		config.StdinAvailable,
+		getenv,
 	)
 	if errors.Is(err, command.ErrHelp) {
 		fmt.Fprint(config.Stdout, command.Usage(kind))
@@ -113,6 +133,11 @@ func Run(config Config) int {
 		ID:       requestID,
 		Command:  parsed.Command,
 	}
+	// Attribution rides on the envelope for every command, so the desktop can
+	// show which session is driving which Simulator without per-command flags.
+	if agent := command.AgentFromEnvironment(getenv); agent != nil {
+		request.Agent = agent
+	}
 	if _, err := protocol.EncodeRequest(request); err != nil {
 		writeLocalError(
 			config.Stderr,
@@ -141,8 +166,11 @@ func RootUsage() string {
 	for _, name := range protocol.Commands() {
 		fmt.Fprintf(&builder, "  %s\n", name)
 	}
+	builder.WriteString("  mcp\n  setup\n")
 	builder.WriteString("\nEach command accepts structured flags and an optional bounded JSON object on stdin.\n")
 	builder.WriteString("Output is one compact rndevtools/1 JSON response.\n")
+	builder.WriteString("`rndevtools mcp` serves the same commands to coding agents as an MCP server on stdio.\n")
+	builder.WriteString("`rndevtools setup` registers that server, the lanes and Supabase skills, and the agent hooks with Claude Code, Codex, Cursor, and Kiro.\n")
 	return builder.String()
 }
 
@@ -213,10 +241,36 @@ func writeJSON(writer io.Writer, value any) {
 	_, _ = writer.Write(append(encoded, '\n'))
 }
 
-func newRequestID() (string, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return "", fmt.Errorf("generate request id: %w", err)
+// runMCP serves the commands over stdio as a Model Context Protocol server
+// until the client closes stdin. Diagnostics go to stderr; stdout is the
+// protocol channel and carries nothing else.
+func runMCP(config Config) int {
+	if len(config.Arguments) > 1 {
+		if config.Arguments[1] == "--help" || config.Arguments[1] == "help" {
+			fmt.Fprint(config.Stdout, "Usage: rndevtools mcp\n\nServes rndevtools as an MCP server over stdio (JSON-RPC, one message per line).\n"+
+				"Register it with your coding agent; `rndevtools setup` does so for Claude Code, Codex, Cursor, and Kiro.\n")
+			return ExitSuccess
+		}
+		writeLocalError(config.Stderr, "invalid_arguments", "mcp takes no flags", false, "Run rndevtools mcp --help.", "")
+		return ExitUsage
 	}
-	return "cli-" + hex.EncodeToString(random), nil
+	socketPath := config.SocketPath
+	if socketPath == "" {
+		resolved, err := client.DefaultSocketPath()
+		if err != nil {
+			writeLocalError(config.Stderr, "internal_error", err.Error(), false, "", "")
+			return ExitInternal
+		}
+		socketPath = resolved
+	}
+	server := mcp.New(mcp.Config{
+		Version:   config.Version,
+		Transport: mcp.SocketTransport(socketPath),
+		Lookup:    config.lookup(),
+	})
+	if err := server.Serve(context.Background(), config.Stdin, config.Stdout); err != nil {
+		fmt.Fprintf(config.Stderr, "rndevtools mcp: %v\n", err)
+		return ExitTransport
+	}
+	return ExitSuccess
 }

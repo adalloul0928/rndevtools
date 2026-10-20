@@ -111,7 +111,7 @@ describe('normalizeComponentTargets', () => {
 			[
 				{
 					id: 'target-1',
-					name: 'Exercise card',
+					name: 'Example card',
 					bounds: { x: Number.NaN, y: 10.25, width: -2, height: 30.75 },
 					instance: { state: 'x'.repeat(100) },
 					sourceFiles: ['one.tsx', 'two.tsx'],
@@ -218,10 +218,10 @@ describe('normalizeComponentTargets', () => {
 				{
 					id: 'semantic-target',
 					name: 'Search field',
-					accessibilityLabel: 'Search exercises',
-					accessibilityHint: 'Filters the exercise list',
+					accessibilityLabel: 'Search items',
+					accessibilityHint: 'Filters the item list',
 					accessibilityRole: 'search',
-					accessibilityValue: 'bench',
+					accessibilityValue: 'example',
 					accessibilityState: {
 						disabled: false,
 						selected: true,
@@ -235,7 +235,7 @@ describe('normalizeComponentTargets', () => {
 
 		expect(targets[0]).toEqual(
 			expect.objectContaining({
-				accessibilityLabel: 'Search exercises',
+				accessibilityLabel: 'Search items',
 				accessibilityRole: 'search',
 				accessibilityState: { disabled: false, selected: true },
 				actions: ['focus', 'setText'],
@@ -250,11 +250,11 @@ describe('normalizeComponentTargets', () => {
 			[
 				{
 					id: 'child-instance',
-					targetId: 'exercise-row',
+					targetId: 'item-row',
 					parentId: 'parent-instance',
 					depth: 2,
 					zIndex: 12.25,
-					name: 'Exercise row',
+					name: 'Item row',
 					styles: {
 						display: 'flex',
 						accessToken: 'must-not-leak',
@@ -267,7 +267,7 @@ describe('normalizeComponentTargets', () => {
 		expect(targets[0]).toEqual(
 			expect.objectContaining({
 				id: 'child-instance',
-				targetId: 'exercise-row',
+				targetId: 'item-row',
 				parentId: 'parent-instance',
 				depth: 2,
 				zIndex: 12.3,
@@ -438,8 +438,8 @@ describe('createComponentInspectorPlugin', () => {
 		const diagnostics = createComponentInspectorPlugin({
 			source: {
 				getSnapshot: () => [
-					{ id: 'row-1', targetId: 'exercise-row', name: 'Row one' },
-					{ id: 'row-2', targetId: 'exercise-row', name: 'Row two' },
+					{ id: 'row-1', targetId: 'item-row', name: 'Row one' },
+					{ id: 'row-2', targetId: 'item-row', name: 'Row two' },
 				],
 				subscribe: () => () => {},
 			},
@@ -453,7 +453,7 @@ describe('createComponentInspectorPlugin', () => {
 		expect(diagnostics.getSnapshot().diagnostics).toEqual([
 			expect.objectContaining({
 				code: 'duplicate-target-id',
-				targetId: 'exercise-row',
+				targetId: 'item-row',
 				instanceIds: ['row-1', 'row-2'],
 			}),
 		]);
@@ -568,11 +568,11 @@ describe('createComponentInspectorPlugin', () => {
 		).rejects.toThrow('does not support scroll');
 		await diagnostics.performAction('one', screenHash, {
 			type: 'setText',
-			text: 'Bench',
+			text: 'Example',
 		});
 		expect(performAction).toHaveBeenCalledWith('one', {
 			type: 'setText',
-			text: 'Bench',
+			text: 'Example',
 		});
 		dispose?.();
 	});

@@ -23,6 +23,7 @@ import {
 	SimulatorService,
 } from './simulator-service';
 import {
+	type DeviceAccessPort,
 	type SlimmingHelperProvider,
 	SlimmingService,
 } from './slimming-service';
@@ -101,7 +102,7 @@ const COMPATIBILITY: SimHelperCompatibility = {
 		hostArchitecture: 'arm64',
 		helperVersion: '0.1.0',
 		helperBuildCommit: 'a'.repeat(40),
-		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
+		catalogVersion: 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3',
 	},
 	verifiedOperations: [],
 };
@@ -174,18 +175,18 @@ class FakeHelper implements SlimmingHelperProvider {
 			protocolVersion: 2 as const,
 			platform: 'darwin' as const,
 			architecture: 'arm64' as const,
-			catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
+			catalogVersion: 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3',
 			catalogSource: {
 				repository: 'https://github.com/MobAI-App/simslim' as const,
 				commit: 'b'.repeat(40),
 				profilesSha256: 'c'.repeat(64),
 				patchSet: 'pumpd.1' as const,
 				upstreamSourceManifestSha256:
-					'8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08' as const,
+					'bbd7640e2738197be54564d9f9926710a0dc5e13ee674d6e00e48bd5714b6172' as const,
 				patchSha256:
-					'69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083' as const,
+					'f58830a4f4cde1dcd609286d416e9c4d33f472ca6bb32fc38fc4bbac7fa37a4c' as const,
 				vendoredSourceManifestSha256:
-					'b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7' as const,
+					'eb5317fe41e6a987ceaa2d6da5097a7b561e90214328a639eeac2c2599bce269' as const,
 			},
 			capabilities: {
 				operations: [
@@ -227,7 +228,7 @@ class FakeHelper implements SlimmingHelperProvider {
 		}))
 	);
 	listProfiles = vi.fn(async () => ({
-		catalogVersion: 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2',
+		catalogVersion: 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3',
 		categories: [
 			{
 				id: 'telemetry',
@@ -437,7 +438,8 @@ function action(value: unknown): SlimmingAction {
 async function createService(
 	helper = new FakeHelper(),
 	persistenceDirectory?: string,
-	mutationCoordinator?: SimulatorMutationCoordinatorPort
+	mutationCoordinator?: SimulatorMutationCoordinatorPort,
+	deviceAccess?: DeviceAccessPort
 ) {
 	const directory =
 		persistenceDirectory ??
@@ -449,6 +451,7 @@ async function createService(
 		appVersion: '0.1.0',
 		helper,
 		...(mutationCoordinator ? { mutationCoordinator } : {}),
+		...(deviceAccess ? { deviceAccess } : {}),
 		pollIntervalMs: 60_000,
 	});
 	await service.start();
@@ -592,6 +595,90 @@ describe('slimming service', () => {
 			await service.stop();
 		}
 	});
+	it('refuses a mutation on a device another session holds, for agents and the panel alike', async () => {
+		const decisions: Array<[string, string | undefined]> = [];
+		const deviceAccess: DeviceAccessPort = (udid, requester) => {
+			decisions.push([udid, requester?.sessionId]);
+			if (requester?.sessionId === 'owner') return { allowed: true };
+			return {
+				allowed: false,
+				reason: `Simulator ${udid} is held by claude session owner through lane lane-1.`,
+				hold: {
+					simulatorUdid: udid,
+					via: 'lane',
+					laneId: 'lane-1',
+					holder: { kind: 'claude', sessionId: 'owner' },
+					holderLive: true,
+				},
+			};
+		};
+		const slimming = await createService(
+			new FakeHelper(),
+			undefined,
+			undefined,
+			deviceAccess
+		);
+		await enableAndAcknowledge(slimming.service, 'held');
+
+		const stranger = slimming.service.runAction(
+			action({
+				actionId: 'held-stranger',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+				requester: { kind: 'codex', sessionId: 'stranger' },
+			})
+		);
+		expect(stranger.accepted).toBe(false);
+		expect(stranger.error).toMatch(/held by claude session owner/);
+
+		const operator = slimming.service.runAction(
+			action({
+				actionId: 'held-operator',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+			})
+		);
+		expect(operator.accepted).toBe(false);
+
+		const owner = slimming.service.runAction(
+			action({
+				actionId: 'held-owner',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+				requester: { kind: 'claude', sessionId: 'owner' },
+			})
+		);
+		expect(owner.accepted).toBe(true);
+		expect((await waitForJob(slimming.service, owner.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		expect(decisions.map(([, who]) => who)).toEqual([
+			'stranger',
+			undefined,
+			'owner',
+		]);
+
+		// Read-only work never consults ownership.
+		const preview = slimming.service.runAction(
+			action({
+				actionId: 'held-preview',
+				kind: 'profile.preview',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				requester: { kind: 'codex', sessionId: 'stranger' },
+			})
+		);
+		expect(preview.accepted).toBe(true);
+		expect(decisions).toHaveLength(3);
+		await slimming.service.stop();
+	});
+
 	it('serializes direct Fleet actions behind a Slimming mutation on the same UDID', async () => {
 		const coordinator = new SimulatorMutationCoordinator();
 		const helper = new FakeHelper();
@@ -742,6 +829,42 @@ describe('slimming service', () => {
 		);
 		expect(receipt).toMatchObject({ accepted: false });
 		expect(helper.applyProfile).not.toHaveBeenCalled();
+		await service.stop();
+	});
+
+	it('makes room for new work by dropping the oldest finished jobs, and refuses only while 100 are active', async () => {
+		const { service } = await createService();
+		const preview = (actionId: string) =>
+			service.runAction(
+				action({
+					actionId,
+					kind: 'profile.preview',
+					simulatorUdids: [UDID],
+					profileId: PROFILE,
+				})
+			);
+		// Read-only jobs run one at a time, so 100 accepted at once are all active.
+		const active = Array.from({ length: 100 }, (_, index) =>
+			preview(`preview-${index}`)
+		);
+		expect(active.every((receipt) => receipt.accepted)).toBe(true);
+		expect(preview('preview-overflow')).toMatchObject({
+			accepted: false,
+			error: 'The 100-job Slimming queue is full.',
+		});
+		for (const receipt of active)
+			await waitForJob(service, receipt.jobId ?? '');
+
+		// A session that already ran 100 jobs keeps working.
+		const next = preview('preview-after');
+		expect(next.accepted).toBe(true);
+		expect((await waitForJob(service, next.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		const actionIds = service.getState().jobs.map((job) => job.actionId);
+		expect(actionIds).toHaveLength(100);
+		expect(actionIds).not.toContain('preview-0');
+		expect(actionIds.at(-1)).toBe('preview-after');
 		await service.stop();
 	});
 

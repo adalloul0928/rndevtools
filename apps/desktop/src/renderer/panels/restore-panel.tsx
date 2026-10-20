@@ -14,17 +14,21 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	CodePreview,
 	ConfirmAction,
 	EmptyPanel,
+	InlineCode,
 	PanelHeader,
+	SectionCard,
 	StatusPill,
 } from '@/components/ui';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 
 export function RestorePanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const rawPoints = selectedDevice?.tools.restorePoints ?? [];
 	const restoreReceipts = selectedDevice?.tools.restoreReceipts ?? [];
 	const points = useMemo(
@@ -60,21 +64,20 @@ export function RestorePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="State"
 				title="Restore Points"
 				description="Persist, selectively restore, and roll back only state sources the app explicitly declares as safe."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<Badge tone="success">
 						<ShieldCheck className="h-3 w-3" /> Rollback guarded · explicit
 						sources
-					</span>
+					</Badge>
 				}
 			/>
 			<div className="grid min-h-0 flex-1 grid-cols-[360px_minmax(0,1fr)]">
 				<div className="panel-scroll border-r border-white/8 p-4">
 					<div className="mb-4 rounded-lg border border-white/10 bg-white/[0.035] p-4">
 						<div className="mb-3 flex items-center gap-2">
-							<div className="grid h-8 w-8 place-items-center rounded-md border border-blue-400/20 bg-blue-400/10 text-blue-300">
+							<div className="grid h-8 w-8 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand)">
 								<Camera className="h-3.5 w-3.5" />
 							</div>
 							<div>
@@ -114,7 +117,12 @@ export function RestorePanel() {
 						>
 							<Camera className="h-3.5 w-3.5" /> Capture current state
 						</Button>
-						<div className="mt-2 flex justify-end">
+						<div className="mt-2 flex items-center justify-end gap-3">
+							{actionUnavailableReason('restore', 'resetBaseline') ? (
+								<span className="text-right text-xs text-(--text-3)">
+									{actionUnavailableReason('restore', 'resetBaseline')}
+								</span>
+							) : null}
 							<ConfirmAction
 								triggerLabel="Reset explicit baselines"
 								title="Reset explicit sources to baseline?"
@@ -159,7 +167,7 @@ export function RestorePanel() {
 									onClick={() => setSelectedId(point.id)}
 								>
 									<div className="flex items-start gap-3">
-										<div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
+										<div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand)">
 											<ArchiveRestore className="h-3.5 w-3.5" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -285,6 +293,24 @@ export function RestorePanel() {
 									/>
 								</div>
 							</div>
+							{(() => {
+								const reasons = [
+									['Rename', actionUnavailableReason('restore', 'rename')],
+									[
+										'Duplicate',
+										actionUnavailableReason('restore', 'duplicate'),
+									],
+									['Restore', actionUnavailableReason('restore', 'restore')],
+								].filter(([, reason]) => reason) as [string, string][];
+								if (reasons.length === 0) return null;
+								return (
+									<p className="-mt-2 mb-4 text-right text-xs text-(--text-3)">
+										{reasons
+											.map(([label, reason]) => `${label}: ${reason}`)
+											.join(' · ')}
+									</p>
+								);
+							})()}
 							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
 								<div className="border-r border-white/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
@@ -316,7 +342,7 @@ export function RestorePanel() {
 									const isSelected = selectedSourceIds.includes(source.id);
 									return (
 										<div
-											className={`rounded-lg border p-4 ${isSelected ? 'border-emerald-400/20 bg-emerald-400/[0.035]' : 'border-white/8 bg-white/[0.02] opacity-60'}`}
+											className={`rounded-lg border p-4 ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/8 bg-white/[0.02] opacity-60'}`}
 											key={source.id}
 										>
 											<div className="mb-3 flex items-center justify-between gap-3">
@@ -324,8 +350,8 @@ export function RestorePanel() {
 													<h3 className="m-0 text-xs font-semibold text-(--foreground)">
 														{source.title}
 													</h3>
-													<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
-														{source.id}
+													<p className="mb-0 mt-1">
+														<InlineCode>{source.id}</InlineCode>
 													</p>
 												</div>
 												<div className="flex items-center gap-2">
@@ -364,38 +390,39 @@ export function RestorePanel() {
 								})}
 							</div>
 							{selectedReceipts[0] ? (
-								<div className="mt-5 rounded-lg border border-white/8 bg-white/[0.02] p-4">
-									<div className="mb-3 flex items-center justify-between">
-										<h3 className="m-0 text-xs font-semibold text-(--foreground)">
-											Latest transaction
-										</h3>
-										<StatusPill
-											tone={
-												selectedReceipts[0].status === 'complete'
-													? 'success'
-													: selectedReceipts[0].status === 'needs-attention'
-														? 'danger'
-														: 'warning'
-											}
-										>
-											{selectedReceipts[0].status}
-										</StatusPill>
-									</div>
-									<div className="space-y-1 text-xs text-(--text-3)">
-										{selectedReceipts[0].sourceResults.map((result) => (
-											<p className="m-0" key={result.sourceId}>
-												{result.sourceTitle}: preflight {result.preflight},
-												apply {result.apply}, rollback {result.rollback}
-											</p>
-										))}
-									</div>
+								<div className="mt-5">
+									<SectionCard
+										title="Latest transaction"
+										actions={
+											<StatusPill
+												tone={
+													selectedReceipts[0].status === 'complete'
+														? 'success'
+														: selectedReceipts[0].status === 'needs-attention'
+															? 'danger'
+															: 'warning'
+												}
+											>
+												{selectedReceipts[0].status}
+											</StatusPill>
+										}
+									>
+										<div className="space-y-1 text-xs text-(--text-3)">
+											{selectedReceipts[0].sourceResults.map((result) => (
+												<p className="m-0" key={result.sourceId}>
+													{result.sourceTitle}: preflight {result.preflight},
+													apply {result.apply}, rollback {result.rollback}
+												</p>
+											))}
+										</div>
+									</SectionCard>
 								</div>
 							) : null}
-							<div className="mt-5 rounded-lg border border-emerald-400/15 bg-emerald-400/[0.05] p-4">
-								<div className="flex items-center gap-2 text-xs font-medium text-emerald-200">
+							<div className="mt-5 rounded-lg border border-(--brand-border) bg-(--brand-soft) p-4">
+								<div className="flex items-center gap-2 text-xs font-medium text-(--brand)">
 									<ShieldCheck className="h-4 w-4" /> Restore safety boundary
 								</div>
-								<p className="mb-0 mt-2 text-xs leading-5 text-emerald-100/60">
+								<p className="mb-0 mt-2 text-xs leading-5 text-(--muted)">
 									Snapshots are JSON-bounded and validated before writes. If a
 									later source fails, the app attempts to reapply the captured
 									rollback data. Secure storage and app user data are not

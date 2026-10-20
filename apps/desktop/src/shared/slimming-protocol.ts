@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 const MAX_SHORT_TEXT = 4 * 1024;
 const MAX_SERVICE_IDS = 1_000;
@@ -8,9 +9,7 @@ const confirmationTokenSchema = z.string().regex(/^confirmation-[a-f0-9]{64}$/);
 const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const timestampSchema = z.number().finite().nonnegative();
-const simulatorUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const simulatorUdidSchema = z.string().regex(UDID_PATTERN);
 const serviceIdentifierSchema = z
 	.string()
 	.trim()
@@ -296,10 +295,22 @@ export const slimmingStateSchema = z.strictObject({
 });
 export type SlimmingState = z.infer<typeof slimmingStateSchema>;
 
+/**
+ * The agent session asking for a mutation. Absent on actions the operator
+ * starts from the desktop. A held device may be mutated only by its holder,
+ * so the service needs to know who is asking.
+ */
+const slimmingRequesterSchema = z.strictObject({
+	kind: z.enum(['claude', 'codex', 'other']),
+	sessionId: identifierSchema,
+});
+export type SlimmingRequester = z.infer<typeof slimmingRequesterSchema>;
+
 const actionBase = {
 	actionId: identifierSchema,
 	simulatorUdids: simulatorUdidsSchema,
 	confirmationToken: confirmationTokenSchema.optional(),
+	requester: slimmingRequesterSchema.optional(),
 };
 const profileActionBase = {
 	...actionBase,

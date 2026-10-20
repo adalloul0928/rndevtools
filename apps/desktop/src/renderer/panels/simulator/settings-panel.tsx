@@ -5,6 +5,7 @@ import {
 	AudioLines,
 	Camera,
 	Command,
+	DatabaseZap,
 	FolderCog,
 	Frame,
 	Laptop,
@@ -16,26 +17,35 @@ import {
 	TerminalSquare,
 	Video,
 } from 'lucide-react';
-import { type ComponentType, useMemo } from 'react';
+import { type ComponentType, useMemo, useState } from 'react';
 import {
 	BridgeUnavailableNotice,
 	RefreshSimulatorsButton,
-	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
 import {
 	Disclosure,
-	InfoPopover,
+	PanelHeader,
 	PanelNotice,
-	StatusPill,
+	ReadinessRow,
+	type ReadinessStatus,
 } from '@/components/ui';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
 } from '@/state/simulator-runtime';
+import {
+	useSupabaseNavigation,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
 import type {
 	SimulatorCapability,
 	SimulatorNativeState,
 } from '../../../shared/simulator-protocol';
+import {
+	SUPABASE_REASONS,
+	type SupabaseState,
+	supabasePlatformLabel,
+} from '../../../shared/supabase-protocol';
 
 type CapabilityId =
 	| 'xcode'
@@ -221,6 +231,20 @@ const CAPABILITIES: CapabilityDefinition[] = [
 export function SettingsPanel() {
 	const { isBridgeAvailable, runOnboardingOperation, state } =
 		useSimulatorRuntime();
+	const [agentSetup, setAgentSetup] = useState<{
+		busy: boolean;
+		lines: string[];
+	}>({ busy: false, lines: [] });
+	const runAgentSetup = async () => {
+		setAgentSetup({ busy: true, lines: [] });
+		const receipt = await runOnboardingOperation({ kind: 'agentCli.setup' });
+		setAgentSetup({
+			busy: false,
+			lines: receipt.completed
+				? (receipt.summary ?? ['Setup completed.'])
+				: [receipt.error ?? 'Setup failed.'],
+		});
+	};
 	const capabilities = useMemo(
 		() =>
 			CAPABILITIES.map((definition) => {
@@ -252,10 +276,9 @@ export function SettingsPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={<RefreshSimulatorsButton />}
 				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected app."
-				eyebrow="Capability onboarding"
 				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
 				title="Settings"
 			/>
@@ -281,6 +304,7 @@ export function SettingsPanel() {
 						</div>
 						<Disclosure title="Optional features & permissions">
 							<div className="sim-capability-list">
+								<LocalSupabaseRow />
 								{capabilities
 									.filter((capability) => !capability.required)
 									.map(renderCapability)}
@@ -297,21 +321,42 @@ export function SettingsPanel() {
 								</header>
 								<p>
 									Packaged startup verifies the signed CLI before opening its
-									private socket. In development, Reveal CLI performs the same
-									manifest, hash, architecture, and signature checks against the
-									current local build. RN Devtools never modifies your shell
-									path.
+									private socket. Set up coding agents registers the CLI as an
+									MCP server with Claude Code, Codex, Cursor, and Kiro, installs
+									the lanes skill where each discovers skills, links the CLI
+									into <code className="sim-inline-code">~/.local/bin</code>,
+									and adds a Claude Code hook that steers raw{' '}
+									<code className="sim-inline-code">simctl</code> back here.
+									Existing configuration is preserved; nothing else on your
+									shell path changes.
 								</p>
-								<Button
-									isDisabled={!isBridgeAvailable}
-									size="sm"
-									variant="secondary"
-									onPress={() =>
-										void runOnboardingOperation({ kind: 'agentCli.reveal' })
-									}
-								>
-									Reveal verified CLI
-								</Button>
+								<div className="sim-settings-actions">
+									<Button
+										isDisabled={!isBridgeAvailable || agentSetup.busy}
+										size="sm"
+										variant="primary"
+										onPress={() => void runAgentSetup()}
+									>
+										{agentSetup.busy ? 'Setting up…' : 'Set up coding agents'}
+									</Button>
+									<Button
+										isDisabled={!isBridgeAvailable}
+										size="sm"
+										variant="secondary"
+										onPress={() =>
+											void runOnboardingOperation({ kind: 'agentCli.reveal' })
+										}
+									>
+										Reveal verified CLI
+									</Button>
+								</div>
+								{agentSetup.lines.length > 0 ? (
+									<ul className="sim-settings-outcome">
+										{agentSetup.lines.map((line) => (
+											<li key={line}>{line}</li>
+										))}
+									</ul>
+								) : null}
 							</section>
 							<section className="sim-security-boundary">
 								<header>
@@ -365,73 +410,176 @@ function CapabilityRow({
 	isBridgeAvailable: boolean;
 	onRunOnboarding: (operation: SimulatorOnboardingOperationInput) => void;
 }) {
-	const Icon = capability.icon;
-	const guidance = capabilityGuidance(capability, isBridgeAvailable);
+	const readiness = capabilityReadiness(capability);
 	const onboarding = capabilityOnboardingAction(capability.id);
 	return (
-		<div className="sim-capability-row">
-			<span className="sim-capability-icon">
-				<Icon className="h-4 w-4" />
-			</span>
-			<div className="sim-capability-copy">
-				<div>
-					<strong>{capability.label}</strong>
-					<InfoPopover label={capability.label}>
-						<p>{capability.description}</p>
-						<p className="mt-2 break-words">
-							{capability.detail ?? capability.mechanism}
-						</p>
-					</InfoPopover>
-					{capability.required ? <span>Required</span> : <span>Optional</span>}
-				</div>
-				{capability.status !== 'available' ? (
-					<p className="sim-capability-next-step">{guidance}</p>
-				) : null}
-			</div>
-			<div className="sim-capability-action">
-				<StatusPill
-					tone={
-						capability.status === 'available'
-							? 'success'
-							: capability.required
-								? 'warning'
-								: 'default'
-					}
+		<ReadinessRow
+			actions={
+				<>
+					{onboarding ? (
+						<Button
+							isDisabled={!isBridgeAvailable}
+							size="sm"
+							variant="secondary"
+							onPress={() => onRunOnboarding(onboarding.operation)}
+						>
+							{onboarding.label}
+						</Button>
+					) : null}
+					{capability.featureLink ? (
+						<Button
+							aria-label={`${capability.featureLink.label} for ${capability.label}`}
+							className="sim-capability-feature-link"
+							size="sm"
+							variant="ghost"
+							onPress={() => {
+								window.location.hash = capability.featureLink?.hash ?? '';
+							}}
+						>
+							{capability.featureLink.label}
+							<ArrowUpRight className="h-3 w-3" />
+						</Button>
+					) : null}
+				</>
+			}
+			{...(capability.status === 'available'
+				? {}
+				: { detail: capabilityGuidance(capability, isBridgeAvailable) })}
+			icon={capability.icon}
+			info={
+				<>
+					<p>{capability.description}</p>
+					<p className="mt-2 break-words">
+						{capability.detail ?? capability.mechanism}
+					</p>
+				</>
+			}
+			label={capability.label}
+			status={readiness.status}
+			statusLabel={readiness.label}
+			tag={capability.required ? 'Required' : 'Optional'}
+		/>
+	);
+}
+
+/** A capability's pill: Ready, Checking, Needs setup (required) or Not available. */
+export function capabilityReadiness(capability: {
+	status: SimulatorCapability['status'];
+	required: boolean;
+}): { status: ReadinessStatus; label: string } {
+	if (capability.status === 'available') {
+		return { status: 'ready', label: 'Ready' };
+	}
+	if (capability.status === 'checking') {
+		return { status: 'checking', label: 'Checking' };
+	}
+	return capability.required
+		? { status: 'needs-fix', label: 'Needs setup' }
+		: { status: 'optional', label: 'Not available' };
+}
+
+/**
+ * The global Local Supabase row: the platform verdict and whether the
+ * feature is on. It is optional, so it never adds to the Settings count.
+ */
+export function localSupabaseReadiness(
+	state: Pick<
+		SupabaseState,
+		'availability' | 'feature' | 'capacity' | 'repositories'
+	>,
+	bridgeAvailable: boolean
+): { status: ReadinessStatus; label: string; detail: string } {
+	if (!bridgeAvailable) {
+		return {
+			status: 'optional',
+			label: 'Not available',
+			detail: SUPABASE_REASONS.bridge,
+		};
+	}
+	const platform = supabasePlatformLabel(state.availability.platform);
+	if (!state.availability.platform.supported) {
+		return {
+			status: 'optional',
+			label: 'Not available',
+			detail: `Native Supabase needs Apple silicon and macOS 14 or later. This Mac: ${platform}.`,
+		};
+	}
+	if (state.feature.policyHealth === 'quarantined') {
+		return {
+			status: 'check',
+			label: 'Off',
+			detail:
+				"Supabase settings couldn't be read, so local Supabase was turned off and defaults restored.",
+		};
+	}
+	if (!state.feature.enabled) {
+		return {
+			status: 'optional',
+			label: 'Off',
+			detail: `This Mac can run it (${platform}). Off means off: nothing runs or polls.`,
+		};
+	}
+	const { running } = state.capacity;
+	if (running > 0) {
+		return {
+			status: 'ready',
+			label: `On · ${running} running`,
+			detail: `One local Supabase stack per worktree and branch · ${platform}.`,
+		};
+	}
+	const needsSetup =
+		state.repositories.length > 0 &&
+		!state.repositories.some(
+			(repository) => repository.readiness === 'ready'
+		) &&
+		state.repositories.some(
+			(repository) => repository.readiness === 'needs-fix'
+		);
+	return needsSetup
+		? {
+				status: 'check',
+				label: 'Needs setup',
+				detail:
+					'No tracked repository is ready for local Supabase yet. Review them in the Supabase tab.',
+			}
+		: {
+				status: 'ready',
+				label: 'On',
+				detail: `One local Supabase stack per worktree and branch · ${platform}.`,
+			};
+}
+
+function LocalSupabaseRow() {
+	const { state, isBridgeAvailable } = useSupabaseState();
+	const { openInSupabase } = useSupabaseNavigation();
+	const readiness = localSupabaseReadiness(state, isBridgeAvailable);
+	return (
+		<ReadinessRow
+			actions={
+				<Button
+					className="sim-capability-feature-link"
+					size="sm"
+					variant="ghost"
+					onPress={() => openInSupabase({ view: 'settings' })}
 				>
-					{capability.status === 'available'
-						? 'Ready'
-						: capability.status === 'checking'
-							? 'Checking'
-							: capability.required
-								? 'Needs setup'
-								: 'Not available'}
-				</StatusPill>
-				{onboarding ? (
-					<Button
-						isDisabled={!isBridgeAvailable}
-						size="sm"
-						variant="secondary"
-						onPress={() => onRunOnboarding(onboarding.operation)}
-					>
-						{onboarding.label}
-					</Button>
-				) : null}
-				{capability.featureLink ? (
-					<Button
-						aria-label={`${capability.featureLink.label} for ${capability.label}`}
-						className="sim-capability-feature-link"
-						size="sm"
-						variant="ghost"
-						onPress={() => {
-							window.location.hash = capability.featureLink?.hash ?? '';
-						}}
-					>
-						{capability.featureLink.label}
-						<ArrowUpRight className="h-3 w-3" />
-					</Button>
-				) : null}
-			</div>
-		</div>
+					Open Supabase settings
+					<ArrowUpRight className="h-3 w-3" />
+				</Button>
+			}
+			detail={readiness.detail}
+			icon={DatabaseZap}
+			info={
+				<p>
+					One local Supabase stack per worktree and branch, on 127.0.0.1, using
+					Supabase&apos;s native runtime. It is optional and alpha; turn it on
+					in the Supabase tab.
+				</p>
+			}
+			label="Local Supabase (alpha)"
+			status={readiness.status}
+			statusLabel={readiness.label}
+			tag="Optional"
+		/>
 	);
 }
 

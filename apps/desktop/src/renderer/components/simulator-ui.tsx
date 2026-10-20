@@ -11,33 +11,9 @@ import {
 	Smartphone,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { EmptyPanel, PanelHeader } from '@/components/ui';
+import { EmptyPanel } from '@/components/ui';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import type { SimulatorDevice } from '../../shared/simulator-protocol';
-
-export function SimulatorPanelHeader({
-	eyebrow,
-	title,
-	description,
-	meta,
-	actions,
-}: {
-	eyebrow: string;
-	title: string;
-	description: string;
-	meta?: ReactNode;
-	actions?: ReactNode;
-}) {
-	return (
-		<PanelHeader
-			actions={actions}
-			description={description}
-			eyebrow={`Simulator / ${eyebrow}`}
-			meta={meta}
-			title={title}
-		/>
-	);
-}
 
 export function RefreshSimulatorsButton({
 	compact = false,
@@ -127,17 +103,21 @@ export function SimulatorMetric({
 			</Card.Header>
 			<Card.Content className="sim-metric-content">
 				<strong>{value}</strong>
-				<span>{detail}</span>
+				{/* Narrow layouts may cut the detail; hovering shows all of it. */}
+				<span title={detail}>{detail}</span>
 			</Card.Content>
 		</Card>
 	);
 }
+
+const NO_DEPENDENCIES: readonly unknown[] = [];
 
 export function DenseVirtualList<T extends object>({
 	ariaLabel,
 	items,
 	getId,
 	renderItem,
+	dependencies = NO_DEPENDENCIES,
 	textValue,
 	selectedId,
 	selectedIds,
@@ -149,9 +129,15 @@ export function DenseVirtualList<T extends object>({
 	className = '',
 }: {
 	ariaLabel: string;
-	items: T[];
+	items: readonly T[];
 	getId: (item: T) => string;
 	renderItem: (item: T) => ReactNode;
+	/**
+	 * What renderItem and textValue read besides the item. React Aria caches
+	 * each row by item identity and renders it again only when these change,
+	 * so a lane chip read from a map would otherwise stay stale.
+	 */
+	dependencies?: readonly unknown[];
 	textValue: (item: T) => string;
 	selectedId?: string | null | undefined;
 	selectedIds?: string[] | undefined;
@@ -167,10 +153,14 @@ export function DenseVirtualList<T extends object>({
 		: selectedId !== undefined && onSelect
 			? 'single'
 			: 'none';
+	// React Aria caches each row by item identity; without these the
+	// highlight would stay on the previously selected row.
+	const selectionKey = selectedIds?.join('\n') ?? selectedId ?? null;
 	return (
 		<ListView
 			aria-label={ariaLabel}
 			className={`sim-virtual-list ${className}`}
+			dependencies={[selectionMode, selectionKey, ...dependencies]}
 			items={items}
 			selectionMode={selectionMode}
 			selectionBehavior={selectionMode === 'multiple' ? 'toggle' : 'replace'}

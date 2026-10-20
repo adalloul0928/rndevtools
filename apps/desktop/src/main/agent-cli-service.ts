@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
@@ -14,6 +13,7 @@ import {
 	agentCliRequestSchema,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
+import { SUPABASE_AGENT_DEFAULT_WAIT_MS } from '../shared/supabase-protocol';
 
 const MAX_CONNECTIONS = 8;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -21,12 +21,46 @@ const RATE_WINDOW_MS = 10_000;
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * Lane up and launch boot a Simulator and wait for Metro, and native plans
+ * fingerprint a worktree with Expo's own tooling. The Go CLI waits 240 s for
+ * them; stopping just short of that still reaches the agent as a typed error.
+ */
+const LONG_REQUEST_TIMEOUT_MS = 230_000;
+/**
+ * `supabase up` waits up to waitMs for the stack and then answers with a job,
+ * so it gets that wait plus this margin. Reads (ls, status, env, log) answer
+ * from quick CLI calls. down only queues a stop and destroy only files a
+ * request, so both stay inside the Go CLI's 45 s deadline for them; reset
+ * keeps the default, inside the CLI's 75 s.
+ */
+const SUPABASE_UP_MARGIN_MS = 10_000;
+const SUPABASE_READ_TIMEOUT_MS = 30_000;
+const SUPABASE_QUICK_TIMEOUT_MS = 40_000;
 const MAX_REQUEST_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_ERROR_LENGTH = 4 * 1024;
+/**
+ * The CLI half-closes after its request, so by the time a handler runs the
+ * socket has read its EOF and is no longer polled: a client that then hangs
+ * up (a cancelled MCP call, a CLI deadline, a killed process) shows only when
+ * something is written. While a handler runs, one space goes out this often.
+ * A write to a closed peer fails at once (EPIPE), which closes the socket and
+ * aborts the handler. JSON allows whitespace before a value, so the answer
+ * still parses as one line.
+ */
+const LIVENESS_PROBE_INTERVAL_MS = 1_000;
+/**
+ * Bounds the probe spaces, which count toward MAX_RESPONSE_BYTES: more than
+ * the longest handler budget needs at one a second.
+ */
+const MAX_LIVENESS_PROBES = 1_024;
+const LIVENESS_PROBE = Buffer.from(' ', 'utf8');
 
 type AgentCliHandlerContext = {
 	requestId: string;
 	signal: AbortSignal;
+	/** Session attribution from the request envelope, when the CLI had one. */
+	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string };
 };
 
 export type AgentCliHandler = (
@@ -95,7 +129,37 @@ function handlerTimeoutMs(command: AgentCliCommand): number {
 	if (command.kind === 'recipe' && command.operation === 'run') {
 		return MAX_REQUEST_TIMEOUT_MS;
 	}
+	if (
+		command.kind === 'native' ||
+		(command.kind === 'lane' &&
+			(command.operation === 'up' || command.operation === 'launch'))
+	) {
+		return LONG_REQUEST_TIMEOUT_MS;
+	}
+	if (command.kind === 'supabase') return supabaseTimeoutMs(command);
 	return REQUEST_TIMEOUT_MS;
+}
+
+function supabaseTimeoutMs(
+	command: Extract<AgentCliCommand, { kind: 'supabase' }>
+): number {
+	switch (command.operation) {
+		case 'up':
+			return (
+				(command.waitMs ?? SUPABASE_AGENT_DEFAULT_WAIT_MS) +
+				SUPABASE_UP_MARGIN_MS
+			);
+		case 'ls':
+		case 'status':
+		case 'env':
+		case 'log':
+			return SUPABASE_READ_TIMEOUT_MS;
+		case 'destroy':
+		case 'down':
+			return SUPABASE_QUICK_TIMEOUT_MS;
+		case 'reset':
+			return REQUEST_TIMEOUT_MS;
+	}
 }
 
 function failureResponse(
@@ -110,7 +174,14 @@ function failureResponse(
 	};
 }
 
-function encodeResponse(response: AgentCliResponse): Buffer {
+/**
+ * The response line, at most maxBytes long; the CLI counts the probe spaces
+ * already written ahead of it toward the same limit.
+ */
+function encodeResponse(
+	response: AgentCliResponse,
+	maxBytes = MAX_RESPONSE_BYTES
+): Buffer {
 	let encoded: Buffer;
 	try {
 		encoded = Buffer.from(`${JSON.stringify(response)}\n`, 'utf8');
@@ -126,7 +197,7 @@ function encodeResponse(response: AgentCliResponse): Buffer {
 			'utf8'
 		);
 	}
-	if (encoded.byteLength <= MAX_RESPONSE_BYTES) return encoded;
+	if (encoded.byteLength <= maxBytes) return encoded;
 	return Buffer.from(
 		`${JSON.stringify(
 			failureResponse(response.id, {
@@ -155,6 +226,7 @@ export class AgentCliService {
 	readonly #handler: AgentCliHandler;
 	readonly #platform: NodeJS.Platform;
 	readonly #readiness: (() => Promise<void>) | undefined;
+	readonly #livenessProbeMs: number;
 	readonly #connections = new Set<Socket>();
 	readonly #requestTimestamps: number[] = [];
 	#server: Server | undefined;
@@ -168,17 +240,21 @@ export class AgentCliService {
 		handler,
 		platform = process.platform,
 		readiness,
+		livenessProbeMs = LIVENESS_PROBE_INTERVAL_MS,
 	}: {
 		socketPath: string;
 		handler: AgentCliHandler;
 		platform?: NodeJS.Platform;
 		readiness?: () => Promise<void>;
+		/** How often a running handler's socket is probed; tests shorten it. */
+		livenessProbeMs?: number;
 	}) {
 		this.#socketPath = path.resolve(socketPath);
 		this.#socketDirectory = path.dirname(this.#socketPath);
 		this.#handler = handler;
 		this.#platform = platform;
 		this.#readiness = readiness;
+		this.#livenessProbeMs = livenessProbeMs;
 	}
 
 	getState(): AgentCliServiceState {
@@ -355,7 +431,6 @@ export class AgentCliService {
 						})
 					)
 				);
-				return;
 			}
 		});
 		socket.once('end', () => {
@@ -391,6 +466,9 @@ export class AgentCliService {
 						code: 'invalid_request',
 						message: 'The command did not match rndevtools/1.',
 						retryable: false,
+						// Usually a CLI or tool list newer or older than this desktop.
+						recovery:
+							'Update RN Devtools, or restart the agent session to reload the rndevtools tools.',
 					})
 				)
 			);
@@ -405,29 +483,48 @@ export class AgentCliService {
 		);
 		const onClose = () => controller.abort();
 		socket.once('close', onClose);
+		// A client that hung up is seen only by a write; see
+		// LIVENESS_PROBE_INTERVAL_MS.
+		let probes = 0;
+		const probe = setInterval(() => {
+			if (socket.destroyed || probes >= MAX_LIVENESS_PROBES) {
+				clearInterval(probe);
+				return;
+			}
+			probes += 1;
+			socket.write(LIVENESS_PROBE);
+		}, this.#livenessProbeMs);
 		try {
 			const result = await this.#handler(request.command, {
-				requestId: request.id || randomUUID(),
+				requestId: request.id,
 				signal: controller.signal,
+				...(request.agent ? { agent: request.agent } : {}),
 			});
 			if (!socket.destroyed) {
 				socket.end(
-					encodeResponse({
-						protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
-						id: request.id,
-						ok: true,
-						result,
-					})
+					encodeResponse(
+						{
+							protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+							id: request.id,
+							ok: true,
+							result,
+						},
+						MAX_RESPONSE_BYTES - probes
+					)
 				);
 			}
 		} catch (error) {
 			if (!socket.destroyed) {
 				socket.end(
-					encodeResponse(failureResponse(request.id, safeErrorBody(error)))
+					encodeResponse(
+						failureResponse(request.id, safeErrorBody(error)),
+						MAX_RESPONSE_BYTES - probes
+					)
 				);
 			}
 		} finally {
 			clearTimeout(timer);
+			clearInterval(probe);
 			socket.off('close', onClose);
 		}
 	}

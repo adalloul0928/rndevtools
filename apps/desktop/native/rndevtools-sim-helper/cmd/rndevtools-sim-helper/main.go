@@ -39,10 +39,6 @@ func run() int {
 	)
 }
 
-func runWithIO(args []string, stdin io.Reader, stdout io.Writer, authorizer authorization.RequestAuthorizer) int {
-	return runWithContext(context.Background(), args, stdin, stdout, authorizer)
-}
-
 func runWithContext(
 	parent context.Context,
 	args []string,
@@ -95,6 +91,11 @@ func runWithContext(
 // requests graceful cancellation, so rollback can finish before the parent
 // escalates to SIGKILL. This also avoids Darwin signal-runtime failures while
 // the helper is supervising simctl child processes.
+//
+// The Swift broker passes a pipe(2), but Electron's 'pipe' stdio slot is a
+// libuv socketpair, so both are accepted: either reads EOF once the parent
+// closes or half-closes its end. Any other descriptor type, such as /dev/null,
+// would read EOF at once and cancel every run, so it is refused.
 func contextWithInheritedControl(parent context.Context, descriptor int) (context.Context, context.CancelFunc) {
 	if descriptor < 3 || os.Getenv(controlFDEnvironment) != strconv.Itoa(descriptor) {
 		return parent, func() {}
@@ -104,7 +105,7 @@ func contextWithInheritedControl(parent context.Context, descriptor int) (contex
 		return parent, func() {}
 	}
 	metadata, err := file.Stat()
-	if err != nil || metadata.Mode()&os.ModeNamedPipe == 0 {
+	if err != nil || metadata.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
 		_ = file.Close()
 		return parent, func() {}
 	}

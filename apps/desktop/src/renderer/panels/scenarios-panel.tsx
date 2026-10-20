@@ -10,9 +10,12 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	ConfirmAction,
 	EmptyPanel,
+	InlineCode,
 	PanelHeader,
+	SectionCard,
 	StatusPill,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
@@ -20,6 +23,9 @@ import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { ScenarioDefinitionSummary } from '../../shared/protocol';
 
 type VariableDrafts = Readonly<Record<string, string>>;
+
+const IMPORT_TEMPLATE =
+	'{\n  "schemaVersion": 1,\n  "namespace": "rndevtools-scenarios",\n  "scenarios": []\n}';
 
 function initialVariables(
 	scenario: ScenarioDefinitionSummary | null
@@ -70,8 +76,38 @@ function receiptTone(status: string): 'success' | 'warning' | 'danger' {
 	return 'danger';
 }
 
+/**
+ * Validates the import textarea without mutating device state, so the panel can
+ * surface inline feedback and gate the merge trigger before a round-trip.
+ */
+export function validateScenarioImport(text: string): {
+	ok: boolean;
+	error?: string;
+} {
+	const trimmed = text.trim();
+	if (trimmed === '') return { ok: false, error: 'Paste a scenario document.' };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(trimmed);
+	} catch {
+		return { ok: false, error: 'Document is not valid JSON.' };
+	}
+	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		return { ok: false, error: 'Top level must be a JSON object.' };
+	}
+	const document = parsed as Record<string, unknown>;
+	if (!Array.isArray(document.scenarios)) {
+		return { ok: false, error: 'Missing a "scenarios" array.' };
+	}
+	if (document.scenarios.length === 0) {
+		return { ok: false, error: 'Add at least one scenario to import.' };
+	}
+	return { ok: true };
+}
+
 export function ScenariosPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const scenarios = selectedDevice?.tools.scenarios ?? [];
 	const runtime = selectedDevice?.tools.scenarioRuntime ?? { running: false };
 	const receipts = selectedDevice?.tools.scenarioReceipts ?? [];
@@ -98,9 +134,12 @@ export function ScenariosPanel() {
 				error instanceof Error ? error.message : 'Variables are invalid.';
 		}
 	}
-	const [importText, setImportText] = useState(
-		'{\n  "schemaVersion": 1,\n  "namespace": "rndevtools-scenarios",\n  "scenarios": []\n}'
+	const [importText, setImportText] = useState(IMPORT_TEMPLATE);
+	const importValidation = useMemo(
+		() => validateScenarioImport(importText),
+		[importText]
 	);
+	const importReason = actionUnavailableReason('scenarios', 'import');
 	const latestReceipt = useMemo(
 		() =>
 			selected
@@ -110,25 +149,34 @@ export function ScenariosPanel() {
 				: undefined,
 		[receipts, selected]
 	);
+	const executeReason = actionUnavailableReason('scenarios', 'execute');
+	const runBlockedReason = runtime.recoveryError
+		? 'Corrupt recovery data must be discarded first.'
+		: runtime.active
+			? 'Undo the active scenario before running another.'
+			: runtime.running
+				? 'A scenario transaction is already running.'
+				: variableError
+					? variableError
+					: executeReason;
 
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Automation"
 				title="Scenarios"
 				description="Run bounded, versioned app-state transactions with full preflight, rollback capture, active-state visibility, and one-tap undo."
 				meta={
 					runtime.recoveryError ? (
-						<span className="flex items-center gap-1.5 text-red-300">
+						<span className="flex items-center gap-1.5 text-(--danger)">
 							<ShieldAlert className="h-3 w-3" /> Recovery data needs attention
 						</span>
 					) : runtime.active ? (
-						<span className="flex items-center gap-1.5 text-amber-300">
+						<span className="flex items-center gap-1.5 text-(--warning)">
 							<ShieldAlert className="h-3 w-3" /> {runtime.active.scenarioName}{' '}
 							{runtime.active.recoveryRequired ? 'needs recovery' : 'active'}
 						</span>
 					) : (
-						<span className="flex items-center gap-1.5 text-emerald-300">
+						<span className="flex items-center gap-1.5 text-(--brand)">
 							<CheckCircle2 className="h-3 w-3" /> No scenario override
 						</span>
 					)
@@ -183,9 +231,7 @@ export function ScenariosPanel() {
 						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Available scenarios
 						</span>
-						<span className="font-mono text-xs text-(--text-3)">
-							{scenarios.length}
-						</span>
+						<Badge>{scenarios.length}</Badge>
 					</div>
 					{scenarios.length === 0 ? (
 						<EmptyPanel
@@ -196,65 +242,99 @@ export function ScenariosPanel() {
 						/>
 					) : (
 						<div className="space-y-2">
-							{scenarios.map((scenario) => (
-								<button
-									aria-pressed={selected?.id === scenario.id}
-									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === scenario.id ? 'border-blue-400/25 bg-blue-400/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
-									key={scenario.id}
-									type="button"
-									onClick={() => setSelectedId(scenario.id)}
-								>
-									<div className="flex items-start justify-between gap-3">
-										<div className="min-w-0">
-											<p className="m-0 truncate text-xs font-medium text-(--foreground)">
-												{scenario.name}
-											</p>
-											<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
-												{scenario.id} · v{scenario.version}
-											</p>
+							{scenarios.map((scenario) => {
+								const isSelected = selected?.id === scenario.id;
+								return (
+									<button
+										aria-current={isSelected ? 'true' : undefined}
+										aria-pressed={isSelected}
+										className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+										key={scenario.id}
+										type="button"
+										onClick={() => setSelectedId(scenario.id)}
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0">
+												<p className="m-0 truncate text-xs font-medium text-(--foreground)">
+													{scenario.name}
+												</p>
+												<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
+													{scenario.id} · v{scenario.version}
+												</p>
+											</div>
+											<Badge tone={scenario.bundled ? 'info' : 'default'}>
+												{scenario.bundled ? 'Bundled' : 'User'}
+											</Badge>
 										</div>
-										<StatusPill tone={scenario.bundled ? 'info' : 'default'}>
-											{scenario.bundled ? 'Bundled' : 'User'}
-										</StatusPill>
-									</div>
-								</button>
-							))}
+									</button>
+								);
+							})}
 						</div>
 					)}
-					<div className="mt-5 rounded-lg border border-white/8 bg-white/[0.025] p-3">
-						<div className="mb-2 flex items-center gap-2 text-xs font-semibold text-(--foreground)">
-							<FileJson2 className="h-3.5 w-3.5" /> Import user scenarios
-						</div>
-						<TextArea
-							aria-label="Scenario import JSON"
-							className="min-h-36 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-4 text-(--foreground) outline-none focus:border-white/25"
-							maxLength={512 * 1024}
-							value={importText}
-							onChange={(event) => setImportText(event.currentTarget.value)}
-						/>
-						<ConfirmAction
-							triggerLabel="Merge import"
-							title="Import user scenarios?"
-							description="Every definition is strictly parsed before the persistent scenario set changes. Bundled IDs cannot be replaced."
-							confirmLabel="Validate and merge"
-							isDisabled={!importText || !canRunAction('scenarios', 'import')}
-							triggerVariant="secondary"
-							onConfirm={() =>
-								void runAction(
-									'scenarios',
-									'import',
-									{ json: importText, mode: 'merge' },
-									'Scenario document imported.'
-								)
-							}
-						/>
+					<div className="mt-5">
+						<SectionCard
+							title="Import user scenarios"
+							icon={<FileJson2 className="h-3.5 w-3.5" />}
+						>
+							<TextArea
+								aria-label="Scenario import JSON"
+								aria-describedby="scenario-import-feedback"
+								aria-invalid={!importValidation.ok}
+								className="min-h-36 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-4 text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
+								maxLength={512 * 1024}
+								value={importText}
+								onChange={(event) => setImportText(event.currentTarget.value)}
+							/>
+							<div
+								className="mt-2 flex items-center justify-between gap-2"
+								id="scenario-import-feedback"
+							>
+								<span
+									className={`text-xs ${importValidation.ok ? 'text-(--brand)' : 'text-(--text-3)'}`}
+								>
+									{importValidation.ok
+										? 'Document looks valid — bundled IDs stay protected.'
+										: (importValidation.error ?? '')}
+								</span>
+								<button
+									className="text-xs text-(--text-3) underline-offset-2 hover:text-(--foreground) hover:underline"
+									type="button"
+									onClick={() => setImportText(IMPORT_TEMPLATE)}
+								>
+									Reset
+								</button>
+							</div>
+							<div className="mt-3">
+								<ConfirmAction
+									triggerLabel="Merge import"
+									title="Import user scenarios?"
+									description="Every definition is strictly parsed before the persistent scenario set changes. Bundled IDs cannot be replaced."
+									confirmLabel="Validate and merge"
+									isDisabled={!importValidation.ok || importReason !== null}
+									triggerVariant="secondary"
+									onConfirm={() =>
+										void runAction(
+											'scenarios',
+											'import',
+											{ json: importText, mode: 'merge' },
+											'Scenario document imported.'
+										)
+									}
+								/>
+								{importValidation.ok && importReason ? (
+									<p className="mb-0 mt-2 text-xs text-(--text-3)">
+										{importReason}
+									</p>
+								) : null}
+							</div>
+						</SectionCard>
 					</div>
 				</div>
 				<div className="panel-scroll p-6">
 					{selected ? (
 						<div className="mx-auto max-w-3xl">
 							{runtime.recoveryError ? (
-								<div className="mb-5 rounded-lg border border-red-400/25 bg-red-400/[0.07] p-4 text-xs text-red-200">
+								<div className="mb-5 rounded-lg border border-(--danger)/25 bg-(--danger)/[0.08] p-4 text-xs text-(--danger)">
 									{runtime.recoveryError}
 								</div>
 							) : null}
@@ -297,13 +377,7 @@ export function ScenariosPanel() {
 										title={`Run ${selected.name}?`}
 										description={`The app will preflight all ${selected.steps.length} steps, capture rollback state, then apply sequentially. Privileged and non-reversible steps remain blocked by the mobile engine.`}
 										confirmLabel="Run transaction"
-										isDisabled={
-											Boolean(runtime.active) ||
-											runtime.running ||
-											Boolean(runtime.recoveryError) ||
-											Boolean(variableError) ||
-											!canRunAction('scenarios', 'execute')
-										}
+										isDisabled={runBlockedReason !== null}
 										onConfirm={() => {
 											void runAction(
 												'scenarios',
@@ -320,12 +394,14 @@ export function ScenariosPanel() {
 									/>
 								</div>
 							</div>
+							{runBlockedReason && !variableError ? (
+								<p className="mb-5 mt-[-8px] text-xs text-(--text-3)">
+									Run is unavailable: {runBlockedReason}
+								</p>
+							) : null}
 							{selected.variables.length > 0 ? (
-								<div className="mb-5 rounded-lg border border-white/8 bg-white/[0.025] p-4">
-									<h3 className="m-0 text-xs font-semibold text-(--foreground)">
-										Variables
-									</h3>
-									<div className="mt-3 grid grid-cols-2 gap-3">
+								<SectionCard className="mb-5" title="Variables">
+									<div className="grid grid-cols-2 gap-3">
 										{selected.variables.map((variable) => (
 											<label
 												className="text-xs text-(--muted)"
@@ -334,7 +410,7 @@ export function ScenariosPanel() {
 												{variable.label}
 												{variable.required ? ' *' : ''}
 												<input
-													className="mt-1 h-9 w-full rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground) outline-none focus:border-white/25"
+													className="mt-1 h-9 w-full rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
 													value={drafts[variable.id] ?? ''}
 													onChange={(event) =>
 														setVariablesByScenario((current) => ({
@@ -350,18 +426,18 @@ export function ScenariosPanel() {
 										))}
 									</div>
 									{variableError ? (
-										<p className="mb-0 mt-2 text-xs text-red-300">
+										<p className="mb-0 mt-2 text-xs text-(--danger)">
 											{variableError}
 										</p>
 									) : null}
-								</div>
+								</SectionCard>
 							) : null}
 							<div className="grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
 								<div className="border-r border-white/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Steps
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
 										{selected.steps.length}
 									</p>
 								</div>
@@ -369,7 +445,7 @@ export function ScenariosPanel() {
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Variables
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
 										{selected.variables.length}
 									</p>
 								</div>
@@ -377,7 +453,7 @@ export function ScenariosPanel() {
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Preconditions
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
 										{selected.preconditionCount}
 									</p>
 								</div>
@@ -388,40 +464,41 @@ export function ScenariosPanel() {
 										className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/[0.02] p-3"
 										key={step.id}
 									>
-										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 font-mono text-xs text-(--muted)">
+										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 font-mono text-xs tabular-nums text-(--muted)">
 											{index + 1}
 										</span>
 										<div>
 											<p className="m-0 text-xs font-medium text-(--foreground)">
 												{step.label ?? step.id}
 											</p>
-											<p className="mb-0 mt-1 font-mono text-xs text-(--text-3)">
-												{step.type}
-											</p>
+											<div className="mt-1">
+												<InlineCode>{step.type}</InlineCode>
+											</div>
 										</div>
 									</div>
 								))}
 							</div>
 							{latestReceipt ? (
-								<div className="mt-5 rounded-lg border border-white/8 bg-white/[0.02] p-4">
-									<div className="flex items-center justify-between">
-										<div className="flex items-center gap-2 text-xs font-semibold text-(--foreground)">
-											<History className="h-3.5 w-3.5" /> Latest transaction
-										</div>
+								<SectionCard
+									className="mt-5"
+									title="Latest transaction"
+									icon={<History className="h-3.5 w-3.5" />}
+									actions={
 										<StatusPill tone={receiptTone(latestReceipt.status)}>
 											{latestReceipt.status}
 										</StatusPill>
-									</div>
-									<p className="mb-0 mt-2 text-xs text-(--text-3)">
+									}
+								>
+									<p className="m-0 text-xs text-(--text-3)">
 										{formatRelativeTime(latestReceipt.completedAt)} ·{' '}
 										{latestReceipt.stepResults.length} step results
 									</p>
 									{latestReceipt.error ? (
-										<p className="mb-0 mt-2 text-xs text-red-300">
+										<p className="mb-0 mt-2 text-xs text-(--danger)">
 											{latestReceipt.error}
 										</p>
 									) : null}
-								</div>
+								</SectionCard>
 							) : null}
 						</div>
 					) : (

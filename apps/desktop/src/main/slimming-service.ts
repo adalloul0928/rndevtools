@@ -1,8 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
+import { redactDiagnosticText } from '@rndevtools/core/redact';
+import type { DeviceAccessDecision } from '../shared/device-hold';
 import type {
 	SlimmingAcknowledgementReceipt,
 	SlimmingAcknowledgementRequest,
@@ -19,11 +17,13 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import {
+	type SlimmingRequester,
 	slimmingAcknowledgementRequestSchema,
 	slimmingActionSchema,
 	slimmingSettingRequestSchema,
 	slimmingStateSchema,
 } from '../shared/slimming-protocol';
+import { safeErrorText } from './security';
 import {
 	compatibilityForPublic,
 	mutationEvidenceFromError,
@@ -44,6 +44,12 @@ import {
 	type PersistedSlimmingSetting,
 	SlimmingPersistence,
 } from './slimming-persistence';
+
+/** Answers whether `requester` (an agent, or the operator when undefined) may mutate the device. */
+export type DeviceAccessPort = (
+	simulatorUdid: string,
+	requester: SlimmingRequester | undefined
+) => DeviceAccessDecision;
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
 const MAX_JOBS = 100;
@@ -107,10 +113,6 @@ type InternalJob = {
 	emergencyRecoveryTargets: Set<string>;
 };
 
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024);
-}
-
 function helperStateFromError(error: unknown): SlimmingState['helper'] {
 	const kind =
 		error && typeof error === 'object' && 'kind' in error
@@ -119,7 +121,7 @@ function helperStateFromError(error: unknown): SlimmingState['helper'] {
 	return {
 		status: kind === 'untrusted' ? 'untrusted' : 'unavailable',
 		readOnlyAvailable: false,
-		error: safeError(error),
+		error: safeErrorText(error),
 	};
 }
 
@@ -245,7 +247,7 @@ function mutationFailureDetail(error: unknown): string {
 }
 
 function describeMutationFailure(error: unknown): string {
-	return `${safeError(error)}${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
+	return `${safeErrorText(error)}${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
 		0,
 		4 * 1024
 	);
@@ -285,6 +287,7 @@ export class SlimmingService {
 	readonly #now: () => number;
 	readonly #pollIntervalMs: number;
 	readonly #mutationCoordinator: SimulatorMutationCoordinatorPort;
+	readonly #deviceAccess: DeviceAccessPort | undefined;
 	readonly #listeners = new Set<SlimmingListener>();
 	readonly #jobs: InternalJob[] = [];
 	readonly #tasks = new Set<Promise<void>>();
@@ -305,6 +308,7 @@ export class SlimmingService {
 		mutationUnavailableReason,
 		helper = new SimHelperClient({ resourceDirectory, appVersion }),
 		mutationCoordinator = new SimulatorMutationCoordinator(),
+		deviceAccess,
 		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 		now = Date.now,
 	}: {
@@ -314,11 +318,17 @@ export class SlimmingService {
 		mutationUnavailableReason?: string;
 		helper?: SlimmingHelperProvider;
 		mutationCoordinator?: SimulatorMutationCoordinatorPort;
+		/**
+		 * Who holds each device. When set, a mutation on a device another
+		 * session holds is refused for every caller, agent or GUI alike.
+		 */
+		deviceAccess?: DeviceAccessPort;
 		pollIntervalMs?: number;
 		now?: () => number;
 	}) {
 		this.#helper = helper;
 		this.#mutationCoordinator = mutationCoordinator;
+		this.#deviceAccess = deviceAccess;
 		this.#persistence = new SlimmingPersistence(persistenceDirectory);
 		this.#appVersion = appVersion;
 		this.#mutationUnavailableReason = mutationUnavailableReason;
@@ -374,7 +384,7 @@ export class SlimmingService {
 			this.#state.setting = {
 				experimentalMutationsEnabled: false,
 				disabledDisposition: 'restore-failed',
-				warning: `Safety state could not load. Mutations are blocked: ${safeError(error)}`,
+				warning: `Safety state could not load. Mutations are blocked: ${safeErrorText(error)}`,
 			};
 		}
 		await this.refresh();
@@ -652,7 +662,7 @@ export class SlimmingService {
 				actionId: request.actionId,
 				accepted: false,
 				state: this.getState(),
-				error: safeError(error),
+				error: safeErrorText(error),
 			};
 		}
 	}
@@ -670,6 +680,22 @@ export class SlimmingService {
 			false,
 			mutationLease
 		);
+	}
+
+	/**
+	 * Drops the oldest finished jobs until one more fits, as the Simulator
+	 * service does, so a long session never fills the queue with history.
+	 * False only when every listed job is still active.
+	 */
+	#makeJobRoom(): boolean {
+		while (this.#jobs.length >= MAX_JOBS) {
+			const index = this.#jobs.findIndex(
+				(job) => !ACTIVE_JOB_STATUSES.has(job.public.status)
+			);
+			if (index < 0) return false;
+			this.#jobs.splice(index, 1);
+		}
+		return true;
 	}
 
 	cancelJob(jobId: string): boolean {
@@ -755,6 +781,13 @@ export class SlimmingService {
 						`${udid} requires the exact EXPERIMENTAL acknowledgement.`
 					);
 				}
+				// Slimming reboots the device. A device another session holds (its
+				// lane or claim) is refused whoever asks, so one agent's slim can
+				// never restart another agent's Simulator.
+				const access = this.#deviceAccess?.(udid, action.requester);
+				if (access && !access.allowed) {
+					return this.#reject(action, access.reason);
+				}
 			}
 		}
 		if (this.#jobs.some((job) => job.public.actionId === action.actionId)) {
@@ -763,7 +796,7 @@ export class SlimmingService {
 				'A Slimming action with this identifier already exists.'
 			);
 		}
-		if (this.#jobs.length >= MAX_JOBS) {
+		if (!this.#makeJobRoom()) {
 			return this.#reject(
 				action,
 				`The ${MAX_JOBS}-job Slimming queue is full.`
@@ -1938,7 +1971,7 @@ export class SlimmingService {
 							mapDeviceState(device.state) === 'shutdown'
 								? 'Preview or mutate to inspect this Shutdown Simulator through a temporary, automatically restored boot.'
 								: result.status === 'rejected'
-									? safeError(result.reason)
+									? safeErrorText(result.reason)
 									: 'Managed service inspection is unavailable while the Simulator changes state.',
 					};
 				}

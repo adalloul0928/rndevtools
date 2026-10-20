@@ -38,6 +38,53 @@ func TestInheritedControlPipeCancelsWithoutOSSignals(t *testing.T) {
 	}
 }
 
+// Electron spawns direct helper runs with a 'pipe' stdio slot on FD 4, which
+// libuv backs with a socketpair, and cancels by calling end() on its side.
+func TestInheritedControlSocketCancelsOnElectronHalfClose(t *testing.T) {
+	descriptors, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperEnd, electronEnd := descriptors[0], descriptors[1]
+	defer syscall.Close(electronEnd)
+	t.Setenv(controlFDEnvironment, strconv.Itoa(helperEnd))
+	ctx, stop := contextWithInheritedControl(context.Background(), helperEnd)
+	defer stop()
+	select {
+	case <-ctx.Done():
+		t.Fatal("an open control socket cancelled helper work")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := syscall.Shutdown(electronEnd, syscall.SHUT_WR); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("half-closing the control socket did not cancel helper work")
+	}
+}
+
+func TestInheritedControlRefusesMarkedDescriptorThatIsNeitherPipeNorSocket(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	descriptor, err := syscall.Dup(int(null.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(controlFDEnvironment, strconv.Itoa(descriptor))
+	ctx, stop := contextWithInheritedControl(context.Background(), descriptor)
+	defer stop()
+	select {
+	case <-ctx.Done():
+		t.Fatal("a marked character device was read as a closed control channel")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestInheritedControlDoesNotTouchUnmarkedDescriptors(t *testing.T) {
 	t.Setenv(controlFDEnvironment, "")
 	readPipe, writePipe, err := os.Pipe()
@@ -110,7 +157,7 @@ func TestRunDeniesEveryDirectMutationBeforeSimulatorAccess(t *testing.T) {
 			authorizer := &denyingAuthorizer{}
 			input := `{"protocolVersion":2,"requestId":"direct","operation":"` + operation + `","payload":` + payload + `}`
 			var output bytes.Buffer
-			if exitCode := runWithIO([]string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 1 {
+			if exitCode := runWithContext(context.Background(), []string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 1 {
 				t.Fatalf("exit code = %d, want 1", exitCode)
 			}
 			if authorizer.calls != 1 {
@@ -131,7 +178,7 @@ func TestRunPreservesDirectReadOnlyHandshake(t *testing.T) {
 	authorizer := &denyingAuthorizer{}
 	input := `{"protocolVersion":2,"requestId":"read","operation":"handshake","payload":{}}`
 	var output bytes.Buffer
-	if exitCode := runWithIO([]string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 0 {
+	if exitCode := runWithContext(context.Background(), []string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0: %s", exitCode, output.String())
 	}
 	if authorizer.calls != 0 {

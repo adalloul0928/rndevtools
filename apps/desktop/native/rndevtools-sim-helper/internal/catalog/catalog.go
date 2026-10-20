@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	Version                      = "simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2"
-	UpstreamCommit               = "09fc9cbbca35db5230e6d571a0a366fe6876266e"
-	UpstreamProfilesHash         = "e86e26967d4bf5e4ee33444066416330736ee7a4633ecf756cce15e801cdc0de"
+	Version                      = "simslim-v0.12.2-6518ba7e-pumpd.1-presets.3"
+	UpstreamCommit               = "6518ba7eab1123d7e1d7797b0e05f51043b42a5b"
+	UpstreamProfilesHash         = "289a52ba2b906f40e6980c966c8b236ab8dc0c12a0b101d84af996c55a0580eb"
 	PatchSet                     = "pumpd.1"
-	UpstreamSourceManifestSHA256 = "8a7681f26eb84be6b5a84a1326973c35c1ba4320e27c706655d3eed8bd31af08"
-	PatchSHA256                  = "69bef9b9d08e900652acb77fd13463f6bc5f8735df1aa994ba6be6d353146083"
-	VendoredSourceManifestSHA256 = "b2045d5332b79e52875d592189f37de2c817c12a341cddbb75499f3085b0e4c7"
+	UpstreamSourceManifestSHA256 = "bbd7640e2738197be54564d9f9926710a0dc5e13ee674d6e00e48bd5714b6172"
+	PatchSHA256                  = "f58830a4f4cde1dcd609286d416e9c4d33f472ca6bb32fc38fc4bbac7fa37a4c"
+	VendoredSourceManifestSHA256 = "eb5317fe41e6a987ceaa2d6da5097a7b561e90214328a639eeac2c2599bce269"
 )
 
 type Category struct {
@@ -41,6 +41,8 @@ type Profile struct {
 // These jobs remained registered after reboot in real iOS 26.5 apply tests.
 // Keep them enabled in the bundled presets instead of weakening registration proof.
 // They remain in the upstream mutation universe so legacy overrides can be restored.
+// Upstream v0.12.2 made assistantd and gamed restore-only on its own side, so
+// they are no longer slimmable and do not need to be listed here.
 var preservedServiceIDs = []string{
 	"com.apple.MapKit.SnapshotService",
 	"com.apple.siri.acousticsignature",

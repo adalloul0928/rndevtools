@@ -24,19 +24,18 @@
 				"src/**/*.{ts,tsx}!",
 				"src/**/*.css!",
 				"scripts/**/*.{cjs,mjs}!",
+				"e2e/**/*.ts!",
 				"*.ts!"
+			]
+		},
+		"examples/expo-demo": {
+			"entry": [
+				"src/lib/devtools-host-disabled.tsx!"
 			],
-			"paths": {
-				"@/*": [
-					"./src/renderer/*"
-				],
-				"@main/*": [
-					"./src/main/*"
-				],
-				"@shared/*": [
-					"./src/shared/*"
-				]
-			}
+			"ignoreDependencies": [
+				"expo-updates",
+				"expo-system-ui"
+			]
 		}
 	}
 }

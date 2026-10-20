@@ -234,8 +234,15 @@ function appContainerPaths(output: string, container: string): string[] {
 	});
 }
 
+/**
+ * Work that does not mutate a device runs one job at a time per device. A
+ * recording runs until it is stopped, for up to an hour, so recordings queue
+ * apart: a screenshot or an app listing taken meanwhile does not wait for it.
+ */
 function actionQueueKey(action: SimulatorAction): string {
-	return actionDeviceUdid(action) ?? 'inventory';
+	const udid = actionDeviceUdid(action);
+	if (!udid) return 'inventory';
+	return action.kind === 'capture.video' ? `${udid}:video` : udid;
 }
 
 function mutatesInventory(action: SimulatorAction): boolean {

@@ -1,6 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "globalDependencies": [
+    "biome.json",
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
@@ -9,32 +10,18 @@
     "apps/**/tsconfig.json",
     "packages/**/package.json"
   ],
-  "globalEnv": [
-    "NODE_ENV"
-  ],
+  "globalEnv": ["NODE_ENV"],
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
     },
     "lint": {},
     "typecheck": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     },
     "test:run": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     }
   }
 }

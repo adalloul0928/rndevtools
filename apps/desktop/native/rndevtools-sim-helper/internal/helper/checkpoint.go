@@ -18,6 +18,7 @@ import (
 	"github.com/adalloul0928/rndevtools-sim-helper/internal/catalog"
 	"github.com/adalloul0928/rndevtools-sim-helper/internal/compatibility"
 	"github.com/adalloul0928/rndevtools-sim-helper/internal/protocol"
+	"github.com/adalloul0928/rndevtools-sim-helper/internal/simulator"
 )
 
 const (
@@ -25,13 +26,10 @@ const (
 	checkpointSchemaVersion   = 4
 	checkpointDigestDomain    = "rndevtools-sim-checkpoint-v4\x00"
 	checkpointPurposePrepared = "prepared-mutation"
-	checkpointPurposeRestore  = "restore-point"
 )
 
-var checkpointUDIDPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 var checkpointPreparationIDPattern = regexp.MustCompile(`^preparation-[a-f0-9]{32}$`)
 var checkpointProfileIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$`)
-var checkpointProcessNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
 
 type checkpointPayload struct {
 	SchemaVersion               int                 `json:"schemaVersion"`
@@ -82,28 +80,6 @@ func encodePreparedCheckpoint(
 		PreparedProfileID:           profileID,
 		PreparedDesiredServiceIDs:   canonicalManagedIDs(desiredServiceIDs),
 		ObservedRunningProcessNames: canonicalProcessNames(observedRunningProcessNames),
-	})
-}
-
-func encodeRestorePoint(
-	simulatorID, originalBootState string,
-	tuple compatibility.Tuple,
-	managedDisabledServiceIDs []string,
-) (string, error) {
-	return encodeCheckpointPayload(checkpointPayload{
-		SchemaVersion:               checkpointSchemaVersion,
-		CatalogVersion:              catalog.Version,
-		CatalogSourceCommit:         catalog.UpstreamCommit,
-		CatalogPatchSet:             catalog.PatchSet,
-		VendoredSourceManifestHash:  catalog.VendoredSourceManifestSHA256,
-		CompatibilityMatrixVersion:  compatibility.Version,
-		SimulatorID:                 simulatorID,
-		Tuple:                       tuple,
-		OriginalBootState:           originalBootState,
-		ManagedDisabledServiceIDs:   canonicalManagedIDs(managedDisabledServiceIDs),
-		Purpose:                     checkpointPurposeRestore,
-		PreparedDesiredServiceIDs:   []string{},
-		ObservedRunningProcessNames: []string{},
 	})
 }
 
@@ -171,7 +147,7 @@ func validateCheckpointPayload(payload checkpointPayload) error {
 		payload.CompatibilityMatrixVersion != compatibility.Version {
 		return errors.New("checkpoint metadata is not compatible with this helper")
 	}
-	if !checkpointUDIDPattern.MatchString(payload.SimulatorID) {
+	if !simulator.UDIDPattern.MatchString(payload.SimulatorID) {
 		return errors.New("checkpoint simulator ID is invalid")
 	}
 	if payload.OriginalBootState != "Booted" && payload.OriginalBootState != "Shutdown" {
@@ -209,7 +185,7 @@ func validateCheckpointPayload(payload checkpointPayload) error {
 	}
 	previous = ""
 	for index, processName := range payload.ObservedRunningProcessNames {
-		if !checkpointProcessNamePattern.MatchString(processName) {
+		if !simulator.ProcessNamePattern.MatchString(processName) {
 			return errors.New("checkpoint observed process name is invalid")
 		}
 		if index > 0 && processName <= previous {
@@ -227,39 +203,31 @@ func validateCheckpointPayload(payload checkpointPayload) error {
 		}
 		previous = serviceID
 	}
-	switch payload.Purpose {
-	case checkpointPurposePrepared:
-		if !checkpointPreparationIDPattern.MatchString(payload.PreparationID) {
-			return errors.New("checkpoint preparation ID is invalid")
+	if payload.Purpose != checkpointPurposePrepared {
+		return errors.New("checkpoint purpose is invalid")
+	}
+	if !checkpointPreparationIDPattern.MatchString(payload.PreparationID) {
+		return errors.New("checkpoint preparation ID is invalid")
+	}
+	switch payload.PreparedOperation {
+	case protocol.OperationApplyProfile:
+		if !checkpointProfileIDPattern.MatchString(payload.PreparedProfileID) {
+			return errors.New("checkpoint prepared profile ID is invalid")
 		}
-		switch payload.PreparedOperation {
-		case protocol.OperationApplyProfile:
-			if !checkpointProfileIDPattern.MatchString(payload.PreparedProfileID) {
-				return errors.New("checkpoint prepared profile ID is invalid")
-			}
-			desired, err := catalog.DesiredServiceIDs(payload.PreparedProfileID)
-			if err != nil || !slices.Equal(canonicalManagedIDs(desired), payload.PreparedDesiredServiceIDs) {
-				return errors.New("checkpoint prepared profile target is invalid")
-			}
-		case protocol.OperationRestoreManaged:
-			if payload.PreparedProfileID != "" || len(payload.PreparedDesiredServiceIDs) != 0 {
-				return errors.New("checkpoint prepared restore target is invalid")
-			}
-		case protocol.OperationUndoLast:
-			if payload.PreparedProfileID != "" {
-				return errors.New("checkpoint prepared undo target is invalid")
-			}
-		default:
-			return errors.New("checkpoint prepared operation is invalid")
+		desired, err := catalog.DesiredServiceIDs(payload.PreparedProfileID)
+		if err != nil || !slices.Equal(canonicalManagedIDs(desired), payload.PreparedDesiredServiceIDs) {
+			return errors.New("checkpoint prepared profile target is invalid")
 		}
-	case checkpointPurposeRestore:
-		if payload.PreparationID != "" || payload.PreparedOperation != "" ||
-			payload.PreparedProfileID != "" || len(payload.PreparedDesiredServiceIDs) != 0 ||
-			len(payload.ObservedRunningProcessNames) != 0 {
-			return errors.New("restore-point checkpoint contains mutation intent")
+	case protocol.OperationRestoreManaged:
+		if payload.PreparedProfileID != "" || len(payload.PreparedDesiredServiceIDs) != 0 {
+			return errors.New("checkpoint prepared restore target is invalid")
+		}
+	case protocol.OperationUndoLast:
+		if payload.PreparedProfileID != "" {
+			return errors.New("checkpoint prepared undo target is invalid")
 		}
 	default:
-		return errors.New("checkpoint purpose is invalid")
+		return errors.New("checkpoint prepared operation is invalid")
 	}
 	return nil
 }

@@ -3,14 +3,18 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 } from '@rndevtools/core/desktop-protocol';
+// The narrow entry points keep this headless module off the root barrel, which
+// also loads the camera provider and the image overlay.
+import { getDevtoolsAuthorization } from '@rndevtools/react-native/authorization';
 import {
 	type DesktopClientHandle,
-	getDevtoolsAuthorization,
 	shouldStartDesktopClient,
+	simulatorUdidFromPath,
 	startDesktopClient,
-} from '@rndevtools/react-native';
+} from '@rndevtools/react-native/desktop';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import { Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 
 /**
@@ -29,6 +33,12 @@ function createDeviceInfo(): DesktopDeviceInfoSnapshot {
 		model: Device.modelName ?? undefined,
 		osVersion: Device.osVersion ?? undefined,
 		appVersion: Constants.expoConfig?.version ?? '0.0.0',
+		bundleIdentifier: Constants.expoConfig?.ios?.bundleIdentifier ?? undefined,
+		// Reporting the Simulator UDID lets the desktop link this session to the
+		// Simulator row and the lane that launched it, and lets an agent address
+		// both with one `--udid`. It is derived from the app's own container
+		// path, so it is undefined on a physical device.
+		simulatorUdid: simulatorUdidFromPath(Paths.document.uri),
 		// Declaring no capabilities is what makes every privileged desktop
 		// control inert for this demo. A host opts in one capability at a time.
 		capabilities: [],

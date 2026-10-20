@@ -25,13 +25,16 @@ import { serializeValue, truncateText } from '../core/serialize';
 import { shareDiagnosticContent } from '../core/share';
 import type { DevToolsPanelPlugin, DevToolsSystemImage } from '../types';
 import {
-	assertEnvironmentRules as assertTypedEnvironmentRules,
+	assertEnvironmentRules,
+	type EnvironmentSection,
+	type EnvironmentValidationResult,
+	type EnvironmentValueRule,
+	environmentSectionEntries,
 	summarizeEnvironmentHealth,
 	validateEnvironmentValues as validateTypedEnvironmentValues,
 } from './environment-model';
 
 const MAX_ENVIRONMENT_RENDERED_VALUE_BYTES = 16 * 1024;
-const MAX_ENVIRONMENT_TEXT_LENGTH = 4 * 1024;
 
 export function formatEnvironmentValue(value: unknown): string {
 	if (value === undefined || value === null || value === '') return 'Not set';
@@ -51,39 +54,6 @@ function formatEnvironmentEntry(key: string, value: unknown): string {
 		: formatEnvironmentValue(value);
 }
 
-type EnvironmentValueType =
-	| 'string'
-	| 'number'
-	| 'boolean'
-	| 'object'
-	| 'array';
-
-export type EnvironmentValueRule = {
-	key: string;
-	section?: string;
-	description?: string;
-	required?: boolean;
-	expectedType?: EnvironmentValueType;
-	expectedValue?: unknown;
-};
-
-type EnvironmentValidationStatus =
-	| 'valid'
-	| 'missing'
-	| 'typeMismatch'
-	| 'valueMismatch';
-
-export type EnvironmentValidationResult = EnvironmentValueRule & {
-	status: EnvironmentValidationStatus;
-	actualValue?: unknown;
-	actualType?: string;
-};
-
-export type EnvironmentSection = {
-	title: string;
-	values: Readonly<Record<string, unknown>>;
-};
-
 export type EnvironmentPluginOptions = {
 	values?: Readonly<Record<string, unknown>>;
 	sections?: ReadonlyArray<EnvironmentSection>;
@@ -95,301 +65,6 @@ export type EnvironmentPluginOptions = {
 	systemImage?: DevToolsSystemImage;
 	tint?: string;
 };
-
-const MAX_ENVIRONMENT_ENTRIES_PER_SECTION = 5_000;
-const MAX_ENVIRONMENT_COMPARISON_DEPTH = 32;
-const MAX_ENVIRONMENT_COMPARISON_ENTRIES = 10_000;
-
-function valueType(value: unknown): string {
-	if (Array.isArray(value)) return 'array';
-	if (value === null) return 'null';
-	return typeof value;
-}
-
-function isMissing(value: unknown): boolean {
-	return value === undefined || value === null || value === '';
-}
-
-function environmentSectionEntries(
-	section: EnvironmentSection,
-	rejectOverflow = false,
-): readonly (readonly [string, unknown])[] {
-	let descriptors: Record<string, PropertyDescriptor>;
-	try {
-		descriptors = Object.getOwnPropertyDescriptors(section.values);
-	} catch {
-		return [];
-	}
-	const entries = Object.entries(descriptors).filter(
-		([, descriptor]) => descriptor.enumerable,
-	);
-	if (entries.length > MAX_ENVIRONMENT_ENTRIES_PER_SECTION) {
-		if (rejectOverflow) {
-			throw new Error(
-				`Environment sections support at most ${MAX_ENVIRONMENT_ENTRIES_PER_SECTION} values.`,
-			);
-		}
-		entries.length = MAX_ENVIRONMENT_ENTRIES_PER_SECTION;
-	}
-	return entries.map(
-		([key, descriptor]) =>
-			[
-				key,
-				'value' in descriptor ? descriptor.value : '[Accessor omitted]',
-			] as const,
-	);
-}
-
-type EnvironmentComparisonState = {
-	remaining: number;
-	seen: WeakMap<object, WeakSet<object>>;
-};
-
-function environmentValuesEqual(
-	left: unknown,
-	right: unknown,
-	state: EnvironmentComparisonState = {
-		remaining: MAX_ENVIRONMENT_COMPARISON_ENTRIES,
-		seen: new WeakMap<object, WeakSet<object>>(),
-	},
-	depth = 0,
-): boolean {
-	if (Object.is(left, right)) return true;
-	if (depth >= MAX_ENVIRONMENT_COMPARISON_DEPTH || state.remaining <= 0) {
-		return false;
-	}
-	state.remaining -= 1;
-	if (
-		!left ||
-		!right ||
-		typeof left !== 'object' ||
-		typeof right !== 'object' ||
-		Array.isArray(left) !== Array.isArray(right)
-	) {
-		return false;
-	}
-	try {
-		if (left instanceof Date || right instanceof Date) {
-			return (
-				left instanceof Date &&
-				right instanceof Date &&
-				Date.prototype.getTime.call(left) === Date.prototype.getTime.call(right)
-			);
-		}
-		if (!Array.isArray(left)) {
-			const leftPrototype = Object.getPrototypeOf(left);
-			const rightPrototype = Object.getPrototypeOf(right);
-			const leftIsPlain =
-				leftPrototype === Object.prototype || leftPrototype === null;
-			const rightIsPlain =
-				rightPrototype === Object.prototype || rightPrototype === null;
-			if (!leftIsPlain || !rightIsPlain) return false;
-		}
-	} catch {
-		return false;
-	}
-	const matched = state.seen.get(left);
-	if (matched?.has(right)) return true;
-	if (matched) matched.add(right);
-	else state.seen.set(left, new WeakSet([right]));
-
-	let leftDescriptors: Record<string, PropertyDescriptor>;
-	let rightDescriptors: Record<string, PropertyDescriptor>;
-	try {
-		leftDescriptors = Object.getOwnPropertyDescriptors(left);
-		rightDescriptors = Object.getOwnPropertyDescriptors(right);
-	} catch {
-		return false;
-	}
-	if (Array.isArray(left) && Array.isArray(right)) {
-		const leftLength = leftDescriptors.length;
-		const rightLength = rightDescriptors.length;
-		if (
-			!leftLength ||
-			!rightLength ||
-			!('value' in leftLength) ||
-			!('value' in rightLength) ||
-			leftLength.value !== rightLength.value ||
-			typeof leftLength.value !== 'number' ||
-			leftLength.value > MAX_ENVIRONMENT_COMPARISON_ENTRIES
-		) {
-			return false;
-		}
-		for (let index = 0; index < leftLength.value; index += 1) {
-			const leftDescriptor = leftDescriptors[String(index)];
-			const rightDescriptor = rightDescriptors[String(index)];
-			if (
-				!leftDescriptor ||
-				!rightDescriptor ||
-				!('value' in leftDescriptor) ||
-				!('value' in rightDescriptor) ||
-				!environmentValuesEqual(
-					leftDescriptor.value,
-					rightDescriptor.value,
-					state,
-					depth + 1,
-				)
-			) {
-				return false;
-			}
-		}
-		return true;
-	}
-	const leftKeys = Object.entries(leftDescriptors)
-		.filter(([, descriptor]) => descriptor.enumerable)
-		.map(([key]) => key);
-	const rightKeys = Object.entries(rightDescriptors)
-		.filter(([, descriptor]) => descriptor.enumerable)
-		.map(([key]) => key);
-	if (
-		leftKeys.length > MAX_ENVIRONMENT_COMPARISON_ENTRIES ||
-		rightKeys.length > MAX_ENVIRONMENT_COMPARISON_ENTRIES
-	) {
-		return false;
-	}
-	return (
-		leftKeys.length === rightKeys.length &&
-		leftKeys.every((key) => {
-			const leftDescriptor = leftDescriptors[key];
-			const rightDescriptor = rightDescriptors[key];
-			return (
-				leftDescriptor !== undefined &&
-				rightDescriptor !== undefined &&
-				'value' in leftDescriptor &&
-				'value' in rightDescriptor &&
-				environmentValuesEqual(
-					leftDescriptor.value,
-					rightDescriptor.value,
-					state,
-					depth + 1,
-				)
-			);
-		})
-	);
-}
-
-const environmentValueTypes = new Set<EnvironmentValueType>([
-	'string',
-	'number',
-	'boolean',
-	'object',
-	'array',
-]);
-
-function assertEnvironmentRules(
-	sections: readonly EnvironmentSection[],
-	rules: readonly EnvironmentValueRule[],
-): void {
-	const sectionTitles = new Set(sections.map((entry) => entry.title));
-	const signatures = new Set<string>();
-	const scopesByKey = new Map<string, Set<string>>();
-	for (const rule of rules) {
-		if (
-			!rule ||
-			typeof rule !== 'object' ||
-			typeof rule.key !== 'string' ||
-			!rule.key.trim() ||
-			rule.key.length > 4 * 1024
-		) {
-			throw new Error('Environment rule keys must be 1–4096 characters.');
-		}
-		if (
-			rule.description !== undefined &&
-			(typeof rule.description !== 'string' ||
-				rule.description.length > MAX_ENVIRONMENT_TEXT_LENGTH)
-		) {
-			throw new Error(
-				'Environment rule descriptions cannot exceed 4096 characters.',
-			);
-		}
-		if (rule.section && !sectionTitles.has(rule.section)) {
-			throw new Error(`Unknown environment rule section: ${rule.section}`);
-		}
-		if (
-			rule.expectedType !== undefined &&
-			!environmentValueTypes.has(rule.expectedType)
-		) {
-			throw new Error(
-				`Invalid expected type for environment rule ${rule.key}.`,
-			);
-		}
-		const signature = `${rule.section ?? '*'}\u0000${rule.key}`;
-		if (signatures.has(signature)) {
-			throw new Error(
-				`Duplicate environment rule: ${rule.section ?? '*'}:${rule.key}`,
-			);
-		}
-		signatures.add(signature);
-		const scope = rule.section ?? '*';
-		const existingScopes = scopesByKey.get(rule.key) ?? new Set<string>();
-		if (existingScopes.size > 0 && (scope === '*' || existingScopes.has('*'))) {
-			throw new Error(
-				`Overlapping environment rules require explicit, non-global sections: ${rule.key}`,
-			);
-		}
-		existingScopes.add(scope);
-		scopesByKey.set(rule.key, existingScopes);
-		if (!rule.section) {
-			const matchingSectionCount = sections.filter((entry) =>
-				environmentSectionEntries(entry).some(([key]) => key === rule.key),
-			).length;
-			if (matchingSectionCount > 1) {
-				throw new Error(
-					`Environment rule ${rule.key} is ambiguous; specify its section.`,
-				);
-			}
-		}
-	}
-}
-
-export function validateEnvironmentValues(
-	sections: readonly EnvironmentSection[],
-	rules: readonly EnvironmentValueRule[],
-): readonly EnvironmentValidationResult[] {
-	return rules.map((rule) => {
-		const candidates = rule.section
-			? sections.filter((section) => section.title === rule.section)
-			: sections;
-		const sectionEntry = candidates
-			.flatMap((entry) =>
-				environmentSectionEntries(entry).map(([key, value]) => ({
-					key,
-					value,
-				})),
-			)
-			.find((entry) => entry.key === rule.key);
-		const actualValue = sectionEntry?.value;
-		const actualType = valueType(actualValue);
-		if (isMissing(actualValue)) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: rule.required === false ? 'valid' : 'missing',
-			};
-		}
-		if (rule.expectedType && actualType !== rule.expectedType) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: 'typeMismatch',
-			};
-		}
-		if (
-			Object.hasOwn(rule, 'expectedValue') &&
-			!environmentValuesEqual(actualValue, rule.expectedValue)
-		) {
-			return {
-				...rule,
-				actualValue,
-				actualType,
-				status: 'valueMismatch',
-			};
-		}
-		return { ...rule, actualValue, actualType, status: 'valid' };
-	});
-}
 
 /**
  * Collapsed-row summary. Deliberately short: a serialized expected value would
@@ -462,7 +137,6 @@ export function createEnvironmentPlugin({
 		sectionTitles.add(declaredSection.title);
 	}
 	assertEnvironmentRules(declaredSections, rules);
-	assertTypedEnvironmentRules(declaredSections, rules);
 
 	function EnvironmentPanel({ onBack }: { onBack: () => void }) {
 		const validationResults = validateTypedEnvironmentValues(

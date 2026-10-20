@@ -6,6 +6,7 @@ import {
 	ChevronDown,
 	Command,
 	Cpu,
+	DatabaseZap,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Radio,
@@ -22,18 +23,39 @@ import {
 	useEffect,
 	useState,
 } from 'react';
+import { PanelErrorBoundary } from '@/components/error-boundary';
 import { ActionNotice, StatusPill } from '@/components/status-ui';
+import {
+	type ActionNoticeRuntime,
+	type ActionNoticeSource,
+	actionNoticeRuntimes,
+	createActionStatusOrder,
+	createSuccessNoticeTimers,
+	selectActionNotice,
+} from '@/lib/action-notice';
+import { requestNetworkFilter, useAppTraffic } from '@/lib/app-traffic';
+import { formatShortcutRange } from '@/lib/shell-navigation';
+import { appTrafficBanner } from '@/simulator/app-traffic-model';
 import {
 	isSimulatorToolId,
 	type SimulatorToolId,
+	simulatorToolSections,
 	simulatorTools,
 } from '@/simulator/simulator-config';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
+import { useLaneRuntime } from '@/state/lane-runtime';
 import { useRecipeRuntime } from '@/state/recipe-runtime';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
+import {
+	useSupabaseActions,
+	useSupabaseActiveJobCount,
+	useSupabaseNavigation,
+	useSupabaseSidebarBadge,
+} from '@/state/supabase-runtime';
 import { isToolId, toolGroups } from '@/tool-config';
 import type { PerformanceSample, ToolId } from '../shared/protocol';
+import type { SupabaseSidebarBadge } from '../shared/supabase-protocol';
 
 type WorkspaceId = 'simulator' | 'connected';
 type WorkspaceRoute = {
@@ -163,6 +185,16 @@ const BuildInsightsPanel = lazy(() =>
 		default: module.BuildInsightsPanel,
 	}))
 );
+const LanesPanel = lazy(() =>
+	import('@/panels/simulator/lanes-panel').then((module) => ({
+		default: module.LanesPanel,
+	}))
+);
+const SupabasePanel = lazy(() =>
+	import('@/panels/simulator/supabase-panel').then((module) => ({
+		default: module.SupabasePanel,
+	}))
+);
 const SimulatorSettingsPanel = lazy(() =>
 	import('@/panels/simulator/settings-panel').then((module) => ({
 		default: module.SettingsPanel,
@@ -196,8 +228,28 @@ const SIMULATOR_PANELS: Record<
 	captures: CapturesPanel,
 	automation: AutomationPanel,
 	builds: BuildInsightsPanel,
+	lanes: LanesPanel,
+	supabase: SupabasePanel,
 	settings: SimulatorSettingsPanel,
 };
+
+const SIMULATOR_TOOL_LABELS = new Map(
+	simulatorTools.map((tool) => [tool.id, tool.label])
+);
+const CONNECTED_TOOL_LABELS = new Map(
+	toolGroups
+		.flatMap((group) => group.tools)
+		.map((tool) => [tool.id, tool.label])
+);
+const SIMULATOR_SHORTCUT_RANGE = formatShortcutRange(
+	simulatorTools.map((tool) => tool.shortcut)
+);
+const SIMULATOR_TOOL_SECTIONS = simulatorToolSections();
+/** Tools that work without Xcode, so the setup banner stays off them. */
+const TOOLS_WITHOUT_SETUP_BANNER: ReadonlySet<SimulatorToolId> = new Set([
+	'settings',
+	'supabase',
+]);
 
 function routeFromHash(): WorkspaceRoute {
 	const hash = window.location.hash.slice(1);
@@ -243,37 +295,38 @@ export function App() {
 	const recipe = useRecipeRuntime();
 	const simulator = useSimulatorRuntime();
 	const slimming = useSlimmingRuntime();
+	const lanes = useLaneRuntime();
+	const supabase = useSupabaseActions();
 	const [route, setRoute] = useState<WorkspaceRoute>(routeFromHash);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	const [statusOrder] = useState(createActionStatusOrder);
+	const [successTimers] = useState(createSuccessNoticeTimers);
+	// Every runtime that reports an actionStatus. Which of them the active tool
+	// shows is decided by actionNoticeRuntimes.
+	const noticeSources: Record<ActionNoticeRuntime, ActionNoticeSource> = {
+		desktop: { status: desktop.actionStatus, clear: desktop.clearActionStatus },
+		simulator: {
+			status: simulator.actionStatus,
+			clear: simulator.clearActionStatus,
+		},
+		recipe: { status: recipe.actionStatus, clear: recipe.clearActionStatus },
+		slimming: {
+			status: slimming.actionStatus,
+			clear: slimming.clearActionStatus,
+		},
+		lanes: { status: lanes.actionStatus, clear: lanes.clearActionStatus },
+		supabase: {
+			status: supabase.actionStatus,
+			clear: supabase.clearActionStatus,
+		},
+	};
 
+	// Syncing on every render is cheap: a status keeps its timer until the
+	// runtime replaces it.
 	useEffect(() => {
-		const successfulClearers = [
-			desktop.actionStatus.kind === 'success'
-				? desktop.clearActionStatus
-				: null,
-			recipe.actionStatus.kind === 'success' ? recipe.clearActionStatus : null,
-			simulator.actionStatus.kind === 'success'
-				? simulator.clearActionStatus
-				: null,
-			slimming.actionStatus.kind === 'success'
-				? slimming.clearActionStatus
-				: null,
-		].filter((clearer): clearer is () => void => clearer !== null);
-		if (successfulClearers.length === 0) return;
-		const timer = window.setTimeout(() => {
-			for (const clear of successfulClearers) clear();
-		}, 3_500);
-		return () => window.clearTimeout(timer);
-	}, [
-		desktop.actionStatus,
-		desktop.clearActionStatus,
-		recipe.actionStatus,
-		recipe.clearActionStatus,
-		simulator.actionStatus,
-		simulator.clearActionStatus,
-		slimming.actionStatus,
-		slimming.clearActionStatus,
-	]);
+		successTimers.sync(noticeSources);
+	});
+	useEffect(() => () => successTimers.dispose(), [successTimers]);
 
 	useEffect(() => {
 		const onHashChange = () => setRoute(routeFromHash());
@@ -359,22 +412,11 @@ export function App() {
 		}));
 		replaceHash('simulator', tool);
 	};
-	const activeActionStatus =
-		route.workspace === 'simulator'
-			? route.simulatorTool === 'automation'
-				? recipe.actionStatus
-				: route.simulatorTool === 'slimming'
-					? slimming.actionStatus
-					: simulator.actionStatus
-			: desktop.actionStatus;
-	const clearActiveActionStatus =
-		route.workspace === 'simulator'
-			? route.simulatorTool === 'automation'
-				? recipe.clearActionStatus
-				: route.simulatorTool === 'slimming'
-					? slimming.clearActionStatus
-					: simulator.clearActionStatus
-			: desktop.clearActionStatus;
+	const notice = selectActionNotice(
+		noticeSources,
+		actionNoticeRuntimes(route.workspace, route.simulatorTool),
+		statusOrder
+	);
 
 	return (
 		<div className="desktop-provider" data-workspace={route.workspace}>
@@ -413,11 +455,11 @@ export function App() {
 					</div>
 				</main>
 			</div>
-			{activeActionStatus.kind !== 'idle' ? (
+			{notice ? (
 				<ActionNotice
-					kind={activeActionStatus.kind}
-					message={activeActionStatus.message}
-					onDismiss={clearActiveActionStatus}
+					kind={notice.status.kind}
+					message={notice.status.message}
+					onDismiss={notice.clear}
 				/>
 			) : null}
 		</div>
@@ -443,6 +485,7 @@ function Titlebar({
 	const recipe = useRecipeRuntime();
 	const simulator = useSimulatorRuntime();
 	const slimming = useSlimmingRuntime();
+	const supabaseJobs = useSupabaseActiveJobCount();
 	const shortcut = sidebarShortcut(desktop.bootstrap?.platform);
 	const latest = desktop.selectedDevice?.tools.performance.samples.at(-1);
 	const connected =
@@ -471,7 +514,8 @@ function Titlebar({
 				'running',
 				'cancelling',
 			].includes(run.status)
-		).length;
+		).length +
+		supabaseJobs;
 
 	return (
 		<header
@@ -582,19 +626,30 @@ function Titlebar({
 								/>
 								<span aria-hidden="true" className="titlebar-rule" />
 								<div className="titlebar-controls">
-									<button
-										className="connection-button"
-										type="button"
-										onClick={() => {
-											if (connectedTool !== 'diagnostics')
-												setConnectedTool('diagnostics');
-										}}
-									>
-										<span
-											className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
-										/>
-										{connected} live
-									</button>
+									<Tooltip delay={500}>
+										<button
+											aria-current={
+												connectedTool === 'diagnostics' ? 'page' : undefined
+											}
+											aria-label={`${connected} live ${connected === 1 ? 'connection' : 'connections'} · open Diagnostics`}
+											className="connection-button"
+											type="button"
+											onClick={() => {
+												if (connectedTool !== 'diagnostics')
+													setConnectedTool('diagnostics');
+											}}
+										>
+											<span
+												className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
+											/>
+											{connected} live
+										</button>
+										<Tooltip.Content>
+											{connected} live{' '}
+											{connected === 1 ? 'connection' : 'connections'} · open
+											Diagnostics
+										</Tooltip.Content>
+									</Tooltip>
 									<NativeSelect
 										className="device-select"
 										fullWidth={false}
@@ -783,9 +838,8 @@ function SimulatorSidebar({
 	const { state, selectedDevice } = useSimulatorRuntime();
 	const { bootstrap } = useDesktopRuntime();
 	const recipe = useRecipeRuntime();
+	const supabase = useSupabaseSidebarBadge();
 	const navigationModifier = bootstrap?.platform === 'darwin' ? '⌘' : 'Ctrl+';
-	const coreTools = simulatorTools.filter((tool) => tool.id !== 'settings');
-	const settingsTool = simulatorTools.find((tool) => tool.id === 'settings');
 	const unavailable = Object.values(state.capability.features).filter(
 		(ready) => !ready
 	).length;
@@ -814,63 +868,52 @@ function SimulatorSidebar({
 				/>
 			</header>
 			<nav className="desktop-sidebar-content" aria-label="Simulator tools">
-				<section className="tool-group">
-					<h2 className="tool-group-label">Simulator</h2>
-					<div className="space-y-0.5">
-						{coreTools.map((tool) => {
-							const Icon = tool.icon;
-							const count = simulatorCount(
-								tool.id,
-								state,
-								recipe.state.recipes.length
-							);
-							return (
-								<Button
-									{...(activeTool === tool.id
-										? { 'aria-current': 'page' as const }
-										: {})}
-									className={`tool-nav-item ${activeTool === tool.id ? 'is-current' : ''}`}
-									key={tool.id}
-									variant="ghost"
-									onPress={() => setActiveTool(tool.id)}
-								>
-									<Icon className="h-3.5 w-3.5" />
-									<span className="flex-1 text-left">{tool.label}</span>
-									{count !== undefined ? (
-										<span className="tool-count">{count}</span>
-									) : null}
-									<kbd className="tool-shortcut">
-										{navigationModifier}
-										{tool.shortcut}
-									</kbd>
-								</Button>
-							);
-						})}
-					</div>
-				</section>
-				{settingsTool ? (
-					<section className="tool-group">
-						<h2 className="tool-group-label">System</h2>
-						<Button
-							{...(activeTool === settingsTool.id
-								? { 'aria-current': 'page' as const }
-								: {})}
-							className={`tool-nav-item ${activeTool === settingsTool.id ? 'is-current' : ''}`}
-							variant="ghost"
-							onPress={() => setActiveTool(settingsTool.id)}
-						>
-							<Settings2 className="h-3.5 w-3.5" />
-							<span className="flex-1 text-left">Settings</span>
-							{unavailable > 0 ? (
-								<span className="tool-count is-warning">{unavailable}</span>
-							) : null}
-							<kbd className="tool-shortcut">{navigationModifier}7</kbd>
-						</Button>
+				{SIMULATOR_TOOL_SECTIONS.map((section) => (
+					<section className="tool-group" key={section.id}>
+						<h2 className="tool-group-label">{section.label}</h2>
+						<div className="space-y-0.5">
+							{section.tools.map((tool) => {
+								const Icon = tool.icon;
+								const badge = simulatorBadge(tool.id, {
+									state,
+									recipeCount: recipe.state.recipes.length,
+									unavailableCapabilities: unavailable,
+									supabase,
+								});
+								return (
+									<Button
+										{...(activeTool === tool.id
+											? { 'aria-current': 'page' as const }
+											: {})}
+										{...(badge?.label ? { 'aria-label': badge.label } : {})}
+										className={`tool-nav-item ${activeTool === tool.id ? 'is-current' : ''}`}
+										key={tool.id}
+										variant="ghost"
+										onPress={() => setActiveTool(tool.id)}
+									>
+										<Icon className="h-3.5 w-3.5" />
+										<span className="flex-1 text-left">{tool.label}</span>
+										{badge ? (
+											<span
+												className={`tool-count ${badge.tone === 'default' ? '' : `is-${badge.tone}`}`}
+											>
+												{badge.value}
+											</span>
+										) : null}
+										<kbd className="tool-shortcut">
+											{navigationModifier}
+											{tool.shortcut}
+										</kbd>
+									</Button>
+								);
+							})}
+						</div>
 					</section>
-				) : null}
+				))}
 			</nav>
 			<footer className="desktop-sidebar-footer">
 				<button
+					aria-label={`Simulator capability ${state.capability.status}${state.capability.xcodeVersion ? ` · Xcode ${state.capability.xcodeVersion}` : ''} · open Settings`}
 					className="broker-summary simulator-capability-summary"
 					type="button"
 					onClick={() => setActiveTool('settings')}
@@ -895,7 +938,7 @@ function SimulatorSidebar({
 						) : (
 							'Ctrl'
 						)}{' '}
-						1–7
+						{SIMULATOR_SHORTCUT_RANGE}
 					</span>
 					<span>Navigate Simulator</span>
 				</div>
@@ -904,17 +947,50 @@ function SimulatorSidebar({
 	);
 }
 
-function simulatorCount(
+type SimulatorBadge = Readonly<{
+	value: number;
+	tone: 'default' | 'warning' | 'danger';
+	/** Replaces the nav item's accessible name when the count needs words. */
+	label?: string;
+}>;
+
+/**
+ * The count beside a Simulator tool: plain counts for most tools, Settings'
+ * amber capability count, and the Supabase runtime's memoised badge (red
+ * for danger, amber for requests and warnings, a grey running count).
+ */
+function simulatorBadge(
 	tool: SimulatorToolId,
-	state: ReturnType<typeof useSimulatorRuntime>['state'],
-	recipeCount: number
-): number | undefined {
-	if (tool === 'fleet') return state.devices.length;
-	if (tool === 'captures') return state.captures.length;
-	if (tool === 'automation') return recipeCount;
-	if (tool === 'actions')
-		return state.devices.filter((device) => device.state === 'booted').length;
-	return undefined;
+	context: {
+		state: ReturnType<typeof useSimulatorRuntime>['state'];
+		recipeCount: number;
+		unavailableCapabilities: number;
+		supabase: SupabaseSidebarBadge | undefined;
+	}
+): SimulatorBadge | undefined {
+	const { state } = context;
+	switch (tool) {
+		case 'fleet':
+			return { value: state.devices.length, tone: 'default' };
+		case 'captures':
+			return { value: state.captures.length, tone: 'default' };
+		case 'automation':
+			return { value: context.recipeCount, tone: 'default' };
+		case 'actions':
+			return {
+				value: state.devices.filter((device) => device.state === 'booted')
+					.length,
+				tone: 'default',
+			};
+		case 'supabase':
+			return context.supabase;
+		case 'settings':
+			return context.unavailableCapabilities > 0
+				? { value: context.unavailableCapabilities, tone: 'warning' }
+				: undefined;
+		default:
+			return undefined;
+	}
 }
 
 function DesktopSidebar({
@@ -987,6 +1063,7 @@ function DesktopSidebar({
 			</nav>
 			<footer className="desktop-sidebar-footer">
 				<button
+					aria-label={`Broker ${state?.broker.status ?? 'starting'} on ${state ? `${state.broker.host}:${state.broker.port}` : '127.0.0.1'} · open Diagnostics`}
 					className="broker-summary"
 					type="button"
 					onClick={() => setActiveTool('diagnostics')}
@@ -1028,8 +1105,10 @@ function SimulatorContent({
 	const { state } = useSimulatorRuntime();
 	return (
 		<>
-			{state.capability.status !== 'available' && activeTool !== 'settings' ? (
+			{state.capability.status !== 'available' &&
+			!TOOLS_WITHOUT_SETUP_BANNER.has(activeTool) ? (
 				<button
+					aria-label="Simulator setup needs attention · open Settings"
 					className="simulator-onboarding-banner"
 					type="button"
 					onClick={() => setActiveTool('settings')}
@@ -1070,6 +1149,7 @@ const ConnectedContent = memo(function ConnectedContent({
 							are disabled until it reconnects.
 						</output>
 					) : null}
+					<AppTrafficBanner />
 					<div className="min-h-0 flex-1">
 						<ConnectedToolPanel tool={activeTool} />
 					</div>
@@ -1081,21 +1161,91 @@ const ConnectedContent = memo(function ConnectedContent({
 	);
 });
 
+/**
+ * The connected app talks to another backend than its lane's stack. Only a
+ * real mismatch shows; no traffic, an unlinked app or a lane without a
+ * backend never does. It reads the lane and Supabase runtimes itself, so
+ * their pushes re-render this banner and not the memoised inspector.
+ */
+function AppTrafficBanner() {
+	const traffic = useAppTraffic();
+	const { selectedDevice } = useDesktopRuntime();
+	const { openInSupabase } = useSupabaseNavigation();
+	const banner = selectedDevice
+		? appTrafficBanner(traffic, selectedDevice.info.name)
+		: undefined;
+	if (!banner || !selectedDevice) return null;
+	const deviceId = selectedDevice.info.id;
+	const { filter, stackId } = banner;
+	return (
+		<section
+			aria-label="App traffic"
+			className={`offline-banner app-traffic-banner is-${banner.tone}`}
+		>
+			<DatabaseZap aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+			<strong className="app-traffic-banner-text">{banner.text}</strong>
+			<span className="app-traffic-banner-actions">
+				<Button
+					size="sm"
+					variant="ghost"
+					onPress={() =>
+						openInSupabase(stackId === undefined ? {} : { stackId })
+					}
+				>
+					Open in Supabase
+				</Button>
+				{filter ? (
+					<Button
+						size="sm"
+						variant="ghost"
+						onPress={() => {
+							requestNetworkFilter({ deviceId, target: filter });
+							window.location.hash = 'connected/network';
+						}}
+					>
+						Show this traffic
+					</Button>
+				) : null}
+			</span>
+			{/* The verdict is announced when it changes; the running counts are not. */}
+			{banner.tone === 'danger' ? (
+				<span className="sr-only" role="alert">
+					{banner.announcement}
+				</span>
+			) : (
+				<output className="sr-only">{banner.announcement}</output>
+			)}
+		</section>
+	);
+}
+
 function ConnectedToolPanel({ tool }: { tool: ToolId }) {
 	const Panel = TOOL_PANELS[tool];
 	return (
-		<Suspense fallback={<PanelLoading />}>
-			<Panel />
-		</Suspense>
+		<PanelErrorBoundary
+			key={tool}
+			label={CONNECTED_TOOL_LABELS.get(tool) ?? tool}
+			panel={`connected/${tool}`}
+		>
+			<Suspense fallback={<PanelLoading />}>
+				<Panel />
+			</Suspense>
+		</PanelErrorBoundary>
 	);
 }
 
 function SimulatorToolPanel({ tool }: { tool: SimulatorToolId }) {
 	const Panel = SIMULATOR_PANELS[tool];
 	return (
-		<Suspense fallback={<PanelLoading />}>
-			<Panel />
-		</Suspense>
+		<PanelErrorBoundary
+			key={tool}
+			label={SIMULATOR_TOOL_LABELS.get(tool) ?? tool}
+			panel={`simulator/${tool}`}
+		>
+			<Suspense fallback={<PanelLoading />}>
+				<Panel />
+			</Suspense>
+		</PanelErrorBoundary>
 	);
 }
 

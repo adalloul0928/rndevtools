@@ -94,11 +94,26 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		return protocol.Response{}, classifyNetworkError("connect to desktop app", err)
 	}
 	defer connection.Close()
+	// A caller that gives up (an MCP client cancelling a tool call) closes
+	// the connection, which ends the read at once. The desktop, which has
+	// already read this side's EOF, sees the close at its next liveness
+	// probe (a space it writes about once a second ahead of a slow answer)
+	// and aborts the handler; a desktop job the handler started keeps
+	// running. The deadline below still bounds everything else.
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	failed := func(operation string, err error) error {
+		if cause := ctx.Err(); cause != nil {
+			// The closed connection is only the symptom; report why.
+			return classifyNetworkError(operation, cause)
+		}
+		return classifyNetworkError(operation, err)
+	}
 	if err := connection.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return protocol.Response{}, &ClientError{Kind: ErrorTransport, Op: "set socket deadline", Cause: err}
 	}
-	if err := writeAll(connection, append(encoded, '\n')); err != nil {
-		return protocol.Response{}, classifyNetworkError("write request", err)
+	if _, err := connection.Write(append(encoded, '\n')); err != nil {
+		return protocol.Response{}, failed("write request", err)
 	}
 	unixConnection, ok := connection.(*net.UnixConn)
 	if !ok {
@@ -109,28 +124,21 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		}
 	}
 	if err := unixConnection.CloseWrite(); err != nil {
-		return protocol.Response{}, classifyNetworkError("finish request", err)
+		return protocol.Response{}, failed("finish request", err)
 	}
 
 	limited := &io.LimitedReader{R: connection, N: protocol.MaxResponseBytes + 1}
 	reader := bufio.NewReaderSize(limited, 64*1024)
 	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		if len(line) > protocol.MaxResponseBytes {
-			return protocol.Response{}, &ClientError{
-				Kind:  ErrorProtocol,
-				Op:    "read response",
-				Cause: fmt.Errorf("response exceeds %d bytes", protocol.MaxResponseBytes),
-			}
-		}
-		return protocol.Response{}, classifyNetworkError("read response", err)
-	}
 	if len(line) > protocol.MaxResponseBytes {
 		return protocol.Response{}, &ClientError{
 			Kind:  ErrorProtocol,
 			Op:    "read response",
 			Cause: fmt.Errorf("response exceeds %d bytes", protocol.MaxResponseBytes),
 		}
+	}
+	if err != nil {
+		return protocol.Response{}, failed("read response", err)
 	}
 	line = line[:len(line)-1]
 	if len(line) > 0 && line[len(line)-1] == '\r' {
@@ -145,6 +153,24 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		return protocol.Response{}, &ClientError{Kind: ErrorProtocol, Op: "validate response", Cause: err}
 	}
 	return response, nil
+}
+
+// Reachable reports whether the desktop answers on socketPath within timeout:
+// the socket passes the same ownership and permission checks a request
+// needs, and a connection opens. Nothing is sent, and the desktop drops the
+// empty connection. The steering hook uses it to tell a running desktop from
+// the files a crashed one left behind.
+func Reachable(socketPath string, timeout time.Duration) bool {
+	localClient, err := New(socketPath, timeout)
+	if err != nil || localClient.validateSocket() != nil {
+		return false
+	}
+	connection, err := net.DialTimeout("unix", localClient.socketPath, timeout)
+	if err != nil {
+		return false
+	}
+	_ = connection.Close()
+	return true
 }
 
 func (c *Client) validateSocket() error {
@@ -204,18 +230,4 @@ func classifyNetworkError(operation string, err error) error {
 		kind = ErrorTimeout
 	}
 	return &ClientError{Kind: kind, Op: operation, Cause: err}
-}
-
-func writeAll(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		written, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[written:]
-	}
-	return nil
 }

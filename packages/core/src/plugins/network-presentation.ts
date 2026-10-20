@@ -51,6 +51,12 @@ const MAX_NETWORK_CURL_URL_BYTES = 16 * 1024;
 const MAX_NETWORK_CURL_HEADER_NAME_BYTES = 1024;
 const MAX_NETWORK_CURL_HEADER_VALUE_BYTES = 8 * 1024;
 const MAX_NETWORK_CURL_BODY_BYTES = 32 * 1024;
+/**
+ * Stands in for a URL that cURL export leaves out. A release bundle keeps
+ * string literals, so `rndevtools-verify-bundle` looks for this one to find
+ * this module.
+ */
+const CURL_URL_OMITTED = '[URL omitted: export limit]';
 const CURL_DERIVED_HEADERS = new Set([
 	'content-length',
 	'host',
@@ -585,7 +591,7 @@ export function buildCurlCommand(event: NetworkEvent): string {
 		event.url.length <= MAX_NETWORK_CURL_URL_BYTES
 			? truncateText(defaultRedactUrl(event.url), MAX_NETWORK_CURL_URL_BYTES)
 			: undefined;
-	let url = '[URL omitted: export limit]';
+	let url = CURL_URL_OMITTED;
 	if (redactedUrl && !redactedUrl.truncated) {
 		try {
 			const protocol = new URL(redactedUrl.text).protocol;
@@ -596,7 +602,7 @@ export function buildCurlCommand(event: NetworkEvent): string {
 			// cURL export only supports absolute HTTP(S) diagnostics.
 		}
 	}
-	if (url === '[URL omitted: export limit]') omitted += 1;
+	if (url === CURL_URL_OMITTED) omitted += 1;
 	const parts = [`curl -X ${quote(method)} ${quote(url)}`];
 	const requestContentTypes: string[] = [];
 	const projectedHeaders = projectCurlHeaders(event.requestHeaders);

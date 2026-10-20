@@ -3,8 +3,8 @@ package simslim
 import "fmt"
 
 // Feature is a user-facing capability backed by specific launchd daemons.
-// Every label must also live in a Category (enforced in features_test.go), so a
-// feature only ever names daemons the tool could actually have turned off.
+// Every label must also be managed by a Category (enforced in features_test.go),
+// including required services that earlier versions could have turned off.
 type Feature struct {
 	ID     string   `json:"id"`
 	Name   string   `json:"name"`
@@ -41,7 +41,9 @@ var Features = []Feature{
 	{ID: "health", Name: "HealthKit", Labels: []string{"com.apple.healthd"}},
 	{ID: "homekit", Name: "HomeKit", Labels: []string{"com.apple.homed"}},
 	{ID: "imessage", Name: "iMessage & FaceTime", Labels: []string{"com.apple.identityservicesd"}},
-	{ID: "widgets", Name: "Widgets & Live Activities", Labels: []string{"com.apple.chronod", "com.apple.liveactivitiesd"}},
+	// The stock Maps widget needs navd: without it the widget extension
+	// spins on its XPC connection and floods the unified log.
+	{ID: "widgets", Name: "Widgets & Live Activities", Labels: []string{"com.apple.chronod", "com.apple.liveactivitiesd", "com.apple.navd"}},
 	{ID: "wallet", Name: "Wallet & passes", Labels: []string{"com.apple.passd"}},
 	{ID: "maps", Name: "Maps background services", Labels: []string{"com.apple.Maps.mapssyncd"}},
 	{ID: "weather", Name: "Weather", Labels: []string{"com.apple.weatherd"}},

@@ -1,8 +1,14 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
+import { lstat, open, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import {
+	type SimulatorInput,
+	type SimulatorInputResult,
+	simulatorInputResultSchema,
+	simulatorInputSchema,
+} from '../shared/simulator-input-protocol';
 import {
 	type CaptureCompositionRecipe,
 	captureCompositionRecipeSchema,
@@ -14,6 +20,7 @@ import {
 	type VerifiedNativeHelper,
 	verifyNativeHost,
 } from './native-helper-trust';
+import { ensurePrivateDirectory } from './private-files';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
@@ -22,6 +29,7 @@ import {
 const INSPECTION_PROTOCOL_VERSION = 2;
 const COMPOSITION_PROTOCOL_VERSION = 3;
 const MUTATION_BROKER_PROTOCOL_VERSION = 4;
+const SIMULATOR_INPUT_PROTOCOL_VERSION = 5;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_MUTATION_BROKER_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_COMPOSITION_INPUT_BYTES = 32 * 1024 * 1024;
@@ -102,6 +110,7 @@ const responseSchema = z.union([
 			z.literal(INSPECTION_PROTOCOL_VERSION),
 			z.literal(COMPOSITION_PROTOCOL_VERSION),
 			z.literal(MUTATION_BROKER_PROTOCOL_VERSION),
+			z.literal(SIMULATOR_INPUT_PROTOCOL_VERSION),
 		]),
 		requestId: identifierSchema,
 		ok: z.literal(true),
@@ -112,6 +121,7 @@ const responseSchema = z.union([
 			z.literal(INSPECTION_PROTOCOL_VERSION),
 			z.literal(COMPOSITION_PROTOCOL_VERSION),
 			z.literal(MUTATION_BROKER_PROTOCOL_VERSION),
+			z.literal(SIMULATOR_INPUT_PROTOCOL_VERSION),
 		]),
 		requestId: identifierSchema,
 		ok: z.literal(false),
@@ -160,82 +170,47 @@ function assertOwnedFile(
 	}
 }
 
-async function ensurePrivateDirectory(
+/** A private image-composition directory that the current user owns. */
+function compositionDirectory(
 	directory: string,
 	{ recursive }: { recursive: boolean }
 ): Promise<string> {
-	await mkdir(directory, { recursive, mode: 0o700 });
-	const metadata = await lstat(directory);
-	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error(
-			'Image-composition storage must be a private local directory.'
-		);
-	}
-	const userId = process.getuid?.();
-	if (userId !== undefined && metadata.uid !== userId) {
-		throw new Error(
-			'Image-composition storage must be owned by the current user.'
-		);
-	}
-	await chmod(directory, 0o700);
-	return realpath(directory);
+	return ensurePrivateDirectory(directory, 'Image-composition storage', {
+		recursive,
+		ownedByUser: true,
+	});
 }
 
-async function stageImage(
-	sourcePath: string,
-	destinationPath: string
-): Promise<void> {
-	const sourceMetadata = await lstat(sourcePath);
-	assertOwnedFile(sourceMetadata, 'Capture input');
-	if (
-		sourceMetadata.size <= 0 ||
-		sourceMetadata.size > MAX_COMPOSITION_INPUT_BYTES
-	) {
-		throw new Error('Capture input exceeds the 32 MiB composition limit.');
-	}
-	const source = await open(
-		sourcePath,
-		constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
-	);
-	let destination: Awaited<ReturnType<typeof open>> | undefined;
-	try {
-		const openedMetadata = await source.stat();
-		assertOwnedFile(openedMetadata, 'Capture input');
-		if (
-			openedMetadata.size !== sourceMetadata.size ||
-			openedMetadata.size > MAX_COMPOSITION_INPUT_BYTES
-		) {
-			throw new Error('Capture input changed while it was being staged.');
-		}
-		const data = await source.readFile();
-		if (data.byteLength !== openedMetadata.size) {
-			throw new Error('Capture input changed while it was being staged.');
-		}
-		destination = await open(
-			destinationPath,
-			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-			0o600
-		);
-		await destination.writeFile(data);
-		await destination.sync();
-	} finally {
-		await Promise.allSettled([source.close(), destination?.close()]);
-	}
-}
-
-async function copyComposedOutput(
+/**
+ * Copies a regular file the current user owns into a new 0600 file, refusing
+ * one that is empty, over `maxBytes`, not `expectedBytes` long when that is
+ * given, or that changes while it is read.
+ */
+async function copyOwnedFile(
 	sourcePath: string,
 	destinationPath: string,
-	expectedBytes: number
+	{
+		label,
+		maxBytes,
+		expectedBytes,
+		rejectedMessage,
+		changedMessage,
+	}: {
+		label: string;
+		maxBytes: number;
+		expectedBytes?: number;
+		rejectedMessage: string;
+		changedMessage: string;
+	}
 ): Promise<void> {
 	const metadata = await lstat(sourcePath);
-	assertOwnedFile(metadata, 'Composed image');
+	assertOwnedFile(metadata, label);
 	if (
 		metadata.size <= 0 ||
-		metadata.size > MAX_COMPOSITION_OUTPUT_BYTES ||
-		metadata.size !== expectedBytes
+		metadata.size > maxBytes ||
+		(expectedBytes !== undefined && metadata.size !== expectedBytes)
 	) {
-		throw new Error('Composed image did not match its verified helper result.');
+		throw new Error(rejectedMessage);
 	}
 	const source = await open(
 		sourcePath,
@@ -244,13 +219,13 @@ async function copyComposedOutput(
 	let destination: Awaited<ReturnType<typeof open>> | undefined;
 	try {
 		const openedMetadata = await source.stat();
-		assertOwnedFile(openedMetadata, 'Composed image');
+		assertOwnedFile(openedMetadata, label);
 		if (openedMetadata.size !== metadata.size) {
-			throw new Error('Composed image changed before it could be committed.');
+			throw new Error(changedMessage);
 		}
 		const data = await source.readFile();
 		if (data.byteLength !== metadata.size) {
-			throw new Error('Composed image changed before it could be committed.');
+			throw new Error(changedMessage);
 		}
 		destination = await open(
 			destinationPath,
@@ -262,6 +237,18 @@ async function copyComposedOutput(
 	} finally {
 		await Promise.allSettled([source.close(), destination?.close()]);
 	}
+}
+
+function stageImage(
+	sourcePath: string,
+	destinationPath: string
+): Promise<void> {
+	return copyOwnedFile(sourcePath, destinationPath, {
+		label: 'Capture input',
+		maxBytes: MAX_COMPOSITION_INPUT_BYTES,
+		rejectedMessage: 'Capture input exceeds the 32 MiB composition limit.',
+		changedMessage: 'Capture input changed while it was being staged.',
+	});
 }
 
 /**
@@ -390,11 +377,9 @@ export class NativeHostClient {
 			);
 		}
 		const recipe = captureCompositionRecipeSchema.parse(input.recipe);
-		const root = await ensurePrivateDirectory(
+		const root = await compositionDirectory(
 			this.#compositionWorkspaceDirectory,
-			{
-				recursive: true,
-			}
+			{ recursive: true }
 		);
 		const workspaceToken = randomBytes(16).toString('hex');
 		const workspace = path.join(root, workspaceToken);
@@ -413,10 +398,10 @@ export class NativeHostClient {
 			: undefined;
 		const output = `output.${recipe.outputFormat === 'jpeg' ? 'jpeg' : 'png'}`;
 		try {
-			await ensurePrivateDirectory(workspace, { recursive: false });
+			await compositionDirectory(workspace, { recursive: false });
 			await Promise.all([
-				ensurePrivateDirectory(inputs, { recursive: false }),
-				ensurePrivateDirectory(outputs, { recursive: false }),
+				compositionDirectory(inputs, { recursive: false }),
+				compositionDirectory(outputs, { recursive: false }),
 			]);
 			await stageImage(input.primaryPath, path.join(inputs, primaryInput));
 			if (input.secondaryPath && secondaryInput) {
@@ -449,11 +434,14 @@ export class NativeHostClient {
 					'Native compositor returned inconsistent result metadata.'
 				);
 			}
-			await copyComposedOutput(
-				path.join(outputs, output),
-				input.outputPath,
-				result.byteCount
-			);
+			await copyOwnedFile(path.join(outputs, output), input.outputPath, {
+				label: 'Composed image',
+				maxBytes: MAX_COMPOSITION_OUTPUT_BYTES,
+				expectedBytes: result.byteCount,
+				rejectedMessage:
+					'Composed image did not match its verified helper result.',
+				changedMessage: 'Composed image changed before it could be committed.',
+			});
 		} finally {
 			await rm(workspace, { force: true, recursive: true });
 		}
@@ -486,13 +474,35 @@ export class NativeHostClient {
 		return result.helperResponse;
 	}
 
+	/**
+	 * Delivers one input gesture to a Simulator through the host's HID path.
+	 * The payload is validated by the shared schema before it leaves this
+	 * process and again by the host; an unsigned build may use this freely
+	 * because touching a Simulator's screen mutates nothing on disk.
+	 */
+	async sendSimulatorInput(
+		input: SimulatorInput,
+		signal?: AbortSignal
+	): Promise<SimulatorInputResult> {
+		const validated = simulatorInputSchema.parse(input);
+		return simulatorInputResultSchema.parse(
+			await this.#call('send_simulator_input', signal, {
+				protocolVersion: SIMULATOR_INPUT_PROTOCOL_VERSION,
+				payload: validated,
+				// A 2 KiB text at ~12 ms per key is ~25 s; swipes are bounded at 10 s.
+				timeoutMs: 60_000,
+			})
+		);
+	}
+
 	async #call(
 		operation:
 			| 'handshake'
 			| 'permission_status'
 			| 'capability_status'
 			| 'compose_image'
-			| 'run_simulator_mutation',
+			| 'run_simulator_mutation'
+			| 'send_simulator_input',
 		signal?: AbortSignal,
 		{
 			protocolVersion = INSPECTION_PROTOCOL_VERSION,
@@ -501,7 +511,7 @@ export class NativeHostClient {
 			forceKillDelayMs,
 			maxResponseBytes = MAX_RESPONSE_BYTES,
 		}: {
-			protocolVersion?: 2 | 3 | 4;
+			protocolVersion?: 2 | 3 | 4 | 5;
 			payload?: Record<string, unknown>;
 			timeoutMs?: number;
 			forceKillDelayMs?: number;

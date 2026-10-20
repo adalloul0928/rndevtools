@@ -1,13 +1,58 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoDevice } from './demo-data';
 import {
+	createDesktopStateParser,
 	createEmptyDeviceTools,
 	DESKTOP_PROTOCOL_VERSION,
 	DESKTOP_SUPPORTED_PROTOCOL_VERSIONS,
+	type DesktopState,
+	type DeviceSession,
 	desktopBootstrapSchema,
+	desktopStateSchema,
 	deviceHelloMessageSchema,
 	deviceSnapshotMessageSchema,
 } from './protocol';
+
+function desktopState(devices: DeviceSession[]): DesktopState {
+	return {
+		protocolVersion: DESKTOP_PROTOCOL_VERSION,
+		broker: {
+			status: 'listening',
+			host: '127.0.0.1',
+			port: 47931,
+			access: 'loopback',
+			urls: ['ws://127.0.0.1:47931/device'],
+		},
+		devices,
+		diagnostics: [],
+	};
+}
+
+function storageEntry(id: string, key: string, valueText: string) {
+	return {
+		id,
+		adapterId: 'standard',
+		adapterTitle: 'Standard storage',
+		key,
+		valueText,
+		valueType: 'string' as const,
+		bytes: valueText.length,
+		sensitive: false,
+		editable: true,
+	};
+}
+
+function storageSnapshot(
+	storage: ReturnType<typeof storageEntry>[],
+	storageEvents: unknown[]
+) {
+	return deviceSnapshotMessageSchema.parse({
+		type: 'snapshot',
+		sequence: 1,
+		sentAt: Date.now(),
+		tools: { ...createEmptyDeviceTools(), storage, storageEvents },
+	}).tools;
+}
 
 describe('redaction stays inside the advertised text bounds', () => {
 	it('re-parses its own output when redaction expands the text', () => {
@@ -700,6 +745,101 @@ describe('desktop IPC and device schemas', () => {
 		expect(parsed.tools.storageEvents?.[0]?.structuralDiff).toBeUndefined();
 	});
 
+	it('hides storage values whose keys name a credential', () => {
+		const tools = storageSnapshot(
+			[
+				storageEntry('refresh-token', 'auth.refreshToken', 'q8Zx3kLm9PwT'),
+				storageEntry('password', 'user_password', 'hunter2-example'),
+				storageEntry('theme', 'appearance/theme', 'dark'),
+			],
+			[
+				{
+					id: 'refresh-token-event',
+					at: 1,
+					adapterId: 'standard',
+					key: 'auth.refreshToken',
+					kind: 'updated',
+					previousText: 'r4Wq9TzX2bLm',
+					nextText: 'q8Zx3kLm9PwT',
+					structuralDiff: [{ path: '$', kind: 'changed' }],
+				},
+				{
+					id: 'theme-event',
+					at: 2,
+					adapterId: 'standard',
+					key: 'appearance/theme',
+					kind: 'updated',
+					previousText: 'light',
+					nextText: 'dark',
+				},
+			]
+		);
+
+		for (const entry of tools.storage.slice(0, 2)) {
+			expect(entry).toMatchObject({
+				valueType: 'hidden',
+				bytes: 0,
+				sensitive: true,
+				editable: false,
+			});
+			expect(entry.valueText).toBeUndefined();
+		}
+		expect(tools.storage[2]).toMatchObject({
+			valueText: 'dark',
+			sensitive: false,
+			editable: true,
+		});
+		const [secretEvent, themeEvent] = tools.storageEvents;
+		expect(secretEvent?.previousText).toBeUndefined();
+		expect(secretEvent?.nextText).toBeUndefined();
+		expect(secretEvent?.structuralDiff).toBeUndefined();
+		// A hidden key does not take the history of its adapter's other keys.
+		expect(themeEvent).toMatchObject({
+			previousText: 'light',
+			nextText: 'dark',
+		});
+	});
+
+	it('drops event text for keys the snapshot does not list in clear', () => {
+		const tools = storageSnapshot(
+			[storageEntry('theme', 'appearance/theme', 'dark')],
+			[
+				// A secure store emptied on sign-out lists no entries any more.
+				{
+					id: 'secure-removed',
+					at: 1,
+					adapterId: 'secure',
+					key: 'cached.blob',
+					kind: 'removed',
+					previousText: 'q8Zr3p0LkV2mXn7Ab9Cd',
+				},
+				{
+					id: 'standard-removed',
+					at: 2,
+					adapterId: 'standard',
+					key: 'legacy.flag',
+					kind: 'removed',
+					previousText: 'opaque-legacy-value',
+				},
+				{
+					id: 'theme-updated',
+					at: 3,
+					adapterId: 'standard',
+					key: 'appearance/theme',
+					kind: 'updated',
+					previousText: 'light',
+					nextText: 'dark',
+				},
+			]
+		);
+
+		expect(tools.storageEvents.map((event) => event.previousText)).toEqual([
+			undefined,
+			undefined,
+			'light',
+		]);
+	});
+
 	it('redacts diagnostic strings while preserving explicit pairing URLs', () => {
 		const parsed = desktopBootstrapSchema.parse({
 			state: {
@@ -733,5 +873,102 @@ describe('desktop IPC and device schemas', () => {
 
 		expect(parsed.state.diagnostics[0]?.message).toBe('{"token":"[REDACTED]"}');
 		expect(parsed.state.broker.urls[0]).toContain('token=pairing-secret');
+	});
+});
+
+describe('desktop state parser', () => {
+	function consoleDevice(message: string): DeviceSession {
+		return {
+			...createDemoDevice(1_800_000_000_000),
+			tools: {
+				...createEmptyDeviceTools(),
+				console: [{ id: 'log', at: 1, level: 'info', message }],
+			},
+		};
+	}
+
+	function messageOf(
+		result: ReturnType<ReturnType<typeof createDesktopStateParser>>
+	) {
+		if (!result.success) throw result.error;
+		return result.data.devices[0]?.tools.console[0]?.message;
+	}
+
+	it('accepts and returns what the full state schema does', () => {
+		const parse = createDesktopStateParser();
+		const state = desktopState([createDemoDevice(1_800_000_000_000)]);
+		const parsed = parse(state);
+		expect(parsed.success && parsed.data).toEqual(
+			desktopStateSchema.parse(state)
+		);
+
+		const [device] = state.devices;
+		if (!device) throw new Error('Expected the demo device');
+		const overfull = desktopState([
+			{
+				...device,
+				sequence: device.sequence + 1,
+				tools: {
+					...device.tools,
+					restorePoints: Array.from({ length: 101 }, (_, index) => ({
+						id: `point-${index}`,
+						label: 'Point',
+						createdAt: 1,
+						estimatedBytes: 0,
+						sources: [],
+					})),
+				},
+			},
+		]);
+		const rejected = parse(overfull);
+		expect(desktopStateSchema.safeParse(overfull).success).toBe(false);
+		expect(rejected.success).toBe(false);
+		expect(
+			rejected.success ? [] : rejected.error.issues.map((issue) => issue.path)
+		).toEqual([['devices', 0, 'tools', 'restorePoints']]);
+
+		const badBroker = parse({
+			...state,
+			broker: { ...state.broker, port: 0 },
+		});
+		expect(
+			badBroker.success ? [] : badBroker.error.issues.map((issue) => issue.path)
+		).toEqual([['broker', 'port']]);
+	});
+
+	it("parses a device's tools again only when its session or sequence changes", () => {
+		const parse = createDesktopStateParser();
+		const device = consoleDevice('first');
+		expect(messageOf(parse(desktopState([device])))).toBe('first');
+
+		// Main replaces tools only with a higher sequence, so the same id,
+		// connectedAt and sequence carry the tools that were already parsed.
+		const heartbeat = parse(
+			desktopState([
+				{ ...consoleDevice('not read again'), lastSeenAt: 1_800_000_000_500 },
+			])
+		);
+		expect(messageOf(heartbeat)).toBe('first');
+		expect(heartbeat.success && heartbeat.data.devices[0]?.lastSeenAt).toBe(
+			1_800_000_000_500
+		);
+
+		const snapshot = {
+			...consoleDevice('second'),
+			sequence: device.sequence + 1,
+		};
+		expect(messageOf(parse(desktopState([snapshot])))).toBe('second');
+
+		const reconnected = {
+			...consoleDevice('reconnected'),
+			connectedAt: device.connectedAt + 1,
+			sequence: snapshot.sequence,
+		};
+		expect(messageOf(parse(desktopState([reconnected])))).toBe('reconnected');
+
+		// A device that left the state is forgotten.
+		expect(parse(desktopState([])).success).toBe(true);
+		const returned = { ...reconnected, tools: consoleDevice('back').tools };
+		expect(messageOf(parse(desktopState([returned])))).toBe('back');
 	});
 });

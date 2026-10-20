@@ -703,6 +703,49 @@ func TestUndoSurvivesNewHelperProcessUsingOpaqueCheckpoint(t *testing.T) {
 	}
 }
 
+func TestUndoKeepsTheBootStateTheSimulatorHasWhenUndoStarts(t *testing.T) {
+	backend := newFakeBackend()
+	backend.device.State = "Shutdown"
+	firstService := NewService(backend, "dev", "unknown")
+	result, apiError := firstService.Handle(context.Background(), request(protocol.OperationApplyProfile, preparedApplyPayload(t, firstService, "rndevtools-development")))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	checkpointToken := result.(MutationEvidence).CheckpointToken
+	if backend.device.State != "Shutdown" {
+		t.Fatalf("apply did not restore the shutdown state: %#v", backend.device)
+	}
+	// A lane boots the Simulator for use after the change was applied.
+	backend.device.State = "Booted"
+
+	secondService := NewService(backend, "dev", "unknown")
+	undoResult, apiError := secondService.Handle(context.Background(), request(protocol.OperationUndoLast, preparedUndoPayload(t, secondService, checkpointToken)))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	undo := undoResult.(MutationEvidence)
+	if !undo.Changed || undo.OriginalBootState != "Booted" || undo.FinalBootState != "Booted" || backend.device.State != "Booted" {
+		t.Fatalf("undo shut down a Simulator that was booted when it started: %#v backend=%#v", undo, backend.device)
+	}
+}
+
+func TestNoChangeUndoKeepsTheCurrentBootState(t *testing.T) {
+	backend := newFakeBackend()
+	target, err := encodePreparedCheckpoint(helperTestUDID, "Shutdown", backend.tuple, []string{}, protocol.OperationRestoreManaged, "", []string{}, []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(backend, "dev", "unknown")
+	result, apiError := service.Handle(context.Background(), request(protocol.OperationUndoLast, preparedUndoPayload(t, service, target)))
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	undo := result.(MutationEvidence)
+	if undo.Changed || backend.applyCalls != 0 || undo.FinalBootState != "Booted" || backend.device.State != "Booted" {
+		t.Fatalf("a no-change undo changed the boot state: %#v backend=%#v", undo, backend.device)
+	}
+}
+
 func TestUndoRejectsCheckpointAfterCompatibilityTupleChanges(t *testing.T) {
 	backend := newFakeBackend()
 	firstService := NewService(backend, "dev", "unknown")
@@ -723,11 +766,16 @@ func TestUndoRejectsCheckpointAfterCompatibilityTupleChanges(t *testing.T) {
 
 func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 	backend := newFakeBackend()
-	token, err := encodeRestorePoint(helperTestUDID, "Booted", backend.tuple, []string{})
+	token, err := encodePreparedCheckpoint(helperTestUDID, "Booted", backend.tuple, []string{}, protocol.OperationRestoreManaged, "", []string{}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The random preparation ID makes the digest random, so pick a final
+	// character that always differs from the real one.
 	tampered := token[:len(token)-1] + "A"
+	if tampered == token {
+		tampered = token[:len(token)-1] + "E"
+	}
 	if _, err := decodeCheckpoint(tampered); err == nil {
 		t.Fatal("tampered checkpoint passed integrity validation")
 	}
@@ -742,7 +790,9 @@ func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 		Tuple:                       backend.tuple,
 		OriginalBootState:           "Booted",
 		ManagedDisabledServiceIDs:   []string{"com.example.not-allowlisted"},
-		Purpose:                     checkpointPurposeRestore,
+		Purpose:                     checkpointPurposePrepared,
+		PreparationID:               "preparation-0123456789abcdef0123456789abcdef",
+		PreparedOperation:           protocol.OperationRestoreManaged,
 		PreparedDesiredServiceIDs:   []string{},
 		ObservedRunningProcessNames: []string{},
 	}
@@ -759,7 +809,7 @@ func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 
 func TestCheckpointContainingEntireManagedCatalogFitsProtocolBound(t *testing.T) {
 	backend := newFakeBackend()
-	token, err := encodeRestorePoint(helperTestUDID, "Booted", backend.tuple, catalog.ManagedServiceIDs())
+	token, err := encodePreparedCheckpoint(helperTestUDID, "Booted", backend.tuple, catalog.ManagedServiceIDs(), protocol.OperationRestoreManaged, "", []string{}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}

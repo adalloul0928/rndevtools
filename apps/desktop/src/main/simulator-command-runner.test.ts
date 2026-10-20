@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
+	type SimulatorCommandOptions,
 } from './simulator-command-runner';
 
 describe('simulator command runner', () => {
@@ -79,6 +80,8 @@ describe('simulator command runner', () => {
 		// of the spent authorization descriptor then kills the process mid-run. Only a
 		// character device (S_IFCHR) is safe here; descriptor 4 stays the control pipe.
 		const S_IFCHR = 0o20000;
+		const S_IFIFO = 0o10000;
+		const S_IFSOCK = 0o140000;
 		const result = await runSimulatorCommand(
 			process.execPath,
 			[
@@ -89,10 +92,12 @@ describe('simulator command runner', () => {
 		);
 		const [authorization, control] = result.stdout.split(' ');
 		expect(authorization).toBe(`3:${S_IFCHR.toString(8)}`);
-		// The control pipe must stay a real pollable channel, whatever Node backs it
-		// with on this platform, so closing it still cancels the helper.
-		expect(control).not.toBe(`4:${S_IFCHR.toString(8)}`);
-		expect(control).toMatch(/^4:\d+$/);
+		// The control pipe must stay a socket (libuv backs 'pipe' with a
+		// socketpair) or a FIFO, the only types the helper accepts there, so
+		// closing it still cancels the helper.
+		expect([`4:${S_IFSOCK.toString(8)}`, `4:${S_IFIFO.toString(8)}`]).toContain(
+			control
+		);
 	});
 
 	it('reports the helper exit code and stderr when a command dies without output', async () => {
@@ -192,5 +197,39 @@ describe('simulator command runner', () => {
 				simulatorAppEnvironment: { timeZone: '../../private/etc' },
 			})
 		).rejects.toMatchObject({ kind: 'spawn' });
+	});
+
+	it('pins the locale to C for a call that asks, and for no other', async () => {
+		vi.stubEnv('LANG', 'ja_JP.SJIS');
+		vi.stubEnv('LC_ALL', 'fr_FR.ISO8859-1');
+		try {
+			const environmentOf = async (options?: SimulatorCommandOptions) =>
+				JSON.parse(
+					(
+						await runSimulatorCommand(
+							process.execPath,
+							['-e', 'process.stdout.write(JSON.stringify(process.env))'],
+							options
+						)
+					).stdout
+				) as Record<string, string>;
+			const desktop = await environmentOf();
+			expect(desktop).toMatchObject({
+				LANG: 'ja_JP.SJIS',
+				LC_ALL: 'fr_FR.ISO8859-1',
+			});
+			expect(await environmentOf({ environment: { LC_ALL: 'C' } })).toEqual({
+				...desktop,
+				LC_ALL: 'C',
+			});
+			// Nothing else gets through, whatever a caller passes.
+			expect(
+				await environmentOf({
+					environment: { LC_ALL: 'en_US.UTF-8', PATH: '/tmp' },
+				} as unknown as SimulatorCommandOptions)
+			).toEqual(desktop);
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 });

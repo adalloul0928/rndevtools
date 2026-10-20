@@ -30,7 +30,7 @@ import type { ConsoleEntry } from '../../shared/protocol';
 
 type ConsoleLevel = ConsoleEntry['level'] | 'all';
 
-function levelTone(
+export function levelTone(
 	level: ConsoleEntry['level']
 ): 'default' | 'info' | 'warning' | 'danger' {
 	if (level === 'error') return 'danger';
@@ -39,9 +39,34 @@ function levelTone(
 	return 'default';
 }
 
-function exportLine(entry: ConsoleEntry): string {
+export function exportLine(entry: ConsoleEntry): string {
 	const repeatCount = entry.repeatCount ?? 1;
 	return `[${new Date(entry.at).toISOString()}] ${entry.level.toUpperCase()}${entry.scope ? ` [${entry.scope}]` : entry.source ? ` [${entry.source}]` : ''} ${entry.message}${repeatCount > 1 ? ` (repeated ${repeatCount}x)` : ''}${entry.errorStack ? `\n${entry.errorStack}` : ''}${entry.attributesText ? `\n${entry.attributesText}` : ''}`;
+}
+
+/** Copy-button label from the last copy result. Pure so it is unit-tested. */
+export function copyFeedbackLabel(
+	lastCopy: { ok: boolean; truncated: boolean } | null
+): string {
+	if (lastCopy?.ok === true)
+		return lastCopy.truncated ? 'Copied (bounded)' : 'Copied';
+	if (lastCopy?.ok === false) return 'Copy failed';
+	return 'Copy visible';
+}
+
+/**
+ * Drops bookmarks whose entries left the buffer. Returns `previous` itself
+ * when none did, so a push that only adds entries renders the grid once, not
+ * twice with rebuilt columns.
+ */
+export function retainedBookmarks(
+	previous: ReadonlySet<string>,
+	entries: readonly Pick<ConsoleEntry, 'id'>[]
+): ReadonlySet<string> {
+	if (previous.size === 0) return previous;
+	const retained = new Set(entries.map((entry) => entry.id));
+	const kept = [...previous].filter((id) => retained.has(id));
+	return kept.length === previous.size ? previous : new Set(kept);
 }
 
 export function ConsolePanel() {
@@ -87,14 +112,7 @@ export function ConsolePanel() {
 		ok: boolean;
 		truncated: boolean;
 	} | null>(null);
-	const copyLabel =
-		lastCopy?.ok === true
-			? lastCopy.truncated
-				? 'Copied (bounded)'
-				: 'Copied'
-			: lastCopy?.ok === false
-				? 'Copy failed'
-				: 'Copy visible';
+	const copyLabel = copyFeedbackLabel(lastCopy);
 	useEffect(() => {
 		if (!lastCopy) return;
 		const timer = window.setTimeout(() => setLastCopy(null), 1_800);
@@ -107,10 +125,7 @@ export function ConsolePanel() {
 		if (selectedDevice?.info.id === undefined) setSelectedId(null);
 	}, [selectedDevice?.info.id]);
 	useEffect(() => {
-		const retained = new Set(entries.map((entry) => entry.id));
-		setBookmarkedIds(
-			(previous) => new Set([...previous].filter((id) => retained.has(id)))
-		);
+		setBookmarkedIds((previous) => retainedBookmarks(previous, entries));
 	}, [entries]);
 	const toggleBookmark = (id: string): void => {
 		setBookmarkedIds((previous) => {
@@ -187,11 +202,10 @@ export function ConsolePanel() {
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="Inspect"
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
 				meta={
-					<span className="flex items-center gap-1.5 text-emerald-300">
+					<span className="flex items-center gap-1.5 text-(--brand)">
 						<ShieldCheck className="h-3 w-3" /> Logger-backed · redacted
 					</span>
 				}
@@ -367,7 +381,7 @@ export function ConsolePanel() {
 									No structured attributes were attached to this event.
 								</div>
 							)}
-							<div className="mt-4 flex items-center gap-2 rounded-md border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-xs leading-5 text-emerald-200/80">
+							<div className="mt-4 flex items-center gap-2 rounded-md border border-(--brand-border) bg-(--brand-soft) p-3 text-xs leading-5 text-(--brand)">
 								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens,
 								emails, and identifiers are redacted before this event reaches
 								desktop.

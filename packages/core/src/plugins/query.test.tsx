@@ -1,17 +1,17 @@
 import { QueryClient } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Platform } from 'react-native';
+import { formatRelativeTime } from '../core/format';
 import {
 	createMutationSnapshot,
 	createQueryPlugin,
 	createQuerySimulationController,
-	createQuerySnapshot,
 	formatQueryKey,
 	formatQueryKeyRemainder,
-	formatRelativeTime,
 	type QueryPlugin,
 	summarizeError,
 } from './query';
+import { createQuerySnapshot } from './query-model';
 
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
@@ -192,8 +192,8 @@ async function renderPanel(plugin: QueryPlugin) {
 
 describe('createQuerySnapshot', () => {
 	it('formats query keys as readable breadcrumbs', () => {
-		expect(formatQueryKey(['workouts', 'today', { userId: 42 }])).toBe(
-			'workouts › today › { "userId": "[REDACTED]" }',
+		expect(formatQueryKey(['projects', 'today', { userId: 42 }])).toBe(
+			'projects › today › { "userId": "[REDACTED]" }',
 		);
 		expect(formatQueryKey(undefined)).toBe('Anonymous mutation');
 	});
@@ -215,13 +215,13 @@ describe('createQuerySnapshot', () => {
 		const queryClient = new QueryClient({
 			defaultOptions: { mutations: { gcTime: Number.POSITIVE_INFINITY } },
 		});
-		queryClient.setQueryData(['workouts', { page: 1 }], { items: [1, 2] });
+		queryClient.setQueryData(['projects', { page: 1 }], { items: [1, 2] });
 		const query = queryClient.getQueryCache().getAll()[0];
 		if (!query) throw new Error('Expected cached query');
 
 		const snapshot = createQuerySnapshot(query, true, 1024);
 
-		expect(snapshot.key).toContain('workouts');
+		expect(snapshot.key).toContain('projects');
 		expect(snapshot.status).toBe('success');
 		expect(snapshot.data).toContain('items');
 		expect(snapshot.dataUpdateCount).toBe(1);
@@ -231,7 +231,7 @@ describe('createQuerySnapshot', () => {
 	it('stores detached redacted query keys instead of live key references', () => {
 		const queryClient = new QueryClient();
 		const privateKey = { accessToken: 'private-key-value', page: 1 };
-		queryClient.setQueryData(['workouts', privateKey], { ok: true });
+		queryClient.setQueryData(['projects', privateKey], { ok: true });
 		const query = queryClient.getQueryCache().getAll()[0];
 		if (!query) throw new Error('Expected cached query');
 
@@ -248,7 +248,7 @@ describe('createQuerySnapshot', () => {
 
 	it('bounds individual query-key segments', () => {
 		const queryClient = new QueryClient();
-		queryClient.setQueryData(['workouts', 'x'.repeat(10_000)], { ok: true });
+		queryClient.setQueryData(['projects', 'x'.repeat(10_000)], { ok: true });
 		const query = queryClient.getQueryCache().getAll()[0];
 		if (!query) throw new Error('Expected cached query');
 
@@ -264,11 +264,11 @@ describe('createQuerySnapshot', () => {
 
 describe('query panel formatting helpers', () => {
 	it('titles rows with the key segments after the grouping segment', () => {
-		expect(formatQueryKeyRemainder(['workouts', 'list', 'week-12'])).toBe(
-			'list · week-12',
+		expect(formatQueryKeyRemainder(['projects', 'list', 'page-12'])).toBe(
+			'list · page-12',
 		);
 		expect(formatQueryKeyRemainder(['stats', 12])).toBe('12');
-		expect(formatQueryKeyRemainder(['workouts'])).toBe('workouts');
+		expect(formatQueryKeyRemainder(['projects'])).toBe('projects');
 	});
 
 	it('formats relative update times', () => {
@@ -519,13 +519,13 @@ describe('createMutationSnapshot', () => {
 			defaultOptions: { mutations: { gcTime: Number.POSITIVE_INFINITY } },
 		});
 		const mutation = queryClient.getMutationCache().build(queryClient, {
-			mutationKey: ['save-workout'],
+			mutationKey: ['save-project'],
 			mutationFn: async (variables: { id: string }) => variables,
 		});
 
 		const snapshot = createMutationSnapshot(mutation, true, 1024);
 
-		expect(snapshot.key).toContain('save-workout');
+		expect(snapshot.key).toContain('save-project');
 		expect(snapshot.status).toBe('idle');
 		expect(snapshot.id).toBe(mutation.mutationId);
 		queryClient.clear();
@@ -592,9 +592,9 @@ describe('QueryPanel', () => {
 
 	it('groups queries by first key segment with a summary header and search', async () => {
 		const queryClient = new QueryClient();
-		queryClient.setQueryData(['workouts', 'list', 'week-12'], { items: [1] });
-		queryClient.setQueryData(['workouts', 'detail', 'wko_1'], { id: 'wko_1' });
-		queryClient.setQueryData(['stats', 'weekly-volume'], { total: 3 });
+		queryClient.setQueryData(['projects', 'list', 'page-12'], { items: [1] });
+		queryClient.setQueryData(['projects', 'detail', 'prj_1'], { id: 'prj_1' });
+		queryClient.setQueryData(['stats', 'weekly-total'], { total: 3 });
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
 		await renderPanel(plugin);
@@ -602,17 +602,17 @@ describe('QueryPanel', () => {
 		expect(
 			screen.getByText('3 CACHED · 0 FETCHING · 0 STALE · 0 ERRORS'),
 		).toBeOnTheScreen();
-		expect(screen.getByText('workouts · 2')).toBeOnTheScreen();
+		expect(screen.getByText('projects · 2')).toBeOnTheScreen();
 		expect(screen.getByText('stats · 1')).toBeOnTheScreen();
-		expect(screen.getByText('list · week-12')).toBeOnTheScreen();
-		expect(screen.getByText('weekly-volume')).toBeOnTheScreen();
+		expect(screen.getByText('list · page-12')).toBeOnTheScreen();
+		expect(screen.getByText('weekly-total')).toBeOnTheScreen();
 		expect(screen.getAllByText('0 observers · fresh')).toHaveLength(3);
 
 		await fireEvent.changeText(
 			screen.getByPlaceholderText('Search query keys'),
 			'stats',
 		);
-		expect(screen.queryByText('workouts · 2')).toBeNull();
+		expect(screen.queryByText('projects · 2')).toBeNull();
 		expect(screen.getByText('stats · 1')).toBeOnTheScreen();
 
 		dispose?.();
@@ -668,7 +668,7 @@ describe('QueryPanel', () => {
 
 	it('runs row swipe actions through the action service', async () => {
 		const queryClient = new QueryClient();
-		queryClient.setQueryData(['workouts', 'list'], { items: [] });
+		queryClient.setQueryData(['projects', 'list'], { items: [] });
 		const plugin = createQueryPlugin({ queryClient });
 		const dispose = plugin.install?.();
 		const run = await renderPanel(plugin);
@@ -705,7 +705,7 @@ describe('QueryPanel', () => {
 			defaultOptions: { mutations: { gcTime: Number.POSITIVE_INFINITY } },
 		});
 		queryClient.getMutationCache().build(queryClient, {
-			mutationKey: ['save-workout'],
+			mutationKey: ['save-project'],
 			mutationFn: async (variables: { id: string }) => variables,
 		});
 		const plugin = createQueryPlugin({ queryClient, captureData: true });
@@ -716,7 +716,7 @@ describe('QueryPanel', () => {
 		expect(screen.getByPlaceholderText('Search mutations')).toBeOnTheScreen();
 		expect(screen.getByText('recent · 1')).toBeOnTheScreen();
 		expect(screen.getByText('0 failures')).toBeOnTheScreen();
-		await fireEvent.press(screen.getByText('save-workout'));
+		await fireEvent.press(screen.getByText('save-project'));
 		expect(screen.getByText('Submitted at')).toBeOnTheScreen();
 		expect(screen.getByText('Paused')).toBeOnTheScreen();
 

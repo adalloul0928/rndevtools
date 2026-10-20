@@ -5,22 +5,22 @@ import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	app,
 	BrowserWindow,
+	clipboard,
 	dialog,
 	type IpcMainInvokeEvent,
 	ipcMain,
+	nativeImage,
 	nativeTheme,
 	net,
 	protocol,
 	shell,
-	type WebContents,
 } from 'electron';
-import type { BuildInsightsState } from '../shared/build-insights-protocol';
+import { agentOperationSchema } from '../shared/agent-protocol';
 import { IPC_CHANNELS } from '../shared/ipc';
 import {
 	DEFAULT_BROKER_HOST,
 	DEFAULT_BROKER_PORT,
 	type DesktopBootstrap,
-	type DesktopState,
 	desktopActionSchema,
 } from '../shared/protocol';
 import type {
@@ -28,10 +28,10 @@ import type {
 	RecipeEvidenceManifest,
 	RecipeRunConfirmationResult,
 	RecipeRunRequest,
-	RecipeState,
 	RecipeSummary,
 } from '../shared/recipe-protocol';
 import { recipeRunConfirmationResultSchema } from '../shared/recipe-protocol';
+import { simulatorInputSchema } from '../shared/simulator-input-protocol';
 import {
 	SIMULATOR_CAPTURE_PROTOCOL_SCHEME,
 	type SimulatorAction,
@@ -43,6 +43,7 @@ import {
 	simulatorConfirmationResultSchema,
 	simulatorJobIdSchema,
 } from '../shared/simulator-protocol';
+import { simulatorStreamSubscriptionsSchema } from '../shared/simulator-stream-protocol';
 import {
 	type SlimmingAcknowledgementReceipt,
 	type SlimmingActionReceipt,
@@ -60,18 +61,30 @@ import {
 	slimmingSettingReceiptSchema,
 	slimmingSettingRequestSchema,
 } from '../shared/slimming-protocol';
+import { laneDefaultBackend } from '../shared/supabase-protocol';
 import { ActionConfirmationStore } from './action-confirmation-store';
 import { AgentCliService } from './agent-cli-service';
+import { runAgentCliSetup } from './agent-cli-setup';
 import { createAgentCommandRouter } from './agent-command-router';
+import { AgentService } from './agent-service';
 import { DesktopBroker } from './broker';
 import { createBuildInsightsIpcHandlers } from './build-insights-ipc';
 import { BuildInsightsService } from './build-insights-service';
 import { BuildInsightsStore } from './build-insights-store';
 import { desktopActionConfirmationCopy } from './desktop-action-confirmation';
 import { DesktopSettingsStore } from './desktop-settings-store';
+import { createLaneIpcHandlers } from './lane-ipc';
+import { LaneService } from './lane-service';
+import { LaneStore } from './lane-store';
 import { verifyAgentCli } from './native-helper-trust';
 import { NativeHostClient } from './native-host-client';
+import { runNativePlan } from './native-plan';
+import { stopForQuit } from './quit-sequence';
 import { createRecipeIpcHandlers } from './recipe-ipc';
+import {
+	type RecipeApprovalCounts,
+	recipeApprovalCounts,
+} from './recipe-policy';
 import { RecipeService } from './recipe-service';
 import { RecipeStore } from './recipe-store';
 import {
@@ -80,6 +93,7 @@ import {
 	PACKAGED_RENDERER_URL,
 	packagedRendererAssetPath,
 	trustedDevelopmentRendererUrl,
+	trustedLoopbackHttpUrl,
 	urlsMatchWithoutHash,
 } from './security';
 import { SimHelperClient } from './sim-helper-client';
@@ -96,9 +110,30 @@ import {
 	validateXcodeDeveloperDirectory,
 } from './simulator-onboarding-ipc';
 import { SimulatorService } from './simulator-service';
+import {
+	createNativeImageFrameEncoder,
+	SimulatorStreamService,
+} from './simulator-stream-service';
 import { slimmingConfirmationCopy } from './slimming-confirmation';
 import { SlimmingService } from './slimming-service';
 import { StagedCertificateStore } from './staged-certificate-store';
+import { shouldUseSupabaseDemo } from './supabase/demo-mode';
+import type {
+	SupabaseAgentPort,
+	SupabaseClipboardPort,
+	SupabaseDialogPort,
+	SupabaseLanePort,
+	SupabaseServiceApi,
+	SupabaseServiceDeps,
+	SupabaseShellPort,
+} from './supabase/service-ports';
+import { createSupabaseService } from './supabase/supabase-service';
+import {
+	createSupabaseInterestGate,
+	createSupabaseIpcHandlers,
+	createSupabaseStatePublisher,
+	supabaseInterestKey,
+} from './supabase-ipc';
 
 protocol.registerSchemesAsPrivileged([
 	{
@@ -138,7 +173,19 @@ let slimmingService: SlimmingService | undefined;
 let recipeService: RecipeService | undefined;
 let agentCliService: AgentCliService | undefined;
 let buildInsightsService: BuildInsightsService | undefined;
+let laneService: LaneService | undefined;
+let agentService: AgentService | undefined;
+let simulatorStreamService: SimulatorStreamService | undefined;
 let stagedCertificateStore: StagedCertificateStore | undefined;
+let supabaseService: SupabaseServiceApi | undefined;
+// Each window's Supabase interest counts only while it is visible; both the
+// gate and the state pushes reach the service once it exists.
+const supabaseInterest = createSupabaseInterestGate((senderKey, interest) =>
+	supabaseService?.setInterest(senderKey, interest)
+);
+const supabaseStatePublisher = createSupabaseStatePublisher((state) =>
+	broadcast(IPC_CHANNELS.supabaseStateChanged, state)
+);
 
 function rendererEntryUrl(): string {
 	return (
@@ -187,104 +234,81 @@ function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
 	}
 }
 
-function sendState(webContents: WebContents, state: DesktopState): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.stateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
+/** Sends one message to every open renderer, skipping any that is gone. */
+function broadcast(channel: string, ...args: unknown[]): void {
+	for (const window of windows) {
+		const webContents = window.webContents;
+		if (webContents.isDestroyed()) continue;
+		try {
+			webContents.send(channel, ...args);
+		} catch {
+			// A renderer can disappear between the destroyed check and send.
+		}
 	}
-}
-
-function broadcastState(state: DesktopState): void {
-	for (const window of windows) sendState(window.webContents, state);
-}
-
-function sendSimulatorState(
-	webContents: WebContents,
-	state: SimulatorState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.simulatorStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastSimulatorState(state: SimulatorState): void {
-	for (const window of windows) sendSimulatorState(window.webContents, state);
-}
-
-function sendSlimmingState(
-	webContents: WebContents,
-	state: SlimmingState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.slimmingStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastSlimmingState(state: SlimmingState): void {
-	for (const window of windows) sendSlimmingState(window.webContents, state);
-}
-
-function sendRecipeState(webContents: WebContents, state: RecipeState): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.recipeStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastRecipeState(state: RecipeState): void {
-	for (const window of windows) sendRecipeState(window.webContents, state);
-}
-
-function sendBuildInsightsState(
-	webContents: WebContents,
-	state: BuildInsightsState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.buildInsightsStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastBuildInsightsState(state: BuildInsightsState): void {
-	for (const window of windows)
-		sendBuildInsightsState(window.webContents, state);
 }
 
 function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow | undefined {
 	return BrowserWindow.fromWebContents(event.sender) ?? undefined;
 }
 
+// Each dialog is modal to the window that asked for it, when there is one.
+function showMessageBox(
+	owner: BrowserWindow | undefined,
+	options: Electron.MessageBoxOptions
+): Promise<Electron.MessageBoxReturnValue> {
+	return owner
+		? dialog.showMessageBox(owner, options)
+		: dialog.showMessageBox(options);
+}
+
+function showOpenDialog(
+	owner: BrowserWindow | undefined,
+	options: Electron.OpenDialogOptions
+): Promise<Electron.OpenDialogReturnValue> {
+	return owner
+		? dialog.showOpenDialog(owner, options)
+		: dialog.showOpenDialog(options);
+}
+
+function showSaveDialog(
+	owner: BrowserWindow | undefined,
+	options: Electron.SaveDialogOptions
+): Promise<Electron.SaveDialogReturnValue> {
+	return owner
+		? dialog.showSaveDialog(owner, options)
+		: dialog.showSaveDialog(options);
+}
+
+/** A warning whose default is Cancel; true once the operator confirms. */
+async function confirmWarning(
+	event: IpcMainInvokeEvent,
+	title: string,
+	detail: string,
+	confirmLabel: string
+): Promise<boolean> {
+	const result = await showMessageBox(ownerWindow(event), {
+		type: 'warning',
+		title,
+		message: title,
+		detail,
+		buttons: ['Cancel', confirmLabel],
+		defaultId: 0,
+		cancelId: 0,
+		noLink: true,
+	});
+	return result.response === 1;
+}
+
 async function confirmCaptureDelete(
 	event: IpcMainInvokeEvent,
 	capture: { name: string }
 ): Promise<boolean> {
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Delete this capture?',
-		message: 'Delete this capture?',
-		detail: `${capture.name} will be permanently removed from local capture storage.`,
-		buttons: ['Cancel', 'Delete'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Delete this capture?',
+		`${capture.name} will be permanently removed from local capture storage.`,
+		'Delete'
+	);
 }
 
 async function selectCaptureExportDestination(
@@ -297,16 +321,12 @@ async function selectCaptureExportDestination(
 			: capture.mimeType === 'image/jpeg'
 				? ['jpeg', 'jpg']
 				: ['mp4'];
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export Simulator capture',
 		buttonLabel: 'Export',
 		defaultPath: capture.name,
 		filters: [{ name: 'Simulator capture', extensions }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -316,21 +336,12 @@ async function confirmCaptureRetentionUpdate(
 	current: { captureCount: number }
 ): Promise<boolean> {
 	const gibibytes = policy.maxTotalBytes / (1024 * 1024 * 1024);
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Update capture retention?',
-		message: 'Update capture retention?',
-		detail: `Captures older than ${policy.maxAgeDays} day${policy.maxAgeDays === 1 ? '' : 's'} or beyond ${gibibytes.toFixed(1)} GiB will be removed immediately. ${current.captureCount} capture${current.captureCount === 1 ? '' : 's'} are currently stored.`,
-		buttons: ['Cancel', 'Update Retention'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Update capture retention?',
+		`Captures older than ${policy.maxAgeDays} day${policy.maxAgeDays === 1 ? '' : 's'} or beyond ${gibibytes.toFixed(1)} GiB will be removed immediately. ${current.captureCount} capture${current.captureCount === 1 ? '' : 's'} are currently stored.`,
+		'Update Retention'
+	);
 }
 
 async function confirmSimulatorAction(
@@ -341,100 +352,51 @@ async function confirmSimulatorAction(
 ): Promise<boolean> {
 	const copy = simulatorConfirmationCopy(action, target, certificate);
 	if (!copy) return true;
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: copy.title,
-		message: copy.title,
-		detail: copy.detail,
-		buttons: ['Cancel', 'Continue'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(event, copy.title, copy.detail, 'Continue');
 }
 
 async function confirmSlimmingTarget(
 	event: IpcMainInvokeEvent,
-	target: SlimmingConfirmationTarget,
-	profileName?: string
+	target: SlimmingConfirmationTarget
 ): Promise<boolean> {
-	const copy = slimmingConfirmationCopy(target, profileName);
+	const copy = slimmingConfirmationCopy(target);
 	if (!copy) return true;
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: copy.title,
-		message: copy.title,
-		detail: copy.detail,
-		buttons: ['Cancel', 'Continue'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(event, copy.title, copy.detail, 'Continue');
 }
+
+/** How the run approval dialog names each kind of privileged recipe step. */
+const RECIPE_APPROVAL_STEP_NOUNS: Record<keyof RecipeApprovalCounts, string> = {
+	mutations: 'experimental SimSlim mutation step',
+	sensitiveResets: 'sensitive reset step',
+	restorePointChanges: 'restore-point restore/removal step',
+};
 
 async function requestRecipeRunConfirmation(
 	event: IpcMainInvokeEvent,
 	request: RecipeRunRequest,
 	recipe: RecipeDefinition
 ): Promise<RecipeRunConfirmationResult> {
-	const steps = [...recipe.steps, ...recipe.teardown];
-	const mutationCount = steps.filter(
-		(step) => step.kind === 'slimming.mutation'
-	).length;
-	const sensitiveSimulatorCount = steps.filter(
-		(step) =>
-			step.kind === 'simulator' &&
-			(step.action.operation === 'keychain.reset' ||
-				(step.action.operation === 'privacy.update' &&
-					step.action.privacyOperation === 'reset'))
-	).length;
-	const restorePointMutationCount = steps.filter(
-		(step) =>
-			step.kind === 'restore-point' &&
-			(step.operation === 'restore' || step.operation === 'remove')
-	).length;
+	const counts = recipeApprovalCounts(recipe);
 	const title =
-		mutationCount > 0
+		counts.mutations > 0
 			? 'Run a privileged experimental Simulator recipe?'
 			: 'Run a privileged Simulator recipe?';
-	const actionDescription = [
-		mutationCount > 0
-			? `${mutationCount} experimental SimSlim mutation step${mutationCount === 1 ? '' : 's'}`
-			: undefined,
-		sensitiveSimulatorCount > 0
-			? `${sensitiveSimulatorCount} sensitive reset step${sensitiveSimulatorCount === 1 ? '' : 's'}`
-			: undefined,
-		restorePointMutationCount > 0
-			? `${restorePointMutationCount} restore-point restore/removal step${restorePointMutationCount === 1 ? '' : 's'}`
-			: undefined,
-	]
-		.filter((value): value is string => value !== undefined)
+	const actionDescription = (
+		Object.keys(RECIPE_APPROVAL_STEP_NOUNS) as (keyof RecipeApprovalCounts)[]
+	)
+		.filter((kind) => counts[kind] > 0)
+		.map(
+			(kind) =>
+				`${counts[kind]} ${RECIPE_APPROVAL_STEP_NOUNS[kind]}${counts[kind] === 1 ? '' : 's'}`
+		)
 		.join(' and ');
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
+	const confirmed = await confirmWarning(
+		event,
 		title,
-		message: title,
-		detail: `${recipe.name} revision ${recipe.revision} contains ${actionDescription} and targets these exact Simulator UDIDs: ${request.targetUdids.join(', ')}. ${mutationCount > 0 ? 'SimSlim mutations remain serialized and verified by the signed helper.' : 'Sensitive resets will run only after this one-time exact confirmation.'}`,
-		buttons: ['Cancel', 'Run Recipe'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	if (result.response !== 1) {
+		`${recipe.name} revision ${recipe.revision} contains ${actionDescription} and targets these exact Simulator UDIDs: ${request.targetUdids.join(', ')}. ${counts.mutations > 0 ? 'SimSlim mutations remain serialized and verified by the signed helper.' : 'Sensitive resets will run only after this one-time exact confirmation.'}`,
+		'Run Recipe'
+	);
+	if (!confirmed) {
 		return recipeRunConfirmationResultSchema.parse({
 			actionId: request.actionId,
 			required: true,
@@ -459,36 +421,23 @@ async function confirmRecipeDelete(
 	event: IpcMainInvokeEvent,
 	recipe: RecipeSummary
 ): Promise<boolean> {
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Delete this recipe?',
-		message: 'Delete this recipe?',
-		detail: `${recipe.name} revision ${recipe.revision} will be permanently removed. Existing run evidence remains in local history.`,
-		buttons: ['Cancel', 'Delete'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Delete this recipe?',
+		`${recipe.name} revision ${recipe.revision} will be permanently removed. Existing run evidence remains in local history.`,
+		'Delete'
+	);
 }
 
 async function selectRecipeImportPath(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title: 'Import recipe',
 		buttonLabel: 'Import',
 		properties: ['openFile'],
 		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -496,16 +445,12 @@ async function selectRecipeExportDestination(
 	event: IpcMainInvokeEvent,
 	recipe: RecipeDefinition
 ): Promise<string | undefined> {
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export recipe',
 		buttonLabel: 'Export',
 		defaultPath: `${recipe.id}.rndevtools-recipe.json`,
 		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -513,16 +458,12 @@ async function selectEvidenceExportDestination(
 	event: IpcMainInvokeEvent,
 	evidence: RecipeEvidenceManifest
 ): Promise<string | undefined> {
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export evidence manifest',
 		buttonLabel: 'Export',
 		defaultPath: `${evidence.id}.rndevtools-evidence.json`,
 		filters: [{ name: 'Evidence JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -530,18 +471,27 @@ async function selectBuildInsightsSource(
 	event: IpcMainInvokeEvent,
 	kind: 'derived-data-root' | 'xcresult'
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title:
 			kind === 'xcresult'
 				? 'Import an Xcode result bundle'
 				: 'Watch a DerivedData directory',
 		buttonLabel: kind === 'xcresult' ? 'Import Result' : 'Watch Directory',
 		properties: ['openDirectory'],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
+	return result.canceled ? undefined : result.filePaths[0];
+}
+
+async function selectLaneRepository(
+	event: IpcMainInvokeEvent
+): Promise<string | undefined> {
+	const result = await showOpenDialog(ownerWindow(event), {
+		title: 'Track a repository for lanes',
+		message:
+			'Choose a git checkout. Its worktrees become available as lane targets.',
+		buttonLabel: 'Track Repository',
+		properties: ['openDirectory'],
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -550,7 +500,7 @@ async function selectBuildInsightsExportDestination(
 	format: 'csv' | 'json'
 ): Promise<string | undefined> {
 	const extension = format === 'csv' ? 'csv' : 'json';
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export local Build Insights',
 		buttonLabel: 'Export',
 		defaultPath: `rndevtools-build-insights.${extension}`,
@@ -561,27 +511,19 @@ async function selectBuildInsightsExportDestination(
 				extensions: [extension],
 			},
 		],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
 async function selectXcodeApplication(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title: 'Choose an Xcode application',
 		buttonLabel: 'Use Xcode',
 		properties: ['openFile'],
 		filters: [{ name: 'Xcode application', extensions: ['app'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -615,11 +557,146 @@ async function selectSimulatorInput(
 		};
 	}
 	if (!options) return undefined;
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	const result = await showOpenDialog(ownerWindow(event), options);
 	return result.canceled ? undefined : result.filePaths[0];
+}
+
+function windowForSender(senderId: number): BrowserWindow | undefined {
+	for (const window of windows) {
+		if (!window.isDestroyed() && window.webContents.id === senderId) {
+			return window;
+		}
+	}
+	return undefined;
+}
+
+/** Electron's dialogs for the Supabase service, modal to the asking window. */
+const supabaseDialog: SupabaseDialogPort = {
+	showMessageBox: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const messageBox: Electron.MessageBoxOptions = {
+			...options,
+			buttons: [...options.buttons],
+		};
+		const result = await showMessageBox(window, messageBox);
+		return {
+			response: result.response,
+			checkboxChecked: result.checkboxChecked,
+		};
+	},
+	showSaveDialog: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const save: Electron.SaveDialogOptions = {
+			title: options.title,
+			buttonLabel: options.buttonLabel,
+			defaultPath: options.defaultPath,
+			filters: options.filters.map((filter) => ({
+				name: filter.name,
+				extensions: [...filter.extensions],
+			})),
+		};
+		const result = await showSaveDialog(window, save);
+		return result.canceled || !result.filePath
+			? { canceled: true }
+			: { canceled: false, filePath: result.filePath };
+	},
+	showOpenDialog: async (options, owner) => {
+		const window = owner ? windowForSender(owner.senderId) : undefined;
+		const open: Electron.OpenDialogOptions = {
+			title: options.title,
+			buttonLabel: options.buttonLabel,
+			properties: [...options.properties],
+			...(options.defaultPath === undefined
+				? {}
+				: { defaultPath: options.defaultPath }),
+		};
+		const result = await showOpenDialog(window, open);
+		return { canceled: result.canceled, filePaths: result.filePaths };
+	},
+};
+
+const supabaseShell: SupabaseShellPort = {
+	// Mailpit and Studio only: loopback http, never another host or scheme.
+	openExternal: async (url) => {
+		const trusted = trustedLoopbackHttpUrl(url);
+		if (!trusted) {
+			throw new Error('Only loopback http addresses open outside RN Devtools.');
+		}
+		await shell.openExternal(trusted);
+	},
+	// Paths come from the service's own records; the renderer never names one.
+	showItemInFolder: (itemPath) => {
+		if (!path.isAbsolute(itemPath) || itemPath.includes('\0')) {
+			throw new Error('Only an absolute path can be revealed in Finder.');
+		}
+		shell.showItemInFolder(itemPath);
+	},
+};
+
+// The service compares what it reads back before clearing, so a delayed clear
+// never wipes something the user copied since.
+const supabaseClipboard: SupabaseClipboardPort = {
+	writeText: (text) => clipboard.writeText(text),
+	readText: () => clipboard.readText(),
+};
+
+function supabaseLanePort(lanes: LaneService): SupabaseLanePort {
+	return {
+		lanes: () => lanes.getState().lanes,
+		laneById: (laneId) =>
+			lanes.getState().lanes.find((lane) => lane.id === laneId),
+		worktrees: () => lanes.getState().worktrees,
+		repositories: () => lanes.getState().repositories,
+		restartMetro: (laneId, reason) => lanes.restartMetro(laneId, reason),
+		launchDeferred: (laneId) => lanes.launchDeferred(laneId),
+		subscribe: (listener) => lanes.subscribe(() => listener()),
+	};
+}
+
+function supabaseAgentPort(agents: AgentService): SupabaseAgentPort {
+	return {
+		sessions: () => agents.getState().sessions,
+		holderLiveness: (holder, directory) =>
+			agents.holderLiveness(holder, directory),
+		discovery: () => {
+			const { claude, codex } = agents.getState().discovery;
+			return { claude, codex };
+		},
+		subscribe: (listener) => agents.subscribe(() => listener()),
+	};
+}
+
+function supabasePlatform(): SupabaseServiceDeps['platform'] {
+	return {
+		platform: process.platform,
+		arch: process.arch,
+		macosVersion:
+			process.platform === 'darwin' ? process.getSystemVersion() : undefined,
+	};
+}
+
+function registerSupabaseIpc(service: SupabaseServiceApi): void {
+	const handlers = createSupabaseIpcHandlers({
+		service: {
+			getState: () => service.getState(),
+			runOperation: (operation, context) =>
+				service.runOperation(operation, context),
+			describeConfirmation: (operation) =>
+				service.describeConfirmation(operation),
+			setInterest: supabaseInterest.setInterest,
+		},
+		confirmations: confirmationStore,
+		showConfirmationDialog: supabaseDialog.showMessageBox,
+		assertTrustedSender: assertTrustedRenderer,
+		now: Date.now,
+	});
+	ipcMain.handle(IPC_CHANNELS.getSupabaseState, handlers.getState);
+	ipcMain.handle(IPC_CHANNELS.runSupabaseOperation, handlers.runOperation);
+	ipcMain.handle(
+		IPC_CHANNELS.requestSupabaseConfirmation,
+		handlers.requestConfirmation
+	);
+	ipcMain.on(IPC_CHANNELS.setSupabaseInterest, handlers.setInterest);
 }
 
 function rejectedSimulatorAction(
@@ -638,6 +715,8 @@ function registerIpc(
 	slimming: SlimmingService,
 	recipes: RecipeService,
 	buildInsights: BuildInsightsService,
+	lanes: LaneService,
+	nativeHost: NativeHostClient,
 	certificates: StagedCertificateStore,
 	nativeResourceDirectory: string,
 	settings: DesktopSettingsStore
@@ -674,6 +753,11 @@ function registerIpc(
 			selectBuildInsightsSource(event, 'derived-data-root'),
 		selectExportDestination: selectBuildInsightsExportDestination,
 	});
+	const laneHandlers = createLaneIpcHandlers({
+		service: lanes,
+		assertTrustedRenderer,
+		selectRepository: selectLaneRepository,
+	});
 	const simulatorOnboardingHandlers = createSimulatorOnboardingIpcHandlers({
 		assertTrustedRenderer,
 		selectXcodeApplication,
@@ -700,6 +784,16 @@ function registerIpc(
 			});
 			shell.showItemInFolder(cli.executablePath);
 		},
+		setupAgentCli: async () => {
+			// The verified CLI edits the operator's own agent configuration; the
+			// desktop only launches it and relays its report. Mutations stay in
+			// the Go code, which is tested against each file format.
+			const cli = await verifyAgentCli({
+				resourceDirectory: nativeResourceDirectory,
+				appVersion: app.getVersion(),
+			});
+			return runAgentCliSetup(cli.executablePath, app.getPath('home'));
+		},
 	});
 	ipcMain.handle(IPC_CHANNELS.getBootstrap, (event): DesktopBootstrap => {
 		assertTrustedRenderer(event);
@@ -719,7 +813,7 @@ function registerIpc(
 		const action = desktopActionSchema.parse(value);
 		const confirmation = desktopActionConfirmationCopy(action);
 		if (confirmation) {
-			const options: Electron.MessageBoxOptions = {
+			const result = await showMessageBox(ownerWindow(event), {
 				type: confirmation.destructive ? 'warning' : 'question',
 				title: confirmation.title,
 				message: confirmation.message,
@@ -728,11 +822,7 @@ function registerIpc(
 				defaultId: 0,
 				cancelId: 0,
 				noLink: true,
-			};
-			const owner = ownerWindow(event);
-			const result = owner
-				? await dialog.showMessageBox(owner, options)
-				: await dialog.showMessageBox(options);
+			});
 			if (result.response !== 1) {
 				return {
 					actionId: action.actionId,
@@ -999,20 +1089,14 @@ function registerIpc(
 					error: 'Confirmation requests cannot reuse an existing token.',
 				});
 			}
-			const profileName =
-				'profileId' in target
-					? slimming
-							.getState()
-							.profiles.find((profile) => profile.id === target.profileId)?.name
-					: undefined;
-			if (!slimmingConfirmationCopy(target, profileName)) {
+			if (!slimmingConfirmationCopy(target)) {
 				return slimmingConfirmationResultSchema.parse({
 					actionId: target.actionId,
 					required: false,
 					confirmed: true,
 				});
 			}
-			if (!(await confirmSlimmingTarget(event, target, profileName))) {
+			if (!(await confirmSlimmingTarget(event, target))) {
 				return slimmingConfirmationResultSchema.parse({
 					actionId: target.actionId,
 					required: true,
@@ -1120,6 +1204,37 @@ function registerIpc(
 		IPC_CHANNELS.runBuildInsightsOperation,
 		buildInsightsHandlers.runOperation
 	);
+	ipcMain.handle(IPC_CHANNELS.getLaneState, laneHandlers.getState);
+	ipcMain.handle(IPC_CHANNELS.runLaneOperation, laneHandlers.runOperation);
+	ipcMain.handle(
+		IPC_CHANNELS.sendSimulatorInput,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			return nativeHost.sendSimulatorInput(simulatorInputSchema.parse(value));
+		}
+	);
+	ipcMain.handle(IPC_CHANNELS.getAgentState, (event) => {
+		assertTrustedRenderer(event);
+		if (!agentService) throw new Error('Agents are not available.');
+		return agentService.getState();
+	});
+	ipcMain.handle(
+		IPC_CHANNELS.runAgentOperation,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			if (!agentService) throw new Error('Agents are not available.');
+			return agentService.runOperation(agentOperationSchema.parse(value));
+		}
+	);
+	ipcMain.handle(
+		IPC_CHANNELS.setSimulatorStreamSubscriptions,
+		async (event, value: unknown) => {
+			assertTrustedRenderer(event);
+			await simulatorStreamService?.setSubscriptions(
+				simulatorStreamSubscriptionsSchema.parse(value)
+			);
+		}
+	);
 }
 
 function updateSimulatorPolling(): void {
@@ -1129,6 +1244,13 @@ function updateSimulatorPolling(): void {
 	);
 	simulatorService?.setPollingActive(visible);
 	slimmingService?.setPollingActive(visible);
+	agentService?.setPollingActive(visible);
+	// Live screens are the most expensive poller; they also stop when every
+	// window is merely unfocused, not just hidden.
+	const focused = [...windows].some(
+		(window) => !window.isDestroyed() && window.isFocused()
+	);
+	simulatorStreamService?.setPaused(!(visible && focused));
 }
 
 function createWindow(): BrowserWindow {
@@ -1168,13 +1290,29 @@ function createWindow(): BrowserWindow {
 	});
 	window.on('show', updateSimulatorPolling);
 	window.on('hide', updateSimulatorPolling);
+	window.on('focus', updateSimulatorPolling);
+	window.on('blur', updateSimulatorPolling);
 	window.on('minimize', updateSimulatorPolling);
 	window.on('restore', updateSimulatorPolling);
 	const senderId = window.webContents.id;
 	stagedCertificateStore?.registerSender(senderId);
+	// A hidden or minimized window has no Supabase interest; its last one comes
+	// back when it is shown again.
+	const supabaseKey = supabaseInterestKey(senderId);
+	const updateSupabaseInterest = () =>
+		supabaseInterest.setVisible(
+			supabaseKey,
+			!window.isDestroyed() && window.isVisible() && !window.isMinimized()
+		);
+	updateSupabaseInterest();
+	window.on('show', updateSupabaseInterest);
+	window.on('hide', updateSupabaseInterest);
+	window.on('minimize', updateSupabaseInterest);
+	window.on('restore', updateSupabaseInterest);
 	window.webContents.once('destroyed', () => {
 		confirmationStore.revokeSender(senderId);
 		void stagedCertificateStore?.revokeSender(senderId);
+		supabaseInterest.drop(supabaseKey);
 	});
 	window.once('ready-to-show', () => window.show());
 	window.webContents.session.setPermissionRequestHandler(
@@ -1310,6 +1448,11 @@ if (!app.requestSingleInstanceLock()) {
 				appVersion: app.getVersion(),
 				helper: simHelperClient,
 				mutationCoordinator: simulatorMutationCoordinator,
+				// The agent service is constructed after this one; resolve it late so
+				// every mutation, from the panel or an agent, checks who holds the
+				// device at the moment it is enqueued.
+				deviceAccess: (simulatorUdid, requester) =>
+					agentService?.access(simulatorUdid, requester) ?? { allowed: true },
 			});
 			recipeService = new RecipeService({
 				store: new RecipeStore(path.join(app.getPath('userData'), 'recipes')),
@@ -1323,16 +1466,103 @@ if (!app.requestSingleInstanceLock()) {
 					path.join(app.getPath('userData'), 'build-insights')
 				),
 			});
-			agentCliService = new AgentCliService({
-				socketPath: path.join(
-					app.getPath('userData'),
-					'agent',
-					'rndevtools.sock'
+			laneService = new LaneService({
+				store: new LaneStore(path.join(app.getPath('userData'), 'lanes')),
+				simulator: simulatorService,
+				slimming: slimmingService,
+				mutationCoordinator: simulatorMutationCoordinator,
+				// The agent service is constructed next; it knows which sessions are
+				// alive, which is what decides whether a lane's owner is gone.
+				holds: () => agentService?.holds() ?? new Map(),
+				// Resolved late for the same reason. A queued lane up asks it when its
+				// turn comes, so it resumes the app's lane only for a session that
+				// lane's holder lets in.
+				deviceAccess: (simulatorUdid, requester) =>
+					agentService?.access(simulatorUdid, requester) ?? { allowed: true },
+				// The Supabase service is constructed after the agent service, and
+				// before any lane can start.
+				backends: {
+					ensureForLane: async (input, signal) =>
+						supabaseService
+							? supabaseService.ensureForLane(input, signal)
+							: {
+									summary: {
+										policy: input.policy,
+										status: 'skipped',
+										reason: 'disabled',
+										appEnvNames: [],
+										warnings: [],
+										reasonText: 'Local Supabase is not ready yet.',
+									},
+								},
+					detachLane: (laneId) => {
+						supabaseService?.detachLane(laneId);
+					},
+					// Lanes default to no backend unless the feature is on and the
+					// Mac supports it; otherwise every development lane would ask.
+					defaultPolicy: (environmentId) => {
+						const state = supabaseService?.getState();
+						return state?.feature.enabled &&
+							state.availability.platform.supported
+							? laneDefaultBackend(state.policy, environmentId)
+							: 'off';
+					},
+					describeWorktree: (worktreePath) =>
+						supabaseService?.describeWorktree(worktreePath),
+				},
+			});
+			agentService = new AgentService({
+				directory: path.join(app.getPath('userData'), 'agents'),
+				lanes: () =>
+					laneService?.getState().lanes.map((lane) => ({
+						id: lane.id,
+						simulatorUdid: lane.simulatorUdid,
+						worktreePath: lane.worktreePath,
+						agent: lane.agent,
+						metro: lane.metro,
+						startedAt: lane.startedAt,
+					})) ?? [],
+				// Supabase stack holders get the same abandonment clocks as lanes.
+				holders: () => supabaseService?.holderKeys() ?? [],
+			});
+			const agentSocketPath = path.join(
+				app.getPath('userData'),
+				'agent',
+				'rndevtools.sock'
+			);
+			supabaseService = createSupabaseService({
+				userDataDirectory: app.getPath('userData'),
+				agentSocketDirectory: path.dirname(agentSocketPath),
+				lanes: supabaseLanePort(laneService),
+				agents: supabaseAgentPort(agentService),
+				dialog: supabaseDialog,
+				shell: supabaseShell,
+				clipboard: supabaseClipboard,
+				demo: shouldUseSupabaseDemo(
+					process.env.RNDEVTOOLS_DEMO,
+					app.isPackaged
 				),
+				platform: supabasePlatform(),
+			});
+			simulatorStreamService = new SimulatorStreamService({
+				frameDirectory: path.join(
+					app.getPath('temp'),
+					`rndevtools-stream-${process.pid}`
+				),
+				encode: createNativeImageFrameEncoder(nativeImage),
+			});
+			agentCliService = new AgentCliService({
+				socketPath: agentSocketPath,
 				handler: createAgentCommandRouter({
 					broker,
 					simulator: simulatorService,
 					slimming: slimmingService,
+					lanes: laneService,
+					agents: agentService,
+					supabase: supabaseService,
+					nativePlan: runNativePlan,
+					simulatorInput: (input, signal) =>
+						nativeHostClient.sendSimulatorInput(input, signal),
 					recipes: {
 						list: () => recipeService?.getState().recipes ?? [],
 						get: (recipeId) => recipeService?.getRecipe(recipeId) ?? null,
@@ -1371,21 +1601,50 @@ if (!app.requestSingleInstanceLock()) {
 				slimmingService,
 				recipeService,
 				buildInsightsService,
+				laneService,
+				nativeHostClient,
 				stagedCertificateStore,
 				nativeResourceDirectory,
 				settings
 			);
-			broker.subscribe(broadcastState);
-			simulatorService.subscribe(broadcastSimulatorState);
-			slimmingService.subscribe(broadcastSlimmingState);
-			recipeService.subscribe(broadcastRecipeState);
-			buildInsightsService.subscribe(broadcastBuildInsightsState);
+			registerSupabaseIpc(supabaseService);
+			broker.subscribe((state) => broadcast(IPC_CHANNELS.stateChanged, state));
+			simulatorService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.simulatorStateChanged, state)
+			);
+			slimmingService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.slimmingStateChanged, state)
+			);
+			recipeService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.recipeStateChanged, state)
+			);
+			buildInsightsService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.buildInsightsStateChanged, state)
+			);
+			laneService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.laneStateChanged, state)
+			);
+			agentService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.agentStateChanged, state)
+			);
+			supabaseService.subscribe(supabaseStatePublisher.publish);
+			// The lane start form reads each worktree's project from lane state.
+			supabaseService.subscribe(() => laneService?.backendsChanged());
+			simulatorStreamService.subscribeFrames((frame, bytes) =>
+				broadcast(IPC_CHANNELS.simulatorStreamFrame, frame, bytes)
+			);
+			simulatorStreamService.subscribeStatus((status) =>
+				broadcast(IPC_CHANNELS.simulatorStreamStatus, status)
+			);
 			await Promise.all([
 				broker.start(),
 				simulatorService.start(),
 				slimmingService.start(),
 				recipeService.start(),
 				buildInsightsService.start(),
+				laneService.start(),
+				agentService.start(),
+				supabaseService.start(),
 				agentCliService.start(),
 			]);
 			if (shutdownStarted) return;
@@ -1415,19 +1674,28 @@ app.on('before-quit', (event) => {
 	event.preventDefault();
 	if (shutdownStarted) return;
 	shutdownStarted = true;
-	const simulatorShutdown = simulatorService?.stop();
-	const certificateShutdown = simulatorShutdown
-		? simulatorShutdown.finally(() => stagedCertificateStore?.stop())
-		: stagedCertificateStore?.stop();
-	void Promise.allSettled([
-		broker.stop(),
-		simulatorShutdown,
-		slimmingService?.stop(),
-		recipeService?.stop(),
-		buildInsightsService?.stop(),
-		agentCliService?.stop(),
-		certificateShutdown,
-	]).finally(() => {
+	supabaseStatePublisher.dispose();
+	// Running recipes cancel first: their teardown still needs the Simulator,
+	// slimming, and broker services, which stop once it has finished.
+	void stopForQuit(recipeService?.stop(), () => {
+		const simulatorShutdown = simulatorService?.stop();
+		const certificateShutdown = simulatorShutdown
+			? simulatorShutdown.finally(() => stagedCertificateStore?.stop())
+			: stagedCertificateStore?.stop();
+		return [
+			broker.stop(),
+			simulatorShutdown,
+			slimmingService?.stop(),
+			buildInsightsService?.stop(),
+			laneService?.stop(),
+			agentService?.stop(),
+			// Stopping the service never stops a stack; they outlive the app.
+			supabaseService?.stop(),
+			simulatorStreamService?.stop(),
+			agentCliService?.stop(),
+			certificateShutdown,
+		];
+	}).finally(() => {
 		brokerStopped = true;
 		app.quit();
 	});

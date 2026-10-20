@@ -53,8 +53,16 @@ optional diagnostic dependencies.
 
 Image diagnostics and the storage editor use the separate
 `@rndevtools/core/plugins/images` and `@rndevtools/core/plugins/storage` entry points.
-They are excluded from the shared plugins barrel so hosts can prune their adapters
-from production bundles without depending on tree shaking.
+They are excluded from the shared plugins barrel so a host that does not use them
+never loads them, even without tree shaking. Like every entry point in this
+package, none of them may reach a release bundle; see
+[Keeping devtools out of production builds](#keeping-devtools-out-of-production-builds).
+
+The reference-image overlay controller and its source validators are also
+published alone at `@rndevtools/core/plugins/image-overlay`. The shared plugins
+barrel still exports them; the subpath lets a module that only drives the
+overlay load it without the barrel's panels and the dependencies they reach.
+Like the other entry points, it must never reach a release bundle.
 
 Collectors install when `InternalTools` is enabled and remain active while its
 panel is closed. The runtime reconciles collectors by plugin ID and installer,
@@ -126,12 +134,23 @@ The advanced plugins use host-owned adapters instead of global interception:
 
 - Zustand requires `getInspectableState`; there is no automatic store
   discovery and the built-in panel is read-only.
+- Storage never reads a sensitive adapter's values, and redacts a value stored
+  under a key whose name marks it sensitive, such as `refreshToken` or
+  `session`. An adapter opts out of both with `revealValues: true`.
 - Restore points accept only declared sources. Snapshots must be JSON, are
   bounded by source and session size, remain in memory, and capture rollback
   state before applying a restore.
 - Console subscribes to an application's structured logger, groups repeated
   entries, and preserves supplied scope, correlation, bounded stack, source,
-  and bookmark metadata after redaction. An optional development-only
+  and bookmark metadata after redaction. It redacts a bounded window of each
+  text, at most 1.9 Mi code units for a message or stack however long it is,
+  and redacts attribute keys as it redacts values. The attributes of one
+  event share a work budget of 2 Mi code units, which every value read, key
+  listed or copied, and code unit tested or redacted counts against, so
+  attributes that share one object widely stop at the budget; listing the
+  keys of one huge object still costs time in proportion to its size. A
+  secret of up to 64 Ki code units that a window edge cuts is never stored
+  unredacted; part of a longer one can be. An optional development-only
   `createConsoleMethodSource` exists for third-party output; it requires two
   explicit opt-ins and restores only wrappers it still owns. It is never used
   by default.
@@ -302,9 +321,25 @@ implementations.
 Host applications must provide `GestureHandlerRootView` and
 `SafeAreaProvider` above `InternalTools`.
 
+## Compatibility
+
+| Host | Supported |
+| --- | --- |
+| Expo SDK | 56 and 57 |
+| React Native | 0.85 and 0.86 |
+| `react-native-worklets` | 0.8 through 0.x |
+| `@expo/ui` | 56 and 57 |
+
+The lower bounds were verified against an Expo 56.0.19 / React Native
+0.85.3 host: every named import this package takes from `@expo/ui`,
+`@expo/ui/swift-ui`, `@expo/ui/swift-ui/modifiers`, `@expo/ui/community/menu`,
+`react-native-worklets`, `expo-device`, `expo-file-system`, `expo-constants`,
+and `expo-image-picker` exists in the SDK 56 releases of those packages, and
+the full diagnostic suite runs on-device against that host.
+
 ## Package boundary
 
-Keep generic runtime and diagnostic behavior in `packages/devtools`. Host-app
+Keep generic runtime and diagnostic behavior in `@rndevtools/core`. Host-app
 adapters, feature flags, account actions, fixture scenarios, and product-specific
 panels belong in the consuming application. This keeps the package reusable
 without introducing application dependencies into its graph.

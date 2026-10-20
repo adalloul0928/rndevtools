@@ -1,0 +1,3 @@
+# Native folders that prebuild generates (Continuous Native Generation).
+/ios
+/android

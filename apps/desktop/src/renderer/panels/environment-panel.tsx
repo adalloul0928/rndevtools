@@ -1,26 +1,86 @@
+import { Button } from '@heroui/react/button';
 import { Card } from '@heroui/react/card';
-import { CheckCircle2, CircleAlert, Settings2 } from 'lucide-react';
+import {
+	CheckCircle2,
+	CircleAlert,
+	DatabaseZap,
+	Settings2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
 	EmptyPanel,
+	InlineCode,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
+import { type AppTraffic, useAppTraffic } from '@/lib/app-traffic';
+import {
+	type AppTrafficView,
+	environmentSupabaseChecks,
+} from '@/simulator/app-traffic-model';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
+import {
+	useSupabaseNavigation,
+	useSupabaseState,
+} from '@/state/supabase-runtime';
 import type { EnvironmentEntry } from '../../shared/protocol';
+import { supabaseStackTitle } from '../../shared/supabase-protocol';
 
 const MAX_RENDERED_ENVIRONMENT_VALUES = 500;
 
-function validationTone(
+export function validationTone(
 	status: EnvironmentEntry['status']
 ): 'success' | 'warning' | 'danger' | 'default' {
 	if (status === 'valid') return 'success';
 	if (status === 'unchecked') return 'default';
 	if (status === 'missing') return 'warning';
 	return 'danger';
+}
+
+export function statusLabel(status: EnvironmentEntry['status']): string {
+	if (status === 'typeMismatch') return 'type';
+	if (status === 'valueMismatch') return 'value';
+	return status;
+}
+
+/**
+ * Reduces the validated entries to a health summary. Pure so it can be unit
+ * tested independently of the rendered panel.
+ */
+export function environmentHealth(entries: readonly EnvironmentEntry[]): {
+	hasChecks: boolean;
+	valid: number;
+	failures: number;
+	score: number;
+} {
+	const checked = entries.filter((entry) => entry.status !== 'unchecked');
+	const valid = checked.filter((entry) => entry.status === 'valid').length;
+	const hasChecks = checked.length > 0;
+	return {
+		hasChecks,
+		valid,
+		failures: checked.length - valid,
+		score: hasChecks ? Math.round((valid / checked.length) * 100) : 0,
+	};
+}
+
+/**
+ * What the desktop compares the app's declared Supabase URL with: its lane's
+ * stack, as `the stack for feat-checkout (:21734)`.
+ */
+export function laneStackPhrase(
+	view: Pick<AppTrafficView, 'expectedStack' | 'labels'>
+): string {
+	const port =
+		view.labels.expectedPort === undefined
+			? ''
+			: ` (:${view.labels.expectedPort})`;
+	return view.expectedStack
+		? `the stack for ${supabaseStackTitle(view.expectedStack)}${port}`
+		: `this lane's stack${port}`;
 }
 
 export function EnvironmentPanel() {
@@ -54,16 +114,12 @@ export function EnvironmentPanel() {
 			),
 		[visibleEntries]
 	);
-	const checked = entries.filter((entry) => entry.status !== 'unchecked');
-	const valid = checked.filter((entry) => entry.status === 'valid').length;
-	const hasChecks = checked.length > 0;
-	const score = hasChecks ? Math.round((valid / checked.length) * 100) : 0;
-	const failures = checked.length - valid;
+	const { hasChecks, valid, failures, score } = environmentHealth(entries);
+	const traffic = useAppTraffic();
 
 	return (
 		<section className="panel-root">
 			<PanelHeader
-				eyebrow="App"
 				title="Environment"
 				description="Declared build, update, device, backend, and observability values with explicit validation results."
 				meta={
@@ -72,8 +128,8 @@ export function EnvironmentPanel() {
 							!hasChecks
 								? 'text-(--text-3)'
 								: failures === 0
-									? 'text-emerald-300'
-									: 'text-amber-300'
+									? 'text-(--brand)'
+									: 'text-(--warning)'
 						}
 					>
 						{hasChecks ? `Config health ${score}%` : 'Config not evaluated'}
@@ -88,10 +144,10 @@ export function EnvironmentPanel() {
 					onChange={setQuery}
 				/>
 				<div className="ml-auto flex items-center gap-3">
-					<span className="flex items-center gap-1.5 text-xs text-emerald-300">
+					<span className="flex items-center gap-1.5 text-xs text-(--brand)">
 						<CheckCircle2 className="h-3.5 w-3.5" /> {valid} valid
 					</span>
-					<span className="flex items-center gap-1.5 text-xs text-amber-300">
+					<span className="flex items-center gap-1.5 text-xs text-(--warning)">
 						<CircleAlert className="h-3.5 w-3.5" /> {failures} review
 					</span>
 				</div>
@@ -111,7 +167,7 @@ export function EnvironmentPanel() {
 						>
 							<div className="grid h-full w-full place-items-center rounded-full bg-[#080808] text-center">
 								<div>
-									<div className="font-mono text-2xl font-semibold tracking-[-0.04em] text-(--foreground)">
+									<div className="font-mono text-2xl font-semibold tabular-nums tracking-[-0.04em] text-(--foreground)">
 										{hasChecks ? `${score}%` : '—'}
 									</div>
 									<div className="mt-0.5 text-xs uppercase tracking-[0.08em] text-(--text-3)">
@@ -136,6 +192,7 @@ export function EnvironmentPanel() {
 						</p>
 					</div>
 				</div>
+				<LocalSupabaseChecks entries={entries} traffic={traffic} />
 				{sections.length === 0 ? (
 					<EmptyPanel
 						icon={<Settings2 className="h-5 w-5" />}
@@ -154,7 +211,7 @@ export function EnvironmentPanel() {
 									<Card.Title className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
 										{section.title}
 									</Card.Title>
-									<span className="font-mono text-xs text-(--text-3)">
+									<span className="font-mono text-xs tabular-nums text-(--text-3)">
 										{section.entries.length} values
 									</span>
 								</Card.Header>
@@ -174,15 +231,13 @@ export function EnvironmentPanel() {
 													</p>
 												) : null}
 											</div>
-											<code className="block truncate text-xs text-(--muted)">
-												{entry.valueText}
-											</code>
+											<div className="min-w-0">
+												<InlineCode className="block truncate">
+													{entry.valueText}
+												</InlineCode>
+											</div>
 											<StatusPill tone={validationTone(entry.status)}>
-												{entry.status === 'typeMismatch'
-													? 'type'
-													: entry.status === 'valueMismatch'
-														? 'value'
-														: entry.status}
+												{statusLabel(entry.status)}
 											</StatusPill>
 										</div>
 									))}
@@ -192,6 +247,89 @@ export function EnvironmentPanel() {
 					</div>
 				)}
 			</div>
+		</section>
+	);
+}
+
+/**
+ * The desktop's own check of the app's declared Supabase URL: values are
+ * matched by what they point at, never by their key's name, and only their
+ * origin is shown. A lane's stack serves local http, so that reads as
+ * expected even where the app's own URL rule accepts only https.
+ */
+function LocalSupabaseChecks({
+	entries,
+	traffic,
+}: {
+	entries: readonly EnvironmentEntry[];
+	traffic: AppTraffic;
+}) {
+	const { state } = useSupabaseState();
+	const { openInSupabase } = useSupabaseNavigation();
+	const checks = useMemo(
+		() => environmentSupabaseChecks(entries, traffic, state),
+		[entries, state, traffic]
+	);
+	if (!traffic.enabled || (checks.length === 0 && !traffic.expects)) {
+		return null;
+	}
+	const stack = traffic.expectedStack;
+	return (
+		<section
+			aria-label="Local Supabase checks"
+			className="mb-5 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]"
+		>
+			<header className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-white/8 px-4 py-2">
+				<div className="flex min-w-0 items-center gap-2">
+					<DatabaseZap className="h-3.5 w-3.5 shrink-0 text-(--muted)" />
+					<h2 className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
+						Local Supabase
+					</h2>
+					<span className="truncate text-xs text-(--text-3)">
+						{traffic.expects
+							? `checked by RN Devtools against ${laneStackPhrase(traffic)}`
+							: 'checked by RN Devtools · no lane stack to compare with'}
+					</span>
+				</div>
+				{stack ? (
+					<Button
+						size="sm"
+						variant="ghost"
+						onPress={() => openInSupabase({ stackId: stack.id })}
+					>
+						Open in Supabase
+					</Button>
+				) : null}
+			</header>
+			{checks.length === 0 ? (
+				<p className="m-0 px-4 py-3 text-xs text-(--text-3)">
+					No declared value points at a Supabase API, so there is nothing to
+					compare with {laneStackPhrase(traffic)}.
+				</p>
+			) : (
+				checks.map((check) => (
+					<div
+						className="grid grid-cols-[minmax(160px,.75fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+						key={check.id}
+					>
+						<div className="min-w-0">
+							<p className="m-0 truncate font-mono text-xs text-(--foreground)">
+								{check.key}
+							</p>
+							<InlineCode className="mt-1 block truncate">
+								{check.origin}
+							</InlineCode>
+						</div>
+						<div className="min-w-0 text-xs leading-5">
+							<p className="m-0 text-(--foreground)">{check.text}</p>
+							{check.note ? (
+								<p className="m-0 text-(--text-3)">{check.note}</p>
+							) : null}
+						</div>
+						<StatusPill tone={check.tone}>{check.status}</StatusPill>
+					</div>
+				))
+			)}
 		</section>
 	);
 }

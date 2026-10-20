@@ -1,9 +1,6 @@
 import { utf8ByteLength } from '../core/serialize';
-import {
-	createEnvironmentPlugin,
-	formatEnvironmentValue,
-	validateEnvironmentValues,
-} from './environment';
+import { createEnvironmentPlugin, formatEnvironmentValue } from './environment';
+import { validateEnvironmentValues } from './environment-model';
 
 describe('validateEnvironmentValues', () => {
 	it('formats declared values without JSON noise', () => {

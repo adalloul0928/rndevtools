@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { desktopActionSchema } from '../shared/protocol';
-import {
-	desktopActionConfirmationCopy,
-	desktopActionNeedsConfirmation,
-} from './desktop-action-confirmation';
+import { desktopActionConfirmationCopy } from './desktop-action-confirmation';
 
 function action(command: string, payload: Record<string, unknown>) {
 	return desktopActionSchema.parse({
@@ -32,7 +29,6 @@ describe('desktop action confirmation policy', () => {
 		'requires main-owned confirmation for scenarios.%s',
 		(command, payload) => {
 			const parsed = action(command, payload);
-			expect(desktopActionNeedsConfirmation(parsed)).toBe(true);
 			expect(desktopActionConfirmationCopy(parsed)).toMatchObject({
 				detail: expect.stringContaining('device-1'),
 				confirmLabel: expect.any(String),
@@ -90,7 +86,6 @@ describe('desktop action confirmation policy', () => {
 			command: 'refresh',
 			payload: {},
 		});
-		expect(desktopActionNeedsConfirmation(parsed)).toBe(false);
 		expect(desktopActionConfirmationCopy(parsed)).toBeUndefined();
 	});
 });

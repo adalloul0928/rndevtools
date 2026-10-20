@@ -12,7 +12,7 @@ Connected app diagnostics:
 - TanStack Query queries, bounded sanitized payload previews, mutations, invalidate, and refetch actions
 - Expo Router map, history, and allowlisted navigation
 - Environment validation and health scoring
-- Explicit, read-only Zustand store projections and change history
+- Explicit Zustand store projections and change history, with confirmed Apply patch and Restore for stores declared restorable
 - Guarded restore points for declared safe state sources, with rollback attempts
 - JS responsiveness reviews with optional native UI/CPU/memory channels
 - Targeted component registry with source, test ID, safe instance projection, measured bounds, and on-device highlight
@@ -40,7 +40,17 @@ Local iOS Simulator tooling on macOS:
   does not report scheme, configuration, Xcode version, or reliable clean/incremental
   evidence, so those values remain explicitly unreported instead of being inferred.
   The Swift FSEvents adapter and versioned richer-metadata adapters remain deferred.
-- A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket
+- Lanes: one git worktree on one Simulator with its own leased Metro port, so
+  several branches and coding agents run side by side. Lanes refuse to steal a
+  worktree, Simulator, or port; Metro health, agent attribution, and the Metro
+  log are visible on the fleet wall and in the Lanes panel
+- A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket,
+  including `lane up|down|ls|launch|log` and an agent skill
+- Local Supabase per worktree (alpha): the Supabase tab (⌘8) tracks every native
+  local Supabase stack on this Mac. For each one it shows the agent session, lane,
+  Simulator and worktree/branch it belongs to. It starts, stops, resets, migrates,
+  inspects, reads logs for and cleans up stacks, and lets lanes start the
+  worktree's stack automatically. See [Local Supabase per worktree](#local-supabase-per-worktree-alpha).
 
 Protocol v2 adds Simulator identity, explicit semantic elements and safe actions,
 app-scoped network conditions, request/recipe correlation, and development camera
@@ -67,15 +77,24 @@ pnpm --filter @rndevtools/desktop dev:simulator
 That command verifies the pinned vendored SimSlim source, builds the Go and
 Swift helpers for the current architecture, then starts Electron.
 
-Electron 43 has no install hook, so `pnpm install` deliberately does not fetch
-the runtime. The first `dev`, `package`, or `make` prints
-`Downloading Electron binary...` and pulls roughly 110 MB from GitHub releases;
-every later run reuses it. On an offline machine or behind a proxy, set
-`ELECTRON_MIRROR` before that first run.
+The pinned Electron release has no install hook, so `pnpm install` deliberately
+does not fetch the runtime. The first `dev` or `start` prints
+`Downloading Electron binary...` and pulls roughly 110 MB from GitHub releases
+into `node_modules/electron/dist`; every later run reuses it. `package` and
+`make` never use that copy: electron-builder downloads the same zip through its
+own `@electron/get`, reuses one already in Electron's cache
+(`~/Library/Caches/electron` on macOS), and still fetches `SHASUMS256.txt` on
+every run. Packaging offline therefore needs a seeded `SHASUMS256.txt-44.7.0`
+(named for the pinned version) in that cache root, or electron-builder's
+`electronDist` option. On an offline machine or behind a proxy, set
+`ELECTRON_MIRROR` before the first run; it applies to both downloads.
 
-The mobile diagnostics client is mounted only alongside the internal dev-menu
-host, and only in `development` builds — preview and production never dial the
-broker.
+The mobile diagnostics client starts only when the host's
+`shouldStartDesktopClient({ isDevelopmentBuild })` check passes: in a
+development build, outside tests, and unless
+`EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true`. Hosts pass their own
+development-build flag (the Expo demo passes `__DEV__`), so preview and
+production builds never dial the broker.
 
 The broker listens on `ws://127.0.0.1:47931/device` by default. Expo simulators discover loopback and the Expo development host automatically. If that port is occupied, both sides try the next nine ports.
 
@@ -117,14 +136,75 @@ Loopback is the safe default. The broker itself speaks plaintext WebSocket, whil
 
 ```bash
 RNDEVTOOLS_BIND_ADDRESS=<computer-lan-ip> RNDEVTOOLS_TOKEN=<long-random-token> pnpm --filter @rndevtools/desktop dev
-EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL='wss://<tls-endpoint>/device?token=<long-random-token>' pnpm --dir apps/mobile start
+# From your app's directory:
+EXPO_PUBLIC_DESKTOP_DEVTOOLS_URL='wss://<tls-endpoint>/device?token=<long-random-token>' npx expo start
 ```
 
 The desktop Diagnostics panel lists the broker endpoints. Treat a tokenized URL as a development credential and do not paste it into tickets or logs. `RNDEVTOOLS_PORT` changes the initial port; if it is occupied, the broker tries the next nine ports. An explicit mobile URL should include the selected port when the TLS endpoint does not use its protocol default. Set `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED=true` to disable the development client.
 
 Wildcard binding is intentionally a second opt-in. If a local setup truly requires `0.0.0.0` or `::`, also set `RNDEVTOOLS_ALLOW_WILDCARD=true`; prefer an exact interface address because wildcard binding can include VPN and other unintended adapters. Never expose the plaintext broker directly to an untrusted network.
 
-Diagnostic payloads are metadata-only by default. For a local Metro development session that deliberately needs sanitized query values and HTTP bodies, set `EXPO_PUBLIC_DEVTOOLS_CAPTURE_PAYLOADS=true`. The flag is ignored outside `__DEV__`; assume any opted-in payload can contain application data and keep the connection local and temporary.
+Diagnostic payloads are metadata-only by default. A host that deliberately needs sanitized query values or HTTP bodies opts in per plugin, with `createQueryPlugin({ captureData: true })` and `createNetworkPlugin({ captureBody: true })`; both default to `false`. Assume any opted-in payload can contain application data, and keep the connection local and temporary.
+
+## Local Supabase per worktree (alpha)
+
+The Supabase tab (Simulator workspace, Backend group, ⌘8) runs one native local
+Supabase stack per git worktree and branch. It uses the Supabase CLI's
+experimental stack backend: no Docker, automatic loopback ports, and about
+160 MiB per idle stack. Design, measurements, the full UI specification and the
+as-built notes are in [`experiments/supabase-backends/`](experiments/supabase-backends/).
+
+### Requirements
+
+- **This Mac:** Apple silicon with macOS 14 or later.
+- **Turn it on:** Supabase › Turn on local Supabase. It is off by default, and
+  nothing is probed or spawned while it is off.
+- **The repository:**
+  - commits `[experimental] stack = true` in `supabase/config.toml`, pins no ports,
+    and preferably disables Studio and analytics in config
+    (see [`examples/expo-demo/supabase`](../../examples/expo-demo/supabase/config.toml));
+  - pins `supabase` exactly as a devDependency. RN Devtools runs the worktree's own
+    CLI and never a global one, and it verifies CLI 2.121.0.
+
+### What it does
+
+- **Native only.** It creates every stack with `--runtime native` and never uses
+  `auto` or Docker. After every start it runs `lsof` over the stack's process
+  tree and stops the stack if anything listens beyond loopback. A Docker or
+  Podman stack it finds is flagged as LAN-exposed; one on a worktree RN Devtools
+  manages is stopped once and never attached.
+- **Lanes.** A lane on a development worktree starts or resumes that worktree's
+  stack while the Simulator boots. Its Metro gets only the stack's API URL and
+  publishable key, under variable names you configure in the tab's settings.
+- **Agents.** Agents use `rndevtools supabase --operation up|down|ls|status|env|reset|log|destroy`,
+  or the `supabase` MCP tool, plus the worktree's own `supabase … --local` data
+  commands. `rndevtools setup` installs the `rndevtools-supabase` skill and a
+  hook that steers agents away from hand-run lifecycle commands while RN Devtools
+  manages the worktree. Destroying, or resetting a stack another session holds,
+  becomes a request you approve.
+- **Holds and cleanup.** Stacks are held by lanes, agent sessions and your pins,
+  like Simulators. One stops 60 s after its last holder releases it, 10 min after
+  that holder's session is gone, or at once when its worktree is deleted. Data is
+  kept. Destroying is never automatic: Clean up suggests orphaned, stale-branch and
+  long-stopped stacks with their sizes.
+- **Branch switches.** Stack identity includes the git branch. RN Devtools follows
+  a held stack to the new branch after HEAD has been stable for 30 s and no rebase
+  or merge is running, and switching back reattaches the old one. Following from
+  the stack's notice, or an agent's `up`, skips the 30 s wait.
+- **Confirmations.** Destroy, reset, recreate, enabling Studio, stopping a stack
+  RN Devtools didn't start, turning the feature on or turning it off while
+  managed stacks run, settings that weaken a safeguard, and approving an agent's
+  destroy or reset go through a native dialog with Cancel as the default and a
+  one-time token. Database changes run only from the stack's own worktree, and
+  only while that worktree is on the stack's branch.
+
+### Trade-off
+
+Supabase recommends Docker for several local projects on one machine. Native
+stacks share this Mac's process table, the default local keys are public
+constants shared by every stack, and `supabase_admin` is trusted on loopback.
+Treat local Supabase as single-user-Mac tooling: stacks are separate databases,
+not isolated tenants.
 
 ## Security and privacy boundaries
 
@@ -151,6 +231,12 @@ Diagnostic payloads are metadata-only by default. For a local Metro development 
   read-only inspection remains available.
 - Build artifacts, captures, process data, recipes, and evidence remain local. Build source
   paths stay in Electron main and never cross the preload boundary.
+- Local Supabase keys, the database URL and CLI output stay in Electron main. The
+  renderer receives loopback URLs, ports, ids and redacted, bounded text. Copying a
+  key or psql command happens in main, and main clears the clipboard 60 s later if
+  it still holds that text. The Supabase CLI runs with an allowlisted environment
+  from a neutral working directory, with telemetry and update checks off. Nothing
+  Supabase-related crosses the unauthenticated broker.
 
 This remains an internal development tool. Do not enable its mobile client in release builds or expose the LAN broker on an untrusted network.
 

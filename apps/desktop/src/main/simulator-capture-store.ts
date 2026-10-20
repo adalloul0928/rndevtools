@@ -1,15 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-	chmod,
-	lstat,
-	mkdir,
-	open,
-	readdir,
-	realpath,
-	rename,
-	rm,
-} from 'node:fs/promises';
+import { lstat, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -19,7 +10,14 @@ import {
 	type SimulatorCaptureRetentionState,
 	simulatorCaptureIdSchema,
 	simulatorCaptureRetentionPolicySchema,
+	UDID_PATTERN,
 } from '../shared/simulator-protocol';
+import {
+	ensurePrivateDirectory,
+	isMissing,
+	syncDirectory,
+	writeFileAtomic,
+} from './private-files';
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000;
 const MAX_CAPTURE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -31,9 +29,7 @@ const CAPTURE_FILE_PATTERN =
 	/^(capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(jpeg|mp4|png)$/i;
 const CAPTURE_RECORD_PATTERN =
 	/^(capture-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/i;
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 
 export const DEFAULT_SIMULATOR_CAPTURE_RETENTION_POLICY = {
 	maxAgeDays: 30,
@@ -105,29 +101,6 @@ function publicCapture(record: CaptureRecord): SimulatorCapture {
 		mimeType: record.mimeType,
 		bytes: record.bytes,
 	};
-}
-
-function isMissing(error: unknown): boolean {
-	return (error as NodeJS.ErrnoException).code === 'ENOENT';
-}
-
-async function assertPrivateDirectory(directory: string): Promise<string> {
-	await mkdir(directory, { recursive: true, mode: 0o700 });
-	const metadata = await lstat(directory);
-	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error('Capture storage must be a private local directory.');
-	}
-	await chmod(directory, 0o700);
-	return realpath(directory);
-}
-
-async function syncDirectory(directory: string): Promise<void> {
-	const handle = await open(directory, constants.O_RDONLY);
-	try {
-		await handle.sync();
-	} finally {
-		await handle.close();
-	}
 }
 
 export function simulatorCaptureUrl(captureId: string): string {
@@ -440,12 +413,17 @@ export class SimulatorCaptureStore {
 	}
 
 	async #initializeInternal(): Promise<void> {
-		const canonicalRoot = await assertPrivateDirectory(this.#root);
-		this.#filesDirectory = await assertPrivateDirectory(
-			path.join(canonicalRoot, 'files')
+		const canonicalRoot = await ensurePrivateDirectory(
+			this.#root,
+			'Capture storage'
 		);
-		this.#recordsDirectory = await assertPrivateDirectory(
-			path.join(canonicalRoot, 'records')
+		this.#filesDirectory = await ensurePrivateDirectory(
+			path.join(canonicalRoot, 'files'),
+			'Capture storage'
+		);
+		this.#recordsDirectory = await ensurePrivateDirectory(
+			path.join(canonicalRoot, 'records'),
+			'Capture storage'
 		);
 		this.#policyPath = path.join(canonicalRoot, 'retention-v1.json');
 		this.#policy = await this.#loadPolicy();
@@ -558,28 +536,22 @@ export class SimulatorCaptureStore {
 	}
 
 	async #persistRecord(record: CaptureRecord): Promise<void> {
-		const recordsDirectory = this.#requiredRecordsDirectory();
-		const destinationPath = this.#recordPath(record.id);
 		await this.#writeAtomicJson(
-			recordsDirectory,
-			destinationPath,
+			this.#recordPath(record.id),
 			record,
 			MAX_RECORD_BYTES
 		);
 	}
 
 	async #persistPolicy(policy: SimulatorCaptureRetentionPolicy): Promise<void> {
-		const destinationPath = this.#requiredPolicyPath();
 		await this.#writeAtomicJson(
-			path.dirname(destinationPath),
-			destinationPath,
+			this.#requiredPolicyPath(),
 			{ version: 1, policy },
 			MAX_POLICY_BYTES
 		);
 	}
 
 	async #writeAtomicJson(
-		directory: string,
 		destinationPath: string,
 		value: unknown,
 		maximumBytes: number
@@ -588,29 +560,7 @@ export class SimulatorCaptureStore {
 		if (Buffer.byteLength(serialized, 'utf8') > maximumBytes) {
 			throw new Error('Capture metadata exceeded its safe size limit.');
 		}
-		const temporaryPath = path.join(
-			directory,
-			`.capture-${process.pid}-${randomUUID()}.tmp`
-		);
-		const handle = await open(
-			temporaryPath,
-			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-			0o600
-		);
-		try {
-			try {
-				await handle.writeFile(serialized, 'utf8');
-				await handle.sync();
-			} finally {
-				await handle.close();
-			}
-			await rename(temporaryPath, destinationPath);
-			await chmod(destinationPath, 0o600);
-			await syncDirectory(directory);
-		} catch (error) {
-			await rm(temporaryPath, { force: true }).catch(() => undefined);
-			throw error;
-		}
+		await writeFileAtomic(destinationPath, serialized, 'capture');
 	}
 
 	async #pruneInternal(): Promise<number> {

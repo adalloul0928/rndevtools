@@ -36,6 +36,37 @@ export function captureRetentionFieldsFromPolicy(
 	};
 }
 
+/** The retention form, and the stored policy it was last filled from. */
+export type CaptureRetentionForm = Readonly<{
+	fields: CaptureRetentionFields;
+	filledFrom?: SimulatorCaptureRetentionPolicy;
+}>;
+
+/**
+ * The retention form once main reports the stored policy. It follows the
+ * policy unless the operator has typed over the values it was last filled
+ * with, so a capture landing in the background never wipes an edit that has
+ * not been applied yet.
+ */
+export function refillCaptureRetentionForm(
+	form: CaptureRetentionForm,
+	policy: SimulatorCaptureRetentionPolicy
+): CaptureRetentionForm {
+	if (form.filledFrom) {
+		const filled = captureRetentionFieldsFromPolicy(form.filledFrom);
+		if (
+			form.fields.maxAgeDays !== filled.maxAgeDays ||
+			form.fields.maxTotalGiB !== filled.maxTotalGiB
+		) {
+			return form;
+		}
+	}
+	return {
+		fields: captureRetentionFieldsFromPolicy(policy),
+		filledFrom: policy,
+	};
+}
+
 export function runningRecordingJobForDevice(
 	jobs: readonly SimulatorJob[],
 	deviceUdid: string | undefined

@@ -108,7 +108,7 @@ func (service *Service) doctor(ctx context.Context, payload doctorPayload) (Doct
 	return DoctorResult{
 		SimulatorID:               payload.SimulatorID,
 		Healthy:                   diagnosis.OK,
-		ManagedDisabledServiceIDs: sortedCopy(status.ManagedDisabledServiceIDs),
+		ManagedDisabledServiceIDs: canonicalManagedIDs(status.ManagedDisabledServiceIDs),
 		Capabilities:              capabilities,
 	}, nil
 }

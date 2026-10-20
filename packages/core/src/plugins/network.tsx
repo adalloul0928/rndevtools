@@ -1082,12 +1082,12 @@ export type NetworkPluginOptions = {
 		init: RequestInit | undefined,
 	) => Readonly<{ correlationId?: string; parentEventId?: string }> | undefined;
 	/**
-	 * Response headers consulted for a correlation id, in preference order. A
+	 * Request headers consulted for a correlation id, in preference order. A
 	 * host with its own vendor header lists it first; the standard headers are
 	 * the default so no vendor prefix is assumed.
 	 */
 	correlationIdHeaders?: readonly string[];
-	/** Response headers consulted for a parent event id, in preference order. */
+	/** Request headers consulted for a parent event id, in preference order. */
 	parentEventIdHeaders?: readonly string[];
 	maxBodyBytes?: number;
 	maxEvents?: number;
@@ -1461,11 +1461,6 @@ export function createNetworkPlugin(
 		}
 		return exposedEvents;
 	};
-	store.subscribe(() => {
-		const sourceEvents = store.getSnapshot();
-		exposedEventSource = sourceEvents;
-		exposedEvents = Object.freeze([...sourceEvents]);
-	});
 	const pausedStore = new ExternalStore(false);
 	const noSimulationProfile: NetworkSimulationProfile = Object.freeze(
 		getNetworkSimulationProfile('none'),
@@ -3171,6 +3166,33 @@ export function createNetworkPlugin(
 	const clearSimulationProfile = (
 		requestId?: string,
 	): Promise<DevToolsActionReceipt> => setSimulationProfile('none', requestId);
+	// Clears exactly the requests that were confirmed, and only while the tools
+	// session and collector generation they were confirmed in are current.
+	const clearConfirmed = (
+		requestedCaptureAuthority: string | undefined,
+		requestedGeneration: number,
+		confirmedIds: readonly string[],
+	): void => {
+		if (
+			!captureAuthorityMatches(requestedCaptureAuthority) ||
+			!collectorActive ||
+			collectorGeneration !== requestedGeneration
+		) {
+			throw new Error('The network tools session changed before clear ran.');
+		}
+		const currentIds = store.getSnapshot().map(networkEventResourceId);
+		if (
+			currentIds.length !== confirmedIds.length ||
+			currentIds.some((id, index) => id !== confirmedIds[index])
+		) {
+			throw new Error(
+				'Captured network requests changed before clear ran. Review and confirm the current requests again.',
+			);
+		}
+		cancelActiveBodyCaptures();
+		store.clear();
+		clearTimelineEvents(confirmedIds);
+	};
 	const requestClear = (requestId?: string): Promise<DevToolsActionReceipt> => {
 		synchronizeCaptureAuthority();
 		const requestedCaptureAuthority = activeCaptureAuthority;
@@ -3217,29 +3239,12 @@ export function createNetworkPlugin(
 					reason: 'Cleared diagnostic events cannot be reconstructed.',
 				},
 			},
-			action: () => {
-				if (
-					!captureAuthorityMatches(requestedCaptureAuthority) ||
-					!collectorActive ||
-					collectorGeneration !== requestedGeneration
-				) {
-					throw new Error(
-						'The network tools session changed before clear ran.',
-					);
-				}
-				const currentIds = store.getSnapshot().map(networkEventResourceId);
-				if (
-					currentIds.length !== confirmedIds.length ||
-					currentIds.some((id, index) => id !== confirmedIds[index])
-				) {
-					throw new Error(
-						'Captured network requests changed before clear ran. Review and confirm the current requests again.',
-					);
-				}
-				cancelActiveBodyCaptures();
-				store.clear();
-				clearTimelineEvents(confirmedIds);
-			},
+			action: () =>
+				clearConfirmed(
+					requestedCaptureAuthority,
+					requestedGeneration,
+					confirmedIds,
+				),
 		});
 	};
 	const importSimulationPreference = async (
@@ -3562,29 +3567,12 @@ export function createNetworkPlugin(
 					confirmLabel: 'Clear',
 					destructive: true,
 				},
-				action: () => {
-					if (
-						!captureAuthorityMatches(requestedCaptureAuthority) ||
-						!collectorActive ||
-						collectorGeneration !== requestedGeneration
-					) {
-						throw new Error(
-							'The network tools session changed before clear ran.',
-						);
-					}
-					const currentIds = store.getSnapshot().map(networkEventResourceId);
-					if (
-						currentIds.length !== confirmedIds.length ||
-						currentIds.some((id, index) => id !== confirmedIds[index])
-					) {
-						throw new Error(
-							'Captured network requests changed before clear ran. Review and confirm the current requests again.',
-						);
-					}
-					cancelActiveBodyCaptures();
-					store.clear();
-					clearTimelineEvents(confirmedIds);
-				},
+				action: () =>
+					clearConfirmed(
+						requestedCaptureAuthority,
+						requestedGeneration,
+						confirmedIds,
+					),
 			});
 		};
 		const togglePaused = () => {

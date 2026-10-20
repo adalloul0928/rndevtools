@@ -11,8 +11,10 @@ Two halves that version together:
   SwiftUI chrome and matching React Native panels on Android.
 - **On your Mac** — an Electron app that connects over a loopback WebSocket and
   gives the same diagnostics a real desktop UI, plus Simulator fleet
-  management, deep links and permissions, screenshot and recording capture,
-  build insights, and experimental Simulator slimming.
+  management, lanes (one git worktree per Simulator with its own Metro port,
+  for parallel branches and coding agents), a native local Supabase stack per
+  worktree (alpha), deep links and permissions, screenshot and recording
+  capture, build insights, and experimental Simulator slimming.
 
 ## Packages
 
@@ -51,7 +53,7 @@ enough guarantee — one retained import pulls in the panels and every adapter
 they reach. `@rndevtools/react-native` ships the mechanism: a Metro resolver
 that swaps devtools modules for typed no-op shims so the graph is cut rather
 than trimmed, and `rndevtools-verify-bundle` to assert over a real export that
-nothing survived. Wire up both.
+no devtools markers survived. Wire up both.
 
 **Both packages ship TypeScript source, not build output.** Three components
 use Reanimated worklets, which have to be workletized by your app's own Babel
@@ -62,7 +64,7 @@ configuration. Jest needs the packages in `transformIgnorePatterns`.
 
 > [!IMPORTANT]
 > The desktop app depends on **HeroUI Pro**, a commercial component library.
-> 16 renderer modules import `@heroui-pro/react`, so building from source
+> 18 renderer modules import `@heroui-pro/react`, so building from source
 > requires your own HeroUI Pro license and a `HEROUI_AUTH_TOKEN`. The two npm
 > packages have no such dependency and build freely.
 
@@ -72,8 +74,8 @@ pnpm --filter @rndevtools/desktop native:build   # Go + Swift helpers
 pnpm --filter @rndevtools/desktop dev
 ```
 
-Native helper builds need Go, Swift, and `govulncheck`
-(`go install golang.org/x/vuln/cmd/govulncheck@latest`).
+Native helper builds need Go and Swift. `native:check` additionally needs
+`govulncheck` (`go install golang.org/x/vuln/cmd/govulncheck@v1.8.0`).
 
 Simulator mutation is gated on code signing: the helper verifies that its
 parent process is signed by a pinned Apple Team ID, injected at build time from

@@ -121,6 +121,60 @@ describe('advanced Android diagnostic panels', () => {
 		dispose?.();
 	});
 
+	it('keeps Console row ids unique when a log arrives during a store update', async () => {
+		let listener: ((event: ConsoleLogInput) => void) | undefined;
+		const diagnostics = createConsolePlugin({
+			source: {
+				subscribe: (next) => {
+					listener = next;
+					return () => {
+						listener = undefined;
+					};
+				},
+			},
+		});
+		const dispose = diagnostics.plugin.install?.();
+		// A host logger that also captures console output. React reports the
+		// Console panel's store update during another component's render
+		// synchronously, from inside the store's append.
+		let forwarded = 0;
+		const consoleError = jest
+			.spyOn(console, 'error')
+			.mockImplementation((message: unknown) => {
+				forwarded += 1;
+				if (forwarded <= 5)
+					listener?.({ level: 'error', message: String(message) });
+			});
+		function RenderLogger({ message }: { message?: string }) {
+			if (message) listener?.({ level: 'info', message });
+			return null;
+		}
+		const Panel = diagnostics.plugin.Panel;
+
+		try {
+			const view = await render(
+				<>
+					<Panel {...panelProps} />
+					<RenderLogger />
+				</>,
+			);
+			await view.rerender(
+				<>
+					<Panel {...panelProps} />
+					<RenderLogger message="logged during render" />
+				</>,
+			);
+
+			const ids = diagnostics.getEvents().map((event) => event.id);
+			expect(forwarded).toBeGreaterThan(0);
+			expect(ids.length).toBeGreaterThan(1);
+			expect(new Set(ids).size).toBe(ids.length);
+		} finally {
+			consoleError.mockRestore();
+			dispose?.();
+		}
+	});
+
 	it('renders Zustand projections and changes without SwiftUI', async () => {
 		let state = { count: 1 };
 		const diagnostics = createZustandPlugin({
@@ -177,7 +231,7 @@ describe('advanced Android diagnostic panels', () => {
 				getSnapshot: () => [
 					{
 						id: 'card',
-						name: 'Exercise card',
+						name: 'Example card',
 						bounds: { x: 0, y: 0, width: 100, height: 40 },
 					},
 				],
@@ -190,7 +244,7 @@ describe('advanced Android diagnostic panels', () => {
 		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Registered targets')).toBeOnTheScreen();
-		expect(screen.getByText('Unscoped · Exercise card')).toBeOnTheScreen();
+		expect(screen.getByText('Unscoped · Example card')).toBeOnTheScreen();
 		expect(screen.getByText('Highlight target')).toBeOnTheScreen();
 		dispose?.();
 	});

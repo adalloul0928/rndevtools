@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
+import { setTimeout as wait } from 'node:timers/promises';
 import type {
 	DesktopAction,
 	DesktopActionResult,
 	DesktopState,
 	DeviceSession,
 } from '../shared/protocol';
-import { desktopActionSchema } from '../shared/protocol';
+import {
+	desktopActionCapability,
+	desktopActionSchema,
+} from '../shared/protocol';
 import {
 	DEFAULT_RECIPE_RUN_CONCURRENCY,
 	type RecipeDefinition,
@@ -30,7 +30,6 @@ import {
 import type {
 	SimulatorAction,
 	SimulatorActionReceipt,
-	SimulatorJob,
 	SimulatorState,
 } from '../shared/simulator-protocol';
 import { simulatorActionSchema } from '../shared/simulator-protocol';
@@ -38,12 +37,13 @@ import {
 	SLIMMING_CONFIRMATIONS,
 	type SlimmingAction,
 	type SlimmingActionReceipt,
-	type SlimmingJob,
 	type SlimmingState,
 	slimmingActionSchema,
 } from '../shared/slimming-protocol';
+import { waitForJob } from './job-wait';
 import { recipeRequiresRunApproval } from './recipe-policy';
 import type { RecipeRunRecord, RecipeStore } from './recipe-store';
+import { safeErrorText } from './security';
 import {
 	SimulatorMutationCoordinator,
 	type SimulatorMutationCoordinatorPort,
@@ -58,18 +58,18 @@ const SLIMMING_CANCEL_SETTLE_TIMEOUT_MS = 6 * 60 * 1_000;
 const MAX_RUN_MESSAGE_LENGTH = 4 * 1_024;
 const MAX_CLEANUP_FAILURE_LENGTH = 1_024;
 const CONNECTED_WAIT_SLICE_MS = 5_000;
-const TERMINAL_SIMULATOR_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
-const TERMINAL_SLIMMING_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
+/**
+ * The connected-action contract's shortest wait (a `timeoutMs` of at least
+ * 50 ms); a wait-for step with less time left than this is over.
+ */
+const MIN_CONNECTED_WAIT_SLICE_MS = 50;
+/**
+ * Wait-for attempts start at least this far apart. The broker answers some
+ * failures at once (another action is in flight for the device), and retrying
+ * those back to back would run on microtasks alone and starve the main
+ * process's event loop, the step timeout and cancellation included.
+ */
+const CONNECTED_WAIT_RETRY_MS = 250;
 
 export type RecipeBrokerPort = {
 	getState: () => DesktopState;
@@ -114,10 +114,6 @@ type TargetContext = {
 	diagnosticBaseline: Set<string>;
 	mutationLease: SimulatorMutationLease;
 };
-
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024);
-}
 
 function actionId(): string {
 	return `recipe-action-${randomUUID()}`;
@@ -177,6 +173,18 @@ function currentDevice(
 	return device;
 }
 
+/** Refuses an action the app instance does not advertise; retrying cannot change that. */
+function assertAdvertised(
+	device: DeviceSession,
+	action: Pick<DesktopAction, 'tool' | 'command'>
+): void {
+	const capability = desktopActionCapability(action.tool, action.command);
+	if (capability && device.info.capabilities.includes(capability)) return;
+	throw new Error(
+		`The connected app does not advertise ${capability ?? `${action.tool}.${action.command}`}.`
+	);
+}
+
 function diagnosticIds(state: DesktopState, deviceId?: string): Set<string> {
 	const ids = new Set(state.diagnostics.map((entry) => entry.id));
 	const device = deviceId
@@ -206,17 +214,8 @@ function evidenceTarget(
 }
 
 function waitForDelay(durationMs: number, signal: AbortSignal): Promise<void> {
-	if (signal.aborted) return Promise.reject(new Error('Recipe run cancelled.'));
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			signal.removeEventListener('abort', onAbort);
-			resolve();
-		}, durationMs);
-		const onAbort = () => {
-			clearTimeout(timer);
-			reject(new Error('Recipe run cancelled.'));
-		};
-		signal.addEventListener('abort', onAbort, { once: true });
+	return wait(durationMs, undefined, { signal }).catch(() => {
+		throw new Error('Recipe run cancelled.');
 	});
 }
 
@@ -379,7 +378,7 @@ export class RecipeService {
 		} catch (error) {
 			return this.#reject(
 				request,
-				`Fresh Simulator inventory failed: ${safeError(error)}`
+				`Fresh Simulator inventory failed: ${safeErrorText(error)}`
 			);
 		}
 		const canonicalUdids: string[] = [];
@@ -566,7 +565,9 @@ export class RecipeService {
 			this.#appendTimeline(record, {
 				phase: 'run',
 				status: signal.aborted ? 'cancelled' : 'failed',
-				message: signal.aborted ? 'Recipe run cancelled.' : safeError(error),
+				message: signal.aborted
+					? 'Recipe run cancelled.'
+					: safeErrorText(error),
 			});
 		} finally {
 			const statuses = record.run.targets.map((target) => target.status);
@@ -645,7 +646,7 @@ export class RecipeService {
 				currentStepId: undefined,
 				message: runSignal.aborted
 					? 'Recipe target cancelled before execution.'
-					: safeError(error),
+					: safeErrorText(error),
 			});
 			const cleanupController = new AbortController();
 			try {
@@ -678,7 +679,7 @@ export class RecipeService {
 				this.#updateCleanup(record, index, {
 					status: 'failed',
 					failures: [
-						safeError(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
+						safeErrorText(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
 					],
 					message: 'Teardown could not acquire the simulator mutation lease.',
 				});
@@ -762,7 +763,7 @@ export class RecipeService {
 				currentStepId: undefined,
 				message: runSignal.aborted
 					? 'Recipe target cancelled.'
-					: safeError(error),
+					: safeErrorText(error),
 			});
 		} finally {
 			if (!context.connectedDeviceId) {
@@ -812,7 +813,10 @@ export class RecipeService {
 				});
 			} catch (error) {
 				failures.push(
-					`${step.id}: ${safeError(error)}`.slice(0, MAX_CLEANUP_FAILURE_LENGTH)
+					`${step.id}: ${safeErrorText(error)}`.slice(
+						0,
+						MAX_CLEANUP_FAILURE_LENGTH
+					)
 				);
 			}
 			await this.#save(record);
@@ -889,7 +893,7 @@ export class RecipeService {
 					scoped.signal.aborted && parentSignal.aborted
 						? 'cancelled'
 						: 'failed',
-				message: safeError(scoped.signal.reason ?? error),
+				message: safeErrorText(scoped.signal.reason ?? error),
 				targetUdid: context.udid,
 				stepId: step.id,
 			});
@@ -1060,7 +1064,12 @@ export class RecipeService {
 		if (!receipt.accepted || !receipt.jobId) {
 			throw new Error(receipt.error ?? 'Simulator action was rejected.');
 		}
-		const job = await this.#waitForSimulatorJob(receipt.jobId, signal);
+		const job = await waitForJob(this.#simulator, receipt.jobId, signal, {
+			cancel: true,
+			settleMs: SIMULATOR_CANCEL_SETTLE_TIMEOUT_MS,
+			abortError: () =>
+				new Error('Cancelled Simulator action did not reach a terminal state.'),
+		});
 		if (job.status !== 'complete') throw new Error(job.message);
 		if (job.captureId && record !== undefined && targetIndex !== undefined) {
 			const target = evidenceTarget(record, targetIndex);
@@ -1078,67 +1087,39 @@ export class RecipeService {
 		return job.captureId;
 	}
 
-	#waitForSimulatorJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SimulatorJob> {
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			let settled = false;
-			let cancellationTimer: NodeJS.Timeout | undefined;
-			const finish = (state: SimulatorState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SIMULATOR_STATUSES.has(job.status)) return;
-				settled = true;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				if (settled || cancellationTimer) return;
-				this.#simulator.cancelJob(jobId);
-				cancellationTimer = setTimeout(() => {
-					settled = true;
-					cleanup();
-					reject(
-						new Error(
-							'Cancelled Simulator action did not reach a terminal state.'
-						)
-					);
-				}, SIMULATOR_CANCEL_SETTLE_TIMEOUT_MS);
-			};
-			const cleanup = () => {
-				if (cancellationTimer) clearTimeout(cancellationTimer);
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = this.#simulator.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(this.#simulator.getState());
-			if (signal.aborted) onAbort();
-		});
-	}
-
 	async #runDesktopAction(value: unknown): Promise<void> {
 		const action = desktopActionSchema.parse(value);
 		const result = await this.#broker.dispatchAction(action);
 		if (!result.ok) throw new Error(result.error ?? 'Connected action failed.');
 	}
 
+	/**
+	 * Waits on the app in bounded slices until `timeoutMs`. The exact app
+	 * instance is looked up for every attempt, so one that went offline fails
+	 * the step as it fails any other step, and so does one that does not
+	 * advertise the wait.
+	 */
 	async #runBoundedDesktopWait(
-		value: Omit<DesktopAction, 'actionId'>,
+		value: Omit<DesktopAction, 'actionId' | 'deviceId'>,
+		context: TargetContext,
 		timeoutMs: number,
 		signal: AbortSignal
 	): Promise<void> {
 		const deadline = this.#now() + timeoutMs;
 		let lastError: unknown;
-		do {
+		for (;;) {
 			if (signal.aborted)
 				throw signal.reason ?? new Error('Recipe run cancelled.');
-			const remainingMs = Math.max(1, deadline - this.#now());
+			const device = currentDevice(this.#broker.getState(), context);
+			assertAdvertised(device, value);
+			const startedAt = this.#now();
+			const remainingMs = deadline - startedAt;
+			if (remainingMs < MIN_CONNECTED_WAIT_SLICE_MS) break;
 			try {
 				await this.#runDesktopAction({
 					...value,
 					actionId: actionId(),
+					deviceId: device.info.id,
 					payload: {
 						...value.payload,
 						timeoutMs: Math.min(CONNECTED_WAIT_SLICE_MS, remainingMs),
@@ -1148,7 +1129,10 @@ export class RecipeService {
 			} catch (error) {
 				lastError = error;
 			}
-		} while (this.#now() < deadline);
+			const pauseMs =
+				Math.min(startedAt + CONNECTED_WAIT_RETRY_MS, deadline) - this.#now();
+			if (pauseMs > 0) await waitForDelay(pauseMs, signal);
+		}
 		throw lastError ?? new Error('Connected-app wait timed out.');
 	}
 
@@ -1189,51 +1173,18 @@ export class RecipeService {
 			if (!receipt.accepted || !receipt.jobId) {
 				throw new Error(receipt.error ?? 'Slimming mutation was rejected.');
 			}
-			const job = await this.#waitForSlimmingJob(receipt.jobId, signal);
+			const job = await waitForJob(this.#slimming, receipt.jobId, signal, {
+				cancel: true,
+				settleMs: SLIMMING_CANCEL_SETTLE_TIMEOUT_MS,
+				abortError: () =>
+					new Error(
+						'Cancelled Slimming mutation did not reach a terminal state.'
+					),
+			});
 			if (job.status !== 'complete') throw new Error(job.message);
 		} finally {
 			release();
 		}
-	}
-
-	#waitForSlimmingJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SlimmingJob> {
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			let settled = false;
-			let cancellationTimer: NodeJS.Timeout | undefined;
-			const finish = (state: SlimmingState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SLIMMING_STATUSES.has(job.status)) return;
-				settled = true;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				if (settled || cancellationTimer) return;
-				this.#slimming.cancelJob(jobId);
-				cancellationTimer = setTimeout(() => {
-					settled = true;
-					cleanup();
-					reject(
-						new Error(
-							'Cancelled Slimming mutation did not reach a terminal state.'
-						)
-					);
-				}, SLIMMING_CANCEL_SETTLE_TIMEOUT_MS);
-			};
-			const cleanup = () => {
-				if (cancellationTimer) clearTimeout(cancellationTimer);
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = this.#slimming.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(this.#slimming.getState());
-			if (signal.aborted) onAbort();
-		});
 	}
 
 	#assertStep(
@@ -1303,14 +1254,13 @@ export class RecipeService {
 	): Promise<void> {
 		const waitFor = step.waitFor;
 		if (waitFor.condition === 'component.exists') {
-			const device = currentDevice(this.#broker.getState(), context);
 			await this.#runBoundedDesktopWait(
 				{
-					deviceId: device.info.id,
 					tool: 'components',
 					command: 'waitForElement',
 					payload: { id: waitFor.componentId },
 				},
+				context,
 				step.timeoutMs ?? 10_000,
 				signal
 			);
@@ -1323,11 +1273,11 @@ export class RecipeService {
 			if (!screenHash) throw new Error('No starting screen hash is available.');
 			await this.#runBoundedDesktopWait(
 				{
-					deviceId: device.info.id,
 					tool: 'components',
 					command: 'waitForScreenChange',
 					payload: { screenHash },
 				},
+				context,
 				step.timeoutMs ?? 10_000,
 				signal
 			);
@@ -1575,18 +1525,4 @@ export class RecipeService {
 			error,
 		});
 	}
-}
-
-/** Narrow, confirmation-preserving surface for the agent command router. */
-export function createRecipePort(service: RecipeService) {
-	return {
-		list: () => Promise.resolve(service.getState().recipes),
-		get: (recipeId: string) => Promise.resolve(service.getRecipe(recipeId)),
-		run: (request: RecipeRunRequest) => service.runRecipe(request),
-		cancel: (runId: string) => Promise.resolve(service.cancelRun(runId)),
-		status: (runId: string) =>
-			Promise.resolve(
-				service.getState().runs.find((run) => run.id === runId) ?? null
-			),
-	};
 }

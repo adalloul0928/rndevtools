@@ -43,7 +43,7 @@ if (!simulatorHelperTeamFlag) {
 const packageManifest = JSON.parse(
 	readFileSync(join(desktopDirectory, 'package.json'), 'utf8')
 );
-const catalogVersion = 'simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2';
+const catalogVersion = 'simslim-v0.12.2-6518ba7e-pumpd.1-presets.3';
 verifyVendoredSimSlim(goPackage);
 const sourceCommit = nativeSourceIdentity();
 
@@ -54,124 +54,93 @@ if (process.platform !== 'darwin' && options.ifSupported) {
 	);
 	process.exit(0);
 }
-const architectures = options.all
-	? ['arm64', 'x64']
-	: [options.architecture ?? hostArchitecture()];
+const architectures = options.all ? ['arm64', 'x64'] : [hostArchitecture()];
 
-if (options.buildGo) {
-	requireCommand('go', ['version'], {
-		...allowlistedBuildEnvironment(),
-		GOENV: 'off',
-		GOEXPERIMENT: '',
-		GOFLAGS: '',
-		GOPROXY: 'off',
-		GOTOOLCHAIN: 'local',
-		GOWORK: 'off',
-	});
+requireCommand('go', ['version'], {
+	...allowlistedBuildEnvironment(),
+	GOENV: 'off',
+	GOEXPERIMENT: '',
+	GOFLAGS: '',
+	GOPROXY: 'off',
+	GOTOOLCHAIN: 'local',
+	GOWORK: 'off',
+});
+if (process.platform !== 'darwin') {
+	fail('The Swift native host can only be built on macOS.');
 }
-if (options.buildSwift) {
-	if (process.platform !== 'darwin') {
-		fail('The Swift native host can only be built on macOS.');
-	}
-	requireCommand('swift', ['--version'], allowlistedBuildEnvironment());
-}
+requireCommand('swift', ['--version'], allowlistedBuildEnvironment());
 
 for (const architecture of architectures) {
 	const outputDirectory = join(outputRoot, `mac-${architecture}`);
 	mkdirSync(outputDirectory, { recursive: true });
 	const helpers = {};
-	if (!options.buildGo) {
-		for (const [key, name] of [
-			['simulator', 'rndevtools-sim-helper'],
-			['cli', 'rndevtools'],
-		]) {
-			const existing = join(outputDirectory, name);
-			if (!statIfFile(existing)) {
-				fail(`Partial native build requires the existing ${name} binary.`);
-			}
-			helpers[key] = helperManifest(existing, name);
-		}
-	}
-	if (!options.buildSwift) {
-		const existing = join(outputDirectory, 'rndevtools-native-host');
-		if (!statIfFile(existing)) {
-			fail(
-				'Partial native build requires the existing rndevtools-native-host binary.'
-			);
-		}
-		helpers.nativeHost = helperManifest(existing, 'rndevtools-native-host');
-	}
 
-	if (options.buildGo) {
-		const goEnvironment = {
-			...allowlistedBuildEnvironment(),
-			CGO_ENABLED: '0',
-			GOENV: 'off',
-			GOEXPERIMENT: '',
-			GOFLAGS: '',
-			GOARCH: architecture === 'x64' ? 'amd64' : 'arm64',
-			GOAMD64: 'v1',
-			GOARM64: 'v8.0',
-			GOOS: 'darwin',
-			GOPROXY: 'off',
-			GOTOOLCHAIN: 'local',
-			GOWORK: 'off',
-		};
-		const simulatorDestination = join(outputDirectory, 'rndevtools-sim-helper');
-		buildGoBinary(
-			goPackage,
-			'./cmd/rndevtools-sim-helper',
-			simulatorDestination,
-			goEnvironment,
-			'vendor',
-			simulatorHelperTeamFlag
-		);
-		helpers.simulator = helperManifest(
-			simulatorDestination,
-			'rndevtools-sim-helper'
-		);
+	const goEnvironment = {
+		...allowlistedBuildEnvironment(),
+		CGO_ENABLED: '0',
+		GOENV: 'off',
+		GOEXPERIMENT: '',
+		GOFLAGS: '',
+		GOARCH: architecture === 'x64' ? 'amd64' : 'arm64',
+		GOAMD64: 'v1',
+		GOARM64: 'v8.0',
+		GOOS: 'darwin',
+		GOPROXY: 'off',
+		GOTOOLCHAIN: 'local',
+		GOWORK: 'off',
+	};
+	const simulatorDestination = join(outputDirectory, 'rndevtools-sim-helper');
+	buildGoBinary(
+		goPackage,
+		'./cmd/rndevtools-sim-helper',
+		simulatorDestination,
+		goEnvironment,
+		'vendor',
+		simulatorHelperTeamFlag
+	);
+	helpers.simulator = helperManifest(
+		simulatorDestination,
+		'rndevtools-sim-helper'
+	);
 
-		const cliDestination = join(outputDirectory, 'rndevtools');
-		buildGoBinary(
-			cliPackage,
-			'./cmd/rndevtools',
-			cliDestination,
-			goEnvironment,
-			'readonly'
-		);
-		helpers.cli = helperManifest(cliDestination, 'rndevtools');
-	}
+	const cliDestination = join(outputDirectory, 'rndevtools');
+	buildGoBinary(
+		cliPackage,
+		'./cmd/rndevtools',
+		cliDestination,
+		goEnvironment,
+		'readonly'
+	);
+	helpers.cli = helperManifest(cliDestination, 'rndevtools');
 
-	if (options.buildSwift) {
-		const swiftArchitecture = architecture === 'x64' ? 'x86_64' : 'arm64';
-		const scratchDirectory = join(outputRoot, `.swift-${architecture}`);
-		const swiftEnvironment = allowlistedBuildEnvironment();
-		const swiftArguments = [
-			'build',
-			'--package-path',
-			swiftPackage,
-			'--scratch-path',
-			scratchDirectory,
-			'--configuration',
-			'release',
-			'--arch',
-			swiftArchitecture,
-		];
-		run('swift', swiftArguments, desktopDirectory, swiftEnvironment);
-		const binaryDirectory = commandOutput(
-			'swift',
-			[...swiftArguments, '--show-bin-path'],
-			desktopDirectory,
-			swiftEnvironment
-		);
-		if (!binaryDirectory) {
-			fail(`Swift did not report a binary directory for ${architecture}.`);
-		}
-		const destination = join(outputDirectory, 'rndevtools-native-host');
-		copyFileSync(join(binaryDirectory, 'rndevtools-native-host'), destination);
-		chmodSync(destination, 0o755);
-		helpers.nativeHost = helperManifest(destination, 'rndevtools-native-host');
+	const swiftArchitecture = architecture === 'x64' ? 'x86_64' : 'arm64';
+	const scratchDirectory = join(outputRoot, `.swift-${architecture}`);
+	const swiftEnvironment = allowlistedBuildEnvironment();
+	const swiftArguments = [
+		'build',
+		'--package-path',
+		swiftPackage,
+		'--scratch-path',
+		scratchDirectory,
+		'--configuration',
+		'release',
+		'--arch',
+		swiftArchitecture,
+	];
+	run('swift', swiftArguments, desktopDirectory, swiftEnvironment);
+	const binaryDirectory = commandOutput(
+		'swift',
+		[...swiftArguments, '--show-bin-path'],
+		desktopDirectory,
+		swiftEnvironment
+	);
+	if (!binaryDirectory) {
+		fail(`Swift did not report a binary directory for ${architecture}.`);
 	}
+	const destination = join(outputDirectory, 'rndevtools-native-host');
+	copyFileSync(join(binaryDirectory, 'rndevtools-native-host'), destination);
+	chmodSync(destination, 0o755);
+	helpers.nativeHost = helperManifest(destination, 'rndevtools-native-host');
 
 	const manifest = {
 		schemaVersion: 1,
@@ -197,14 +166,6 @@ for (const architecture of architectures) {
 		`${JSON.stringify(manifest, null, 2)}\n`
 	);
 	process.stdout.write(`Built native resources for mac-${architecture}.\n`);
-}
-
-function statIfFile(path) {
-	try {
-		return statSync(path).isFile();
-	} catch {
-		return false;
-	}
 }
 
 function buildGoBinary(
@@ -235,41 +196,21 @@ function buildGoBinary(
 }
 
 function parseOptions(arguments_) {
-	let architecture;
 	let all = false;
-	let buildGo = true;
-	let buildSwift = true;
 	let ifSupported = false;
-	for (let index = 0; index < arguments_.length; index += 1) {
-		const argument = arguments_[index];
+	for (const argument of arguments_) {
 		if (argument === '--all') {
 			all = true;
-		} else if (argument === '--go-only') {
-			buildSwift = false;
-		} else if (argument === '--swift-only') {
-			buildGo = false;
 		} else if (argument === '--if-supported') {
 			ifSupported = true;
-		} else if (argument === '--arch') {
-			architecture = arguments_[index + 1];
-			index += 1;
 		} else {
 			fail(`Unknown build option: ${argument}`);
 		}
 	}
-	if (architecture && !['arm64', 'x64'].includes(architecture)) {
-		fail(`Unsupported architecture: ${architecture}`);
-	}
-	if (all && architecture) {
-		fail('Use either --all or --arch, not both.');
-	}
-	if (ifSupported && (all || architecture || !buildGo || !buildSwift)) {
+	if (ifSupported && all) {
 		fail('--if-supported is reserved for the default packaging build.');
 	}
-	if (!buildGo && !buildSwift) {
-		fail('At least one native helper must be selected.');
-	}
-	return { all, architecture, buildGo, buildSwift, ifSupported };
+	return { all, ifSupported };
 }
 
 function hostArchitecture() {

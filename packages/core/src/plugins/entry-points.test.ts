@@ -10,7 +10,7 @@ jest.mock('./storage', () => {
 	);
 });
 
-it('loads production staff plugin factories without development-only plugins', () => {
+it('loads the shared plugin factories without the image and storage subpaths', () => {
 	const plugins = jest.requireActual<typeof import('./index')>(
 		'@rndevtools/core/plugins',
 	);

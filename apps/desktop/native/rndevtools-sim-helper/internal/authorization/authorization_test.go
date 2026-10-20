@@ -30,7 +30,7 @@ func (attestor *stubAttestor) Attest(_ context.Context, _ int) error {
 
 func TestDirectMutationInvocationIsDenied(t *testing.T) {
 	request := mutationRequest(t, protocol.OperationCloneSimulator)
-	authorizer := New(strings.NewReader(""), &stubAttestor{})
+	authorizer := New(strings.NewReader(""), &stubAttestor{}, testBuildCommit)
 	authorizer.parentPID = func() int { return 42 }
 	if apiError := authorizer.Authorize(context.Background(), request); apiError == nil || apiError.Code != "mutation_authorization_required" {
 		t.Fatalf("expected direct mutation denial, got %#v", apiError)
@@ -88,7 +88,7 @@ func TestProductionStyleInheritedPipeRequiresNonBlockingReadDescriptor(t *testin
 
 func TestReadOnlyRequestsDoNotConsumeOrRequireAuthorization(t *testing.T) {
 	request := decodeRequest(t, `{"protocolVersion":2,"requestId":"read-only","operation":"simulator_status","payload":{"simulatorId":"`+testSimulatorID+`"}}`)
-	authorizer := New(nil, nil)
+	authorizer := New(nil, nil, testBuildCommit)
 	if apiError := authorizer.Authorize(context.Background(), request); apiError != nil {
 		t.Fatalf("read-only request unexpectedly denied: %#v", apiError)
 	}
@@ -101,7 +101,7 @@ func TestOperationBoundAuthorizationSucceedsOnce(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0)
 	request := mutationRequest(t, protocol.OperationApplyProfile)
 	attestor := &stubAttestor{}
-	authorizer := NewBound(
+	authorizer := New(
 		bytes.NewReader(envelopeData(t, request, now.Add(15*time.Second), 42)),
 		attestor,
 		testBuildCommit,
@@ -128,7 +128,7 @@ func TestBuildBoundAuthorizationRejectsOlderNativeHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer := NewBound(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
+	authorizer := New(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
 	authorizer.now = func() time.Time { return now }
 	authorizer.parentPID = func() int { return 42 }
 	if apiError := authorizer.Authorize(context.Background(), request); apiError == nil {
@@ -162,7 +162,7 @@ func TestAuthorizationRejectsMismatchesExpiryAndUntrustedParent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			authorizer := New(bytes.NewReader(data), &stubAttestor{error: test.attestError})
+			authorizer := New(bytes.NewReader(data), &stubAttestor{error: test.attestError}, testBuildCommit)
 			authorizer.now = func() time.Time { return now }
 			authorizer.parentPID = func() int { return test.parentPID }
 			apiError := authorizer.Authorize(context.Background(), request)
@@ -171,6 +171,42 @@ func TestAuthorizationRejectsMismatchesExpiryAndUntrustedParent(t *testing.T) {
 			}
 			if test.attestError != nil && !strings.Contains(apiError.Message, test.attestError.Error()) {
 				t.Fatalf("attestation reason was not surfaced: %q", apiError.Message)
+			}
+		})
+	}
+}
+
+// The Swift broker binds the grant to the exact "simulatorId" key, while the
+// helper decodes payloads with encoding/json, which matches keys
+// case-insensitively and keeps the last match.
+func TestAuthorizationBindsTheSimulatorTheHelperActsOnWhenKeysDifferOnlyByCase(t *testing.T) {
+	const actedOnSimulatorID = "11111111-2222-3333-4444-555555555555"
+	now := time.Unix(1_900_000_000, 0)
+	for _, variant := range []string{"SIMULATORID", "simulatorID", "ſimulatorId"} {
+		t.Run(variant, func(t *testing.T) {
+			request := decodeRequest(t, `{"protocolVersion":2,"requestId":"mutation-1","operation":"disk_cleanup","payload":{"simulatorId":"`+testSimulatorID+`","`+variant+`":"`+actedOnSimulatorID+`","categoryIds":["caches"],"confirmation":"CLEAN_SIMULATOR_DISK"}}`)
+			var payload struct {
+				SimulatorID  string   `json:"simulatorId"`
+				CategoryIDs  []string `json:"categoryIds"`
+				Confirmation string   `json:"confirmation"`
+			}
+			if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil || payload.SimulatorID != actedOnSimulatorID {
+				t.Fatalf("helper payload decoding changed: %#v %#v", payload, apiError)
+			}
+			for _, bound := range []string{testSimulatorID, actedOnSimulatorID} {
+				value := validEnvelope(request, now.Add(15*time.Second), 42)
+				value.SimulatorID = bound
+				data, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				authorizer := New(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
+				authorizer.now = func() time.Time { return now }
+				authorizer.parentPID = func() int { return 42 }
+				apiError := authorizer.Authorize(context.Background(), request)
+				if allowed := bound == actedOnSimulatorID; (apiError == nil) != allowed {
+					t.Fatalf("grant bound to %s: allowed=%v, want %v (%#v)", bound, apiError == nil, allowed, apiError)
+				}
 			}
 		})
 	}

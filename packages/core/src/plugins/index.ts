@@ -1,5 +1,8 @@
-// Production staff tools import this barrel. Keep development-only plugins
-// on dedicated subpaths so hosts can prune them without relying on tree shaking.
+// Built-in diagnostics shared by every host. Like the rest of this package, it
+// must never reach a release bundle: hosts cut it at resolution time with
+// `withDevtoolsPruning` and check the export with `rndevtools-verify-bundle`.
+// Plugins with heavier or riskier dependencies live on dedicated subpaths, so
+// a host that never uses them never loads them.
 export type {
 	NetworkSimulationPreference,
 	NetworkSimulationProfile,
@@ -102,8 +105,8 @@ export {
 	validateImageOverlayRemoteUrl,
 	validateImageOverlaySource,
 } from './image-overlay';
-// Image diagnostics live at `@rndevtools/core/plugins/images`; the mobile host
-// replaces their adapter with a no-op in production.
+// Image diagnostics live at `@rndevtools/core/plugins/images`, so only a host
+// that wires an image adapter loads them.
 export {
 	buildNavigationRoutePath,
 	createNavigationPlugin,
@@ -226,10 +229,9 @@ export {
 	type ScenarioRepositorySnapshot,
 } from './scenario-repository';
 // The storage plugin is deliberately absent from this barrel and lives at
-// `@rndevtools/core/plugins/storage`. It edits, deletes, and clears host storage,
-// so a host that ships diagnostics to production can take the rest of the
-// barrel without pulling an editor it must not expose. The split keeps that
-// module out of the bundle even when the host does not enable tree shaking.
+// `@rndevtools/core/plugins/storage`. It edits, deletes, and clears host
+// storage, so a host opts in to that editor by importing it, and the barrel
+// never loads it even without tree shaking.
 export {
 	changedZustandKeys,
 	createZustandPlugin,

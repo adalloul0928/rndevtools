@@ -15,24 +15,28 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Badge,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
+import {
+	assertFixtureSize,
+	IMAGE_MIME_TYPES,
+	inspectImageFixture,
+	inspectVideoFixture,
+	readFixtureBase64,
+	VIDEO_MIME_TYPES,
+} from '@/lib/camera-fixture-file';
 import { formatBytes, formatDuration } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
-
-const MAX_FIXTURE_BYTES = 384 * 1024;
-const MAX_ENCODED_FIXTURE_BYTES = 512 * 1024;
-const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
-const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime'] as const;
 
 type FixtureKind = 'still' | 'qr' | 'video';
 
 export function CameraPanel() {
-	const { canRunAction, selectedDevice, runAction } = useDesktopRuntime();
+	const { canRunAction, actionUnavailableReason, selectedDevice, runAction } =
+		useDesktopRuntime();
 	const fixture = selectedDevice?.tools.cameraFixture ?? {
 		active: false as const,
 	};
@@ -48,25 +52,22 @@ export function CameraPanel() {
 		() => (kind === 'video' ? VIDEO_MIME_TYPES : IMAGE_MIME_TYPES).join(','),
 		[kind]
 	);
+	const setFixtureReason = actionUnavailableReason('camera', 'setFixture');
+	const clearFixtureReason = fixture.active
+		? actionUnavailableReason('camera', 'clearFixture')
+		: 'No fixture is currently active.';
 
 	const setFixture = async () => {
 		if (!file) return;
 		setLocalError(null);
 		setIsPreparing(true);
 		try {
-			if (file.size === 0 || file.size > MAX_FIXTURE_BYTES) {
-				throw new Error('Choose a non-empty fixture no larger than 384 KiB.');
-			}
-			const media = await inspectFixtureFile(file, kind);
-			const dataBase64 = await readBase64(file);
-			if (
-				new TextEncoder().encode(dataBase64).byteLength >
-				MAX_ENCODED_FIXTURE_BYTES
-			) {
-				throw new Error(
-					'The encoded fixture exceeds the 512 KiB action envelope.'
-				);
-			}
+			assertFixtureSize(file);
+			const media =
+				kind === 'video'
+					? await inspectVideoFixture(file)
+					: await inspectImageFixture(file);
+			const dataBase64 = await readFixtureBase64(file, 'action');
 			await runAction(
 				'camera',
 				'setFixture',
@@ -77,9 +78,7 @@ export function CameraPanel() {
 					dataBase64,
 					width: media.width,
 					height: media.height,
-					...(media.durationMs === undefined
-						? {}
-						: { durationMs: media.durationMs }),
+					...('durationMs' in media ? { durationMs: media.durationMs } : {}),
 				},
 				`${kind === 'qr' ? 'QR' : kind === 'video' ? 'Video' : 'Still-image'} camera fixture applied.`
 			);
@@ -115,11 +114,10 @@ export function CameraPanel() {
 					</Button>
 				}
 				description="Send an explicit still, QR, video, unavailable, or error fixture to the app's instrumented development camera provider."
-				eyebrow="App / Instrumented input"
 				meta={
-					<StatusPill dot tone={fixture.active ? 'success' : 'default'}>
+					<Badge tone={fixture.active ? 'success' : 'default'}>
 						{fixture.active ? 'Fixture active' : 'Live provider'}
-					</StatusPill>
+					</Badge>
 				}
 				title="Camera Fixtures"
 			/>
@@ -128,6 +126,13 @@ export function CameraPanel() {
 				It does not replace the macOS camera, Simulator system camera, or camera
 				input in third-party libraries.
 			</PanelNotice>
+			{setFixtureReason ? (
+				<PanelNotice title="Fixture actions are unavailable." tone="warning">
+					{setFixtureReason} Fixtures can be prepared and validated here, but
+					cannot be sent until the connected device advertises the camera
+					fixture capability.
+				</PanelNotice>
+			) : null}
 			{localError ? (
 				<PanelNotice title="Fixture could not be prepared." tone="danger">
 					{localError}
@@ -291,7 +296,11 @@ export function CameraPanel() {
 					<dl>
 						<KeyValue
 							label="Status"
-							value={fixture.active ? 'Active' : 'Inactive'}
+							value={
+								<Badge tone={fixture.active ? 'success' : 'default'}>
+									{fixture.active ? 'Active' : 'Inactive'}
+								</Badge>
+							}
 						/>
 						<KeyValue label="Kind" value={fixture.kind ?? '—'} />
 						<KeyValue label="Media type" value={fixture.mimeType ?? '—'} mono />
@@ -318,6 +327,11 @@ export function CameraPanel() {
 							}
 						/>
 					</dl>
+					{clearFixtureReason && fixture.active ? (
+						<p className="mb-0 mt-2 text-xs leading-4 text-(--text-3)">
+							{clearFixtureReason}
+						</p>
+					) : null}
 					<p>
 						The desktop receives metadata only after activation; raw fixture
 						bytes remain on the connected development client.
@@ -326,86 +340,4 @@ export function CameraPanel() {
 			</div>
 		</section>
 	);
-}
-
-async function readBase64(file: File): Promise<string> {
-	return await new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onerror = () =>
-			reject(new Error('The selected fixture could not be read.'));
-		reader.onload = () => {
-			const result = reader.result;
-			if (typeof result !== 'string') {
-				reject(new Error('The selected fixture produced an invalid payload.'));
-				return;
-			}
-			const separator = result.indexOf(',');
-			if (separator < 0) {
-				reject(new Error('The selected fixture produced an invalid data URL.'));
-				return;
-			}
-			resolve(result.slice(separator + 1));
-		};
-		reader.readAsDataURL(file);
-	});
-}
-
-async function inspectFixtureFile(
-	file: File,
-	kind: FixtureKind
-): Promise<{ width: number; height: number; durationMs?: number }> {
-	if (kind !== 'video') {
-		if (
-			!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])
-		) {
-			throw new Error(
-				'Still and QR fixtures must be JPEG, PNG, or WebP images.'
-			);
-		}
-		const bitmap = await createImageBitmap(file);
-		try {
-			return { width: bitmap.width, height: bitmap.height };
-		} finally {
-			bitmap.close();
-		}
-	}
-	if (
-		!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])
-	) {
-		throw new Error('Video fixtures must be MP4 or QuickTime files.');
-	}
-	const objectUrl = URL.createObjectURL(file);
-	try {
-		return await new Promise((resolve, reject) => {
-			const video = document.createElement('video');
-			video.preload = 'metadata';
-			video.onerror = () =>
-				reject(new Error('Video metadata could not be decoded.'));
-			video.onloadedmetadata = () => {
-				const durationMs = Math.round(video.duration * 1_000);
-				if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-					reject(
-						new Error('The selected video does not report valid dimensions.')
-					);
-					return;
-				}
-				if (
-					!Number.isFinite(durationMs) ||
-					durationMs <= 0 ||
-					durationMs > 600_000
-				) {
-					reject(new Error('Choose a video between 1 ms and 10 minutes.'));
-					return;
-				}
-				resolve({
-					width: video.videoWidth,
-					height: video.videoHeight,
-					durationMs,
-				});
-			};
-			video.src = objectUrl;
-		});
-	} finally {
-		URL.revokeObjectURL(objectUrl);
-	}
 }

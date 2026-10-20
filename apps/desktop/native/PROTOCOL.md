@@ -120,7 +120,7 @@ cross the native boundary as arbitrary service lists.
     "hostArchitecture": "arm64 | x64",
     "helperVersion": "0.1.0",
     "helperBuildCommit": "40-hex-commit-or-dirty-aware-source-identity",
-    "catalogVersion": "simslim-v0.8.0-09fc9cbb-pumpd.1-presets.2"
+    "catalogVersion": "simslim-v0.12.2-6518ba7e-pumpd.1-presets.3"
   },
   "verifiedOperations": []
 }
@@ -170,12 +170,14 @@ directly cannot use them to mutate a simulator.
 
 Electron sends the exact helper request to the signed Swift native host over
 protocol v4. The native host authenticates its live parent as the
-production-signed desktop application using the build's pinned Apple Team ID,
-validates the exact helper-manifest bytes against that application's resource
-seal, reads the helper SHA-256 and build commit from the validated manifest,
-verifies the packaged sibling Go helper against the pinned designated
+production-signed desktop application signed by the native host's own Apple
+Team ID, validates the exact helper-manifest bytes against that application's
+resource seal, reads the helper SHA-256 and build commit from the validated
+manifest, verifies the packaged sibling Go helper against the pinned designated
 requirement, starts it suspended, binds the live process to the exact verified
-CodeDirectory hash, and only then resumes it and sends input. A
+CodeDirectory hash, and only then resumes it and sends input. The native host
+pins no team of its own: the Go helper's build-time `APPLE_TEAM_ID` pin, which
+it checks against the native host as described below, anchors the chain. A
 15-second, random, one-shot authorization travels only on inherited file
 descriptor 3. It binds the request ID, operation, canonical Simulator UDID,
 SHA-256 of every exact helper-request byte (therefore the complete profile,
@@ -187,7 +189,10 @@ process satisfy pinned designated requirements. It reads each process's
 kernel-attached CodeDirectory hash through `csops(2)` and binds that hash into a
 static `codesign` requirement on the executable, because `codesign`'s `+pid`
 form cannot evaluate an explicit requirement against a process on current
-macOS. It also requires the authorization
+macOS. It compares the authorized UDID with the one the operation itself
+decodes from the payload, where JSON field names match case-insensitively, so
+keys that differ only by case cannot authorize one Simulator and act on
+another. It also requires the authorization
 to name its exact build commit, consumes the descriptor exactly once, watches
 the broker parent for the operation lifetime, and rejects replay, mismatch,
 expiry, downgrade, missing FD, parent death, or untrusted-parent cases before
@@ -199,11 +204,14 @@ confirmation and the compatibility/checkpoint checks described below remain
 mandatory on top of this process boundary.
 
 Both direct read-only execution and Swift-brokered mutation execution also
-provide a private inherited control pipe on FD 4, explicitly marked by
-`RNDEVTOOLS_HELPER_CONTROL_FD=4`. Closing the pipe cancels the Go context and allows
+provide a private inherited control channel on FD 4, explicitly marked by
+`RNDEVTOOLS_HELPER_CONTROL_FD=4`. Electron's direct runs pass a Unix socketpair
+(Node's `'pipe'` stdio) and the broker passes a pipe. Closing or half-closing the
+parent's end cancels the Go context and allows
 independently bounded boot-state restoration or mutation rollback to finish;
 the parent escalates only to SIGKILL after the operation-specific grace period.
-Unmarked descriptors are never opened. The helper intentionally does not use
+Unmarked descriptors are never opened, and a marked descriptor that is neither a
+pipe nor a socket is ignored. The helper intentionally does not use
 `os/signal` while supervising Simulator child processes.
 
 Every mutation uses a two-phase prepare/persist/commit contract. Preparation is
@@ -269,7 +277,10 @@ commit-time roots, rather than the earlier preparation snapshot, must all be
 absent after the reboot. Missing, duplicated, or ambiguous PID/program/tree
 mappings fail before mutation. This proof is deliberately scoped to managed
 jobs observed running at commit; jobs already not running are covered by the
-independent launchd-registration absence proof.
+independent launchd-registration absence proof. Every successful commit,
+undo included, ends in the boot state the Simulator had when that commit
+started: undo returns the managed services to the target checkpoint, not to the
+boot state recorded with it.
 
 The helper also proves that both the checkpoint and requested target can be
 represented by SimSlim's public profile API before mutation. A pre-existing
@@ -336,9 +347,9 @@ only when applicable; the three rollback booleans are always present.
 
 `checkpointToken` is at most 32,768 UTF-8 bytes. It is a canonical,
 integrity-checked opaque encoding of the exact prior allowlisted set, original
-boot state, Simulator ID, tuple, catalog/fork identities, matrix version, and,
-for preparation, the exact intended operation/profile/desired set plus a
-random preparation ID and bounded preparation-time executable basenames. It
+boot state, Simulator ID, tuple, catalog/fork identities, matrix version, the
+exact intended operation/profile/desired set, a random preparation ID, and
+bounded preparation-time executable basenames. It
 contains no filesystem path, raw command line, or process environment and is
 an integrity binding, not an authorization credential. Commit-time process
 evidence is freshly captured and may differ after an intentional shutdown/boot
@@ -357,7 +368,8 @@ unverified state retains a private emergency token, blocks other mutations,
 and exposes checkpoint-bound Undo recovery. No-op and proven-rolled-back
 attempts never replace the prior successful restore point.
 
-Sending SIGINT or SIGTERM requests graceful cancellation. A mutation failure
+Closing the FD 4 control channel requests graceful cancellation; the helper
+installs no signal handler, so a signal ends it without cleanup. A mutation failure
 then enters an independent bounded rollback/boot-restoration context before
 responding. Electron's operation-specific timeout and forced-kill grace always
 reserve that cleanup budget; ungraceful termination is not routine
@@ -450,3 +462,65 @@ helper path, authorization token, signing identity, executable, argument
 vector, expiry, or nonce from Electron. Cancellation terminates the isolated
 helper process group and reserves the existing operation-specific rollback
 grace before Electron's outer forced-kill deadline.
+
+### Protocol v5 simulator input
+
+Protocol v5 preserves every earlier native-host operation and adds
+`send_simulator_input`, which drives a booted Simulator over the same HID path
+Simulator.app uses for the mouse and keyboard. The guest cannot tell these
+events from a user's, so they work on Springboard, system alerts, and the
+login screen, not only inside a connected development app. Nothing on disk is
+mutated, so the operation is available in unsigned builds.
+
+The payload is one gesture, addressed by exact UDID. Coordinates are ratios of
+the device screen (`0…1` from the top-left) so any screenshot size converts
+without knowing the device geometry:
+
+| `kind` | Fields | Delivered as |
+| --- | --- | --- |
+| `tap` | `x`, `y`, `holdMilliseconds` (default 40; 500+ is a long press) | digitizer down, hold, up |
+| `swipe` | `fromX`, `fromY`, `toX`, `toY`, `durationMilliseconds` (default 250), `steps` (default 16, max 120) | down, interpolated moves, up |
+| `text` | `text` (printable ASCII plus `\n` and `\t`, max 2048) | one key down/up per character, shift held for upper case and symbols |
+| `key` | `usage` (USB HID keyboard usage 0x04…0xE7, e.g. 0x28 Return, 0x2A Delete, 0x29 Escape), `modifiers` (`shift`, `control`, `option`, `command`) | modifiers down, key down/up, modifiers up |
+| `button` | `button`: `home`, `lock`, `siri`, `volume-up`, `volume-down`, `apple-pay` | hardware button down/up |
+
+Text is typed, never pasted: iOS 16+ gates the pasteboard behind an
+"Allow Paste" prompt that blocks unattended use.
+
+The result reports `messages` (HID messages the Simulator acknowledged) and
+`elapsedMilliseconds`. Errors: `invalid_payload` for anything outside the
+table; `simulator_not_found` and `simulator_not_booted` from the live
+CoreSimulator inventory; `simulator_input_unavailable` when this Xcode does
+not expose the SimulatorKit symbols the host resolves at run time (the host
+links no private framework, it `dlopen`s CoreSimulator and SimulatorKit from
+the active developer directory and resolves `SimServiceContext`,
+`SimDeviceLegacyHIDClient`, and the `IndigoHIDMessageFor*` builders by name);
+`simulator_input_failed` when a message is refused or unacknowledged within 5 s.
+A gesture that is cancelled or fails part-way first lifts whatever it still
+holds (the finger, keys and modifiers, or a button) before the host reports the
+error, so a shared Simulator is not left with input held down. Holds wake on
+cancellation, so the lifts go out before Electron's forced kill.
+
+The result also names the `transport` that carried the events. Two exist, and
+the host picks one from the CoreSimulator version actually loaded in process
+(the system framework's `CFBundleVersion`, not the Xcode the request named,
+because that framework is what talks to the guest):
+
+| CoreSimulator | Transport | Path |
+| --- | --- | --- |
+| < 1155.4 (Xcode 26 and earlier) | `indigo` | SimulatorKit's `SimDeviceLegacyHIDClient`. Buttons and keys come from the framework's `IndigoHIDMessageFor*` builders; a single touch is the documented 320-byte Indigo envelope (`eventType` 2) around the multi-touch builder's digitizer contact, repeated once as the second payload. Every message is acknowledged individually. |
+| ≥ 1155.4 (Xcode 27) | `dtuhid` | Apple injects `dtuhidd` into the guest and the legacy client stops delivering touches. The host looks the device's `com.apple.coredevice.feature.remote.hid.digitizer` service up in the Simulator's bootstrap namespace (`-[SimDevice lookup:error:]`), wraps the port with libxpc's `xpc_endpoint_create_mach_port_4sim`, marks the connection simulator-to-host with `xpc_connection_enable_sim2host_4sim` (without it the daemon sees the peer but no payload), and sends plain-XPC dictionaries: `{messageType, isBarrier, featureIdentifier, payload}` with `IndigoDigitizerEvent {pointOne{x,y}, eventType 0 start/1 position/2 end, edge, target}`, `IndigoKeyboardButtonEvent {usageCode, state 1 down/2 up}`, and `IndigoButtonEvent {usagePage 0x0C, usageCode, state}` (home 0x40, lock 0x30, Siri 0xCF, volume 0xE9/0xEA; Apple Pay is a double side press and has no usage). `dtuhidd` is demand-launched, so the host first sends a barrier-flagged no-op key-up, which the daemon answers, and retries up to five times four seconds apart before reporting `simulator_input_failed`. |
+
+Both transports deliver the same gesture sequence (`SimulatorInputSequencer`),
+so a tap, swipe, or typed string behaves identically on either Xcode. The
+environment variable `RNDEVTOOLS_SIMULATOR_INPUT_TRANSPORT=indigo|dtuhid`
+overrides the selection for diagnosis.
+
+Verification status: `indigo` is verified live on Xcode 26.6 (CoreSimulator
+1051.55). `dtuhid` is built from idb's published transport and verified as far
+as this toolchain allows: the service lookup reaches the guest, which reports
+that it does not vend the digitizer service on CoreSimulator 1051. To verify on
+Xcode 27, boot a device and run `rndevtools input --udid <UDID> --kind tap
+--x 0.39 --y 0.92` (Safari's icon on a default home screen); the result must
+say `"transport": "dtuhid"` and Safari must open. If `dtuhidd` answers the
+probe but nothing lands, the payload shape is the suspect, not the connection.

@@ -1,4 +1,3 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -9,6 +8,12 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import type { ActionStatus } from '@/lib/action-notice';
+import {
+	errorText,
+	nextActionId,
+	type WithoutActionId,
+} from '@/lib/runtime-action';
 import type {
 	RecipeBridge,
 	RecipeDefinition,
@@ -23,16 +28,6 @@ import type {
 	RecipeSummary,
 } from '../../shared/recipe-protocol';
 
-type RecipeActionStatus =
-	| { kind: 'idle'; message: '' }
-	| { kind: 'pending'; message: string }
-	| { kind: 'success'; message: string }
-	| { kind: 'error'; message: string };
-
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId' | 'confirmationToken'>
-	: never;
-
 export type RecipeRunInput = WithoutActionId<RecipeRunRequest>;
 export type RecipeFileOperationInput = WithoutActionId<RecipeFileOperation>;
 
@@ -41,7 +36,7 @@ type RecipeRuntimeValue = {
 	isLoading: boolean;
 	isBridgeAvailable: boolean;
 	runtimeError: string | null;
-	actionStatus: RecipeActionStatus;
+	actionStatus: ActionStatus;
 	clearActionStatus: () => void;
 	refresh: () => Promise<void>;
 	getRecipe: (recipeId: string) => Promise<RecipeDefinition | null>;
@@ -83,14 +78,6 @@ function getRecipeBridge(): RecipeBridge | null {
 	return candidate as RecipeBridge;
 }
 
-function recipeErrorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
-
-function nextRecipeActionId(prefix: string): string {
-	return `${prefix}-${crypto.randomUUID()}`;
-}
-
 export async function confirmAndRunRecipe(
 	bridge: Pick<RecipeBridge, 'requestRecipeRunConfirmation' | 'runRecipe'>,
 	request: RecipeRunRequest
@@ -102,7 +89,7 @@ export async function confirmAndRunRecipe(
 		return {
 			actionId: request.actionId,
 			accepted: false,
-			error: recipeErrorText(error),
+			error: errorText(error),
 		};
 	}
 	if (confirmation.actionId !== request.actionId) {
@@ -145,7 +132,7 @@ export async function confirmAndRunRecipe(
 		return {
 			actionId: request.actionId,
 			accepted: false,
-			error: recipeErrorText(error),
+			error: errorText(error),
 		};
 	}
 }
@@ -182,7 +169,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 			? null
 			: 'Recipe automation requires the secure desktop bridge. Update and reopen the installed desktop app.'
 	);
-	const [actionStatus, setActionStatus] = useState<RecipeActionStatus>({
+	const [actionStatus, setActionStatus] = useState<ActionStatus>({
 		kind: 'idle',
 		message: '',
 	});
@@ -201,7 +188,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				setIsLoading(false);
 			});
 		} catch (error) {
-			setRuntimeError(recipeErrorText(error));
+			setRuntimeError(errorText(error));
 			setIsLoading(false);
 		}
 		void bridge
@@ -212,7 +199,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				setRuntimeError(null);
 			})
 			.catch((error: unknown) => {
-				if (active) setRuntimeError(recipeErrorText(error));
+				if (active) setRuntimeError(errorText(error));
 			})
 			.finally(() => {
 				if (active) setIsLoading(false);
@@ -240,7 +227,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 			setState(nextState);
 			setRuntimeError(null);
 		} catch (error) {
-			setRuntimeError(recipeErrorText(error));
+			setRuntimeError(errorText(error));
 		} finally {
 			setIsLoading(false);
 		}
@@ -281,7 +268,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				await refresh();
 				return summary;
 			} catch (error) {
-				const message = recipeErrorText(error);
+				const message = errorText(error);
 				setActionStatus({ kind: 'error', message });
 				throw new Error(message);
 			} finally {
@@ -293,7 +280,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 
 	const runRecipe = useCallback(
 		async (input: RecipeRunInput): Promise<RecipeRunReceipt> => {
-			const actionId = nextRecipeActionId('recipe');
+			const actionId = nextActionId('recipe');
 			if (!bridge) {
 				const error = 'Recipe execution requires the secure desktop bridge.';
 				setActionStatus({ kind: 'error', message: error });
@@ -414,7 +401,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				);
 				return cancelled;
 			} catch (error) {
-				setActionStatus({ kind: 'error', message: recipeErrorText(error) });
+				setActionStatus({ kind: 'error', message: errorText(error) });
 				return false;
 			}
 		},
@@ -425,7 +412,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 		async (
 			input: RecipeFileOperationInput
 		): Promise<RecipeFileOperationReceipt> => {
-			const actionId = nextRecipeActionId('recipe-file');
+			const actionId = nextActionId('recipe-file');
 			const failed = (error: string): RecipeFileOperationReceipt => ({
 				actionId,
 				kind: input.kind,
@@ -476,7 +463,7 @@ export function RecipeRuntimeProvider({ children }: { children: ReactNode }) {
 				}
 				return receipt;
 			} catch (error) {
-				const message = recipeErrorText(error);
+				const message = errorText(error);
 				setActionStatus({ kind: 'error', message });
 				return failed(message);
 			} finally {

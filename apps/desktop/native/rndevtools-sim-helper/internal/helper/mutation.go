@@ -14,14 +14,13 @@ import (
 )
 
 type mutationRequest struct {
-	Operation            protocol.Operation
-	SimulatorID          string
-	ProfileID            string
-	Desired              []string
-	Acknowledgement      string
-	PreparedToken        string
-	UndoCheckpoint       *checkpointPayload
-	FinalBootStateTarget string
+	Operation       protocol.Operation
+	SimulatorID     string
+	ProfileID       string
+	Desired         []string
+	Acknowledgement string
+	PreparedToken   string
+	UndoCheckpoint  *checkpointPayload
 }
 
 type MutationPreparationEvidence struct {
@@ -126,7 +125,7 @@ func (service *Service) prepareMutation(
 		// exact tuple acknowledgement before the returned token can be committed.
 		// The commit path below independently evaluates the caller acknowledgement
 		// against the token-bound fresh tuple.
-		"EXPERIMENTAL",
+		compatibility.ExperimentalAcknowledgement,
 		catalog.Version,
 	)
 	if err != nil {
@@ -250,8 +249,7 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 			false,
 		))
 	}
-	if preparedCheckpoint.Purpose != checkpointPurposePrepared ||
-		preparedCheckpoint.PreparedOperation != request.Operation ||
+	if preparedCheckpoint.PreparedOperation != request.Operation ||
 		preparedCheckpoint.PreparedProfileID != request.ProfileID ||
 		!slices.Equal(
 			preparedCheckpoint.PreparedDesiredServiceIDs,
@@ -338,10 +336,6 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 		))
 	}
 
-	finalBootTarget := request.FinalBootStateTarget
-	if finalBootTarget == "" {
-		finalBootTarget = preparation.OriginalBootState
-	}
 	evidence := MutationEvidence{
 		Operation:         request.Operation,
 		ProfileID:         request.ProfileID,
@@ -362,7 +356,7 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 	if !evidence.Changed {
 		evidence.Verification = preflightVerification
 		evidence.After = stateEvidence(preflightVerification.CurrentManagedDisabledIDs)
-		finalState, restoreErr := service.backend.RestoreBootState(ctx, preparation.Device.ID, finalBootTarget)
+		finalState, restoreErr := service.backend.RestoreBootState(ctx, preparation.Device.ID, preparation.OriginalBootState)
 		if restoreErr == nil {
 			evidence.FinalBootState = finalState
 			return evidence, nil
@@ -397,7 +391,7 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 		}
 		return service.failAndRollback(ctx, evidence, preparation, "verification_failed")
 	}
-	finalState, err := service.backend.RestoreBootState(ctx, preparation.Device.ID, finalBootTarget)
+	finalState, err := service.backend.RestoreBootState(ctx, preparation.Device.ID, preparation.OriginalBootState)
 	if err != nil {
 		evidence.FailureDetail = protocol.BoundedDetail(err.Error())
 		return service.failAndRollback(ctx, evidence, preparation, "restore_boot_state_failed")

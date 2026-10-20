@@ -5,7 +5,7 @@ downloads code, opens a network listener, or exposes a shell. Every protocol
 operation and CLI flag is explicitly allowlisted and bounded.
 
 - `rndevtools-sim-helper` is a first-party Go protocol adapter linked to an exact,
-  checked-in snapshot of SimSlim v0.8.0. It discovers the default iOS Simulator
+  checked-in snapshot of SimSlim v0.12.2. It discovers the default iOS Simulator
   device set, reads managed launchd overrides, projects the pinned service
   catalog, previews and verifies profiles, runs capability diagnostics, and
   performs compatibility-gated experimental apply, restore, and undo
@@ -23,10 +23,11 @@ operation and CLI flag is explicitly allowlisted and bounded.
   Protocol v3 also performs bounded, nondestructive PNG/JPEG Capture Design Studio
   compositions inside a helper-owned private workspace. Inputs and outputs are staged by
   Electron main; the renderer and helper protocol never exchange application paths.
-  Protocol v4 is the sole mutation broker for the Go simulator helper. It authenticates
-  the live production-signed Electron parent against the build's pinned Apple Team ID,
-  validates the exact manifest bytes against the parent app's resource seal, binds both
-  native executables to the same build, and verifies the suspended helper's exact live
+  Protocol v4 is the sole mutation broker for the Go simulator helper. It requires the
+  live production-signed Electron parent to carry the native host's own Apple Team ID
+  (the Go helper pins that team at build time from `APPLE_TEAM_ID`), validates the
+  exact manifest bytes against the parent app's resource seal, binds both native
+  executables to the same build, and verifies the suspended helper's exact live
   CodeDirectory identity before delivering an operation/UDID/exact-request-bound one-shot
   authorization on inherited FD 3. A separately marked private control pipe on FD 4
   requests graceful cancellation and gives helper rollback its full bounded grace period.
@@ -37,8 +38,10 @@ operation and CLI flag is explicitly allowlisted and bounded.
 
 The simulator helper consumes protocol v2. The native host keeps its exact
 protocol-v1 surface for the existing Electron client, adds the protocol-v2
-`capability_status` operation, protocol-v3 `compose_image`, and protocol-v4's
-signed-parent `run_simulator_mutation` broker. Both consume one bounded JSON object from
+`capability_status` operation, protocol-v3 `compose_image`, protocol-v4's
+signed-parent `run_simulator_mutation` broker, and protocol-v5's
+`send_simulator_input` (taps, swipes, typed text, keys, and hardware buttons
+over SimulatorKit's HID transport; see PROTOCOL.md). Both consume one bounded JSON object from
 standard input, emit one bounded JSON object to standard output, and exit. The
 CLI uses its separately versioned local-socket contract. The build emits a
 SHA-256 manifest beside all three binaries. On macOS, the packaging hook first
@@ -69,21 +72,21 @@ cannot perform real mutations.
 Build the current architecture:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:build
-pnpm --dir apps/devtools-desktop native:verify
-pnpm --dir apps/devtools-desktop native:verify:capabilities
+pnpm --filter @rndevtools/desktop native:build
+pnpm --filter @rndevtools/desktop native:verify
+pnpm --filter @rndevtools/desktop native:verify:capabilities
 ```
 
 Build both supported macOS architectures:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:build:all
+pnpm --filter @rndevtools/desktop native:build:all
 ```
 
 Run source checks:
 
 ```bash
-pnpm --dir apps/devtools-desktop native:check
+pnpm --filter @rndevtools/desktop native:check
 ```
 
 The Go gate runs formatting, vet, race tests, a hermetic two-module dependency
