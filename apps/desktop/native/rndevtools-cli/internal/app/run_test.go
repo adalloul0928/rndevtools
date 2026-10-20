@@ -158,9 +158,17 @@ func readRequestLikeTheDesktop(connection net.Conn) (string, bool) {
 }
 
 func TestRunServesMCPOverStdio(t *testing.T) {
-	socketPath := appTestServer(t, func(id string) string {
+	var seen protocol.Request
+	socketPath := appTestServerCapturing(t, &seen, func(id string) string {
 		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"healthy":true}}`
 	})
+	// The injected lookup, not the developer's own session, attributes the call.
+	lookup := func(name string) string {
+		if name == "CODEX_THREAD_ID" {
+			return "thread-mcp"
+		}
+		return ""
+	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := Run(Config{
@@ -172,9 +180,16 @@ func TestRunServesMCPOverStdio(t *testing.T) {
 		Stdout:     &stdout,
 		Stderr:     &stderr,
 		SocketPath: socketPath,
+		Lookup:     lookup,
 	})
 	if exitCode != ExitSuccess {
 		t.Fatalf("exit = %d; stderr=%s", exitCode, stderr.String())
+	}
+	if seen.Agent["kind"] != "codex" || seen.Agent["sessionId"] != "thread-mcp" {
+		t.Fatalf("MCP calls must be attributed through the injected lookup: %v", seen.Agent)
+	}
+	if !strings.HasPrefix(seen.ID, "mcp-") {
+		t.Fatalf("MCP request id %q", seen.ID)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != 2 {
@@ -315,7 +330,6 @@ func appTestServerCapturing(t *testing.T, captured *protocol.Request, response f
 	if err := os.Chmod(socketPath, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { listener.Close() })
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -335,7 +349,12 @@ func appTestServerCapturing(t *testing.T, captured *protocol.Request, response f
 		*captured = request
 		_, _ = connection.Write([]byte(response(request.ID) + "\n"))
 	}()
-	t.Cleanup(func() { <-done })
+	// Close first: an Accept that no client ever reaches would never return, and
+	// a regression that skips the socket must fail its assertions, not hang.
+	t.Cleanup(func() {
+		listener.Close()
+		<-done
+	})
 	return socketPath
 }
 
@@ -367,6 +386,9 @@ func TestSupabaseCommandsCarryTheAgentOnTheEnvelopeOnly(t *testing.T) {
 	}
 	if seen.Agent["kind"] != "claude" || seen.Agent["sessionId"] != "sess-9" {
 		t.Fatalf("the envelope must attribute the call: %v", seen.Agent)
+	}
+	if !strings.HasPrefix(seen.ID, "cli-") {
+		t.Fatalf("CLI request id %q", seen.ID)
 	}
 	if !strings.Contains(stdout.String(), `"code":"supabase_disabled"`) || !strings.Contains(stdout.String(), "--runtime native") {
 		t.Fatalf("the refusal and its recovery reach stdout: %s", stdout.String())

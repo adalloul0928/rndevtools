@@ -35,11 +35,25 @@ func TestSupabaseIsACommandListedAfterLane(t *testing.T) {
 			}
 		}
 	}
-	if len(commands) != len(validCommands) {
-		t.Fatalf("Commands() lists %d of %d commands", len(commands), len(validCommands))
-	}
 	if _, err := EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"supabase","operation":"ls"}`)}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNewRequestIDIsAPrefixedRandomIdentifier(t *testing.T) {
+	first, err := NewRequestID("mcp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewRequestID("mcp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first, "mcp-") || len(first) != len("mcp-")+32 || first == second {
+		t.Fatalf("request ids %q and %q", first, second)
+	}
+	if _, err := EncodeRequest(Request{Protocol: Name, ID: first, Command: json.RawMessage(`{"kind":"doctor"}`)}); err != nil {
+		t.Fatalf("a generated id must be a valid request id: %v", err)
 	}
 }
 

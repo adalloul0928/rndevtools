@@ -112,7 +112,7 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 	if err := connection.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return protocol.Response{}, &ClientError{Kind: ErrorTransport, Op: "set socket deadline", Cause: err}
 	}
-	if err := writeAll(connection, append(encoded, '\n')); err != nil {
+	if _, err := connection.Write(append(encoded, '\n')); err != nil {
 		return protocol.Response{}, failed("write request", err)
 	}
 	unixConnection, ok := connection.(*net.UnixConn)
@@ -130,22 +130,15 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 	limited := &io.LimitedReader{R: connection, N: protocol.MaxResponseBytes + 1}
 	reader := bufio.NewReaderSize(limited, 64*1024)
 	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		if len(line) > protocol.MaxResponseBytes {
-			return protocol.Response{}, &ClientError{
-				Kind:  ErrorProtocol,
-				Op:    "read response",
-				Cause: fmt.Errorf("response exceeds %d bytes", protocol.MaxResponseBytes),
-			}
-		}
-		return protocol.Response{}, failed("read response", err)
-	}
 	if len(line) > protocol.MaxResponseBytes {
 		return protocol.Response{}, &ClientError{
 			Kind:  ErrorProtocol,
 			Op:    "read response",
 			Cause: fmt.Errorf("response exceeds %d bytes", protocol.MaxResponseBytes),
 		}
+	}
+	if err != nil {
+		return protocol.Response{}, failed("read response", err)
 	}
 	line = line[:len(line)-1]
 	if len(line) > 0 && line[len(line)-1] == '\r' {
@@ -237,18 +230,4 @@ func classifyNetworkError(operation string, err error) error {
 		kind = ErrorTimeout
 	}
 	return &ClientError{Kind: kind, Op: operation, Cause: err}
-}
-
-func writeAll(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		written, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[written:]
-	}
-	return nil
 }

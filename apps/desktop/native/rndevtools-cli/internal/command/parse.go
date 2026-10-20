@@ -198,18 +198,10 @@ func AgentFromEnvironment(lookup func(string) string) map[string]any {
 	return nil
 }
 
-func Parse(
-	kind protocol.Command,
-	arguments []string,
-	stdin io.Reader,
-	stdinAvailable bool,
-) (Parsed, error) {
-	return ParseWithEnvironment(kind, arguments, stdin, stdinAvailable, nil)
-}
-
-// ParseWithEnvironment is Parse plus agent attribution read from `lookup`
-// (normally os.Getenv). Attribution is attached only to lane commands that
-// accept it and only when the caller did not already provide one.
+// ParseWithEnvironment parses a command's flags and optional stdin object into
+// a validated command. Agent attribution is read from `lookup` (normally
+// os.Getenv); it is attached only to lane commands that accept it and only
+// when the caller did not already provide one.
 func ParseWithEnvironment(
 	kind protocol.Command,
 	arguments []string,

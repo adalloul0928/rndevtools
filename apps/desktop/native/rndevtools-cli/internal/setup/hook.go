@@ -79,11 +79,6 @@ func readPreToolUse(input io.Reader) (shellCall, bool) {
 	return shellCall{command: payload.ToolInput.Command, cwd: payload.Cwd}, true
 }
 
-// EvaluateShellCommand applies the steering rules to one shell command line.
-func EvaluateShellCommand(command string) HookDecision {
-	return evaluateShellCall(shellCall{command: command})
-}
-
 func evaluateShellCall(call shellCall) HookDecision {
 	return evaluateShellCallWith(call, defaultSupabaseEnvironment())
 }

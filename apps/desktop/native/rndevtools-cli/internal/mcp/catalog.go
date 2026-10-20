@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/adalloul0928/rndevtools-cli/internal/command"
@@ -63,8 +62,7 @@ type meta struct {
 	description string
 	// readOnly means every operation of the tool only observes. It becomes
 	// the readOnlyHint, and setup lets Kiro run these tools without asking.
-	readOnly    bool
-	destructive bool
+	readOnly bool
 }
 
 // ReadOnlyTools names the tools whose every operation only observes, in list
@@ -233,8 +231,6 @@ var toolMeta = map[protocol.Command]meta{
 
 // Resources: read-only views an agent can pull without a tool call.
 
-var udidPattern = regexp.MustCompile(`(?i)^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$`)
-
 func staticResources() []map[string]any {
 	return []map[string]any{
 		{
@@ -298,7 +294,7 @@ func (server *Server) readResource(ctx context.Context, params json.RawMessage) 
 		return server.jsonResource(ctx, request.URI, protocol.CommandAgents, map[string]any{})
 	case strings.HasPrefix(path, "screen/"):
 		udid := strings.TrimPrefix(path, "screen/")
-		if !udidPattern.MatchString(udid) {
+		if !command.ValidUDID(udid) {
 			return nil, &rpcError{Code: codeInvalidParams, Message: "screen resources are addressed by Simulator UDID"}
 		}
 		return server.screenResource(ctx, request.URI, strings.ToUpper(udid))

@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -171,7 +172,9 @@ func run(options Options, write bool) (Report, error) {
 				return report, err
 			}
 		case AgentKiro:
-			extra := map[string]any{"disabled": false, "autoApprove": readOnlyTools()}
+			// Kiro runs the tools the MCP server marks read-only without asking, so
+			// the two lists cannot drift; tools that change state still ask.
+			extra := map[string]any{"disabled": false, "autoApprove": mcp.ReadOnlyTools()}
 			if err := record(writeJSONServers(filepath.Join(options.Home, ".kiro", "settings", "mcp.json"), "mcpServers", options.Executable, extra, write)); err != nil {
 				return report, err
 			}
@@ -264,18 +267,6 @@ func serverEntry(executable string, extra map[string]any) map[string]any {
 		entry[key] = value
 	}
 	return entry
-}
-
-// readOnlyTools lists the tools Kiro may run without a prompt: the ones the
-// MCP server marks read-only, so the two lists cannot drift. Tools that drive
-// a device, cancel a job, or slim a Simulator still ask.
-func readOnlyTools() []any {
-	names := mcp.ReadOnlyTools()
-	tools := make([]any, len(names))
-	for index, name := range names {
-		tools[index] = name
-	}
-	return tools
 }
 
 func writeJSONServers(path string, key string, executable string, extra map[string]any, write bool) (Change, error) {
@@ -595,17 +586,7 @@ func skillDirectories(options Options, agents []Agent) []string {
 		}
 	}
 	sort.Strings(directories)
-	return unique(directories)
-}
-
-func unique(values []string) []string {
-	out := values[:0]
-	for index, value := range values {
-		if index == 0 || value != values[index-1] {
-			out = append(out, value)
-		}
-	}
-	return out
+	return slices.Compact(directories)
 }
 
 func installSkill(skillsDirectory string, name string, write bool) (Change, error) {

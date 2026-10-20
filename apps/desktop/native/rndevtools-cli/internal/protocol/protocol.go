@@ -2,10 +2,13 @@ package protocol
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
@@ -39,29 +42,6 @@ const (
 	CommandRelease    Command = "release"
 	CommandInput      Command = "input"
 )
-
-var validCommands = map[Command]struct{}{
-	CommandDoctor:     {},
-	CommandSimulators: {},
-	CommandApps:       {},
-	CommandScreen:     {},
-	CommandElements:   {},
-	CommandAct:        {},
-	CommandWait:       {},
-	CommandCapture:    {},
-	CommandRecord:     {},
-	CommandNetwork:    {},
-	CommandRecipe:     {},
-	CommandJobs:       {},
-	CommandSlimming:   {},
-	CommandLane:       {},
-	CommandSupabase:   {},
-	CommandNative:     {},
-	CommandAgents:     {},
-	CommandClaim:      {},
-	CommandRelease:    {},
-	CommandInput:      {},
-}
 
 type Request struct {
 	Protocol string          `json:"protocol"`
@@ -114,10 +94,20 @@ func Commands() []Command {
 
 func ParseCommand(value string) (Command, error) {
 	command := Command(value)
-	if _, ok := validCommands[command]; !ok {
+	if !slices.Contains(Commands(), command) {
 		return "", fmt.Errorf("unsupported command %q", value)
 	}
 	return command, nil
+}
+
+// NewRequestID is prefix followed by 128 random bits in hex. The prefix names
+// the peer that made the request (cli-, mcp-).
+func NewRequestID(prefix string) (string, error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate request id: %w", err)
+	}
+	return prefix + hex.EncodeToString(random), nil
 }
 
 func EncodeRequest(request Request) ([]byte, error) {
@@ -204,7 +194,7 @@ func validateRequest(request Request) error {
 	if err := decoder.Decode(&command); err != nil {
 		return errors.New("command must be a JSON object")
 	}
-	if _, ok := validCommands[command.Kind]; !ok {
+	if !slices.Contains(Commands(), command.Kind) {
 		return fmt.Errorf("unsupported command %q", command.Kind)
 	}
 	return requireEOF(decoder)

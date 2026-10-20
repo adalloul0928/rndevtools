@@ -18,7 +18,7 @@ func TestDescribeMirrorsTheFlagTable(t *testing.T) {
 		if len(fields) != len(commandFields[kind]) {
 			t.Fatalf("%s: %d fields described, %d flags defined", kind, len(fields), len(commandFields[kind]))
 		}
-		for _, field := range fields {
+		for index, field := range fields {
 			switch field.Type {
 			case "string", "integer", "number", "boolean", "object":
 			case "array":
@@ -28,7 +28,7 @@ func TestDescribeMirrorsTheFlagTable(t *testing.T) {
 			default:
 				t.Fatalf("%s.%s: unexpected type %q", kind, field.Name, field.Type)
 			}
-			if field.Usage == "" || len(field.Path) == 0 {
+			if field.Usage == "" || len(commandFields[kind][index].path) == 0 {
 				t.Fatalf("%s.%s: missing usage or path", kind, field.Name)
 			}
 		}

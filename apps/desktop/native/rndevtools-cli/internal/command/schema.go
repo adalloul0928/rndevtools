@@ -730,8 +730,13 @@ func validAbsolutePath(value string) bool {
 	return strings.HasPrefix(value, "/") && len(value) >= 2 && len(value) <= 1024 && !strings.ContainsRune(value, 0)
 }
 
+// ValidUDID reports whether value has the shape of a Simulator UDID.
+func ValidUDID(value string) bool {
+	return udidPattern.MatchString(value)
+}
+
 func validateUDID(value string) error {
-	if !udidPattern.MatchString(value) {
+	if !ValidUDID(value) {
 		return errors.New("udid is invalid")
 	}
 	return nil

@@ -13,6 +13,11 @@ import (
 
 const testUDID = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
 
+// Parse is ParseWithEnvironment with no environment, so no agent is attributed.
+func Parse(kind protocol.Command, arguments []string, stdin io.Reader, stdinAvailable bool) (Parsed, error) {
+	return ParseWithEnvironment(kind, arguments, stdin, stdinAvailable, nil)
+}
+
 func TestValidateMatchesServerCommandUnion(t *testing.T) {
 	tests := map[protocol.Command]string{
 		protocol.CommandDoctor:     `{"kind":"doctor"}`,

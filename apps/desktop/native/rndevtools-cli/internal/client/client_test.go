@@ -70,9 +70,10 @@ func TestClientHalfClosesAfterExactlyOneRequestBeforeReadingResponse(t *testing.
 		if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("expected the client write half to close: %w", err)
 		}
-		return writeAllForTest(connection, []byte(
-			`{"protocol":"rndevtools/1","id":"`+testID+`","ok":true,"result":{}}`+"\n",
+		_, err = connection.Write([]byte(
+			`{"protocol":"rndevtools/1","id":"` + testID + `","ok":true,"result":{}}` + "\n",
 		))
+		return err
 	})
 	localClient, err := New(socketPath, time.Second)
 	if err != nil {
@@ -260,14 +261,15 @@ func TestClientReadsAnAnswerLedByLivenessProbes(t *testing.T) {
 			return err
 		}
 		for range 3 {
-			if err := writeAllForTest(connection, []byte(" ")); err != nil {
+			if _, err := connection.Write([]byte(" ")); err != nil {
 				return err
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		return writeAllForTest(connection, []byte(
-			`{"protocol":"rndevtools/1","id":"`+testID+`","ok":true,"result":{"slow":true}}`+"\n",
+		_, err := connection.Write([]byte(
+			`{"protocol":"rndevtools/1","id":"` + testID + `","ok":true,"result":{"slow":true}}` + "\n",
 		))
+		return err
 	})
 	localClient, err := New(socketPath, time.Second)
 	if err != nil {
@@ -375,18 +377,4 @@ func assertClientError(t *testing.T, err error, kind ErrorKind) {
 	if !errors.As(err, &clientError) || clientError.Kind != kind {
 		t.Fatalf("error = %v, want kind %s", err, kind)
 	}
-}
-
-func writeAllForTest(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		written, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		data = data[written:]
-	}
-	return nil
 }

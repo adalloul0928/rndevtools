@@ -9,9 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +64,6 @@ type Config struct {
 	Lookup func(string) string
 	// ReadFile loads a capture for embedding; defaults to os.ReadFile.
 	ReadFile func(string) ([]byte, error)
-	Logger   io.Writer
 }
 
 // Server is one stdio MCP session.
@@ -87,9 +84,6 @@ func New(config Config) *Server {
 	}
 	if config.ReadFile == nil {
 		config.ReadFile = os.ReadFile
-	}
-	if config.Logger == nil {
-		config.Logger = io.Discard
 	}
 	return &Server{config: config, linger: cancelLinger}
 }
@@ -584,9 +578,11 @@ func Tools() []Tool {
 			Title:       meta.title,
 			Description: meta.description,
 			InputSchema: schema,
+			// No tool is destructive; destructiveHint is stated anyway because MCP
+			// reads an absent one as true.
 			Annotations: map[string]any{
 				"readOnlyHint":    meta.readOnly,
-				"destructiveHint": meta.destructive,
+				"destructiveHint": false,
 				"idempotentHint":  meta.readOnly,
 				"openWorldHint":   false,
 			},
@@ -628,7 +624,7 @@ func (server *Server) callTool(ctx context.Context, params json.RawMessage) (any
 }
 
 func (server *Server) send(ctx context.Context, parsed command.Parsed) (protocol.Response, error) {
-	requestID, err := newRequestID()
+	requestID, err := protocol.NewRequestID("mcp-")
 	if err != nil {
 		return protocol.Response{}, err
 	}
@@ -758,12 +754,4 @@ func compact(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return buffer.String()
-}
-
-func newRequestID() (string, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return "", fmt.Errorf("generate request id: %w", err)
-	}
-	return "mcp-" + hex.EncodeToString(random), nil
 }

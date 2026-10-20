@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +73,7 @@ func Run(config Config) int {
 	case "hook":
 		return runHook(config)
 	}
-	requestID, err := newRequestID()
+	requestID, err := protocol.NewRequestID("cli-")
 	if err != nil {
 		writeLocalError(config.Stderr, "internal_error", err.Error(), false, "", "")
 		return ExitInternal
@@ -243,14 +241,6 @@ func writeJSON(writer io.Writer, value any) {
 	_, _ = writer.Write(append(encoded, '\n'))
 }
 
-func newRequestID() (string, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return "", fmt.Errorf("generate request id: %w", err)
-	}
-	return "cli-" + hex.EncodeToString(random), nil
-}
-
 // runMCP serves the commands over stdio as a Model Context Protocol server
 // until the client closes stdin. Diagnostics go to stderr; stdout is the
 // protocol channel and carries nothing else.
@@ -276,8 +266,7 @@ func runMCP(config Config) int {
 	server := mcp.New(mcp.Config{
 		Version:   config.Version,
 		Transport: mcp.SocketTransport(socketPath),
-		Lookup:    os.Getenv,
-		Logger:    config.Stderr,
+		Lookup:    config.lookup(),
 	})
 	if err := server.Serve(context.Background(), config.Stdin, config.Stdout); err != nil {
 		fmt.Fprintf(config.Stderr, "rndevtools mcp: %v\n", err)

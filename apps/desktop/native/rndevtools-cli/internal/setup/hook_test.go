@@ -13,6 +13,11 @@ import (
 	"github.com/adalloul0928/rndevtools-cli/internal/client"
 )
 
+// EvaluateShellCommand applies the steering rules to one shell command line.
+func EvaluateShellCommand(command string) HookDecision {
+	return evaluateShellCall(shellCall{command: command})
+}
+
 func TestHookBlocksMutatingSimctlAndHandStartedMetro(t *testing.T) {
 	for command, want := range map[string]string{
 		"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44": "lane",

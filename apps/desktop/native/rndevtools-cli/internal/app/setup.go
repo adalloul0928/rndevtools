@@ -142,7 +142,7 @@ func setupDoctor(config Config) map[string]any {
 	if err != nil {
 		return map[string]any{"ok": false, "message": err.Error()}
 	}
-	requestID, err := newRequestID()
+	requestID, err := protocol.NewRequestID("cli-")
 	if err != nil {
 		return map[string]any{"ok": false, "message": err.Error()}
 	}
@@ -283,7 +283,7 @@ func runSessionEndHook(config Config) int {
 		fmt.Fprintln(config.Stderr, "rndevtools hook session-end:", err)
 		return ExitSuccess
 	}
-	requestID, err := newRequestID()
+	requestID, err := protocol.NewRequestID("cli-")
 	if err != nil {
 		return ExitSuccess
 	}

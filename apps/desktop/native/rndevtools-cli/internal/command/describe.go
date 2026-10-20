@@ -16,8 +16,6 @@ import (
 type Field struct {
 	// Name is the flag name without dashes, e.g. "hold-ms".
 	Name string
-	// Path is where the value lands in the command object, e.g. ["input","holdMilliseconds"].
-	Path []string
 	// Type is a JSON Schema type: string, integer, number, boolean, array, or object.
 	Type string
 	// Items is the array item type when Type is "array".
@@ -33,7 +31,7 @@ func Describe(kind protocol.Command) ([]Field, bool) {
 	}
 	fields := make([]Field, 0, len(specs))
 	for _, spec := range specs {
-		field := Field{Name: spec.flagName, Path: spec.path, Usage: spec.usage}
+		field := Field{Name: spec.flagName, Usage: spec.usage}
 		switch spec.kind {
 		case fieldString:
 			field.Type = "string"
