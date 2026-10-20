@@ -231,7 +231,7 @@ describe('advanced Android diagnostic panels', () => {
 				getSnapshot: () => [
 					{
 						id: 'card',
-						name: 'Exercise card',
+						name: 'Example card',
 						bounds: { x: 0, y: 0, width: 100, height: 40 },
 					},
 				],
@@ -244,7 +244,7 @@ describe('advanced Android diagnostic panels', () => {
 		await renderPanel(diagnostics.plugin);
 
 		expect(screen.getByText('Registered targets')).toBeOnTheScreen();
-		expect(screen.getByText('Unscoped · Exercise card')).toBeOnTheScreen();
+		expect(screen.getByText('Unscoped · Example card')).toBeOnTheScreen();
 		expect(screen.getByText('Highlight target')).toBeOnTheScreen();
 		dispose?.();
 	});

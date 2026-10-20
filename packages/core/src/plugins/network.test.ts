@@ -758,7 +758,7 @@ describe('createNetworkPlugin', () => {
 					Authorization: 'Bearer secret',
 					'Content-Type': 'application/json',
 				},
-				body: '{"name":"Bench press"}',
+				body: '{"name":"Example item"}',
 			},
 		);
 		await flushCapture();
@@ -772,7 +772,7 @@ describe('createNetworkPlugin', () => {
 				requestHeaders: expect.objectContaining({
 					authorization: '[REDACTED]',
 				}),
-				requestBody: expect.stringContaining('Bench press'),
+				requestBody: expect.stringContaining('Example item'),
 				responseBody: expect.stringContaining('ok'),
 				source: 'Instrumented fetch',
 				requestSizeBytes: expect.any(Number),
@@ -888,7 +888,7 @@ describe('createNetworkPlugin', () => {
 			'https://example.test/items?token=secret&visible=yes',
 			{
 				method: 'POST',
-				body: JSON.stringify({ password: 'secret', name: 'Squat' }),
+				body: JSON.stringify({ password: 'secret', name: 'Example' }),
 			},
 		);
 		expect(diagnostics.getEvents()).toEqual([
@@ -3362,24 +3362,24 @@ describe('network presentation model', () => {
 		expect(
 			networkEventLabel(
 				networkEvent({
-					url: 'https://abc.supabase.co/rest/v1/workouts?select=id',
+					url: 'https://abc.supabase.co/rest/v1/items?select=id',
 				}),
 			),
-		).toEqual({ label: 'workouts', sourceKind: 'rest' });
+		).toEqual({ label: 'items', sourceKind: 'rest' });
 		expect(
 			networkEventLabel(
 				networkEvent({
-					url: 'https://abc.supabase.co/functions/v1/ai-coach-chat',
+					url: 'https://abc.supabase.co/functions/v1/example-function',
 				}),
 			),
-		).toEqual({ label: 'ai-coach-chat', sourceKind: 'edge function' });
+		).toEqual({ label: 'example-function', sourceKind: 'edge function' });
 		expect(
 			networkEventLabel(
 				networkEvent({
-					url: 'https://abc.supabase.co/storage/v1/object/sign/exercise_media/clip.mp4',
+					url: 'https://abc.supabase.co/storage/v1/object/sign/item_media/clip.mp4',
 				}),
 			),
-		).toEqual({ label: 'exercise_media', sourceKind: 'storage' });
+		).toEqual({ label: 'item_media', sourceKind: 'storage' });
 		expect(
 			networkEventLabel(
 				networkEvent({
@@ -3397,7 +3397,7 @@ describe('network presentation model', () => {
 	it('matches segment filters for supabase, errors, and slow requests', () => {
 		expect(
 			isSupabaseNetworkEvent(
-				networkEvent({ url: 'http://127.0.0.1:54321/rest/v1/sets' }),
+				networkEvent({ url: 'http://127.0.0.1:54321/rest/v1/items' }),
 			),
 		).toBe(true);
 		expect(
@@ -3475,7 +3475,7 @@ describe('network presentation model', () => {
 		).toBe(true);
 		expect(
 			isSystemNetworkEvent(
-				networkEvent({ url: 'http://127.0.0.1:54321/rest/v1/sets' }),
+				networkEvent({ url: 'http://127.0.0.1:54321/rest/v1/items' }),
 			),
 		).toBe(false);
 		expect(
@@ -3565,7 +3565,7 @@ describe('network presentation model', () => {
 				networkEvent({
 					durationMs: 182,
 					responseSizeBytes: 2150,
-					url: 'https://abc.supabase.co/rest/v1/workouts',
+					url: 'https://abc.supabase.co/rest/v1/items',
 				}),
 			),
 		).toBe('rest · 182 ms · 2.1 KB');
@@ -3574,7 +3574,7 @@ describe('network presentation model', () => {
 				networkEvent({
 					state: 'pending',
 					status: undefined,
-					url: 'https://abc.supabase.co/functions/v1/ai-coach-chat',
+					url: 'https://abc.supabase.co/functions/v1/example-function',
 				}),
 			),
 		).toBe('edge function · pending');
@@ -3585,7 +3585,7 @@ describe('network presentation model', () => {
 					error: 'STREAM_FAILED',
 					state: 'error',
 					status: undefined,
-					url: 'https://abc.supabase.co/functions/v1/ai-coach-chat',
+					url: 'https://abc.supabase.co/functions/v1/example-function',
 				}),
 			),
 		).toBe('edge function · 3.4 s · STREAM_FAILED');
@@ -3611,8 +3611,8 @@ describe('network presentation model', () => {
 		expect(prettyNetworkBody('{"a":1}')).toBe('{\n  "a": 1\n}');
 		expect(prettyNetworkBody('plain')).toBe('plain');
 		expect(
-			networkRequestPath('https://abc.supabase.co/rest/v1/workouts?select=id'),
-		).toBe('/rest/v1/workouts?select=id');
+			networkRequestPath('https://abc.supabase.co/rest/v1/items?select=id'),
+		).toBe('/rest/v1/items?select=id');
 		expect(detailStatusText(networkEvent())).toBe('200 OK');
 		expect(
 			detailStatusText(networkEvent({ state: 'aborted', status: undefined })),
@@ -3633,7 +3633,7 @@ describe('network presentation model', () => {
 		const command = buildCurlCommand(
 			networkEvent({
 				method: 'POST',
-				requestBody: '{"name":"Bench"}',
+				requestBody: '{"name":"Example"}',
 				requestHeaders: { 'content-type': 'application/json' },
 				url: "https://example.test/items?q=o'clock",
 			}),
@@ -3643,7 +3643,7 @@ describe('network presentation model', () => {
 		);
 		expect(command).toContain("-H 'content-type: application/json'");
 		expect(command).toContain(`--data-raw '{`);
-		expect(command).toContain(`"name":"Bench"`);
+		expect(command).toContain(`"name":"Example"`);
 	});
 
 	describe('replay safety', () => {
@@ -3652,7 +3652,7 @@ describe('network presentation model', () => {
 				networkReplayBlockReason(
 					networkEvent({
 						method: 'POST',
-						requestBody: defaultRedactBody('{"sets":[1,2,3]}'),
+						requestBody: defaultRedactBody('{"items":[1,2,3]}'),
 					}),
 				),
 			).toBeUndefined();
@@ -3671,10 +3671,10 @@ describe('network presentation model', () => {
 			// The per-level entry cap silently shortens the array, so the projected
 			// body still parses as JSON and would otherwise look complete.
 			const body = defaultRedactBody(
-				JSON.stringify({ sets: Array.from({ length: 150 }, (_, i) => i) }),
+				JSON.stringify({ items: Array.from({ length: 150 }, (_, i) => i) }),
 			);
 			expect(
-				JSON.parse(body.split('\n[Body truncated')[0] ?? '').sets,
+				JSON.parse(body.split('\n[Body truncated')[0] ?? '').items,
 			).toHaveLength(100);
 			expect(
 				networkReplayBlockReason(
@@ -5907,8 +5907,8 @@ describe('network presentation model', () => {
 			'https://example.test/items?token=query-secret',
 			{
 				headers: {
-					'x-request-id': 'coach-request-7',
-					'x-parent-event-id': 'coach-turn-3',
+					'x-request-id': 'request-7',
+					'x-parent-event-id': 'parent-3',
 				},
 			},
 		);
@@ -5917,8 +5917,8 @@ describe('network presentation model', () => {
 		const detail = diagnostics.getEvents()[0];
 		expect(detail).toEqual(
 			expect.objectContaining({
-				correlationId: 'coach-request-7',
-				parentEventId: 'coach-turn-3',
+				correlationId: 'request-7',
+				parentEventId: 'parent-3',
 				cacheStatus: 'hit',
 				timing: expect.objectContaining({
 					totalMs: expect.any(Number),
@@ -5930,8 +5930,8 @@ describe('network presentation model', () => {
 		expect(event).toEqual(
 			expect.objectContaining({
 				kind: 'network.request',
-				correlationId: 'coach-request-7',
-				parentEventId: 'coach-turn-3',
+				correlationId: 'request-7',
+				parentEventId: 'parent-3',
 				resourceRef: {
 					toolId: 'network',
 					resourceId: `${detail?.sessionId}:${detail?.id}`,

@@ -334,9 +334,9 @@ describe('createNavigationPlugin', () => {
 		const navigation = createNavigationPlugin();
 		navigation.updateRoutes([
 			{
-				id: 'workout',
-				path: '/workouts/[id]',
-				kind: inferNavigationRouteKind('/workouts/[id]'),
+				id: 'item',
+				path: '/items/[id]',
+				kind: inferNavigationRouteKind('/items/[id]'),
 			},
 		]);
 		navigation.updateStack([
@@ -549,11 +549,11 @@ describe('createNavigationPlugin', () => {
 	});
 	it('derives human names from the last meaningful path segment', () => {
 		expect(navigationRouteDisplayName('/(tabs)/(home)')).toBe('Home');
-		expect(navigationRouteDisplayName('/train/session/[sessionId]')).toBe(
+		expect(navigationRouteDisplayName('/items/session/[sessionId]')).toBe(
 			'Session Id',
 		);
-		expect(navigationRouteDisplayName('/train/workout-complete')).toBe(
-			'Workout Complete',
+		expect(navigationRouteDisplayName('/items/item-complete')).toBe(
+			'Item Complete',
 		);
 		expect(navigationRouteDisplayName('/')).toBe('Root');
 	});
@@ -570,18 +570,18 @@ describe('Screens panel', () => {
 			const navigation = createNavigationPlugin({
 				onNavigate,
 			});
-			navigation.record('/plan');
+			navigation.record('/projects');
 			navigation.updateRoutes([
 				{
-					id: 'block',
-					path: '/plan/block/[blockId]',
+					id: 'task',
+					path: '/projects/task/[taskId]',
 					kind: 'dynamic',
 				},
 			]);
 			navigation.updateStack([
 				{
-					key: 'plan',
-					name: 'plan',
+					key: 'projects',
+					name: 'projects',
 					depth: 0,
 					visible: true,
 				},
@@ -589,16 +589,16 @@ describe('Screens panel', () => {
 			await renderPanel(navigation.plugin);
 			expect(screen.getByText('Stack · 1')).toBeOnTheScreen();
 			await fireEvent.press(screen.getByText('Pin screen'));
-			expect(getPinnedRoutes()).toContain('/plan/block/[blockId]');
-			const blockRoute = screen.getAllByText('Block Id')[0];
-			if (!blockRoute) throw new Error('Expected an Android route row.');
-			await fireEvent.press(blockRoute);
+			expect(getPinnedRoutes()).toContain('/projects/task/[taskId]');
+			const taskRoute = screen.getAllByText('Task Id')[0];
+			if (!taskRoute) throw new Error('Expected an Android route row.');
+			await fireEvent.press(taskRoute);
 			await fireEvent.changeText(
-				screen.getByPlaceholderText('blockId'),
-				'blk_81',
+				screen.getByPlaceholderText('taskId'),
+				'tsk_81',
 			);
 			await fireEvent.press(screen.getByText('Go'));
-			expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
+			expect(onNavigate).toHaveBeenCalledWith('/projects/task/tsk_81');
 			await fireEvent.press(screen.getByText('Clear history'));
 			expect(navigation.getEvents()).toEqual([]);
 			expect(panelProps.actions.run).toHaveBeenCalledWith(
@@ -675,13 +675,13 @@ describe('Screens panel', () => {
 			});
 			navigation.updateRoutes([
 				{
-					id: 'train',
-					path: '/(tabs)/(train)',
+					id: 'items',
+					path: '/(tabs)/(items)',
 					kind: 'group',
 				},
 				{
-					id: 'block',
-					path: '/plan/block/[blockId]',
+					id: 'task',
+					path: '/projects/task/[taskId]',
 					kind: 'dynamic',
 				},
 				{
@@ -695,23 +695,23 @@ describe('Screens panel', () => {
 		const first = await renderPanel(makePlugin().plugin);
 		expect(screen.getByText('TABS')).toBeOnTheScreen();
 		expect(screen.getByText('All screens · 2')).toBeOnTheScreen();
-		await fireEvent.press(screen.getByText('Train'));
-		expect(onNavigate).toHaveBeenCalledWith('/(tabs)/(train)');
-		await fireEvent.press(screen.getByText('Block Id'));
+		await fireEvent.press(screen.getByText('Items'));
+		expect(onNavigate).toHaveBeenCalledWith('/(tabs)/(items)');
+		await fireEvent.press(screen.getByText('Task Id'));
 		await fireEvent.changeText(
-			screen.getByPlaceholderText(/^blockId(?: — last: blk_81)?$/),
-			'blk_81',
+			screen.getByPlaceholderText(/^taskId(?: — last: tsk_81)?$/),
+			'tsk_81',
 		);
 		await fireEvent.press(screen.getByLabelText('Go'));
-		expect(onNavigate).toHaveBeenCalledWith('/plan/block/blk_81');
+		expect(onNavigate).toHaveBeenCalledWith('/projects/task/tsk_81');
 		expect(screen.queryByText('/(tabs)/_layout')).not.toBeOnTheScreen();
 		await fireEvent.press(screen.getByText('Internal & layouts · 1'));
 		expect(screen.getByText('/(tabs)/_layout')).toBeOnTheScreen();
 		await first.unmount();
 		await renderPanel(makePlugin().plugin);
-		await fireEvent.press(screen.getByText('Block Id'));
+		await fireEvent.press(screen.getByText('Task Id'));
 		expect(
-			screen.getByPlaceholderText('blockId — last: blk_81'),
+			screen.getByPlaceholderText('taskId — last: tsk_81'),
 		).toBeOnTheScreen();
 	});
 	it('pins and unpins routes through swipe actions and the module store', async () => {
@@ -722,8 +722,8 @@ describe('Screens panel', () => {
 		});
 		navigation.updateRoutes([
 			{
-				id: 'coach',
-				path: '/(tabs)/(coach)',
+				id: 'inbox',
+				path: '/(tabs)/(inbox)',
 				kind: 'group',
 			},
 		]);
@@ -733,9 +733,9 @@ describe('Screens panel', () => {
 			screen.getByText('Swipe any screen to pin it here.'),
 		).toBeOnTheScreen();
 		await fireEvent.press(screen.getByLabelText('Pin'));
-		expect(getPinnedRoutes()).toEqual(['/(tabs)/(coach)']);
+		expect(getPinnedRoutes()).toEqual(['/(tabs)/(inbox)']);
 		expect(pinListener).toHaveBeenCalled();
-		expect(screen.getAllByText('/(tabs)/(coach)')).toHaveLength(2);
+		expect(screen.getAllByText('/(tabs)/(inbox)')).toHaveLength(2);
 		expect(screen.getByTestId('sf-star.fill')).toBeOnTheScreen();
 		const [unpinButton] = screen.getAllByLabelText('Unpin');
 		if (!unpinButton) throw new Error('missing Unpin swipe action');
@@ -769,8 +769,8 @@ describe('Screens panel', () => {
 		});
 		navigation.updateRoutes([
 			{
-				id: 'train',
-				path: '/(tabs)/(train)',
+				id: 'items',
+				path: '/(tabs)/(items)',
 				kind: 'group',
 			},
 			{
@@ -785,10 +785,10 @@ describe('Screens panel', () => {
 		).toBeOnTheScreen();
 		await fireEvent.changeText(
 			screen.getByPlaceholderText('myapp://…'),
-			'myapp://train',
+			'myapp://items',
 		);
 		await fireEvent.press(screen.getByLabelText('Open'));
-		expect(onOpenDeepLink).toHaveBeenCalledWith('myapp://train');
+		expect(onOpenDeepLink).toHaveBeenCalledWith('myapp://items');
 		await waitFor(() =>
 			expect(
 				navigation.getTransitions().map((transition) => transition.phase),
@@ -797,10 +797,10 @@ describe('Screens panel', () => {
 		expect(screen.getByText('/(onboarding)')).toBeOnTheScreen();
 		await fireEvent.changeText(
 			screen.getByPlaceholderText('Jump to any screen…'),
-			'train',
+			'items',
 		);
 		expect(screen.queryByText('/(onboarding)')).not.toBeOnTheScreen();
-		expect(screen.getByText('/(tabs)/(train)')).toBeOnTheScreen();
+		expect(screen.getByText('/(tabs)/(items)')).toBeOnTheScreen();
 		expect(screen.getByText('All screens · 1')).toBeOnTheScreen();
 	});
 	it('lists recent distinct routes and the full history disclosure', async () => {
@@ -809,13 +809,13 @@ describe('Screens panel', () => {
 			onNavigate,
 		});
 		navigation.record('/subscribe');
-		navigation.record('/train/complete');
+		navigation.record('/items/complete');
 		navigation.record('/subscribe');
 		navigation.record('/home');
 		await renderPanel(navigation.plugin);
 		expect(screen.getByText('Recent')).toBeOnTheScreen();
 		expect(screen.getAllByText(/\/subscribe · /)).toHaveLength(1);
-		expect(screen.getByText(/\/train\/complete · /)).toBeOnTheScreen();
+		expect(screen.getByText(/\/items\/complete · /)).toBeOnTheScreen();
 		await fireEvent.press(screen.getByText('Subscribe'));
 		expect(onNavigate).toHaveBeenCalledWith('/subscribe');
 		await fireEvent.press(screen.getByText('History · 4'));

@@ -1048,10 +1048,10 @@ describe('sanitizeDiagnosticValue', () => {
 	});
 
 	it('reports a value referenced twice in one tree without calling it a cycle', () => {
-		const shared = { id: 'exercise-1', reps: 8 };
+		const shared = { id: 'item-1', count: 8 };
 		const projection = sanitizeDiagnosticValueWithMetadata({
 			current: shared,
-			exercises: [shared],
+			items: [shared],
 		});
 		const serialized = JSON.stringify(projection.value);
 		expect(serialized).not.toContain('[Circular]');

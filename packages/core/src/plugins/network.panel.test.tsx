@@ -296,7 +296,7 @@ async function seededDiagnostics() {
 		patchGlobalFetch: true,
 	});
 	const disposePlugin = diagnostics.plugin.install?.();
-	await globalThis.fetch('https://abc.supabase.co/rest/v1/workouts?select=id');
+	await globalThis.fetch('https://abc.supabase.co/rest/v1/items?select=id');
 	await globalThis.fetch('https://o123.ingest.sentry.io/api/1/envelope/', {
 		method: 'POST',
 	});
@@ -313,7 +313,7 @@ describe('NetworkPanel', () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
 		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);
 
-		expect(screen.getByText('workouts')).toBeOnTheScreen();
+		expect(screen.getByText('items')).toBeOnTheScreen();
 		expect(screen.queryByTestId('devtools-network-row-2')).toBeNull();
 		expect(screen.getByText('1 hidden')).toBeOnTheScreen();
 
@@ -322,7 +322,7 @@ describe('NetworkPanel', () => {
 		expect(screen.getByText('1 shown')).toBeOnTheScreen();
 
 		await fireEvent.press(screen.getByLabelText('network-filter-errors'));
-		expect(screen.queryByText('workouts')).toBeNull();
+		expect(screen.queryByText('items')).toBeNull();
 		expect(screen.getByText('No matches')).toBeOnTheScreen();
 
 		await disposeDiagnostics(dispose);
@@ -365,10 +365,10 @@ describe('NetworkPanel', () => {
 		// list must come back unfiltered rather than behind an empty search box.
 		await fireEvent.changeText(
 			screen.getByTestId('devtools-network-search'),
-			'workouts',
+			'items',
 		);
 		await fireEvent.press(screen.getByTestId('devtools-network-row-1'));
-		expect(screen.getByText('GET workouts')).toBeOnTheScreen();
+		expect(screen.getByText('GET items')).toBeOnTheScreen();
 		expect(screen.getByText('Overview')).toBeOnTheScreen();
 		expect(screen.getByText('Timing')).toBeOnTheScreen();
 		expect(screen.getByText('Transport / response')).toBeOnTheScreen();
@@ -596,7 +596,7 @@ describe('NetworkPanel', () => {
 		await fireEvent.press(screen.getByTestId('devtools-network-resend'));
 		await waitFor(() => {
 			expect(baseFetch).toHaveBeenCalledWith(
-				'https://abc.supabase.co/rest/v1/workouts?select=id',
+				'https://abc.supabase.co/rest/v1/items?select=id',
 				expect.objectContaining({ method: 'GET' }),
 			);
 		});
@@ -643,7 +643,7 @@ describe('NetworkPanel', () => {
 		});
 
 		expect(baseFetch).toHaveBeenCalledWith(
-			'https://abc.supabase.co/rest/v1/workouts?select=id',
+			'https://abc.supabase.co/rest/v1/items?select=id',
 			expect.objectContaining({ method: 'GET', headers: {} }),
 		);
 		await disposeDiagnostics(dispose);
@@ -840,7 +840,7 @@ describe('NetworkPanel', () => {
 			patchGlobalFetch: true,
 		});
 		const dispose = diagnostics.plugin.install?.();
-		const body = '{"name":"Bench","sets":3}';
+		const body = '{"name":"Example","count":3}';
 		try {
 			await globalThis.fetch('https://example.test/safe-json', {
 				method: 'POST',
@@ -923,7 +923,7 @@ describe('NetworkPanel', () => {
 		try {
 			await globalThis.fetch('https://example.test/secret-json', {
 				method: 'POST',
-				body: '{"password":"shared-secret","name":"Bench"}',
+				body: '{"password":"shared-secret","name":"Example"}',
 			});
 			await flushCapture();
 			expect(diagnostics.getEvents()[0]).toEqual(
@@ -957,13 +957,13 @@ describe('NetworkPanel', () => {
 				.fn()
 				.mockResolvedValue(response('{"ok":true}')) as unknown as typeof fetch,
 		);
-		await instrumented('https://abc.supabase.co/rest/v1/workouts', {
+		await instrumented('https://abc.supabase.co/rest/v1/items', {
 			method: 'POST',
 			headers: {
 				authorization: 'Bearer real-token',
 				accept: 'application/json',
 			},
-			body: '{"name":"Push"}',
+			body: '{"name":"Example"}',
 		});
 		await flushCapture();
 		const actions = createActions();
