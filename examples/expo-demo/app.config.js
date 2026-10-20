@@ -1,15 +1,13 @@
-// Expo evaluates this file instead of app.json when both exist. The static
-// app.json stays the source of truth for the app's identity (scheme, bundle
-// identifier) so tools that only read JSON, like RN Devtools lanes, see the
-// same values; this file only adds settings that need Node to resolve.
-const appJson = require('./app.json');
+// Expo reads app.json first and passes its `expo` object, with defaults filled
+// in, to this function as `config`. The static app.json stays the source of
+// truth for the app's identity (scheme, bundle identifier) so tools that only
+// read JSON, like RN Devtools lanes, see the same values; this file only adds
+// settings that need Node to resolve.
 
 /** @type {import('expo/config').ConfigContext} */
 module.exports = ({ config }) => ({
-	...appJson.expo,
 	...config,
 	experiments: {
-		...appJson.expo.experiments,
 		...config.experiments,
 		// Share native builds across git worktrees so parallel lanes of the same
 		// native shell install a cached dev client instead of rebuilding it.
