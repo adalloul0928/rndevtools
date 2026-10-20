@@ -17,7 +17,6 @@ import {
 import {
 	isPathWithin,
 	nodeStaticFileSystem,
-	STATIC_READ_LIMIT_BYTES,
 	type StaticFileSystem,
 } from './bounded-read';
 import type {
@@ -30,7 +29,6 @@ import {
 	detectSupabaseProject,
 	type SupabaseProjectDetection,
 } from './project';
-import { scanTomlAssignments } from './static-config';
 
 /**
  * Repository readiness for local Supabase: one summary per repository Lanes
@@ -237,17 +235,6 @@ async function countMigrationFiles(projectRoot: string): Promise<number> {
 	return count;
 }
 
-async function bucketsConfiguredIn(
-	fs: StaticFileSystem,
-	configPath: string
-): Promise<boolean> {
-	const read = await fs.readText(configPath, STATIC_READ_LIMIT_BYTES);
-	if (read.status !== 'ok') return false;
-	return scanTomlAssignments(read.text).some(
-		(entry) => entry.path[0] === 'storage' && entry.path[1] === 'buckets'
-	);
-}
-
 async function mapLimited<T, R>(
 	items: readonly T[],
 	limit: number,
@@ -385,9 +372,9 @@ export async function inspectSupabaseRepositories(
 					let migrationCount = 0;
 					let expected: string | undefined;
 					if (detection.status === 'found') {
-						[cli, bucketsConfigured, migrationCount] = await Promise.all([
+						bucketsConfigured = detection.bucketsConfigured === true;
+						[cli, migrationCount] = await Promise.all([
 							resolveCliSafely(input, detection, realRoot),
-							bucketsConfiguredIn(fs, detection.configPath),
 							countMigrations(detection.projectRoot),
 						]);
 						if (head.status === 'ok') {

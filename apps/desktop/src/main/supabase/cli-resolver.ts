@@ -1,6 +1,10 @@
-import { constants as fsConstants } from 'node:fs';
-import { lstat, open, realpath, stat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import {
+	isPathStrictlyWithin,
+	isPathWithin,
+	readBoundedText,
+} from './bounded-read';
 import { parseSupabaseVersion } from './cli-contract';
 import type { SupabaseCliRunner } from './cli-runner';
 import {
@@ -158,20 +162,9 @@ async function readBoundedTextFile(
 	filePath: string,
 	maxBytes: number
 ): Promise<string> {
-	const handle = await open(
-		filePath,
-		fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
-	);
-	try {
-		const info = await handle.stat();
-		if (!info.isFile() || info.size > maxBytes)
-			throw new Error('unexpected file');
-		const buffer = Buffer.alloc(info.size);
-		const { bytesRead } = await handle.read(buffer, 0, info.size, 0);
-		return buffer.subarray(0, bytesRead).toString('utf8');
-	} finally {
-		await handle.close();
-	}
+	const read = await readBoundedText(filePath, maxBytes, { noFollow: true });
+	if (read.status !== 'ok') throw new Error('unexpected file');
+	return read.text;
 }
 
 const nodeResolverFs: SupabaseResolverFsPort = {
@@ -259,23 +252,9 @@ function absoluteInput(value: unknown, field: string): string {
 	return path.resolve(value);
 }
 
-function isWithin(
-	candidate: string,
-	root: string,
-	allowEqual: boolean
-): boolean {
-	const relative = path.relative(root, candidate);
-	if (relative === '') return allowEqual;
-	return (
-		relative !== '..' &&
-		!relative.startsWith(`..${path.sep}`) &&
-		!path.isAbsolute(relative)
-	);
-}
-
 /** `start` and each ancestor up to and including `root`. */
 function lineage(start: string, root: string, field: string): string[] {
-	if (!isWithin(start, root, true)) {
+	if (!isPathWithin(root, start)) {
 		throw new TypeError(`${field} must be inside the worktree root.`);
 	}
 	const directories: string[] = [];
@@ -380,7 +359,7 @@ export class SupabaseCliResolver {
 		const shimRoot = await this.#realpath(path.dirname(shimManifest));
 		if (shimRoot === undefined)
 			return unavailable('invalid-package', shimManifest);
-		if (!allowedRoots.some((root) => isWithin(shimRoot, root, false))) {
+		if (!allowedRoots.some((root) => isPathStrictlyWithin(root, shimRoot))) {
 			return unavailable('outside-worktree', shimRoot);
 		}
 		const shimVersion = await this.#packageVersion(shimRoot, SHIM_PACKAGE);
@@ -407,7 +386,9 @@ export class SupabaseCliResolver {
 		if (platformRoot === undefined) {
 			return unavailable('platform-package-missing', platformManifest);
 		}
-		if (!allowedRoots.some((root) => isWithin(platformRoot, root, false))) {
+		if (
+			!allowedRoots.some((root) => isPathStrictlyWithin(root, platformRoot))
+		) {
 			return unavailable('outside-worktree', platformRoot);
 		}
 		const platformVersion = await this.#packageVersion(
@@ -562,7 +543,9 @@ export class SupabaseCliResolver {
 		const binaryPath = await this.#realpath(input.candidate);
 		if (binaryPath === undefined)
 			return unavailable('binary-missing', input.candidate);
-		if (!input.allowedRoots.some((root) => isWithin(binaryPath, root, false))) {
+		if (
+			!input.allowedRoots.some((root) => isPathStrictlyWithin(root, binaryPath))
+		) {
 			return unavailable('outside-worktree', binaryPath);
 		}
 		if (before.uid !== this.#uid)
@@ -623,7 +606,7 @@ export class SupabaseCliResolver {
 			const result = await this.#runner.run({
 				binaryPath,
 				argv: buildSupabaseArgv(null, operation),
-				phase: 1,
+				readOnly: true,
 				cwd: this.#probeCwd,
 				timeoutMs: budget.timeoutMs,
 				interruptGraceMs: budget.interruptGraceMs,

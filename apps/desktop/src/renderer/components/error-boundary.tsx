@@ -1,17 +1,13 @@
 import { Button } from '@heroui/react/button';
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import { CircleAlert, RotateCcw, Smartphone } from 'lucide-react';
 import { Component, type ReactNode } from 'react';
+import { errorText } from '@/lib/runtime-action';
 import { panelRecovery, SIMULATORS_PANEL } from '@/lib/shell-navigation';
 
 type ErrorBoundaryState = {
 	// Boxed, so a thrown `undefined` or `null` still shows the fallback.
 	failure: { error: unknown } | null;
 };
-
-function failureText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
 
 // The hash names the view that just failed, and a plain reload would render
 // it again, so the app reloads into the Simulators panel.
@@ -43,7 +39,7 @@ export class DesktopErrorBoundary extends Component<
 				</div>
 				<p className="fatal-error-eyebrow">Renderer failure</p>
 				<h1>RN Devtools could not render this view</h1>
-				<p>{failureText(this.state.failure.error)}</p>
+				<p>{errorText(this.state.failure.error)}</p>
 				<Button variant="secondary" onPress={reloadIntoSimulators}>
 					<RotateCcw className="h-3.5 w-3.5" /> Reload desktop app
 				</Button>
@@ -90,7 +86,7 @@ export class PanelErrorBoundary extends Component<
 				</div>
 				<p className="fatal-error-eyebrow">Panel failure</p>
 				<h1>{this.props.label} could not render</h1>
-				<p>{failureText(this.state.failure.error)}</p>
+				<p>{errorText(this.state.failure.error)}</p>
 				<Button variant="secondary" onPress={this.#recover}>
 					{recovery.kind === 'retry' ? (
 						<RotateCcw className="h-3.5 w-3.5" />

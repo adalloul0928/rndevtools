@@ -142,6 +142,8 @@ export type SupabaseProjectDetection =
 			stackFlag: StackFlag;
 			/** `supabase/config.json` exists; CLI routing would prefer it. */
 			configConflict: boolean;
+			/** config.toml declares storage buckets (`[storage.buckets.<name>]`). */
+			bucketsConfigured?: true;
 			projectId?: string;
 			studioEnabled?: boolean;
 			analyticsEnabled?: boolean;
@@ -401,6 +403,9 @@ async function detect(
 	const s3ProtocolEnabled = assignments
 		? booleanAt(assignments, ['storage', 's3_protocol', 'enabled'])
 		: undefined;
+	const bucketsConfigured = assignments?.some(
+		(entry) => entry.path[0] === 'storage' && entry.path[1] === 'buckets'
+	);
 	return {
 		status: 'found',
 		appRoot,
@@ -411,6 +416,7 @@ async function detect(
 			? stackFlagFrom(assignments)
 			: { optedIn: false, reason: 'unreadable-config' },
 		configConflict: conflictKind !== 'missing',
+		...(bucketsConfigured ? { bucketsConfigured } : {}),
 		...(projectId !== undefined ? { projectId } : {}),
 		...(studioEnabled !== undefined ? { studioEnabled } : {}),
 		...(analyticsEnabled !== undefined ? { analyticsEnabled } : {}),

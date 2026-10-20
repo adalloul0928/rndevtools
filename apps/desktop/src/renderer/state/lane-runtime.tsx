@@ -1,4 +1,3 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -9,6 +8,12 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import type { ActionStatus } from '@/lib/action-notice';
+import {
+	errorText,
+	nextActionId,
+	type WithoutActionId,
+} from '@/lib/runtime-action';
 import {
 	DEFAULT_LANE_ENVIRONMENTS,
 	type LaneBridge,
@@ -16,12 +21,6 @@ import {
 	type LaneOperationReceipt,
 	type LaneState,
 } from '../../shared/lane-protocol';
-
-type LaneActionStatus =
-	| { kind: 'idle'; message: '' }
-	| { kind: 'pending'; message: string }
-	| { kind: 'success'; message: string }
-	| { kind: 'error'; message: string };
 
 /**
  * The run that put a notice up, and the operation it ran: its kind and the
@@ -32,7 +31,7 @@ type LaneNoticeOwner = Readonly<{ actionId: string; subject: string }>;
 
 /** The shared Lanes notice and the run that put it up, if any. */
 type LaneNotice = Readonly<{
-	status: LaneActionStatus;
+	status: ActionStatus;
 	owner: LaneNoticeOwner | null;
 }>;
 
@@ -102,9 +101,6 @@ export function settleLaneNotice(
 	return replaced ? IDLE_NOTICE : notice;
 }
 
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId'>
-	: never;
 type LaneOperationInput = WithoutActionId<LaneOperation>;
 
 /**
@@ -195,7 +191,7 @@ type LaneRuntimeValue = {
 	isBridgeAvailable: boolean;
 	/** Operation kind currently in flight, or null. */
 	pendingOperation: LaneOperation['kind'] | null;
-	actionStatus: LaneActionStatus;
+	actionStatus: ActionStatus;
 	clearActionStatus: () => void;
 	refresh: () => Promise<void>;
 	runOperation: (
@@ -239,10 +235,6 @@ function laneBridge(): LaneBridge | null {
 		return null;
 	}
 	return candidate as LaneBridge;
-}
-
-function errorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
 }
 
 export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
@@ -308,7 +300,7 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 			}
 			const operation = {
 				...input,
-				actionId: `lane-${crypto.randomUUID()}`,
+				actionId: nextActionId('lane'),
 			} as LaneOperation;
 			setPendingOperation(operation.kind);
 			if (messages.pendingMessage) {

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { hasSupabaseControlCharacters } from './engine-support';
 
 /**
  * Supabase CLI dialects: the CLI releases RN Devtools has verified, what each
@@ -329,7 +330,7 @@ export type SupabaseArgvErrorReason =
 	| 'feature'
 	| 'invalid-input'
 	| 'not-allowed'
-	| 'phase';
+	| 'read-only';
 
 /** Raised before anything is spawned. Messages never echo argument values. */
 export class SupabaseArgvError extends Error {
@@ -372,7 +373,7 @@ const FEATURE_FOR_KIND: Partial<
  * Builds the argv for one operation. `null` is accepted only for `version`,
  * which is how a binary's dialect is found in the first place. Inputs are
  * re-validated here because they may have crossed IPC; the result is then
- * checked against the same allowlist assertArgvAllowedForPhase uses.
+ * checked against the same allowlist assertSupabaseArgvAllowed uses.
  */
 export function buildSupabaseArgv(
 	dialect: null,
@@ -581,14 +582,6 @@ function unknownOperation(operation: never): never {
 	);
 }
 
-function hasControlCharacters(value: string): boolean {
-	for (let index = 0; index < value.length; index += 1) {
-		const code = value.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
-
 function isStackId(value: string): boolean {
 	return STACK_ID_PATTERN.test(value);
 }
@@ -600,7 +593,7 @@ function isAbsolutePath(value: string): boolean {
 		path.isAbsolute(value) &&
 		path.normalize(value) === value &&
 		!value.endsWith('/') &&
-		!hasControlCharacters(value)
+		!hasSupabaseControlCharacters(value)
 	);
 }
 
@@ -778,13 +771,17 @@ function inspectReportOf(value: unknown): SupabaseInspectReport {
 	return report;
 }
 
-function isLoopbackDatabaseUrl(
+/**
+ * A postgres URL on 127.0.0.1 or [::1] with no fragment, whitespace or
+ * control characters; with `requireTlsDisabled`, one sslmode=disable too.
+ */
+export function isLoopbackDatabaseUrl(
 	value: string,
 	requireTlsDisabled: boolean
 ): boolean {
 	if (
 		value.length > MAX_DATABASE_URL_LENGTH ||
-		hasControlCharacters(value) ||
+		hasSupabaseControlCharacters(value) ||
 		/\s/.test(value)
 	) {
 		return false;
@@ -1094,7 +1091,7 @@ function identifySupabaseArgv(
 				typeof token !== 'string' ||
 				token.length === 0 ||
 				token.length > MAX_ARGUMENT_LENGTH ||
-				hasControlCharacters(token)
+				hasSupabaseControlCharacters(token)
 		)
 	) {
 		throw argvViolation('argv must be a short list of plain strings');
@@ -1142,76 +1139,30 @@ function identifySupabaseArgv(
 	return spec.kind;
 }
 
-/**
- * Rollout phases that change which CLI surfaces the desktop may run.
- */
-export type SupabaseRolloutPhase = 1 | 3 | 4 | 5;
-
-const READ_ONLY_KINDS = [
+/** The commands a read-only run, such as a binary's version probe, may run. */
+const READ_ONLY_KINDS: ReadonlySet<SupabaseCliOperationKind> = new Set([
 	'version',
 	'stack.list',
 	'stack.status',
 	'stack.logs',
 	'migration.list',
 	'inspect',
-] as const satisfies readonly SupabaseCliOperationKind[];
-const LIFECYCLE_KINDS = [
-	'stack.start',
-	'stack.stop',
-	'stack.restart',
-	'stack.prepare',
-] as const satisfies readonly SupabaseCliOperationKind[];
-const DESTROY_KINDS = [
-	'stack.destroy',
-] as const satisfies readonly SupabaseCliOperationKind[];
-const DATABASE_MUTATION_KINDS = [
-	'migration.up',
-	'db.reset',
-	'seed.buckets',
-	'db.dump',
-] as const satisfies readonly SupabaseCliOperationKind[];
-
-function phaseKinds(
-	...groups: (readonly SupabaseCliOperationKind[])[]
-): readonly SupabaseCliOperationKind[] {
-	return Object.freeze(groups.flat());
-}
+]);
 
 /**
- * The operations each rollout phase may run: Phase 1 is read-only, Phase 3
- * adds the lifecycle, Phase 4 destroy, Phase 5 database mutations and export.
+ * Throws unless `argv` is a well-formed command, and with `readOnly` one
+ * that changes nothing. Run it on every argv right before spawning. Returns
+ * the operation kind the argv performs.
  */
-export const SUPABASE_ARGV_ALLOWLIST: Readonly<
-	Record<SupabaseRolloutPhase, readonly SupabaseCliOperationKind[]>
-> = Object.freeze({
-	1: phaseKinds(READ_ONLY_KINDS),
-	3: phaseKinds(READ_ONLY_KINDS, LIFECYCLE_KINDS),
-	4: phaseKinds(READ_ONLY_KINDS, LIFECYCLE_KINDS, DESTROY_KINDS),
-	5: phaseKinds(
-		READ_ONLY_KINDS,
-		LIFECYCLE_KINDS,
-		DESTROY_KINDS,
-		DATABASE_MUTATION_KINDS
-	),
-});
-
-/**
- * Throws unless `argv` is a well-formed command the given rollout phase
- * allows. Run it on every argv right before spawning. Returns the operation
- * kind the argv performs.
- */
-export function assertArgvAllowedForPhase(
-	phase: SupabaseRolloutPhase,
-	argv: readonly string[]
+export function assertSupabaseArgvAllowed(
+	argv: readonly string[],
+	readOnly = false
 ): SupabaseCliOperationKind {
 	const kind = identifySupabaseArgv(argv);
-	// A phase outside the table (a cast from untyped input) allows nothing.
-	const allowed: readonly SupabaseCliOperationKind[] | undefined =
-		SUPABASE_ARGV_ALLOWLIST[phase];
-	if (allowed?.includes(kind) !== true) {
+	if (readOnly && !READ_ONLY_KINDS.has(kind)) {
 		throw new SupabaseArgvError(
-			'phase',
-			`${kind} is not enabled in rollout phase ${String(phase)}.`
+			'read-only',
+			`${kind} is not allowed in a read-only run.`
 		);
 	}
 	return kind;

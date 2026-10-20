@@ -28,8 +28,6 @@ describe('simulatorTools', () => {
 			label: 'Supabase',
 			shortcut: 8,
 			group: 'backend',
-			description:
-				'Track, start, stop and clean up one local Supabase stack per worktree and branch.',
 		});
 		expect(simulatorTools.find((tool) => tool.id === 'settings')).toMatchObject(
 			{ shortcut: 9, group: 'system' }

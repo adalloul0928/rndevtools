@@ -1,4 +1,5 @@
 import {
+	SUPABASE_MIN_FREE_SYSV_SEGMENTS,
 	SUPABASE_POLICY_DEFAULTS,
 	SUPABASE_REASONS,
 	type SupabaseState,
@@ -20,8 +21,6 @@ export const SUPABASE_CREATION_CONCURRENCY = 1;
 export const SUPABASE_LIFECYCLE_CONCURRENCY = 2;
 /** At most this many Supabase CLI children run at once, reads included. */
 export const SUPABASE_MAX_CLI_CHILDREN = 4;
-/** A start needs two free SysV segments: its postmaster plus a shadow. */
-export const SUPABASE_MIN_FREE_SYSV_SEGMENTS = 2;
 
 type MemoryPressure = SupabaseState['capacity']['memoryPressure'];
 
@@ -131,12 +130,6 @@ export type SupabaseAdmissionDecision =
 			message: string;
 	  }>;
 
-function sysvMessage(free: number): string {
-	return free === 1
-		? 'Only 1 Postgres slot is free; a start needs 2. Stop an idle stack first.'
-		: 'No Postgres slot is free; a start needs 2. Stop an idle stack first.';
-}
-
 /**
  * Whether a start may go ahead now. Critical memory pressure refuses; a full
  * cap or too few free SysV segments stops the least recently used unheld
@@ -173,7 +166,11 @@ export function decideSupabaseAdmission(
 		if (free < SUPABASE_MIN_FREE_SYSV_SEGMENTS) {
 			return next
 				? { kind: 'stop-lru', stackId: next.stackId, reason: 'sysv' }
-				: { kind: 'refuse', reason: 'sysv', message: sysvMessage(free) };
+				: {
+						kind: 'refuse',
+						reason: 'sysv',
+						message: SUPABASE_REASONS.sysv(free),
+					};
 		}
 	}
 	const warnings: SupabaseAdmissionWarning[] = [];

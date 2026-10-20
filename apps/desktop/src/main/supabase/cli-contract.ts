@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { inspect } from 'node:util';
 import { z } from 'zod';
+import { isLoopbackHttpUrl } from '../../shared/supabase-protocol';
 import { sanitizeSupabaseText } from './cli-redact';
+import { isLoopbackDatabaseUrl } from './dialect';
 
 /**
  * Projections of the Supabase CLI's `--output-format json` surfaces at the
@@ -179,46 +181,6 @@ export type SupabasePublicEndpoints = Readonly<{
 const PUBLISHABLE_KEY = /^sb_publishable_[A-Za-z0-9_-]{8,256}$/;
 const ANON_KEY = /^eyJ[\w-]+\.[\w-]+\.[\w-]*$/;
 
-function loopbackHttpUrl(value: string): string | undefined {
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		return undefined;
-	}
-	const loopback = url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-	const canonical = url.href === value || url.href === `${value}/`;
-	return url.protocol === 'http:' &&
-		loopback &&
-		url.port !== '' &&
-		url.username === '' &&
-		url.password === '' &&
-		url.search === '' &&
-		url.hash === '' &&
-		canonical
-		? value
-		: undefined;
-}
-
-function loopbackDatabaseUrl(value: string | undefined): string | undefined {
-	if (value === undefined) return undefined;
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		return undefined;
-	}
-	const portNumber = Number(url.port);
-	return (url.protocol === 'postgresql:' || url.protocol === 'postgres:') &&
-		(url.hostname === '127.0.0.1' || url.hostname === '[::1]') &&
-		Number.isInteger(portNumber) &&
-		portNumber >= 1 &&
-		portNumber <= 65_535 &&
-		url.hash === ''
-		? value
-		: undefined;
-}
-
 const environmentSchema = z.object({
 	API_URL: text(256).optional(),
 	REST_URL: text(256).optional(),
@@ -241,14 +203,13 @@ function projectEnvironment(
 	const env: ProjectedEnvironment = environment ?? {};
 	const url = (name: string, value: string | undefined) => {
 		if (value === undefined) return undefined;
-		const valid = loopbackHttpUrl(value);
 		// A URL that is not loopback http is never handed on, so fail closed.
-		if (valid === undefined) {
+		if (!isLoopbackHttpUrl(value)) {
 			throw new SupabaseContractError(surface, [
 				`env.${name}: not_loopback_http`,
 			]);
 		}
-		return valid;
+		return value;
 	};
 	const apiUrl = url('API_URL', env.API_URL);
 	const restUrl = url('REST_URL', env.REST_URL);
@@ -280,13 +241,13 @@ function projectEnvironment(
 		env.ANON_KEY !== undefined && ANON_KEY.test(env.ANON_KEY)
 			? env.ANON_KEY
 			: undefined;
+	const dbUrl =
+		env.DB_URL !== undefined && isLoopbackDatabaseUrl(env.DB_URL, false)
+			? env.DB_URL
+			: undefined;
 	return {
 		publicEndpoints,
-		credentials: new MainOnlyCredentials({
-			publishableKey,
-			anonKey,
-			dbUrl: loopbackDatabaseUrl(env.DB_URL),
-		}),
+		credentials: new MainOnlyCredentials({ publishableKey, anonKey, dbUrl }),
 	};
 }
 

@@ -25,10 +25,7 @@ import {
 	LaneSlimBadge,
 	WorktreeLabel,
 } from '@/components/lane-ui';
-import {
-	SimulatorMetric,
-	SimulatorPanelHeader,
-} from '@/components/simulator-ui';
+import { SimulatorMetric } from '@/components/simulator-ui';
 import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	ConfirmAction,
@@ -37,6 +34,7 @@ import {
 	Disclosure,
 	InfoPopover,
 	KeyValue,
+	PanelHeader,
 	PanelNotice,
 	StatusPill,
 } from '@/components/ui';
@@ -84,7 +82,6 @@ import {
 import type { SimulatorDevice } from '../../../shared/simulator-protocol';
 import type { SlimmingProfile } from '../../../shared/slimming-protocol';
 import {
-	isSupabaseControlEnabled,
 	type SupabaseState,
 	supabaseStackTitle,
 } from '../../../shared/supabase-protocol';
@@ -238,7 +235,7 @@ export function LanesPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<>
 						<Button
@@ -604,7 +601,6 @@ function StartLaneForm({
 	const worktree = worktrees.find(
 		(candidate) => candidate.path === worktreePath
 	);
-	const showBackend = isSupabaseControlEnabled('lane-backend');
 	const suffixes = useMemo(
 		() =>
 			new Map(
@@ -662,11 +658,11 @@ function StartLaneForm({
 							? { slimProfileId }
 							: {}),
 						// Only a choice other than the environment's default travels.
-						...(showBackend && backend.backend !== undefined
+						...(backend.backend !== undefined
 							? { backend: backend.backend }
 							: {}),
 					},
-					{ startsBackend: showBackend && backend.starts }
+					{ startsBackend: backend.starts }
 				);
 			}}
 		>
@@ -771,34 +767,32 @@ function StartLaneForm({
 						</NativeSelect.Trigger>
 					</NativeSelect>
 				</div>
-				{showBackend ? (
-					<div className="sim-toolbar-field">
-						<span>Backend</span>
-						<NativeSelect fullWidth={false}>
-							<NativeSelect.Trigger
-								aria-describedby={backendHintId}
-								aria-label="Lane backend"
-								disabled={!backend.availability.allowed}
-								value={backend.value}
-								onChange={(event) => {
-									const next = backend.options.find(
-										(option) => option.value === event.currentTarget.value
-									);
-									if (next) setBackendChoice(next.value);
-								}}
-							>
-								{backend.options.map((option) => (
-									<NativeSelect.Option key={option.value} value={option.value}>
-										{option.label}
-									</NativeSelect.Option>
-								))}
-								<NativeSelect.Indicator>
-									<ChevronDown className="h-3 w-3" />
-								</NativeSelect.Indicator>
-							</NativeSelect.Trigger>
-						</NativeSelect>
-					</div>
-				) : null}
+				<div className="sim-toolbar-field">
+					<span>Backend</span>
+					<NativeSelect fullWidth={false}>
+						<NativeSelect.Trigger
+							aria-describedby={backendHintId}
+							aria-label="Lane backend"
+							disabled={!backend.availability.allowed}
+							value={backend.value}
+							onChange={(event) => {
+								const next = backend.options.find(
+									(option) => option.value === event.currentTarget.value
+								);
+								if (next) setBackendChoice(next.value);
+							}}
+						>
+							{backend.options.map((option) => (
+								<NativeSelect.Option key={option.value} value={option.value}>
+									{option.label}
+								</NativeSelect.Option>
+							))}
+							<NativeSelect.Indicator>
+								<ChevronDown className="h-3 w-3" />
+							</NativeSelect.Indicator>
+						</NativeSelect.Trigger>
+					</NativeSelect>
+				</div>
 				<Button
 					isDisabled={!canStart}
 					size="sm"
@@ -812,18 +806,16 @@ function StartLaneForm({
 					<FolderPlus className="h-3.5 w-3.5" /> Track repository
 				</Button>
 			</div>
-			{showBackend ? (
-				backend.availability.allowed ? (
-					<p className="sim-field-help lane-backend-hint" id={backendHintId}>
-						<DatabaseZap aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-						<span>{backend.hint}</span>
-					</p>
-				) : (
-					<div>
-						<DisabledReason id={backendHintId}>{backend.hint}</DisabledReason>
-					</div>
-				)
-			) : null}
+			{backend.availability.allowed ? (
+				<p className="sim-field-help lane-backend-hint" id={backendHintId}>
+					<DatabaseZap aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+					<span>{backend.hint}</span>
+				</p>
+			) : (
+				<div>
+					<DisabledReason id={backendHintId}>{backend.hint}</DisabledReason>
+				</div>
+			)}
 			<p className="sim-inline-note lane-start-hint">
 				{environment ? (
 					<>
@@ -1067,14 +1059,13 @@ function LaneBackendSection({
 	);
 	const view = laneBackendView(lane, state, now);
 	if (!view) return null;
-	const restart =
-		view.needsMetroRestart && isSupabaseControlEnabled('restart-metro')
-			? laneRestartMetroAvailability(lane, {
-					bridgeAvailable: isBridgeAvailable,
-					state,
-					pending: laneBusy || isPending(`lane:${lane.id}`),
-				})
-			: undefined;
+	const restart = view.needsMetroRestart
+		? laneRestartMetroAvailability(lane, {
+				bridgeAvailable: isBridgeAvailable,
+				state,
+				pending: laneBusy || isPending(`lane:${lane.id}`),
+			})
+		: undefined;
 	const stop = laneStopBackend(view.stack, state, {
 		bridgeAvailable: isBridgeAvailable,
 		pending: view.stack ? isStackPending(view.stack.id) : false,

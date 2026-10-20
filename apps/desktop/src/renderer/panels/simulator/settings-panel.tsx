@@ -21,10 +21,10 @@ import { type ComponentType, useMemo, useState } from 'react';
 import {
 	BridgeUnavailableNotice,
 	RefreshSimulatorsButton,
-	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
 import {
 	Disclosure,
+	PanelHeader,
 	PanelNotice,
 	ReadinessRow,
 	type ReadinessStatus,
@@ -42,7 +42,6 @@ import type {
 	SimulatorNativeState,
 } from '../../../shared/simulator-protocol';
 import {
-	isSupabaseControlEnabled,
 	SUPABASE_REASONS,
 	type SupabaseState,
 	supabasePlatformLabel,
@@ -277,7 +276,7 @@ export function SettingsPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={<RefreshSimulatorsButton />}
 				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected app."
 				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
@@ -305,9 +304,7 @@ export function SettingsPanel() {
 						</div>
 						<Disclosure title="Optional features & permissions">
 							<div className="sim-capability-list">
-								{isSupabaseControlEnabled('global-settings-row') ? (
-									<LocalSupabaseRow />
-								) : null}
+								<LocalSupabaseRow />
 								{capabilities
 									.filter((capability) => !capability.required)
 									.map(renderCapability)}

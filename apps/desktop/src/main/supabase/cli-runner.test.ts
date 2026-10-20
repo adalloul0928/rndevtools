@@ -362,7 +362,7 @@ describe('SupabaseCliRunner.run', () => {
 		const result = await runnerWith(spawn).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 20_000,
 		});
@@ -384,7 +384,7 @@ describe('SupabaseCliRunner.run', () => {
 		});
 	});
 
-	it('checks argv against the rollout phase before spawning anything', async () => {
+	it('checks argv against the allowlist before spawning anything', async () => {
 		const cwd = await tempDirectory();
 		const { spawn, calls } = fakeSpawn();
 		const runner = runnerWith(spawn);
@@ -392,16 +392,15 @@ describe('SupabaseCliRunner.run', () => {
 			runner.run({
 				binaryPath: BINARY,
 				argv: startArgv,
-				phase: 1,
+				readOnly: true,
 				cwd,
 				timeoutMs: 1_000,
 			})
-		).rejects.toMatchObject({ reason: 'phase' });
+		).rejects.toMatchObject({ reason: 'read-only' });
 		await expect(
 			runner.run({
 				binaryPath: BINARY,
 				argv: ['stack', 'stop', '--all', '--output-format', 'json'],
-				phase: 5,
 				cwd,
 				timeoutMs: 1_000,
 			})
@@ -410,7 +409,7 @@ describe('SupabaseCliRunner.run', () => {
 			runner.run({
 				binaryPath: 'supabase',
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd,
 				timeoutMs: 1_000,
 			})
@@ -429,7 +428,7 @@ describe('SupabaseCliRunner.run', () => {
 			runnerWith(spawn).run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd: 'relative/cwd',
 				timeoutMs: 1_000,
 			})
@@ -438,7 +437,7 @@ describe('SupabaseCliRunner.run', () => {
 			runnerWith(spawn).run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd: link,
 				timeoutMs: 1_000,
 			})
@@ -447,7 +446,7 @@ describe('SupabaseCliRunner.run', () => {
 			runnerWith(spawn, { uid: uid + 1 }).run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd: real,
 				timeoutMs: 1_000,
 			})
@@ -460,7 +459,7 @@ describe('SupabaseCliRunner.run', () => {
 		await runnerWith(finishing).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd: real,
 			timeoutMs: 1_000,
 		});
@@ -481,7 +480,7 @@ describe('SupabaseCliRunner.run', () => {
 		const result = await runnerWith(spawn).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 1_000,
 		});
@@ -517,7 +516,7 @@ describe('SupabaseCliRunner.run', () => {
 		const result = await runnerWith(spawn).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 1_000,
 			onStderrLine: (line) => {
@@ -548,7 +547,7 @@ describe('SupabaseCliRunner.run', () => {
 		const pending = runnerWith(spawn, { clock }).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 1_000,
 			interruptGraceMs: 45_000,
@@ -586,7 +585,7 @@ describe('SupabaseCliRunner.run', () => {
 		const pending = runnerWith(spawn, { clock }).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 100,
 			interruptGraceMs: 5_000,
@@ -622,7 +621,7 @@ describe('SupabaseCliRunner.run', () => {
 		const pending = runnerWith(spawn, { clock }).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 1_000,
 		});
@@ -652,7 +651,7 @@ describe('SupabaseCliRunner.run', () => {
 		const pending = runnerWith(spawn).run({
 			binaryPath: BINARY,
 			argv: listArgv,
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 20_000,
 			signal: controller.signal,
@@ -674,7 +673,7 @@ describe('SupabaseCliRunner.run', () => {
 			runnerWith(spawn).run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd,
 				timeoutMs: 20_000,
 				signal: aborted.signal,
@@ -690,7 +689,7 @@ describe('SupabaseCliRunner.run', () => {
 			.run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd,
 				timeoutMs: 1_000,
 			})
@@ -705,7 +704,7 @@ describe('SupabaseCliRunner.run', () => {
 			runnerWith(throwing).run({
 				binaryPath: BINARY,
 				argv: listArgv,
-				phase: 1,
+				readOnly: true,
 				cwd,
 				timeoutMs: 1_000,
 			})
@@ -731,7 +730,7 @@ describe('SupabaseCliRunner.run', () => {
 				runnerWith(spawn).run({
 					binaryPath: BINARY,
 					argv: listArgv,
-					phase: 1,
+					readOnly: true,
 					cwd,
 					...budget,
 				})
@@ -843,7 +842,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 		const handle = await setup.runner.spawnDetached({
 			binaryPath: BINARY,
 			argv: startArgv,
-			phase: 3,
 			cwd: setup.cwd,
 			timeoutMs: 300_000,
 			progressDirectory: setup.progressDirectory,
@@ -894,7 +892,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 		const handle = await setup.runner.spawnDetached({
 			binaryPath: BINARY,
 			argv: startArgv,
-			phase: 3,
 			cwd: setup.cwd,
 			timeoutMs: 300_000,
 			progressDirectory: setup.progressDirectory,
@@ -929,7 +926,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 		const handle = await setup.runner.spawnDetached({
 			binaryPath: BINARY,
 			argv: startArgv,
-			phase: 3,
 			cwd: setup.cwd,
 			timeoutMs: 1_000,
 			interruptGraceMs: 2_000,
@@ -958,7 +954,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 			runner.spawnDetached({
 				binaryPath: BINARY,
 				argv: startArgv,
-				phase: 3,
 				cwd: setup.cwd,
 				timeoutMs: 1_000,
 				progressDirectory: setup.progressDirectory,
@@ -976,7 +971,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 			setup.runner.spawnDetached({
 				binaryPath: BINARY,
 				argv: startArgv,
-				phase: 3,
 				cwd: setup.cwd,
 				timeoutMs: 1_000,
 				progressDirectory: setup.progressDirectory,
@@ -988,7 +982,6 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 			runnerWith(failing.spawn, { clock: setup.clock }).spawnDetached({
 				binaryPath: BINARY,
 				argv: startArgv,
-				phase: 3,
 				cwd: setup.cwd,
 				timeoutMs: 1_000,
 				progressDirectory: setup.progressDirectory,
@@ -1000,13 +993,13 @@ describe('SupabaseCliRunner.spawnDetached', () => {
 			setup.runner.spawnDetached({
 				binaryPath: BINARY,
 				argv: startArgv,
-				phase: 1,
+				readOnly: true,
 				cwd: setup.cwd,
 				timeoutMs: 1_000,
 				progressDirectory: setup.progressDirectory,
 				progressLabel: 'start',
 			})
-		).rejects.toMatchObject({ reason: 'phase' });
+		).rejects.toMatchObject({ reason: 'read-only' });
 	});
 });
 

@@ -25,7 +25,7 @@ import {
 import { AgentCliError } from '../agent-cli-service';
 import { parseSupabaseDbReset } from './cli-contract';
 import { SUPABASE_BRANCH_MOVED_TITLE } from './cli-errors';
-import { hasSupabaseControlCharacters } from './engine-support';
+import { hasSupabaseControlCharacters, supabaseWithin } from './engine-support';
 import { initialSupabaseJobSteps } from './job-store';
 import type { SupabaseWorktreeFacts } from './repositories';
 import type {
@@ -278,35 +278,6 @@ function warningsFor(
 	return [...warnings].slice(0, 8);
 }
 
-/** Resolves with the value, or undefined after `ms` or an abort. */
-function within<T>(
-	engine: SupabaseEngine,
-	promise: Promise<T>,
-	ms: number,
-	signal: AbortSignal
-): Promise<T | undefined> {
-	// No wait: whatever has settled by now, else the answer is "starting".
-	if (ms <= 0) return Promise.race([promise, Promise.resolve(undefined)]);
-	return new Promise((resolve) => {
-		let done = false;
-		const finish = (value: T | undefined) => {
-			if (done) return;
-			done = true;
-			engine.timers.clearTimeout(timer);
-			signal.removeEventListener('abort', onAbort);
-			resolve(value);
-		};
-		const onAbort = () => finish(undefined);
-		const timer = engine.timers.setTimeout(
-			() => finish(undefined),
-			Math.max(0, ms)
-		);
-		if (signal.aborted) finish(undefined);
-		signal.addEventListener('abort', onAbort, { once: true });
-		promise.then(finish, () => finish(undefined));
-	});
-}
-
 async function up(
 	engine: SupabaseEngine,
 	operation: Extract<SupabaseAgentOperation, { operation: 'up' }>,
@@ -398,7 +369,12 @@ async function up(
 			},
 		})
 	);
-	const settled = await within(engine, pending, operation.waitMs, signal);
+	const settled = await supabaseWithin(
+		engine.timers,
+		pending,
+		operation.waitMs,
+		signal
+	);
 	const stackId = facts.expectedStackId as string;
 	const appEnv = engine
 		.policySnapshot()
@@ -465,7 +441,12 @@ async function up(
 		const restarts = Promise.allSettled(
 			stale.map((lane) => engine.deps.lanes.restartMetro(lane.laneId, 'attach'))
 		);
-		const done = await within(engine, restarts, METRO_RESTART_WAIT_MS, signal);
+		const done = await supabaseWithin(
+			engine.timers,
+			restarts,
+			METRO_RESTART_WAIT_MS,
+			signal
+		);
 		metro = done ? 'restarted' : 'pending';
 	}
 	return {
@@ -845,7 +826,12 @@ async function reset(
 					: { status: 'failed', error: result.error };
 			})
 	);
-	const outcome = await within(engine, done, RESET_WAIT_MS, signal);
+	const outcome = await supabaseWithin(
+		engine.timers,
+		done,
+		RESET_WAIT_MS,
+		signal
+	);
 	if (outcome && outcome.status !== 'complete') {
 		// The worktree switched branches while the reset waited its turn.
 		if (outcome.error?.title === SUPABASE_BRANCH_MOVED_TITLE) {

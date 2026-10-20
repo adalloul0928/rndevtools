@@ -1,6 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentSession, AgentState } from '../../shared/agent-protocol';
+import {
+	type AgentSession,
+	type AgentState,
+	agentSessionKey,
+} from '../../shared/agent-protocol';
 import { isPathInside } from '../../shared/device-hold';
 import type { Lane } from '../../shared/lane-protocol';
 import {
@@ -292,10 +296,6 @@ function validPort(value: number | undefined): number | undefined {
 		value <= 65_535
 		? value
 		: undefined;
-}
-
-function sessionKey(agent: { kind: string; sessionId: string }): string {
-	return `${agent.kind}:${agent.sessionId}`;
 }
 
 /** The capability whose service a composition member is. */
@@ -1111,12 +1111,12 @@ function requestView(
 ): SupabaseAgentRequest {
 	const stack =
 		record.stackId === undefined ? undefined : stacks.get(record.stackId);
-	const requesterKey = sessionKey(record.requester);
+	const requesterKey = agentSessionKey(record.requester);
 	const directory =
 		record.worktreePath ??
 		(record.stackId === undefined ? undefined : worktreeOf(record.stackId));
 	const live =
-		sessions.some((session) => sessionKey(session) === requesterKey) ||
+		sessions.some((session) => agentSessionKey(session) === requesterKey) ||
 		(record.requester.synthetic &&
 			directory !== undefined &&
 			sessions.some(
@@ -1135,7 +1135,7 @@ function requestView(
 			(hold) =>
 				hold.holder === 'operator' ||
 				hold.agent === undefined ||
-				sessionKey(hold.agent) !== requesterKey
+				agentSessionKey(hold.agent) !== requesterKey
 		)
 		.slice(0, 16)
 		.map((hold) => ({
@@ -1188,7 +1188,7 @@ function requestView(
 						ownedByRequester:
 							laneHold?.holder === 'lane' &&
 							laneHold.agent !== undefined &&
-							sessionKey(laneHold.agent) === requesterKey,
+							agentSessionKey(laneHold.agent) === requesterKey,
 					},
 				}
 			: {}),
@@ -1660,7 +1660,6 @@ export function assembleSupabaseState(
 			job.status === 'running' &&
 			(job.kind === 'create' ||
 				job.kind === 'resume' ||
-				job.kind === 'follow' ||
 				job.kind === 'recreate')
 		) {
 			for (const id of job.stackIds) startingIds.add(id);

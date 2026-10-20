@@ -1,4 +1,7 @@
-import type { AgentSession } from '../../shared/agent-protocol';
+import {
+	type AgentSession,
+	agentSessionKey,
+} from '../../shared/agent-protocol';
 import {
 	type DeviceHolder,
 	holderClockKey,
@@ -144,10 +147,6 @@ const HOLDER_ORDER: Readonly<Record<SupabaseHold['holder'], number>> = {
 	worktree: 3,
 };
 
-function sessionKey(holder: Pick<DeviceHolder, 'kind' | 'sessionId'>): string {
-	return `${holder.kind}:${holder.sessionId}`;
-}
-
 /** The hold agent for a holder: synthetic `mcp-*` identities are marked. */
 export function supabaseHoldAgent(holder: DeviceHolder): SupabaseHoldAgent {
 	return {
@@ -239,7 +238,7 @@ function isIgnored(
 	ignore: SupabaseHoldsInput['ignore']
 ): boolean {
 	if (!ignore) return false;
-	if (sessionKey(session) === sessionKey(ignore.holder)) return true;
+	if (agentSessionKey(session) === agentSessionKey(ignore.holder)) return true;
 	// A synthetic requester stands for every session of its kind; the one
 	// working where the request came from is the requester.
 	return (
@@ -257,7 +256,7 @@ export function resolveSupabaseHolds(
 ): SupabaseHoldsResult {
 	const { now, stack, policy } = input;
 	const graceMs = policy.abandonedGraceMs;
-	const liveKeys = new Set(input.sessions.map(sessionKey));
+	const liveKeys = new Set(input.sessions.map(agentSessionKey));
 	const clocks: Record<string, SupabaseHolderClock> = {};
 	const holds: SupabaseHold[] = [];
 	let paused = false;
@@ -325,7 +324,7 @@ export function resolveSupabaseHolds(
 	const liveHolders = new Set(
 		holds.flatMap((hold) =>
 			hold.live && hold.holder !== 'operator' && hold.agent
-				? [sessionKey(hold.agent)]
+				? [agentSessionKey(hold.agent)]
 				: []
 		)
 	);
@@ -345,12 +344,12 @@ export function resolveSupabaseHolds(
 			session.cwd === undefined ||
 			!isPathInside(session.cwd, stack.directory) ||
 			isIgnored(session, ignore) ||
-			liveHolders.has(sessionKey(session)) ||
+			liveHolders.has(agentSessionKey(session)) ||
 			syntheticKinds.has(session.kind)
 		) {
 			continue;
 		}
-		keepers.set(sessionKey(session), {
+		keepers.set(agentSessionKey(session), {
 			agent: supabaseHoldAgent(session),
 			cwd: session.cwd,
 		});

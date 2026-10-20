@@ -700,10 +700,10 @@ export function SectionCard({
  */
 export function Skeleton({
 	className = '',
-	rounded = 'md',
+	rounded = 'sm',
 }: {
 	className?: string;
-	rounded?: 'sm' | 'md' | 'full';
+	rounded?: 'sm' | 'full';
 }) {
 	return (
 		<span

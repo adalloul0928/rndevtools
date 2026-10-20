@@ -39,7 +39,6 @@ import {
 	useSupabaseActions,
 } from '@/state/supabase-runtime';
 import {
-	isSupabaseControlEnabled,
 	type SupabaseState,
 	supabaseActionAvailability,
 } from '../../../shared/supabase-protocol';
@@ -113,23 +112,19 @@ export function SupabaseRequestsView({
 	return (
 		<div className="supabase-body panel-scroll">
 			<div className="supabase-column">
-				{isSupabaseControlEnabled('requests') ? (
-					<AgentRequests
-						headingRef={requestsRef}
-						isBridgeAvailable={isBridgeAvailable}
-						now={now}
-						state={state}
-						onOpenSettings={onOpenSettings}
-						onOpenStack={onOpenStack}
-					/>
-				) : null}
-				{isSupabaseControlEnabled('clean-up') ? (
-					<CleanUp
-						headingRef={cleanUpRef}
-						isBridgeAvailable={isBridgeAvailable}
-						state={state}
-					/>
-				) : null}
+				<AgentRequests
+					headingRef={requestsRef}
+					isBridgeAvailable={isBridgeAvailable}
+					now={now}
+					state={state}
+					onOpenSettings={onOpenSettings}
+					onOpenStack={onOpenStack}
+				/>
+				<CleanUp
+					headingRef={cleanUpRef}
+					isBridgeAvailable={isBridgeAvailable}
+					state={state}
+				/>
 			</div>
 		</div>
 	);
@@ -250,18 +245,16 @@ function RequestCardView({
 							: {})}
 						onRun={() => onRun(approve)}
 					/>
-					{isSupabaseControlEnabled('deny-request') ? (
-						<SupabaseControlButton
-							control={{
-								label: card.deny.label,
-								availability: card.deny.availability,
-								confirmation: { kind: 'none' },
-							}}
-							icon={<X aria-hidden="true" className="h-3.5 w-3.5" />}
-							variant="ghost"
-							onRun={() => onRun({ kind: 'request.deny', requestId: card.id })}
-						/>
-					) : null}
+					<SupabaseControlButton
+						control={{
+							label: card.deny.label,
+							availability: card.deny.availability,
+							confirmation: { kind: 'none' },
+						}}
+						icon={<X aria-hidden="true" className="h-3.5 w-3.5" />}
+						variant="ghost"
+						onRun={() => onRun({ kind: 'request.deny', requestId: card.id })}
+					/>
 					{capacity ? (
 						<Button size="sm" variant="ghost" onPress={onOpenSettings}>
 							<SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" />
@@ -507,13 +500,12 @@ function PruneGroup({
 					(candidate) => candidate.id === row.stackId
 				);
 				if (!group.selectable) {
-					const reveal =
-						stack && isSupabaseControlEnabled('reveal')
-							? supabaseActionAvailability(stack, 'reveal', {
-									bridgeAvailable: isBridgeAvailable,
-									state,
-								})
-							: undefined;
+					const reveal = stack
+						? supabaseActionAvailability(stack, 'reveal', {
+								bridgeAvailable: isBridgeAvailable,
+								state,
+							})
+						: undefined;
 					return (
 						<div className="is-protected supabase-prune-row" key={row.stackId}>
 							<span className="sim-disk-category-check">

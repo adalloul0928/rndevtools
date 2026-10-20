@@ -125,7 +125,6 @@ describe('job steps', () => {
 			'seed-buckets',
 			'export',
 			'prepare',
-			'follow',
 			'studio',
 			'disable',
 		] as const) {

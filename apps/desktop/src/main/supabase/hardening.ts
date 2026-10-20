@@ -4,8 +4,7 @@ import {
 	randomBytes as nodeRandomBytes,
 	randomUUID,
 } from 'node:crypto';
-import { constants } from 'node:fs';
-import { chmod, lstat, open, rename, unlink } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { SUPABASE_PORT_OVERRIDE_NAMES } from './cli-runner';
@@ -30,7 +29,8 @@ import type { PinnedListener } from './project';
  * set lives under `<root>/keys` (0600) and is written into the worktree's
  * `supabase/.env.local`, which every CLI command reads, so an agent's bare
  * restart keeps the keys. That file is written only after `git check-ignore`
- * confirms git ignores it; fingerprints notice when someone reverts it.
+ * confirms git ignores it, and re-read on each apply, which notices when
+ * someone reverts it.
  *
  * Pinned-port leases: a repository that pins listener ports in its config
  * lets only one stack run at a time. With leases on, each worktree gets a
@@ -214,40 +214,15 @@ function managedValues(text: string): Partial<Record<KeyName, string>> {
 	return values;
 }
 
-/** Writes a regular 0600 file atomically next to its target, never through a symlink. */
-async function replaceFileAtomically(
-	file: string,
-	contents: string
-): Promise<void> {
-	const directory = path.dirname(file);
-	const temporary = path.join(
-		directory,
-		`.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`
-	);
-	const handle = await open(
-		temporary,
-		constants.O_CREAT |
-			constants.O_EXCL |
-			constants.O_WRONLY |
-			(constants.O_NOFOLLOW ?? 0),
-		0o600
-	);
-	try {
-		await handle.writeFile(contents, 'utf8');
-		await handle.sync();
-	} catch (error) {
-		await handle.close().catch(() => undefined);
-		await unlink(temporary).catch(() => undefined);
-		throw error;
-	}
-	await handle.close();
-	try {
-		await rename(temporary, file);
-	} catch (error) {
-		await unlink(temporary).catch(() => undefined);
-		throw error;
-	}
-	await chmod(file, 0o600);
+/**
+ * Writes the worktree's dotenv file atomically (0600, never through a
+ * symlink). The folder is the worktree's, and no cap refuses what the read
+ * let through.
+ */
+function writeWorktreeFile(file: string, contents: string): Promise<void> {
+	return writeSupabaseStoreFile(file, contents, Number.POSITIVE_INFINITY, {
+		privateDirectory: false,
+	});
 }
 
 /**
@@ -383,7 +358,7 @@ export class SupabaseKeyStore {
 				...KEY_NAMES.map((name) => envLine(name, wanted[name])),
 				BLOCK_END,
 			];
-			await replaceFileAtomically(
+			await writeWorktreeFile(
 				envFile,
 				`${[...kept, ...(kept.length > 0 ? [''] : []), ...block].join('\n')}\n`
 			);
@@ -401,7 +376,7 @@ export class SupabaseKeyStore {
 			if (current === 'unsafe' || current === '') return false;
 			if (!current.includes(BLOCK_START)) return false;
 			const kept = withoutManagedLines(current);
-			await replaceFileAtomically(
+			await writeWorktreeFile(
 				envFile,
 				kept.length > 0 ? `${kept.join('\n')}\n` : ''
 			);

@@ -1,6 +1,6 @@
 # Per-worktree local Supabase: as built
 
-> **Status:** implemented on 2026-10-17 against Supabase CLI 2.121.0, uncommitted. It ships every phase of [UI.md](UI.md) (P0 to P5, `SUPABASE_UI_PHASE = 5`) and the opt-in Phase 6 hardening toggles.
+> **Status:** implemented on 2026-10-17 against Supabase CLI 2.121.0, uncommitted. It ships every phase of [UI.md](UI.md) (P0 to P5, so no control, operation or CLI command is gated by phase) and the opt-in Phase 6 hardening toggles.
 > **Read with:** [DESIGN.md](DESIGN.md) (the backend design), [UI.md](UI.md) (the tab specification) and [FINDINGS.md](FINDINGS.md) (measurements). This file records what shipped, where it lives, how it was verified and where it departs from those two documents.
 
 ## What it does
@@ -84,7 +84,7 @@ All checks below ran on 2026-10-17.
 The consuming app's variable names stay options (default `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). The root AGENTS.md rule now says that integrated third-party tools may be named in source and the app's own conventions may not.
 
 **Lifecycle:**
-- A start, resume or follow job completes only after `stack list` shows the stack and its status has been read again. Until then a new stack still read as "not created" just after it started.
+- A start or resume job completes only after `stack list` shows the stack and its status has been read again. Until then a new stack still read as "not created" just after it started.
 - `stack list` refreshes are single-flight but never stale: a caller that arrives during a list shares one list queued behind it (`SupabaseSingleFlight.runFresh`). A stop followed at once by a destroy therefore sees the stop.
 - An owner on another CLI release is stopped and restarted with the worktree's CLI when something ensures it, instead of being refused.
 - A drift restart is gated on HEAD and tried once per drift signature.

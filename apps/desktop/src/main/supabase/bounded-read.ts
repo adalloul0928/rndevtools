@@ -3,9 +3,10 @@ import { open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
- * Small, bounded filesystem reads for static project detection. Nothing here
- * evaluates project code, follows a FIFO into a blocking read, or reads more
- * than the caller's byte cap.
+ * Small, bounded filesystem reads (static project detection, the Supabase
+ * store files and the CLI resolver's package manifests) and lexical path
+ * checks. Nothing here evaluates project code, follows a FIFO into a blocking
+ * read, or reads more than the caller's byte cap.
  */
 
 /** DESIGN: static detection reads at most 256 KiB of any one file. */
@@ -50,15 +51,25 @@ async function canonical(target: string): Promise<string | undefined> {
 	}
 }
 
-async function readBoundedText(
+/**
+ * Reads a regular file of at most `maxBytes` as UTF-8, BOM included. With
+ * `noFollow`, a final symlink is refused (an `error`, as the open fails).
+ */
+export async function readBoundedText(
 	target: string,
-	maxBytes: number
+	maxBytes: number,
+	options: Readonly<{ noFollow?: boolean }> = {}
 ): Promise<BoundedTextResult> {
 	let handle: Awaited<ReturnType<typeof open>>;
 	try {
 		// O_NONBLOCK keeps a FIFO planted at a config path from blocking the
 		// read; fstat below then rejects anything that is not a regular file.
-		handle = await open(target, constants.O_RDONLY | constants.O_NONBLOCK);
+		handle = await open(
+			target,
+			constants.O_RDONLY |
+				constants.O_NONBLOCK |
+				(options.noFollow ? (constants.O_NOFOLLOW ?? 0) : 0)
+		);
 	} catch (error) {
 		return isMissing(error) ? { status: 'missing' } : { status: 'error' };
 	}
@@ -80,8 +91,7 @@ async function readBoundedText(
 			length += bytesRead;
 		}
 		if (length > maxBytes) return { status: 'too-large' };
-		const text = buffer.subarray(0, length).toString('utf8');
-		return { status: 'ok', text: text.replace(/^\uFEFF/, '') };
+		return { status: 'ok', text: buffer.subarray(0, length).toString('utf8') };
 	} catch {
 		return { status: 'error' };
 	} finally {
@@ -92,7 +102,13 @@ async function readBoundedText(
 export const nodeStaticFileSystem: StaticFileSystem = {
 	kind: kindOf,
 	realpath: canonical,
-	readText: readBoundedText,
+	// Static detection reads text without its BOM.
+	readText: async (target, maxBytes) => {
+		const read = await readBoundedText(target, maxBytes);
+		return read.status === 'ok'
+			? { status: 'ok', text: read.text.replace(/^\uFEFF/, '') }
+			: read;
+	},
 };
 
 /** True when `candidate` is `root` itself or lies below it (lexically). */
@@ -104,4 +120,9 @@ export function isPathWithin(root: string, candidate: string): boolean {
 			!relative.startsWith(`..${path.sep}`) &&
 			!path.isAbsolute(relative))
 	);
+}
+
+/** True when `candidate` lies below `root`, never `root` itself (lexically). */
+export function isPathStrictlyWithin(root: string, candidate: string): boolean {
+	return isPathWithin(root, candidate) && path.relative(root, candidate) !== '';
 }

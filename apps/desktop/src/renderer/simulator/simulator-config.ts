@@ -30,7 +30,6 @@ export type SimulatorToolGroup = 'simulator' | 'backend' | 'system';
 export type SimulatorToolDefinition = {
 	id: SimulatorToolId;
 	label: string;
-	description: string;
 	icon: ComponentType<{ className?: string }>;
 	shortcut: number;
 	group: SimulatorToolGroup;
@@ -54,8 +53,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'fleet',
 		label: 'Simulators',
-		description:
-			'Boot, inspect, and manage local Simulator and device targets.',
 		icon: Smartphone,
 		shortcut: 1,
 		group: 'simulator',
@@ -63,8 +60,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'actions',
 		label: 'App Actions',
-		description:
-			'Drive deep links, permissions, locations, appearance, and semantic input.',
 		icon: AppWindow,
 		shortcut: 2,
 		group: 'simulator',
@@ -72,8 +67,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'slimming',
 		label: 'SimSlim',
-		description:
-			'Preview, apply, verify, and roll back experimental Simulator service profiles.',
 		icon: Layers3,
 		shortcut: 3,
 		group: 'simulator',
@@ -81,8 +74,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'captures',
 		label: 'Captures',
-		description:
-			'Create, annotate, frame, compare, and export screenshots and recordings.',
 		icon: Camera,
 		shortcut: 4,
 		group: 'simulator',
@@ -90,8 +81,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'automation',
 		label: 'Automation',
-		description:
-			'Run repeatable simulator scenarios and agent-friendly workflows.',
 		icon: Bot,
 		shortcut: 5,
 		group: 'simulator',
@@ -99,8 +88,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'builds',
 		label: 'Build Insights',
-		description:
-			'Review build timing, warnings, cache health, and artifact trends.',
 		icon: Gauge,
 		shortcut: 6,
 		group: 'simulator',
@@ -108,8 +95,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'lanes',
 		label: 'Lanes',
-		description:
-			'Run one worktree per Simulator with its own leased Metro port, for parallel branches and agents.',
 		icon: Waypoints,
 		shortcut: 7,
 		group: 'simulator',
@@ -117,8 +102,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'supabase',
 		label: 'Supabase',
-		description:
-			'Track, start, stop and clean up one local Supabase stack per worktree and branch.',
 		icon: DatabaseZap,
 		shortcut: 8,
 		group: 'backend',
@@ -126,8 +109,6 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 	{
 		id: 'settings',
 		label: 'Settings',
-		description:
-			'Finish capability onboarding and configure local integrations.',
 		icon: Settings2,
 		shortcut: 9,
 		group: 'system',

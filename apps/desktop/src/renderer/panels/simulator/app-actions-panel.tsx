@@ -27,13 +27,12 @@ import {
 	Upload,
 } from 'lucide-react';
 import { type ComponentType, useEffect, useId, useMemo, useState } from 'react';
-import { InfoPopover } from '@/components/ui';
+import { InfoPopover, PanelHeader } from '@/components/ui';
 import { targetConfig } from '@/simulator/target-config';
 import type { SimulatorCapability } from '../../../shared/simulator-protocol';
 import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
-	SimulatorPanelHeader,
 	SimulatorTargetSelect,
 } from '../../components/simulator-ui';
 import { Badge, SearchControl, Toolbar } from '../../components/ui';
@@ -50,7 +49,6 @@ type AppActionDefinition = {
 	description: string;
 	category: ActionCategory;
 	icon: ComponentType<{ className?: string }>;
-	requiresAccessibility?: boolean;
 	config:
 		| 'url'
 		| 'location'
@@ -413,7 +411,7 @@ export function AppActionsPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={<SimulatorTargetSelect />}
 				description="Compose safe, explicit simulator commands without adding debug code to the mobile app. Semantic input is capability-gated and always visible in the action receipt."
 				meta={`${APP_ACTIONS.length} actions`}
@@ -628,12 +626,6 @@ function ActionWorkbench({
 					<Command className="h-3.5 w-3.5" />
 					This action is visible for planning, but the current native provider
 					does not expose it yet.
-				</div>
-			) : null}
-			{action.requiresAccessibility ? (
-				<div className="sim-inline-note is-warning">
-					<Accessibility className="h-3.5 w-3.5" />
-					Accessibility permission is required for semantic input.
 				</div>
 			) : null}
 			{action.config === 'permission' && !bundleIdentifier ? (

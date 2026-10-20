@@ -1,5 +1,6 @@
 import {
 	formatSupabaseSize,
+	isLiveStackState,
 	isSupabaseStackLanExposed,
 	type SupabaseAgentRequest,
 	type SupabaseOperation,
@@ -294,11 +295,7 @@ export function describeSupabaseConfirmation(
 			const running = state.stacks.filter(
 				(entry) =>
 					(entry.origin === 'managed' || entry.origin === 'adopted') &&
-					(entry.state === 'running' ||
-						entry.state === 'starting' ||
-						entry.state === 'partial' ||
-						entry.state === 'unhealthy' ||
-						entry.state === 'stopping')
+					isLiveStackState(entry.state)
 			);
 			return {
 				title: 'Turn off local Supabase?',

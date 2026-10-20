@@ -7,10 +7,6 @@ import {
 	recipeDefinitionSchema,
 } from '../../shared/recipe-protocol';
 
-export const MAX_RECIPE_STEP_COUNT = 100;
-export const MAX_RECIPE_TARGET_COUNT = 20;
-export const MAX_RECIPE_CONCURRENCY = 8;
-
 export const RECIPE_STEP_PALETTE = [
 	{
 		kind: 'simulator',

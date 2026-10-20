@@ -1,9 +1,8 @@
 import { formatAgo } from '@/lib/format';
-import { laneBackendStack } from '@/simulator/supabase-cross-panel';
+import { laneBackendStack, portOf } from '@/simulator/supabase-cross-panel';
 import type { LaneView } from '../../shared/lane-protocol';
 import type { DeviceInfo, EnvironmentEntry } from '../../shared/protocol';
 import {
-	isSupabaseControlEnabled,
 	type SupabaseStackSummary,
 	type SupabaseState,
 	type SupabaseTrafficSignature,
@@ -39,7 +38,7 @@ export type AppTrafficInputs = Readonly<{
 }>;
 
 export type AppTrafficView = Readonly<{
-	/** Local Supabase is on and this phase shows app traffic. */
+	/** Local Supabase is on. */
 	enabled: boolean;
 	/** The app reports its Simulator, so its traffic can be tied to a lane. */
 	linked: boolean;
@@ -52,16 +51,6 @@ export type AppTrafficView = Readonly<{
 	classification: SupabaseTrafficClassification;
 	labels: SupabaseTrafficLabels;
 }>;
-
-function portOf(url: string | undefined): number | undefined {
-	if (url === undefined) return undefined;
-	try {
-		const port = Number(new URL(url).port);
-		return Number.isInteger(port) && port > 0 ? port : undefined;
-	} catch {
-		return undefined;
-	}
-}
 
 /** What the app should talk to: its lane's stack, when the lane has one. */
 export function appTrafficExpectation(
@@ -104,8 +93,7 @@ function appTrafficLabels(
 
 /** The app's traffic, classified against its lane's stack. */
 export function appTrafficView(inputs: AppTrafficInputs): AppTrafficView {
-	const enabled =
-		inputs.state.feature.enabled && isSupabaseControlEnabled('app-traffic');
+	const enabled = inputs.state.feature.enabled;
 	const linked = Boolean(inputs.device?.info.simulatorUdid);
 	const expectation = appTrafficExpectation(inputs.lane, inputs.state);
 	const classification = classifyAppTraffic(
@@ -198,8 +186,8 @@ export type StackAppTrafficRow = Readonly<{
 
 /**
  * The first connected app on a Simulator one of the stack's lanes runs on,
- * classified against this stack. Undefined while the phase is off, when no
- * such app is connected, or when that Simulator's lane uses another stack.
+ * classified against this stack. Undefined while local Supabase is off, when
+ * no such app is connected, or when that Simulator's lane uses another stack.
  */
 export function stackAppTrafficRow(
 	stack: Pick<SupabaseStackSummary, 'id' | 'lanes'>,

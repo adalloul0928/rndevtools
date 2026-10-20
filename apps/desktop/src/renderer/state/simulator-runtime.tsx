@@ -1,4 +1,3 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -9,6 +8,13 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import type { ActionStatus } from '@/lib/action-notice';
+import {
+	errorText,
+	jobNoticeKind,
+	nextActionId,
+	type WithoutActionId,
+} from '@/lib/runtime-action';
 import type {
 	SimulatorAction,
 	SimulatorActionReceipt,
@@ -23,15 +29,6 @@ import type {
 	SimulatorState,
 } from '../../shared/simulator-protocol';
 
-export type SimulatorActionStatus =
-	| { kind: 'idle'; message: '' }
-	| { kind: 'pending'; message: string }
-	| { kind: 'success'; message: string }
-	| { kind: 'error'; message: string };
-
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId' | 'confirmationToken'>
-	: never;
 export type SimulatorActionInput = WithoutActionId<SimulatorAction>;
 export type SimulatorCaptureOperationInput =
 	WithoutActionId<SimulatorCaptureOperation>;
@@ -56,7 +53,7 @@ type SimulatorRuntimeValue = {
 	selectedDevice: SimulatorDevice | null;
 	selectedDeviceUdid: string | null;
 	setSelectedDeviceUdid: (udid: string) => void;
-	actionStatus: SimulatorActionStatus;
+	actionStatus: ActionStatus;
 	clearActionStatus: () => void;
 	refresh: () => Promise<void>;
 	runAction: (
@@ -160,18 +157,10 @@ function persistSelectedDeviceUdid(udid: string): void {
 	}
 }
 
-function simulatorErrorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
-
-function nextActionId(): string {
-	return `simulator-${crypto.randomUUID()}`;
-}
-
 export function simulatorJobCancellationStatus(
 	cancelled: boolean,
 	messages: CancelSimulatorJobMessages = {}
-): SimulatorActionStatus {
+): ActionStatus {
 	return cancelled
 		? { kind: 'success', message: messages.successMessage ?? 'Job cancelled.' }
 		: { kind: 'error', message: 'The job could not be cancelled.' };
@@ -193,7 +182,7 @@ export function SimulatorRuntimeProvider({
 	const [selectedDeviceUdid, setSelectedDeviceUdidState] = useState<
 		string | null
 	>(readSelectedDeviceUdid);
-	const [actionStatus, setActionStatus] = useState<SimulatorActionStatus>({
+	const [actionStatus, setActionStatus] = useState<ActionStatus>({
 		kind: 'idle',
 		message: '',
 	});
@@ -201,14 +190,7 @@ export function SimulatorRuntimeProvider({
 	useEffect(() => {
 		const job = state.jobs.find((candidate) => candidate.id === submittedJobId);
 		if (!job) return;
-		const kind =
-			job.status === 'complete'
-				? ('success' as const)
-				: ['failed', 'needs-attention'].includes(job.status)
-					? ('error' as const)
-					: job.status === 'cancelled'
-						? ('success' as const)
-						: ('pending' as const);
+		const kind = jobNoticeKind(job.status);
 		setActionStatus((current) =>
 			current.kind === kind && current.message === job.message
 				? current
@@ -236,7 +218,7 @@ export function SimulatorRuntimeProvider({
 				setIsLoading(false);
 			});
 		} catch (error) {
-			setRuntimeError(simulatorErrorText(error));
+			setRuntimeError(errorText(error));
 			setIsLoading(false);
 		}
 
@@ -250,7 +232,7 @@ export function SimulatorRuntimeProvider({
 				setRuntimeError(null);
 			})
 			.catch((error: unknown) => {
-				if (active) setRuntimeError(simulatorErrorText(error));
+				if (active) setRuntimeError(errorText(error));
 			})
 			.finally(() => {
 				if (active) setIsLoading(false);
@@ -296,7 +278,7 @@ export function SimulatorRuntimeProvider({
 			);
 			setRuntimeError(null);
 		} catch (error) {
-			setRuntimeError(simulatorErrorText(error));
+			setRuntimeError(errorText(error));
 		} finally {
 			setIsLoading(false);
 		}
@@ -307,7 +289,7 @@ export function SimulatorRuntimeProvider({
 			actionInput: SimulatorActionInput,
 			messages: RunSimulatorActionMessages = {}
 		): Promise<SimulatorActionReceipt> => {
-			const actionId = nextActionId();
+			const actionId = nextActionId('simulator');
 			const actionKey = JSON.stringify(actionInput);
 			if (!bridge) {
 				const error = 'Simulator actions require the secure desktop bridge.';
@@ -376,7 +358,7 @@ export function SimulatorRuntimeProvider({
 				}
 				return receipt;
 			} catch (error) {
-				const message = simulatorErrorText(error);
+				const message = errorText(error);
 				if (latestActionIdRef.current === actionId) {
 					setActionStatus({ kind: 'error', message });
 				}
@@ -405,7 +387,7 @@ export function SimulatorRuntimeProvider({
 				setActionStatus(simulatorJobCancellationStatus(cancelled, messages));
 				return cancelled;
 			} catch (error) {
-				setActionStatus({ kind: 'error', message: simulatorErrorText(error) });
+				setActionStatus({ kind: 'error', message: errorText(error) });
 				return false;
 			}
 		},
@@ -436,7 +418,7 @@ export function SimulatorRuntimeProvider({
 			operationInput: SimulatorCaptureOperationInput,
 			messages: RunSimulatorActionMessages = {}
 		): Promise<SimulatorCaptureOperationReceipt> => {
-			const actionId = `capture-${crypto.randomUUID()}`;
+			const actionId = nextActionId('capture');
 			const operationKey = JSON.stringify(operationInput);
 			const failedReceipt = (
 				error: string
@@ -494,7 +476,7 @@ export function SimulatorRuntimeProvider({
 				}
 				return receipt;
 			} catch (error) {
-				const message = simulatorErrorText(error);
+				const message = errorText(error);
 				if (latestActionIdRef.current === actionId) {
 					setActionStatus({ kind: 'error', message });
 				}
@@ -510,7 +492,7 @@ export function SimulatorRuntimeProvider({
 		async (
 			operationInput: SimulatorOnboardingOperationInput
 		): Promise<SimulatorOnboardingReceipt> => {
-			const actionId = `onboarding-${crypto.randomUUID()}`;
+			const actionId = nextActionId('onboarding');
 			const failed = (error: string): SimulatorOnboardingReceipt => ({
 				actionId,
 				kind: operationInput.kind,
@@ -562,7 +544,7 @@ export function SimulatorRuntimeProvider({
 				if (receipt.completed && receipt.requiresRefresh) await refresh();
 				return receipt;
 			} catch (error) {
-				const message = simulatorErrorText(error);
+				const message = errorText(error);
 				setActionStatus({ kind: 'error', message });
 				return failed(message);
 			} finally {

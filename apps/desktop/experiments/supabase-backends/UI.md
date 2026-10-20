@@ -44,7 +44,7 @@ Five rows stay visible at 1040x700.
 - Unreadable stacks are never destroyable.
 - Agent free text never appears in a dialog, and secrets never reach the renderer.
 
-**Phases** follow SUPABASE_ARGV_ALLOWLIST:
+**Phases** follow the CLI rollout order (every phase has shipped, so none gates anything now):
 - P1: read-only (list, status, log history, database reads).
 - P3: lifecycle, policy, and the Lanes, Fleet and Agents chips.
 - P4: destroy, clean up, agent requests, release.
@@ -152,13 +152,13 @@ Controls from a later phase are absent in earlier ones, not disabled.
 
 ### Database tools
 
-**Choice.** Reads in P1 (phase-1 kinds); moved-branch stats through the DB_URL main holds; mutations --local only in P5; no Copy TypeScript types
+**Choice.** Reads in P1 (the read-only kinds); moved-branch stats through the DB_URL main holds; mutations --local only in P5; no Copy TypeScript types
 
-**Why.** dialect.ts readTarget and the phase table; gen types has no dialect operation (dialect.ts:256-326).
+**Why.** dialect.ts readTarget and READ_ONLY_KINDS; gen types has no dialect operation (dialect.ts:256-326).
 
 ### Phases
 
-**Choice.** Aligned with SUPABASE_ARGV_ALLOWLIST; controls from later phases are absent, not disabled
+**Choice.** Aligned with the CLI rollout order; controls from later phases were absent, not disabled. Every phase has shipped, so nothing is gated by phase now
 
 **Why.** Engineering judge; avoids dead controls.
 
@@ -214,7 +214,7 @@ Controls from a later phase are absent in earlier ones, not disabled.
 
 ### Placement
 - **Tool entry** (simulator-config.ts:13-96):
-  - `{id:'supabase', label:'Supabase', description:'Track, start, stop and clean up one local Supabase stack per worktree and branch.', icon:DatabaseZap, shortcut:8, group:'backend'}`.
+  - `{id:'supabase', label:'Supabase', icon:DatabaseZap, shortcut:8, group:'backend'}`.
   - Settings becomes shortcut 9 with group 'system'; every other tool gets group 'simulator'.
 - **Panel registration:** a lazy SupabasePanel plus an entry in SIMULATOR_PANELS (app.tsx:177-218).
 - **Route:** `#simulator/supabase` only, because routeFromHash reads two segments (app.tsx:231-252).
@@ -238,7 +238,7 @@ Controls from a later phase are absent in earlier ones, not disabled.
 
 ### Panel skeleton (top to bottom)
 1. `section.panel-root`.
-2. **SimulatorPanelHeader:**
+2. **PanelHeader:**
    - h1 Supabase;
    - an About popover;
    - meta: [Alpha] plus counts, or "Off", "Not available on this Mac", "Settings";
@@ -339,7 +339,7 @@ Common reason strings:
   - Every argv ends with `--output-format json` and runs with shell:false.
   - Curated env: PATH, HOME, USER, LOGNAME, TMPDIR, LANG, LC_ALL, SUPABASE_EXPERIMENTAL_STACK=1, SUPABASE_TELEMETRY_DISABLED=1, DO_NOT_TRACK=1, SUPABASE_NO_UPDATE_NOTIFIER=1.
   - The cwd is a neutral 0700 directory.
-  - Every argv passes assertArgvAllowedForPhase (dialect.ts:1218-1235).
+  - Every argv passes assertSupabaseArgvAllowed (dialect.ts); the resolver's version probe runs read-only.
 - **Never emitted:** --runtime auto|docker|podman, stop --all, --stack <name>, id prefixes, status --env, --eager, --dry-run, --debug, --follow, --db-url on any mutation, and --yes outside a token-consuming destroy.
 - **CLI command words** (status and inspect command text, the runner, config snippets) come from main state. They are never renderer literals.
 
@@ -1003,7 +1003,7 @@ Cross-panel
 
 | Component | Kind | Source | Purpose | API sketch |
 |---|---|---|---|---|
-| `SimulatorPanelHeader` | reuse | components/simulator-ui.tsx:18-40 (PanelHeader ui.tsx:70-95) | h1 Supabase, About popover, meta with Alpha Badge, actions Refresh, Clean up N, Gear. |  |
+| `PanelHeader` | reuse | components/ui.tsx:103-126 | h1 Supabase, About popover, meta with Alpha Badge, actions Refresh, Clean up N, Gear. |  |
 | `PanelNotice` | reuse | components/ui.tsx:101-131 | Ranked tab notices (cap 2) and detail notices; warning/danger only for must-read text (info collapses, ui.tsx:110-117). |  |
 | `SimulatorMetric + .sim-metric-grid` | reuse | components/simulator-ui.tsx:109-134; styles.css:1082-1143 | Running, Postgres slots, Memory, Disk; tones default/success/warning only. |  |
 | `Toolbar, SearchControl, NativeSelect filter, .sim-layout-toggle` | reuse | ui.tsx:97-168; fleet-panel.tsx:428-462; lanes-panel.tsx:189-208 | View toggle, search, filter with counts, Follow\|Warn. |  |
@@ -1933,7 +1933,7 @@ Lane chip tones are lane-relative: db :port success; db starting, stopped, stale
 - Holder liveness and countdowns come from resolveHolderLiveness/holderClockKey; holdCountdownLabel lives in device-hold.ts. Prune copy always says suggested.
 - The UI handles all 17 classifier codes (including container_runtime, ports_conflict, confirm_required and flag_misuse). There is no transient code; a single retry happens when retry is once.
 - On a moved branch, reads go through main's DB_URL with sslmode=disable; mutations are --local only; migration status is shown only when HEAD matches.
-- Phases follow SUPABASE_ARGV_ALLOWLIST. db dump is P5.
+- Phases follow the CLI rollout order; db dump is P5. Every phase has shipped.
 - Layout: the unchanged .sim-fleet-layout, 64 px rows, at most 3 header controls, no 44% grid, no table mode, no inbox region.
 - ConfirmAction gains describedBy. StepList is built on Timeline, not Stepper. .sim-state-pill.is-info is fixed. Metrics use only default, success and warning tones. SearchControl gets a width hook.
 - Destroy requires a stopped stack. Batch selection is capped at 20; at most 32 ids per call.

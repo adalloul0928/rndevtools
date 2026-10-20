@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { SUPABASE_REASONS } from '../../shared/supabase-protocol';
+import {
+	SUPABASE_MIN_FREE_SYSV_SEGMENTS,
+	SUPABASE_REASONS,
+} from '../../shared/supabase-protocol';
 import {
 	decideSupabaseAdmission,
 	SUPABASE_CREATION_CONCURRENCY,
 	SUPABASE_LIFECYCLE_CONCURRENCY,
 	SUPABASE_MAX_CLI_CHILDREN,
-	SUPABASE_MIN_FREE_SYSV_SEGMENTS,
 	type SupabaseAdmissionInput,
 	type SupabaseAdmissionStack,
 	supabaseAdmissionCandidates,

@@ -2,17 +2,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-	assertArgvAllowedForPhase,
+	assertSupabaseArgvAllowed,
 	buildSupabaseArgv,
 	resolveSupabaseDialect,
-	SUPABASE_ARGV_ALLOWLIST,
 	SUPABASE_EXCLUDABLE_CAPABILITIES,
 	SUPABASE_MAX_CLI_TIMEOUT_MS,
 	SUPABASE_PREPARABLE_CAPABILITIES,
 	SupabaseArgvError,
 	type SupabaseCliOperation,
 	type SupabaseDialect,
-	type SupabaseRolloutPhase,
 	supabaseOperationBudget,
 } from './dialect';
 
@@ -646,42 +644,25 @@ describe('dialect gates', () => {
 	});
 });
 
-describe('assertArgvAllowedForPhase', () => {
-	it('enables read-only surfaces first, then lifecycle, destroy, and database writes', () => {
-		expect(SUPABASE_ARGV_ALLOWLIST[1]).toEqual([
+describe('assertSupabaseArgvAllowed', () => {
+	it('allows every argv the builder produces, and only reads in a read-only run', () => {
+		const reads = [
 			'version',
 			'stack.list',
 			'stack.status',
 			'stack.logs',
 			'migration.list',
 			'inspect',
-		]);
-		const phases: SupabaseRolloutPhase[] = [1, 3, 4, 5];
-		const firstPhase = (kind: string) =>
-			phases.find((phase) =>
-				(SUPABASE_ARGV_ALLOWLIST[phase] as readonly string[]).includes(kind)
-			);
-		expect(firstPhase('stack.start')).toBe(3);
-		expect(firstPhase('stack.stop')).toBe(3);
-		expect(firstPhase('stack.restart')).toBe(3);
-		expect(firstPhase('stack.prepare')).toBe(3);
-		expect(firstPhase('stack.destroy')).toBe(4);
-		expect(firstPhase('migration.up')).toBe(5);
-		expect(firstPhase('db.reset')).toBe(5);
-		expect(firstPhase('seed.buckets')).toBe(5);
-		expect(firstPhase('db.dump')).toBe(5);
+		];
 		for (const operation of EVERY_OPERATION) {
 			const argv = argvOf(operation);
-			expect(assertArgvAllowedForPhase(5, argv)).toBe(operation.kind);
-			const phase = firstPhase(operation.kind);
-			for (const earlier of phases.filter(
-				(candidate) => candidate < (phase ?? 0)
-			)) {
+			expect(assertSupabaseArgvAllowed(argv)).toBe(operation.kind);
+			if (reads.includes(operation.kind)) {
+				expect(assertSupabaseArgvAllowed(argv, true)).toBe(operation.kind);
+			} else {
 				expect(
-					errorOf(() => assertArgvAllowedForPhase(earlier, argv))
-				).toMatchObject({
-					reason: 'phase',
-				});
+					errorOf(() => assertSupabaseArgvAllowed(argv, true))
+				).toMatchObject({ reason: 'read-only' });
 			}
 		}
 	});
@@ -802,20 +783,15 @@ describe('assertArgvAllowedForPhase', () => {
 			[],
 		];
 		for (const argv of rejected) {
-			expect(errorOf(() => assertArgvAllowedForPhase(5, argv))).toBeInstanceOf(
+			expect(errorOf(() => assertSupabaseArgvAllowed(argv))).toBeInstanceOf(
 				SupabaseArgvError
 			);
 		}
-		expect(
-			errorOf(() =>
-				assertArgvAllowedForPhase(2 as SupabaseRolloutPhase, ['--version'])
-			)
-		).toMatchObject({ reason: 'phase' });
 	});
 
 	it('never echoes argument values when it rejects', () => {
 		const error = errorOf(() =>
-			assertArgvAllowedForPhase(5, [
+			assertSupabaseArgvAllowed([
 				'migration',
 				'list',
 				'--db-url',

@@ -24,7 +24,6 @@ import type {
 	SupabaseNavigationAction,
 } from '@/state/supabase-runtime';
 import {
-	isSupabaseControlEnabled,
 	type SupabaseState,
 	stackStatus,
 	supabaseLiveAgentLabels,
@@ -407,44 +406,34 @@ function SelectionSummary({
 				</ul>
 			)}
 			<div className="supabase-selection-effects">
-				{isSupabaseControlEnabled('bulk-stop') ? (
-					<div className="supabase-selection-effect">
-						<Square
-							aria-hidden="true"
-							className="mt-0.5 h-3.5 w-3.5 shrink-0"
-						/>
-						<p className="supabase-selection-text">
-							<strong className="supabase-selection-label">
-								{bulk.stop.label}:
-							</strong>{' '}
-							{summary.stopEffect}
-						</p>
-						{bulk.stop.availability.allowed ? null : (
-							<DisabledReason id={SUPABASE_BULK_REASON_IDS.stop}>
-								{bulk.stop.availability.reason}
-							</DisabledReason>
-						)}
-					</div>
-				) : null}
-				{isSupabaseControlEnabled('bulk-destroy') ? (
-					<div className="supabase-selection-effect">
-						<Trash2
-							aria-hidden="true"
-							className="mt-0.5 h-3.5 w-3.5 shrink-0"
-						/>
-						<p className="supabase-selection-text">
-							<strong className="supabase-selection-label">
-								{bulk.destroy.label}:
-							</strong>{' '}
-							{summary.destroyEffect}
-						</p>
-						{bulk.destroy.availability.allowed ? null : (
-							<DisabledReason id={SUPABASE_BULK_REASON_IDS.destroy}>
-								{bulk.destroy.availability.reason}
-							</DisabledReason>
-						)}
-					</div>
-				) : null}
+				<div className="supabase-selection-effect">
+					<Square aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+					<p className="supabase-selection-text">
+						<strong className="supabase-selection-label">
+							{bulk.stop.label}:
+						</strong>{' '}
+						{summary.stopEffect}
+					</p>
+					{bulk.stop.availability.allowed ? null : (
+						<DisabledReason id={SUPABASE_BULK_REASON_IDS.stop}>
+							{bulk.stop.availability.reason}
+						</DisabledReason>
+					)}
+				</div>
+				<div className="supabase-selection-effect">
+					<Trash2 aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+					<p className="supabase-selection-text">
+						<strong className="supabase-selection-label">
+							{bulk.destroy.label}:
+						</strong>{' '}
+						{summary.destroyEffect}
+					</p>
+					{bulk.destroy.availability.allowed ? null : (
+						<DisabledReason id={SUPABASE_BULK_REASON_IDS.destroy}>
+							{bulk.destroy.availability.reason}
+						</DisabledReason>
+					)}
+				</div>
 			</div>
 			<p className="sim-inline-note">{bulk.summary}</p>
 		</div>

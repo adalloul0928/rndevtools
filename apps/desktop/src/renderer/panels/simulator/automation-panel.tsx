@@ -42,15 +42,13 @@ import {
 	useState,
 } from 'react';
 import { RecipeStepEditor } from '@/components/recipe-step-editor';
-import {
-	DenseVirtualList,
-	SimulatorPanelHeader,
-} from '@/components/simulator-ui';
+import { DenseVirtualList } from '@/components/simulator-ui';
 import {
 	ConfirmAction,
 	CopyButton,
 	EmptyPanel,
 	InfoPopover,
+	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	Toolbar,
@@ -66,9 +64,6 @@ import {
 	createRecipeStep,
 	duplicateRecipeDefinition,
 	issuesForPath,
-	MAX_RECIPE_CONCURRENCY,
-	MAX_RECIPE_STEP_COUNT,
-	MAX_RECIPE_TARGET_COUNT,
 	prepareRecipeForSave,
 	RECIPE_STEP_PALETTE,
 	type RecipeApprovalAnalysis,
@@ -81,12 +76,16 @@ import {
 import { useRecipeRuntime } from '@/state/recipe-runtime';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import { useSlimmingRuntime } from '@/state/slimming-runtime';
-import type {
-	RecipeDefinition,
-	RecipeEvidenceManifest,
-	RecipeRun,
-	RecipeStep,
-	RecipeSummary,
+import {
+	DEFAULT_RECIPE_RUN_CONCURRENCY,
+	MAX_RECIPE_CONCURRENCY,
+	MAX_RECIPE_STEPS,
+	MAX_RECIPE_TARGETS,
+	type RecipeDefinition,
+	type RecipeEvidenceManifest,
+	type RecipeRun,
+	type RecipeStep,
+	type RecipeSummary,
 } from '../../../shared/recipe-protocol';
 import {
 	SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT,
@@ -130,7 +129,9 @@ export function AutomationPanel() {
 	const [paletteKind, setPaletteKind] = useState<RecipeStepKind>('simulator');
 	const [view, setView] = useState<EditorView>('definition');
 	const [targetUdids, setTargetUdids] = useState<string[]>([]);
-	const [concurrency, setConcurrency] = useState(2);
+	const [concurrency, setConcurrency] = useState(
+		DEFAULT_RECIPE_RUN_CONCURRENCY
+	);
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 	const [evidenceLoad, setEvidenceLoad] = useState<EvidenceLoadState>({
 		kind: 'idle',
@@ -233,14 +234,16 @@ export function AutomationPanel() {
 			recipeRuntime.isBridgeAvailable
 	);
 	const concurrencyValid =
-		Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8;
+		Number.isInteger(concurrency) &&
+		concurrency >= 1 &&
+		concurrency <= MAX_RECIPE_CONCURRENCY;
 	const canRun = Boolean(
 		draft &&
 			persistedById.has(draft.id) &&
 			!selectedEntry?.dirty &&
 			validationIssues.length === 0 &&
 			targetUdids.length >= 1 &&
-			targetUdids.length <= MAX_RECIPE_TARGET_COUNT &&
+			targetUdids.length <= MAX_RECIPE_TARGETS &&
 			concurrencyValid &&
 			recipeRuntime.isBridgeAvailable
 	);
@@ -434,7 +437,7 @@ export function AutomationPanel() {
 	};
 
 	const addStep = () => {
-		if (!draft || totalStepCount >= MAX_RECIPE_STEP_COUNT) return;
+		if (!draft || totalStepCount >= MAX_RECIPE_STEPS) return;
 		const usedIds = new Set(
 			[...draft.steps, ...draft.teardown].map((step) => step.id)
 		);
@@ -487,10 +490,8 @@ export function AutomationPanel() {
 		setTargetUdids((current) => {
 			if (current.includes(udid))
 				return current.filter((value) => value !== udid);
-			if (current.length >= MAX_RECIPE_TARGET_COUNT) {
-				setLocalError(
-					`Select at most ${MAX_RECIPE_TARGET_COUNT} exact targets.`
-				);
+			if (current.length >= MAX_RECIPE_TARGETS) {
+				setLocalError(`Select at most ${MAX_RECIPE_TARGETS} exact targets.`);
 				return current;
 			}
 			return [...current, udid];
@@ -549,7 +550,7 @@ export function AutomationPanel() {
 
 	return (
 		<section className="panel-root recipe-panel">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<Button
 						aria-label="Refresh recipe catalog"
@@ -733,7 +734,7 @@ export function AutomationPanel() {
 												</NativeSelect.Trigger>
 											</NativeSelect>
 											<Button
-												isDisabled={totalStepCount >= MAX_RECIPE_STEP_COUNT}
+												isDisabled={totalStepCount >= MAX_RECIPE_STEPS}
 												size="sm"
 												variant="secondary"
 												onPress={addStep}
@@ -747,7 +748,7 @@ export function AutomationPanel() {
 											? 'Run steps execute in order for each exact target.'
 											: 'Cleanup executes after completion, failure, cancellation, or interruption.'}
 										<span>
-											{totalStepCount} / {MAX_RECIPE_STEP_COUNT} total
+											{totalStepCount} / {MAX_RECIPE_STEPS} total
 										</span>
 									</p>
 									<ExecutionRail
@@ -1154,7 +1155,7 @@ function RunInspector({
 				<div className="recipe-section-title">
 					<span>Targets</span>
 					<code>
-						{targetUdids.length} / {MAX_RECIPE_TARGET_COUNT}
+						{targetUdids.length} / {MAX_RECIPE_TARGETS}
 					</code>
 				</div>
 				<fieldset
@@ -1206,7 +1207,7 @@ function RunInspector({
 				</div>
 				{concurrencyValid ? null : (
 					<p className="sim-field-error" role="alert">
-						Use a concurrency from 1–8.
+						Use a concurrency from 1–{MAX_RECIPE_CONCURRENCY}.
 					</p>
 				)}
 			</section>

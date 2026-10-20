@@ -1,4 +1,3 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	type Context,
 	createContext,
@@ -13,6 +12,7 @@ import {
 	useState,
 } from 'react';
 import type { ActionStatus } from '@/lib/action-notice';
+import { errorText, nextActionId } from '@/lib/runtime-action';
 import {
 	SUPABASE_STACK_FILTERS,
 	type SupabaseDetailSection,
@@ -23,11 +23,10 @@ import {
 	supabaseClockCadence,
 	supabaseRequesterName,
 } from '@/simulator/supabase-model';
-import { formatHoldDuration } from '../../shared/device-hold';
+import { formatStopDelay } from '../../shared/device-hold';
 import {
 	EMPTY_SUPABASE_STATE,
 	isActiveSupabaseJob,
-	isSupabaseControlEnabled,
 	isSupabaseStackRunning,
 	SUPABASE_CONFIRMATION_KINDS,
 	SUPABASE_DETAIL_SECTIONS,
@@ -64,10 +63,6 @@ import {
  */
 
 const IDLE: ActionStatus = { kind: 'idle', message: '' };
-
-function errorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
 
 // ---------------------------------------------------------------------------
 // Bridge and revisions
@@ -110,7 +105,7 @@ export function acceptSupabaseState(
 // Operations
 
 export function createSupabaseActionId(): string {
-	return `supabase-${crypto.randomUUID()}`;
+	return nextActionId('supabase');
 }
 
 export function withSupabaseActionId(
@@ -313,8 +308,7 @@ function onPort(port: number | undefined): string {
 }
 
 function delayText(ms: number): string {
-	if (ms === 0) return 'as soon as';
-	return ms < 120_000 ? `${Math.round(ms / 1_000)} s` : formatHoldDuration(ms);
+	return ms === 0 ? 'as soon as' : formatStopDelay(ms);
 }
 
 function requesterOf(
@@ -631,9 +625,7 @@ export function supabaseActionCopy(
 				? {
 						pending: 'Turning on local Supabase…',
 						success: () =>
-							isSupabaseControlEnabled('lane-backend')
-								? 'Local Supabase is on. Development lanes on opted-in worktrees now get their own database.'
-								: 'Local Supabase is on. RN Devtools now lists the stacks on this Mac.',
+							'Local Supabase is on. Development lanes on opted-in worktrees now get their own database.',
 						failure: 'Could not turn on local Supabase',
 					}
 				: {
@@ -1586,20 +1578,11 @@ export function SupabaseRuntimeProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	const badgeRef = useRef<SupabaseSidebarBadge | undefined>(undefined);
-	const nextBadge = useMemo(
-		() =>
-			isSupabaseControlEnabled('sidebar-badge')
-				? sidebarBadge(state)
-				: undefined,
-		[state]
-	);
+	const nextBadge = useMemo(() => sidebarBadge(state), [state]);
 	if (!sameBadge(badgeRef.current, nextBadge)) badgeRef.current = nextBadge;
 	const badge = badgeRef.current;
 	const activeJobs = useMemo(
-		() =>
-			isSupabaseControlEnabled('titlebar-jobs')
-				? state.jobs.filter(isActiveSupabaseJob).length
-				: 0,
+		() => state.jobs.filter(isActiveSupabaseJob).length,
 		[state.jobs]
 	);
 

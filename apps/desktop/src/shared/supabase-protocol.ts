@@ -2,8 +2,10 @@ import { z } from 'zod';
 import {
 	DEVICE_HOLD_GRACE_MS,
 	formatHoldDuration,
+	formatStopDelay,
 	holdCountdownLabel,
 } from './device-hold';
+import { UDID_PATTERN } from './simulator-protocol';
 
 /**
  * Local Supabase: one native stack per git worktree and branch, tracked,
@@ -24,108 +26,6 @@ import {
  * Shared code is bundled into the sandboxed preload and the renderer, so it
  * imports only zod and other shared modules.
  */
-
-// ---------------------------------------------------------------------------
-// Rollout phases
-
-/**
- * Rollout phases, aligned with the CLI argv allowlist: 1 read-only, 3
- * lifecycle and policy, 4 destroy and agent requests, 5 database mutations
- * and the rest. Structurally the same as main's SupabaseRolloutPhase.
- */
-export type SupabaseUiPhase = 1 | 3 | 4 | 5;
-
-/**
- * The phase this build ships. Every phase through 5 is on; the optional
- * Phase 6 hardening items are policy toggles that default to off.
- */
-export const SUPABASE_UI_PHASE: SupabaseUiPhase = 5;
-
-/**
- * The phase each UI control arrives in. Controls from a later phase than
- * {@link SUPABASE_UI_PHASE} are absent, never disabled.
- */
-export const SUPABASE_CONTROL_PHASES = {
-	// P1: read-only observer.
-	'turn-on': 1,
-	'turn-off': 1,
-	refresh: 1,
-	inspect: 1,
-	'read-database': 1,
-	'read-logs': 1,
-	'copy-public': 1,
-	'repository-recheck': 1,
-	navigate: 1,
-	'settings-view': 1,
-	'global-settings-row': 1,
-	// P3: lifecycle, policy, and the Lanes, Fleet and Agents integration.
-	start: 3,
-	resume: 3,
-	'cancel-start': 3,
-	stop: 3,
-	'stop-external': 3,
-	restart: 3,
-	'stop-and-start': 3,
-	'reapply-exclusions': 3,
-	'switch-cli': 3,
-	pin: 3,
-	adopt: 3,
-	prepare: 3,
-	'open-mailpit': 3,
-	'copy-key': 3,
-	'copy-psql': 3,
-	'copy-app-env': 3,
-	'select-multiple': 3,
-	'bulk-stop': 3,
-	'policy-form': 3,
-	'policy-trust': 3,
-	'repository-mode': 3,
-	'lane-backend': 3,
-	'restart-metro': 3,
-	chips: 3,
-	'sidebar-badge': 3,
-	'titlebar-jobs': 3,
-	activity: 3,
-	// P4: destroy, clean up, agent requests, release, reveal.
-	destroy: 4,
-	'bulk-destroy': 4,
-	'destroy-and-start': 4,
-	'clean-up': 4,
-	requests: 4,
-	'review-destroy': 4,
-	'deny-request': 4,
-	release: 4,
-	reveal: 4,
-	// P5: database mutations, Studio, branch follow, recreate, extras.
-	'apply-migrations': 5,
-	reset: 5,
-	'review-reset': 5,
-	'seed-buckets': 5,
-	export: 5,
-	'enable-studio': 5,
-	'disable-studio': 5,
-	'open-studio': 5,
-	'follow-branch': 5,
-	'resume-saved': 5,
-	recreate: 5,
-	'logs-auto-refresh': 5,
-	'app-traffic': 5,
-	'capacity-requests': 5,
-	'branch-switch-policy': 5,
-	paths: 5,
-	/** Phase 6 hardening toggles (per-stack keys, pinned-port leases, eager lanes). */
-	hardening: 5,
-} as const satisfies Readonly<Record<string, SupabaseUiPhase>>;
-
-export type SupabaseControlId = keyof typeof SUPABASE_CONTROL_PHASES;
-
-/** Whether a control exists in this build's phase (later ones are absent). */
-export function isSupabaseControlEnabled(
-	control: SupabaseControlId,
-	phase: SupabaseUiPhase = SUPABASE_UI_PHASE
-): boolean {
-	return SUPABASE_CONTROL_PHASES[control] <= phase;
-}
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -209,9 +109,7 @@ const portSchema = z.number().int().min(1).max(65_535);
 const laneIdSchema = z
 	.string()
 	.regex(/^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 const environmentIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
 const confirmationTokenSchema = z.string().regex(/^confirmation-[a-f0-9]{64}$/);
 /** `refs/heads/<branch>`, another full ref, `detached`, or `ordinary-workspace`. */
@@ -1226,7 +1124,6 @@ const SUPABASE_JOB_KINDS = [
 	'seed-buckets',
 	'export',
 	'prepare',
-	'follow',
 	'studio',
 	'disable',
 ] as const;
@@ -2181,80 +2078,11 @@ export const supabaseOperationSchema = z.discriminatedUnion('kind', [
 export type SupabaseOperation = z.infer<typeof supabaseOperationSchema>;
 export type SupabaseOperationKind = SupabaseOperation['kind'];
 
-/**
- * The phase each operation kind arrives in; see {@link supabaseOperationPhase}.
- */
-const SUPABASE_OPERATION_PHASES = {
-	refresh: 1,
-	'read-logs': 1,
-	'read-database': 1,
-	copy: 1,
-	'set-enabled': 1,
-	'repository.recheck': 1,
-	start: 3,
-	stop: 3,
-	restart: 3,
-	'stop-and-start': 3,
-	'reapply-exclusions': 3,
-	pin: 3,
-	unpin: 3,
-	adopt: 3,
-	prepare: 3,
-	open: 3,
-	'update-policy': 3,
-	'repository.set-mode': 3,
-	'cancel-job': 3,
-	'restart-metro': 3,
-	destroy: 4,
-	recreate: 4,
-	release: 4,
-	reveal: 4,
-	'request.approve': 4,
-	'request.deny': 4,
-	'apply-migrations': 5,
-	reset: 5,
-	'seed-buckets': 5,
-	export: 5,
-	'set-studio': 5,
-	'follow-branch': 5,
-	'resume-saved': 5,
-	'choose-path': 5,
-} as const satisfies Readonly<Record<SupabaseOperationKind, SupabaseUiPhase>>;
-
-export const SUPABASE_OPERATION_KINDS = Object.freeze(
-	Object.keys(SUPABASE_OPERATION_PHASES) as SupabaseOperationKind[]
-);
-
-/**
- * The exact phase of one operation: copying a key, the psql command or app
- * variables is P3, opening Studio is P5, revealing an export is P5, and a
- * policy patch that touches branch follow or the hardening toggles is P5.
- */
-export function supabaseOperationPhase(
-	operation: SupabaseOperation
-): SupabaseUiPhase {
-	switch (operation.kind) {
-		case 'copy':
-			return operation.what === 'publishable-key' ||
-				operation.what === 'psql-command' ||
-				operation.what === 'app-env'
-				? 3
-				: 1;
-		case 'open':
-			return operation.surface === 'studio' ? 5 : 3;
-		case 'reveal':
-			return operation.what === 'export' ? 5 : 4;
-		case 'update-policy':
-			return operation.patch.branchSwitch !== undefined ||
-				operation.patch.perStackKeys !== undefined ||
-				operation.patch.pinnedPortsCompat !== undefined ||
-				operation.patch.eagerLanes !== undefined
-				? 5
-				: 3;
-		default:
-			return SUPABASE_OPERATION_PHASES[operation.kind];
-	}
-}
+/** Every operation kind, in schema order: what a receipt's `kind` may be. */
+export const SUPABASE_OPERATION_KINDS: readonly SupabaseOperationKind[] =
+	Object.freeze(
+		supabaseOperationSchema.options.map((option) => option.shape.kind.value)
+	);
 
 /** Operation kinds the main-owned native dialog may guard. */
 export const SUPABASE_CONFIRMATION_KINDS = Object.freeze([
@@ -2341,6 +2169,42 @@ export type SupabaseConfirmationResult = z.infer<
 >;
 
 /**
+ * The operation a confirmed dialog makes: the uploads checkbox and the
+ * turn-off button substituted in. Main binds the one-time token to exactly
+ * this, and withSupabaseConfirmation adds the token on top.
+ */
+export function supabaseConfirmedOperation(
+	operation: SupabaseOperation,
+	options: NonNullable<SupabaseConfirmationResult['options']>
+): SupabaseOperation {
+	switch (operation.kind) {
+		case 'destroy':
+			return {
+				...operation,
+				removeUploads: options.removeUploads ?? operation.removeUploads,
+			};
+		case 'request.approve': {
+			const removeUploads = options.removeUploads ?? operation.removeUploads;
+			return {
+				...operation,
+				...(removeUploads === undefined ? {} : { removeUploads }),
+			};
+		}
+		case 'set-enabled': {
+			const disposition = options.disposition ?? operation.disposition;
+			return {
+				...operation,
+				...(disposition === undefined || operation.enabled
+					? {}
+					: { disposition }),
+			};
+		}
+		default:
+			return operation;
+	}
+}
+
+/**
  * Turns a confirmation into the operation to run: the same actionId, the
  * options the dialog chose (the uploads checkbox, the turn-off button), and
  * the token when one was required. Main's token is bound to exactly that.
@@ -2369,41 +2233,11 @@ export function withSupabaseConfirmation(
 		};
 	}
 	const token = result.token;
-	const options = result.options ?? {};
-	switch (operation.kind) {
+	const confirmed = supabaseConfirmedOperation(operation, result.options ?? {});
+	switch (confirmed.kind) {
 		case 'destroy':
-			return {
-				ok: true,
-				operation: {
-					...operation,
-					removeUploads: options.removeUploads ?? operation.removeUploads,
-					confirmationToken: token,
-				},
-			};
-		case 'request.approve': {
-			const removeUploads = options.removeUploads ?? operation.removeUploads;
-			return {
-				ok: true,
-				operation: {
-					...operation,
-					...(removeUploads === undefined ? {} : { removeUploads }),
-					confirmationToken: token,
-				},
-			};
-		}
-		case 'set-enabled': {
-			const disposition = options.disposition ?? operation.disposition;
-			return {
-				ok: true,
-				operation: {
-					...operation,
-					...(disposition === undefined || operation.enabled
-						? {}
-						: { disposition }),
-					confirmationToken: token,
-				},
-			};
-		}
+		case 'request.approve':
+		case 'set-enabled':
 		case 'stop':
 		case 'recreate':
 		case 'reset':
@@ -2411,7 +2245,7 @@ export function withSupabaseConfirmation(
 		case 'update-policy':
 			return {
 				ok: true,
-				operation: { ...operation, confirmationToken: token },
+				operation: { ...confirmed, confirmationToken: token },
 			};
 		default:
 			return {
@@ -3323,7 +3157,6 @@ export type SupabaseActivityStats = z.infer<typeof activityStatsSchema>;
 const START_JOB_KINDS: ReadonlySet<SupabaseJobKind> = new Set([
 	'create',
 	'resume',
-	'follow',
 	'recreate',
 ]);
 
@@ -3466,7 +3299,8 @@ function plural(count: number, one: string, many: string): string {
 	return `${count} ${count === 1 ? one : many}`;
 }
 
-function isLiveStackState(state: SupabaseStackState): boolean {
+/** States in which a stack still holds processes. */
+export function isLiveStackState(state: SupabaseStackState): boolean {
 	return (
 		state === 'running' ||
 		state === 'starting' ||
@@ -3594,7 +3428,6 @@ const JOB_LABELS: Readonly<Record<SupabaseJobKind, string>> = {
 	'seed-buckets': 'Seeding…',
 	export: 'Exporting…',
 	prepare: 'Downloading…',
-	follow: 'Starting…',
 	studio: 'Restarting…',
 	disable: 'Stopping…',
 };
@@ -4507,15 +4340,13 @@ export type SupabaseSidebarBadge = {
 /**
  * The sidebar badge: red for any danger item, amber for requests or
  * warnings, otherwise a grey count of running stacks. Nothing while off,
- * unsupported, not live, or before Phase 3.
+ * unsupported or not live.
  */
 export function sidebarBadge(
 	state: SupabaseState,
-	now: number = state.updatedAt,
-	phase: SupabaseUiPhase = SUPABASE_UI_PHASE
+	now: number = state.updatedAt
 ): SupabaseSidebarBadge | undefined {
 	if (
-		phase < 3 ||
 		!state.feature.enabled ||
 		!state.availability.platform.supported ||
 		state.discovery.status !== 'live'
@@ -4621,7 +4452,7 @@ export function nextEvents(
 			const delay =
 				policy.unheldStopDelayMs === 0
 					? 'It stops as soon as the last holder releases it'
-					: `${policy.unheldStopDelayMs < 120_000 ? `${Math.round(policy.unheldStopDelayMs / 1_000)} s` : formatHoldDuration(policy.unheldStopDelayMs)} after the last release it stops`;
+					: `${formatStopDelay(policy.unheldStopDelayMs)} after the last release it stops`;
 			untimed.push({
 				kind: 'held',
 				tone: 'default',
@@ -4819,6 +4650,9 @@ export type SupabaseAvailabilityContext = Readonly<{
 	now?: number;
 }>;
 
+/** A start needs two free SysV segments: its postmaster plus a shadow. */
+export const SUPABASE_MIN_FREE_SYSV_SEGMENTS = 2;
+
 /** Visible disabled-reason copy, from the Controls spec. */
 export const SUPABASE_REASONS = Object.freeze({
 	bridge:
@@ -4852,6 +4686,11 @@ export const SUPABASE_REASONS = Object.freeze({
 	pinnedReset: 'Pinned stacks are protected. Unpin it first.',
 	capacityFull: (running: number, cap: number) =>
 		`${running} of ${cap} stacks are running and all are in use. Stop one, or raise the limit in Settings.`,
+	/** Fewer than SUPABASE_MIN_FREE_SYSV_SEGMENTS Postgres slots are free. */
+	sysv: (free: number) =>
+		free === 1
+			? `Only 1 Postgres slot is free; a start needs ${SUPABASE_MIN_FREE_SYSV_SEGMENTS}. Stop an idle stack first.`
+			: `No Postgres slot is free; a start needs ${SUPABASE_MIN_FREE_SYSV_SEGMENTS}. Stop an idle stack first.`,
 	memoryCritical:
 		'Memory pressure is critical. Stop stacks or Simulators first.',
 	memoryCriticalStudio:
@@ -5049,8 +4888,7 @@ const checkInFlight: Check = (stack, action, context) => {
 			!(
 				job.kind === 'create' ||
 				job.kind === 'resume' ||
-				job.kind === 'prepare' ||
-				job.kind === 'follow'
+				job.kind === 'prepare'
 			)
 		) {
 			return SUPABASE_REASONS.nothingStarting;
@@ -5220,10 +5058,8 @@ const checkCapacity: Check = (_stack, action, context) => {
 	}
 	if (capacity.sysv) {
 		const free = Math.max(0, capacity.sysv.limit - capacity.sysv.used);
-		if (free < 2) {
-			return free === 1
-				? 'Only 1 Postgres slot is free; a start needs 2. Stop an idle stack first.'
-				: 'No Postgres slot is free; a start needs 2. Stop an idle stack first.';
+		if (free < SUPABASE_MIN_FREE_SYSV_SEGMENTS) {
+			return SUPABASE_REASONS.sysv(free);
 		}
 	}
 	return capacity.memoryPressure === 'critical'
@@ -5815,16 +5651,6 @@ export function checkSupabaseOperation(
 ):
 	| Readonly<{ allowed: true }>
 	| Readonly<{ allowed: false; error: SupabaseErrorView }> {
-	const phase = supabaseOperationPhase(operation);
-	if (phase > SUPABASE_UI_PHASE) {
-		return {
-			allowed: false,
-			error: supabaseDesktopError(
-				'refused',
-				'This control is not available in this release.'
-			),
-		};
-	}
 	const refused = (availability: SupabaseAvailability) =>
 		availability.allowed
 			? undefined

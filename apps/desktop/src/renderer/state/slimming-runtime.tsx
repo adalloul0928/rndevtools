@@ -1,4 +1,3 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	createContext,
 	type ReactNode,
@@ -9,6 +8,13 @@ import {
 	useRef,
 	useState,
 } from 'react';
+import type { ActionStatus } from '@/lib/action-notice';
+import {
+	errorText,
+	jobNoticeKind,
+	nextActionId,
+	type WithoutActionId,
+} from '@/lib/runtime-action';
 import type {
 	SlimmingAcknowledgementRequest,
 	SlimmingAction,
@@ -20,15 +26,6 @@ import type {
 } from '../../shared/slimming-protocol';
 import { SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT } from '../../shared/slimming-protocol';
 
-type SlimmingActionStatus =
-	| { kind: 'idle'; message: '' }
-	| { kind: 'pending'; message: string }
-	| { kind: 'success'; message: string }
-	| { kind: 'error'; message: string };
-
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId' | 'confirmationToken'>
-	: never;
 export type SlimmingActionInput = WithoutActionId<SlimmingAction>;
 export type SlimmingSettingInput = WithoutActionId<SlimmingSettingRequest>;
 
@@ -42,7 +39,7 @@ type SlimmingRuntimeValue = {
 	isLoading: boolean;
 	isBridgeAvailable: boolean;
 	runtimeError: string | null;
-	actionStatus: SlimmingActionStatus;
+	actionStatus: ActionStatus;
 	clearActionStatus: () => void;
 	refresh: () => Promise<void>;
 	setEnabled: (request: SlimmingSettingInput) => Promise<void>;
@@ -93,14 +90,6 @@ function slimmingBridge(): SlimmingBridge | null {
 		return null;
 	}
 	return candidate as SlimmingBridge;
-}
-
-function errorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
-}
-
-function nextActionId(): string {
-	return `slimming-${crypto.randomUUID()}`;
 }
 
 export function createSlimmingAcknowledgementRequest(
@@ -179,7 +168,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			? null
 			: 'Simulator Slimming requires the signed native helper and secure desktop bridge.'
 	);
-	const [actionStatus, setActionStatus] = useState<SlimmingActionStatus>({
+	const [actionStatus, setActionStatus] = useState<ActionStatus>({
 		kind: 'idle',
 		message: '',
 	});
@@ -187,14 +176,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		const job = state.jobs.find((candidate) => candidate.id === submittedJobId);
 		if (!job) return;
-		const kind =
-			job.status === 'complete'
-				? ('success' as const)
-				: ['failed', 'needs-attention'].includes(job.status)
-					? ('error' as const)
-					: job.status === 'cancelled'
-						? ('success' as const)
-						: ('pending' as const);
+		const kind = jobNoticeKind(job.status);
 		setActionStatus((current) =>
 			current.kind === kind && current.message === job.message
 				? current
@@ -270,7 +252,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 
 	const setEnabled = useCallback(
 		async (input: SlimmingSettingInput) => {
-			const actionId = nextActionId();
+			const actionId = nextActionId('slimming');
 			if (!bridge) {
 				setActionStatus({
 					kind: 'error',
@@ -353,7 +335,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			simulatorUdids: string[];
 			acknowledgement: string;
 		}): Promise<{ accepted: boolean; error?: string }> => {
-			const actionId = nextActionId();
+			const actionId = nextActionId('slimming');
 			const request = createSlimmingAcknowledgementRequest(actionId, input);
 			if (!request) {
 				const error =
@@ -425,7 +407,7 @@ export function SlimmingRuntimeProvider({ children }: { children: ReactNode }) {
 			actionInput: SlimmingActionInput,
 			messages: SlimmingActionMessages = {}
 		): Promise<SlimmingActionReceipt> => {
-			const actionId = nextActionId();
+			const actionId = nextActionId('slimming');
 			if (!bridge) {
 				const error = 'Slimming actions require the secure desktop bridge.';
 				setActionStatus({ kind: 'error', message: error });

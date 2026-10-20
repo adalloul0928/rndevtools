@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, opendir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { isPathStrictlyWithin } from './bounded-read';
 
 /**
  * Small building blocks the Supabase service runs on: bounded concurrency,
@@ -48,6 +49,32 @@ export function supabaseDelay(
 			resolve();
 		}, ms);
 		signal?.addEventListener('abort', onAbort, { once: true });
+	});
+}
+
+/** Resolves with the value, or undefined after `ms`, a rejection or an abort. */
+export function supabaseWithin<T>(
+	timers: SupabaseEngineTimers,
+	promise: Promise<T>,
+	ms: number,
+	signal?: AbortSignal
+): Promise<T | undefined> {
+	// No wait: whatever has settled by now, else undefined.
+	if (ms <= 0) return Promise.race([promise, Promise.resolve(undefined)]);
+	return new Promise((resolve) => {
+		let done = false;
+		const finish = (value: T | undefined) => {
+			if (done) return;
+			done = true;
+			timers.clearTimeout(timer);
+			signal?.removeEventListener('abort', onAbort);
+			resolve(value);
+		};
+		const onAbort = () => finish(undefined);
+		const timer = timers.setTimeout(() => finish(undefined), ms);
+		if (signal?.aborted) finish(undefined);
+		signal?.addEventListener('abort', onAbort, { once: true });
+		promise.then(finish, () => finish(undefined));
 	});
 }
 
@@ -238,17 +265,6 @@ export function shellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-/** Whether `candidate` lies strictly inside `root`. */
-function isStrictlyInside(root: string, candidate: string): boolean {
-	const relative = path.relative(root, candidate);
-	return (
-		relative !== '' &&
-		relative !== '..' &&
-		!relative.startsWith(`..${path.sep}`) &&
-		!path.isAbsolute(relative)
-	);
-}
-
 // ---------------------------------------------------------------------------
 // Filesystem walks
 
@@ -361,7 +377,7 @@ export async function deleteSupabaseUploads(
 	if (
 		realUploads === undefined ||
 		realUploads !== current ||
-		!isStrictlyInside(realRoot, realUploads) ||
+		!isPathStrictlyWithin(realRoot, realUploads) ||
 		path.basename(realUploads) !== stackId
 	) {
 		return { removed: false, reason: 'unsafe' };

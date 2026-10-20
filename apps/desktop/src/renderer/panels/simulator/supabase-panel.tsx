@@ -27,10 +27,7 @@ import {
 	useMemo,
 	useRef,
 } from 'react';
-import {
-	SimulatorMetric,
-	SimulatorPanelHeader,
-} from '@/components/simulator-ui';
+import { SimulatorMetric } from '@/components/simulator-ui';
 import {
 	SupabaseControlButton,
 	SupabaseNotice,
@@ -41,6 +38,7 @@ import {
 	DisabledReason,
 	Disclosure,
 	EmptyPanel,
+	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	StatusPill,
@@ -90,7 +88,6 @@ import { agentSessionKey } from '../../../shared/agent-protocol';
 import {
 	attentionItems,
 	isActiveSupabaseJob,
-	isSupabaseControlEnabled,
 	SUPABASE_REASONS,
 	type SupabaseAttentionItem,
 	type SupabaseInterest,
@@ -132,9 +129,7 @@ export function supabaseEffectiveView(
 		case 'off':
 			return view === 'requests' ? 'stacks' : view;
 		default:
-			return view === 'requests' && !isSupabaseControlEnabled('requests')
-				? 'stacks'
-				: view;
+			return view;
 	}
 }
 
@@ -143,9 +138,7 @@ export function supabaseToggleViews(
 	tabState: SupabaseTabState
 ): readonly Exclude<SupabaseView, 'settings'>[] {
 	if (tabState === 'ready' || tabState === 'empty') {
-		return isSupabaseControlEnabled('requests')
-			? ['stacks', 'repositories', 'requests']
-			: ['stacks', 'repositories'];
+		return ['stacks', 'repositories', 'requests'];
 	}
 	return ['stacks', 'repositories'];
 }
@@ -396,7 +389,7 @@ export function SupabasePanel() {
 
 	return (
 		<section className="panel-root supabase-panel">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<SupabaseHeaderActions
 						cleanUpCount={cleanUpCount}
@@ -581,7 +574,7 @@ export function SupabasePanel() {
 					onSelect={selectStack}
 				/>
 			)}
-			{live && view !== 'settings' && isSupabaseControlEnabled('activity') ? (
+			{live && view !== 'settings' ? (
 				<SupabaseActivity now={now} state={state} />
 			) : null}
 		</section>
@@ -626,7 +619,7 @@ function SupabaseHeaderActions({
 			<span className="sr-only" role="status">
 				{refreshing ? 'Refreshing Supabase stacks' : ''}
 			</span>
-			{live && isSupabaseControlEnabled('clean-up') ? (
+			{live ? (
 				<Button size="sm" variant="secondary" onPress={onCleanUp}>
 					<Eraser aria-hidden="true" className="h-3.5 w-3.5" />
 					{cleanUpCount > 0 ? `Clean up ${cleanUpCount}` : 'Clean up'}
@@ -980,82 +973,78 @@ function StacksToolbar({
 				value={navigation.filter}
 				onChange={(filter) => onNavigate({ type: 'set-filter', filter })}
 			/>
-			{isSupabaseControlEnabled('select-multiple') ? (
-				<div className="supabase-bulk-group">
-					{navigation.batchMode && isSupabaseControlEnabled('bulk-stop') ? (
-						<SupabaseControlButton
-							control={{
-								label: bulk.stop.label,
-								availability: bulk.stop.availability,
-								confirmation: stopConfirmation,
-							}}
-							describedBy={
-								bulk.stop.availability.allowed
-									? undefined
-									: SUPABASE_BULK_REASON_IDS.stop
-							}
-							icon={<Square aria-hidden="true" className="h-3.5 w-3.5" />}
-							inlineCopy={supabaseInlineConfirmCopy(
-								stopInput,
-								state,
-								stopConfirmation.kind === 'inline'
-									? stopConfirmation.agents
-									: []
-							)}
-							reasonPlacement="elsewhere"
-							onRun={() => onBulkRun(stopInput)}
-						/>
-					) : null}
-					{navigation.batchMode && isSupabaseControlEnabled('bulk-destroy') ? (
-						<SupabaseControlButton
-							control={{
-								label: bulk.destroy.label,
-								availability: bulk.destroy.availability,
-								confirmation: { kind: 'native' },
-							}}
-							describedBy={
-								bulk.destroy.availability.allowed
-									? undefined
-									: SUPABASE_BULK_REASON_IDS.destroy
-							}
-							icon={<Trash2 aria-hidden="true" className="h-3.5 w-3.5" />}
-							reasonPlacement="elsewhere"
-							variant="ghost"
-							onRun={() =>
-								onBulkRun({
-									kind: 'destroy',
-									stackIds: [...bulk.destroy.stackIds],
-									removeUploads: false,
-								})
-							}
-						/>
-					) : null}
-					<Button
-						aria-label={
-							navigation.batchMode ? 'Done selecting' : 'Select multiple'
+			<div className="supabase-bulk-group">
+				{navigation.batchMode ? (
+					<SupabaseControlButton
+						control={{
+							label: bulk.stop.label,
+							availability: bulk.stop.availability,
+							confirmation: stopConfirmation,
+						}}
+						describedBy={
+							bulk.stop.availability.allowed
+								? undefined
+								: SUPABASE_BULK_REASON_IDS.stop
 						}
-						aria-pressed={navigation.batchMode}
-						size="sm"
-						variant={navigation.batchMode ? 'secondary' : 'ghost'}
-						onPress={() =>
-							onNavigate({
-								type: 'set-batch-mode',
-								enabled: !navigation.batchMode,
+						icon={<Square aria-hidden="true" className="h-3.5 w-3.5" />}
+						inlineCopy={supabaseInlineConfirmCopy(
+							stopInput,
+							state,
+							stopConfirmation.kind === 'inline' ? stopConfirmation.agents : []
+						)}
+						reasonPlacement="elsewhere"
+						onRun={() => onBulkRun(stopInput)}
+					/>
+				) : null}
+				{navigation.batchMode ? (
+					<SupabaseControlButton
+						control={{
+							label: bulk.destroy.label,
+							availability: bulk.destroy.availability,
+							confirmation: { kind: 'native' },
+						}}
+						describedBy={
+							bulk.destroy.availability.allowed
+								? undefined
+								: SUPABASE_BULK_REASON_IDS.destroy
+						}
+						icon={<Trash2 aria-hidden="true" className="h-3.5 w-3.5" />}
+						reasonPlacement="elsewhere"
+						variant="ghost"
+						onRun={() =>
+							onBulkRun({
+								kind: 'destroy',
+								stackIds: [...bulk.destroy.stackIds],
+								removeUploads: false,
 							})
 						}
-					>
-						<ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
-						<span className="supabase-toolbar-label">
-							{navigation.batchMode ? 'Done selecting' : 'Select multiple'}
-						</span>
-					</Button>
-					{navigation.batchMode ? (
-						<span className="sim-toolbar-meta">
-							{navigation.batchIds.length} selected
-						</span>
-					) : null}
-				</div>
-			) : null}
+					/>
+				) : null}
+				<Button
+					aria-label={
+						navigation.batchMode ? 'Done selecting' : 'Select multiple'
+					}
+					aria-pressed={navigation.batchMode}
+					size="sm"
+					variant={navigation.batchMode ? 'secondary' : 'ghost'}
+					onPress={() =>
+						onNavigate({
+							type: 'set-batch-mode',
+							enabled: !navigation.batchMode,
+						})
+					}
+				>
+					<ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
+					<span className="supabase-toolbar-label">
+						{navigation.batchMode ? 'Done selecting' : 'Select multiple'}
+					</span>
+				</Button>
+				{navigation.batchMode ? (
+					<span className="sim-toolbar-meta">
+						{navigation.batchIds.length} selected
+					</span>
+				) : null}
+			</div>
 			{navigation.batchMode ? null : (
 				<span className="sim-toolbar-meta sim-fleet-toolbar-meta">
 					{stackMatches} matching · {navigation.batchIds.length} selected

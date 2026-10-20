@@ -1,6 +1,5 @@
 import { Button } from '@heroui/react/button';
 import { Input } from '@heroui/react/input';
-import { diagnosticErrorText } from '@rndevtools/core/redact';
 import {
 	AlertTriangle,
 	Camera,
@@ -24,7 +23,6 @@ import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
 	formatBytes,
-	SimulatorPanelHeader,
 	SimulatorTargetSelect,
 } from '@/components/simulator-ui';
 import {
@@ -33,10 +31,12 @@ import {
 	Disclosure,
 	InfoPopover,
 	KeyValue,
+	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	Toolbar,
 } from '@/components/ui';
+import { errorText } from '@/lib/runtime-action';
 import {
 	type CaptureCompositionFields,
 	captureCompositionAspectRatio,
@@ -209,7 +209,7 @@ export function CapturesPanel() {
 				);
 			} catch (error) {
 				if (retentionRequestRef.current !== requestId) return;
-				setRetention({ kind: 'error', error: captureErrorText(error) });
+				setRetention({ kind: 'error', error: errorText(error) });
 			}
 		},
 		[getCaptureRetention, isBridgeAvailable]
@@ -249,7 +249,7 @@ export function CapturesPanel() {
 					setAccess({
 						kind: 'error',
 						captureId,
-						error: captureErrorText(error),
+						error: errorText(error),
 					});
 				}
 			}
@@ -294,7 +294,7 @@ export function CapturesPanel() {
 					setSecondaryAccess({
 						kind: 'error',
 						captureId,
-						error: captureErrorText(error),
+						error: errorText(error),
 					});
 				}
 			});
@@ -414,7 +414,7 @@ export function CapturesPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={<SimulatorTargetSelect />}
 				description="Capture screenshots and recordings from booted targets, preview them through a private desktop protocol, and explicitly export or reveal local originals. No filesystem path crosses into the renderer."
 				meta={`${state.captures.length} capture${state.captures.length === 1 ? '' : 's'}`}
@@ -987,8 +987,4 @@ function CaptureRetentionControls({
 			)}
 		</section>
 	);
-}
-
-function captureErrorText(error: unknown): string {
-	return diagnosticErrorText(error).slice(0, 8 * 1024);
 }

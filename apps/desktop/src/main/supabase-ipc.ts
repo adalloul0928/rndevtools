@@ -1,7 +1,3 @@
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import { confirmSupabaseDemoOperation } from '../shared/supabase-demo-data';
 import {
 	checkSupabaseOperation,
@@ -15,6 +11,7 @@ import {
 	sanitizeSupabaseDisplayText,
 	supabaseConfirmationRequired,
 	supabaseConfirmationResultSchema,
+	supabaseConfirmedOperation,
 	supabaseDesktopError,
 	supabaseInterestSchema,
 	supabaseOperationReceiptSchema,
@@ -22,7 +19,7 @@ import {
 	supabaseStateSchema,
 } from '../shared/supabase-protocol';
 import type { ActionConfirmationStore } from './action-confirmation-store';
-import { sanitizeDialogText } from './security';
+import { safeErrorText, sanitizeDialogText } from './security';
 import {
 	type SupabaseConfirmationFacts,
 	type SupabaseDialogPort,
@@ -32,7 +29,6 @@ import {
 } from './supabase/service-ports';
 
 const CONFIRMATION_SCOPE = 'supabase';
-const MAX_ERROR_LENGTH = 4 * 1024;
 /** The confirmation result's error is single-line text of at most 1,024. */
 const MAX_RESULT_ERROR_LENGTH = 1_024;
 const MAX_DIALOG_LINES = 24;
@@ -41,8 +37,6 @@ const STATE_BROADCAST_DELAY_MS = 100;
 
 /** The part of an Electron IPC event these handlers read. */
 type SupabaseIpcEvent = Readonly<{ sender: Readonly<{ id: number }> }>;
-
-type ConfirmationOptions = NonNullable<SupabaseConfirmationResult['options']>;
 
 type SupabaseIpcDependencies<E extends SupabaseIpcEvent> = Readonly<{
 	service: Pick<
@@ -57,52 +51,9 @@ type SupabaseIpcDependencies<E extends SupabaseIpcEvent> = Readonly<{
 	now: () => number;
 }>;
 
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
-
 /** The key a renderer's interest is filed under in the service. */
 export function supabaseInterestKey(senderId: number): string {
 	return `renderer-${senderId}`;
-}
-
-/**
- * The operation the dialog's answer makes: the uploads checkbox and the
- * turn-off button substituted the way withSupabaseConfirmation applies them,
- * so the renderer's follow-up run carries exactly what the token is bound to.
- */
-function confirmedOperation(
-	operation: SupabaseOperation,
-	options: ConfirmationOptions
-): SupabaseOperation {
-	switch (operation.kind) {
-		case 'destroy':
-			return {
-				...operation,
-				removeUploads: options.removeUploads ?? operation.removeUploads,
-			};
-		case 'request.approve': {
-			const removeUploads = options.removeUploads ?? operation.removeUploads;
-			return {
-				...operation,
-				...(removeUploads === undefined ? {} : { removeUploads }),
-			};
-		}
-		case 'set-enabled': {
-			const disposition = options.disposition ?? operation.disposition;
-			return {
-				...operation,
-				...(disposition === undefined || operation.enabled
-					? {}
-					: { disposition }),
-			};
-		}
-		default:
-			return operation;
-	}
 }
 
 /**
@@ -229,7 +180,9 @@ export function createSupabaseIpcHandlers<E extends SupabaseIpcEvent>({
 			const { token, expiresAt } = confirmations.issue(
 				CONFIRMATION_SCOPE,
 				senderId,
-				confirmationBinding(confirmedOperation(operation, outcome.options))
+				confirmationBinding(
+					supabaseConfirmedOperation(operation, outcome.options)
+				)
 			);
 			return {
 				actionId: operation.actionId,
@@ -240,7 +193,7 @@ export function createSupabaseIpcHandlers<E extends SupabaseIpcEvent>({
 				options: outcome.options,
 			};
 		} catch (error) {
-			return refuse(safeError(error));
+			return refuse(safeErrorText(error));
 		}
 	};
 
@@ -300,7 +253,7 @@ export function createSupabaseIpcHandlers<E extends SupabaseIpcEvent>({
 		} catch (error) {
 			return failedReceipt(
 				operation,
-				supabaseDesktopError('internal', safeError(error))
+				supabaseDesktopError('internal', safeErrorText(error))
 			);
 		}
 	};

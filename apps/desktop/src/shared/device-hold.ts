@@ -317,6 +317,14 @@ export function formatHoldDuration(ms: number): string {
 }
 
 /**
+ * A stack's stop delay, the duration part only: whole seconds under two
+ * minutes, else the way holds read it. Callers word a zero delay themselves.
+ */
+export function formatStopDelay(ms: number): string {
+	return ms < 120_000 ? `${Math.round(ms / 1_000)} s` : formatHoldDuration(ms);
+}
+
+/**
  * What a hold label needs: whether the holder is alive, when an abandoned
  * hold ends, and what kind of holder it is. Device holds and Supabase stack
  * holds both fit this shape.

@@ -10,7 +10,7 @@ import type {
 	MainOnlyCredentials,
 	SupabasePublicEndpoints,
 } from './cli-contract';
-import { sha256Hex } from './engine-support';
+import { sha256Hex, supabaseWithin } from './engine-support';
 import type { SupabaseWorktreeFacts } from './repositories';
 import type {
 	SupabaseEngine,
@@ -253,32 +253,6 @@ function failedAnswer(
 	};
 }
 
-/** Resolves with the value, or undefined once `ms` passed or the signal aborted. */
-function within<T>(
-	promise: Promise<T>,
-	ms: number,
-	engine: SupabaseEngine,
-	signal?: AbortSignal
-): Promise<T | undefined> {
-	if (ms <= 0) {
-		return Promise.race([promise, Promise.resolve(undefined)]);
-	}
-	return new Promise((resolve) => {
-		let done = false;
-		const finish = (value: T | undefined) => {
-			if (done) return;
-			done = true;
-			engine.timers.clearTimeout(timer);
-			signal?.removeEventListener('abort', onAbort);
-			resolve(value);
-		};
-		const onAbort = () => finish(undefined);
-		const timer = engine.timers.setTimeout(() => finish(undefined), ms);
-		signal?.addEventListener('abort', onAbort, { once: true });
-		promise.then(finish, () => finish(undefined));
-	});
-}
-
 /**
  * Lane up's backend: the worktree's identity comes from its HEAD (the
  * `branch` input is informational). Waits up to `waitMs` for the stack;
@@ -379,7 +353,12 @@ export async function ensureSupabaseForLane(
 				},
 			})
 		);
-		const settled = await within(pending, waitMs, engine, signal);
+		const settled = await supabaseWithin(
+			engine.timers,
+			pending,
+			waitMs,
+			signal
+		);
 		if (settled) {
 			const answer = answerFor(engine, input, settled);
 			return {

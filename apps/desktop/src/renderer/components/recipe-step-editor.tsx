@@ -11,6 +11,14 @@ import {
 } from 'lucide-react';
 import { useId, useState } from 'react';
 import {
+	assertFixtureSize,
+	IMAGE_MIME_TYPES,
+	inspectImageFixture,
+	inspectVideoFixture,
+	readFixtureBase64,
+	VIDEO_MIME_TYPES,
+} from '@/lib/camera-fixture-file';
+import {
 	createAssertion,
 	createCameraFixture,
 	createSemanticAction,
@@ -20,11 +28,6 @@ import {
 	type RecipeValidationIssue,
 } from '@/simulator/recipe-model';
 import type { RecipeStep } from '../../shared/recipe-protocol';
-
-const MAX_FIXTURE_BYTES = 384 * 1024;
-const MAX_ENCODED_FIXTURE_BYTES = 512 * 1024;
-const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
-const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime'] as const;
 
 type SimulatorStep = Extract<RecipeStep, { kind: 'simulator' }>;
 type SimulatorAction = SimulatorStep['action'];
@@ -1530,111 +1533,27 @@ async function prepareFixtureFile(
 			'Choose a still, QR, or video fixture before selecting a file.'
 		);
 	}
-	if (file.size === 0 || file.size > MAX_FIXTURE_BYTES) {
-		throw new Error('Choose a non-empty fixture no larger than 384 KiB.');
+	assertFixtureSize(file);
+	const dataBase64 = await readFixtureBase64(file, 'recipe');
+	if (fixtureKind === 'video') {
+		const media = await inspectVideoFixture(file);
+		return {
+			fixtureKind,
+			label: file.name,
+			mimeType: file.type as 'video/mp4' | 'video/quicktime',
+			dataBase64,
+			...media,
+		};
 	}
-	const dataBase64 = await readBase64(file);
-	if (
-		new TextEncoder().encode(dataBase64).byteLength > MAX_ENCODED_FIXTURE_BYTES
-	) {
-		throw new Error('The encoded fixture exceeds the 512 KiB recipe envelope.');
-	}
-	if (fixtureKind === 'still' || fixtureKind === 'qr') {
-		if (
-			!IMAGE_MIME_TYPES.includes(file.type as (typeof IMAGE_MIME_TYPES)[number])
-		) {
-			throw new Error(
-				'Still and QR fixtures must be JPEG, PNG, or WebP images.'
-			);
-		}
-		const bitmap = await createImageBitmap(file);
-		try {
-			return {
-				fixtureKind,
-				label: file.name,
-				mimeType: file.type as 'image/jpeg' | 'image/png' | 'image/webp',
-				dataBase64,
-				width: bitmap.width,
-				height: bitmap.height,
-			};
-		} finally {
-			bitmap.close();
-		}
-	}
-	if (
-		!VIDEO_MIME_TYPES.includes(file.type as (typeof VIDEO_MIME_TYPES)[number])
-	) {
-		throw new Error('Video fixtures must be MP4 or QuickTime files.');
-	}
-	const media = await inspectVideo(file);
+	const { width, height } = await inspectImageFixture(file);
 	return {
 		fixtureKind,
 		label: file.name,
-		mimeType: file.type as 'video/mp4' | 'video/quicktime',
+		mimeType: file.type as 'image/jpeg' | 'image/png' | 'image/webp',
 		dataBase64,
-		...media,
+		width,
+		height,
 	};
-}
-
-async function readBase64(file: File): Promise<string> {
-	return await new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onerror = () =>
-			reject(new Error('The selected fixture could not be read.'));
-		reader.onload = () => {
-			const result = reader.result;
-			if (typeof result !== 'string') {
-				reject(new Error('The selected fixture produced an invalid payload.'));
-				return;
-			}
-			const separator = result.indexOf(',');
-			if (separator < 0) {
-				reject(new Error('The selected fixture produced an invalid data URL.'));
-				return;
-			}
-			resolve(result.slice(separator + 1));
-		};
-		reader.readAsDataURL(file);
-	});
-}
-
-async function inspectVideo(
-	file: File
-): Promise<{ width: number; height: number; durationMs: number }> {
-	const objectUrl = URL.createObjectURL(file);
-	try {
-		return await new Promise((resolve, reject) => {
-			const video = document.createElement('video');
-			video.preload = 'metadata';
-			video.onerror = () =>
-				reject(new Error('Video metadata could not be decoded.'));
-			video.onloadedmetadata = () => {
-				const durationMs = Math.round(video.duration * 1_000);
-				if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-					reject(
-						new Error('The selected video does not report valid dimensions.')
-					);
-					return;
-				}
-				if (
-					!Number.isFinite(durationMs) ||
-					durationMs <= 0 ||
-					durationMs > 600_000
-				) {
-					reject(new Error('Choose a video between 1 ms and 10 minutes.'));
-					return;
-				}
-				resolve({
-					width: video.videoWidth,
-					height: video.videoHeight,
-					durationMs,
-				});
-			};
-			video.src = objectUrl;
-		});
-	} finally {
-		URL.revokeObjectURL(objectUrl);
-	}
 }
 
 const SIMULATOR_OPERATIONS: SelectOption[] = [

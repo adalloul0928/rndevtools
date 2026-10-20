@@ -2836,7 +2836,9 @@ describe('SupabaseEngine branch follow', () => {
 				?.holds.some((hold) => hold.agent.sessionId === 'session-a')
 		).toBe(true);
 		expect(h.engine.stackStore.record(oldId)?.holds).toEqual([]);
-		expect(h.engine.stackStore.record(oldId)?.flags.supersededBy).toBe(newId);
+		expect(h.engine.stackStore.record(oldId)?.flags.supersededAt).toBeTypeOf(
+			'number'
+		);
 		// The old stack's data is kept.
 		expect(h.cli.stacks.has(oldId)).toBe(true);
 	});
@@ -2861,7 +2863,7 @@ describe('SupabaseEngine branch follow', () => {
 			expect.arrayContaining(['--stack-id', mainId])
 		);
 		const record = h.engine.stackStore.record(mainId);
-		expect(record?.flags.supersededBy).toBeUndefined();
+		expect(record?.flags.supersededAt).toBeUndefined();
 		expect(
 			record?.holds.some((hold) => hold.agent.sessionId === 'session-a')
 		).toBe(true);

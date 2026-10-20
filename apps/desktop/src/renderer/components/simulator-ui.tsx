@@ -11,30 +11,9 @@ import {
 	Smartphone,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { EmptyPanel, PanelHeader } from '@/components/ui';
+import { EmptyPanel } from '@/components/ui';
 import { useSimulatorRuntime } from '@/state/simulator-runtime';
 import type { SimulatorDevice } from '../../shared/simulator-protocol';
-
-export function SimulatorPanelHeader({
-	title,
-	description,
-	meta,
-	actions,
-}: {
-	title: string;
-	description: string;
-	meta?: ReactNode;
-	actions?: ReactNode;
-}) {
-	return (
-		<PanelHeader
-			actions={actions}
-			description={description}
-			meta={meta}
-			title={title}
-		/>
-	);
-}
 
 export function RefreshSimulatorsButton({
 	compact = false,

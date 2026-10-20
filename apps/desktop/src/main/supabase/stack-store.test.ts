@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
 	mkdir,
 	mkdtemp,
@@ -20,7 +21,6 @@ import {
 	type SupabaseStackRecord,
 	SupabaseStackStore,
 	sanitizeSupabaseRequestNote,
-	supabaseKeyFingerprint,
 	supabaseRecreateError,
 } from './stack-store';
 
@@ -31,6 +31,10 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = 1_792_245_785_000;
 const MINUTE = 60_000;
+/** A fingerprint as older stacks.json files hold it: sha256 of a public key. */
+const KEY_FINGERPRINT = createHash('sha256')
+	.update('a public key', 'utf8')
+	.digest('hex');
 const directories: string[] = [];
 
 async function root(): Promise<string> {
@@ -112,7 +116,7 @@ describe('SupabaseStackStore', () => {
 		await stacks.upsertRecord(
 			record(1, {
 				keyFingerprints: {
-					publishableKey: supabaseKeyFingerprint('a public key'),
+					publishableKey: KEY_FINGERPRINT,
 				},
 			})
 		);
@@ -121,7 +125,7 @@ describe('SupabaseStackStore', () => {
 			record(1, {
 				lastUsedAt: NOW,
 				keyFingerprints: {
-					publishableKey: supabaseKeyFingerprint('a public key'),
+					publishableKey: KEY_FINGERPRINT,
 				},
 			})
 		);

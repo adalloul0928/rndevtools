@@ -15,9 +15,9 @@ import {
 	DenseVirtualList,
 	formatDuration,
 	SimulatorMetric,
-	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
-import { Badge, PanelNotice, StatusPill } from '@/components/ui';
+import { Badge, PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
+import { nextActionId, type WithoutActionId } from '@/lib/runtime-action';
 import type {
 	BuildInsight,
 	BuildInsightsBridge,
@@ -37,9 +37,6 @@ const EMPTY_STATE: BuildInsightsState = {
 export const BUILD_INSIGHTS_FOUNDATION_COPY =
 	"Current foundation: Apple's public xcresulttool get build-results view. Duration, status, and diagnostic counts are available; scheme, configuration, Xcode version, clean/incremental classification, and Swift FSEvents live watching are deferred.";
 
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId'>
-	: never;
 type BuildInsightsOperationInput = WithoutActionId<BuildInsightsOperation>;
 
 function getBridge(): BuildInsightsBridge | null {
@@ -144,14 +141,14 @@ export function BuildInsightsPanel() {
 		void runOperation(
 			{
 				...operation,
-				actionId: `build-insights-${crypto.randomUUID()}`,
+				actionId: nextActionId('build-insights'),
 			} as BuildInsightsOperation,
 			successMessage
 		);
 
 	return (
 		<section className="panel-root build-insights-panel">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<div className="sim-header-action-group">
 						<Button

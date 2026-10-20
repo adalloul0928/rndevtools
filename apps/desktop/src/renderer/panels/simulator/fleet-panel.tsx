@@ -39,7 +39,6 @@ import {
 	NoSimulatorTarget,
 	RefreshSimulatorsButton,
 	SimulatorMetric,
-	SimulatorPanelHeader,
 	TargetStatePill,
 } from '@/components/simulator-ui';
 import { SupabaseChip } from '@/components/supabase-ui';
@@ -48,6 +47,7 @@ import {
 	Disclosure,
 	InfoPopover,
 	KeyValue,
+	PanelHeader,
 	PanelNotice,
 	SearchControl,
 	StatusPill,
@@ -333,7 +333,7 @@ export function FleetPanel() {
 
 	return (
 		<section className="panel-root">
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<>
 						<RefreshSimulatorsButton compact />

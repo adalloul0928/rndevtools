@@ -1,12 +1,9 @@
 import { formatAgo, formatClock, formatSize } from '@/lib/format';
-import {
-	formatHoldDuration,
-	holdCountdownLabel,
-} from '../../shared/device-hold';
+import type { WithoutActionId } from '@/lib/runtime-action';
+import { formatStopDelay, holdCountdownLabel } from '../../shared/device-hold';
 import {
 	attentionItems,
 	isActiveSupabaseJob,
-	isSupabaseControlEnabled,
 	isSupabaseStackRunning,
 	SUPABASE_DETAIL_SECTIONS,
 	SUPABASE_MAX_DESTROY_IDS,
@@ -15,7 +12,6 @@ import {
 	type SupabaseAttentionItem,
 	type SupabaseAttentionRank,
 	type SupabaseAvailability,
-	type SupabaseControlId,
 	type SupabaseDatabasePayload,
 	type SupabaseErrorView,
 	type SupabaseHold,
@@ -63,9 +59,6 @@ import {
 export type SupabaseView = 'stacks' | 'repositories' | 'requests' | 'settings';
 export type SupabaseDetailSection = (typeof SUPABASE_DETAIL_SECTIONS)[number];
 
-type WithoutActionId<T> = T extends { actionId: string }
-	? Omit<T, 'actionId' | 'confirmationToken'>
-	: never;
 /** An operation as a control builds it; the runtime adds the actionId. */
 export type SupabaseOperationInput = WithoutActionId<SupabaseOperation>;
 
@@ -93,7 +86,6 @@ const START_JOB_KINDS: ReadonlySet<SupabaseJob['kind']> = new Set([
 	'create',
 	'resume',
 	'prepare',
-	'follow',
 ]);
 
 function isLive(stack: Pick<SupabaseStackSummary, 'state'>): boolean {
@@ -896,21 +888,6 @@ export type SupabaseDetailAction = Readonly<{
 	confirmation: ReturnType<typeof supabaseConfirmationKind>;
 }>;
 
-const ACTION_CONTROLS = {
-	start: 'start',
-	'try-again': 'start',
-	resume: 'resume',
-	stop: 'stop',
-	'stop-external': 'stop-external',
-	restart: 'restart',
-	pin: 'pin',
-	unpin: 'pin',
-	adopt: 'adopt',
-	'cancel-start': 'cancel-start',
-	'open-lane': 'navigate',
-	'open-logs': 'read-logs',
-} as const satisfies Record<SupabaseDetailActionId, SupabaseControlId>;
-
 const ACTION_STACK_ACTIONS: Readonly<
 	Partial<Record<SupabaseDetailActionId, SupabaseStackAction>>
 > = {
@@ -1015,38 +992,35 @@ export function supabaseDetailActions(
 		now: context.now,
 		...(context.pending === undefined ? {} : { pending: context.pending }),
 	};
-	return ids
-		.filter((id) => isSupabaseControlEnabled(ACTION_CONTROLS[id]))
-		.slice(0, 4)
-		.map((id) => {
-			const action = ACTION_STACK_ACTIONS[id];
-			const operation = detailOperation(id, stack, job);
-			const label = {
-				start: startLabel('Start', state, context.now),
-				'try-again': startLabel('Try again', state, context.now),
-				resume: startLabel('Resume', state, context.now),
-				stop: 'Stop',
-				'stop-external': 'Stop…',
-				restart: 'Restart services',
-				pin: 'Keep running',
-				unpin: 'Unpin',
-				adopt: 'Adopt',
-				'cancel-start': 'Cancel start…',
-				'open-lane': 'Open lane',
-				'open-logs': 'Open logs',
-			}[id];
-			return {
-				id,
-				label,
-				availability: action
-					? supabaseActionAvailability(stack, action, availabilityContext)
-					: { allowed: true },
-				...(operation ? { operation } : {}),
-				confirmation: operation
-					? supabaseConfirmationKind(operation, state)
-					: { kind: 'none' },
-			};
-		});
+	return ids.slice(0, 4).map((id) => {
+		const action = ACTION_STACK_ACTIONS[id];
+		const operation = detailOperation(id, stack, job);
+		const label = {
+			start: startLabel('Start', state, context.now),
+			'try-again': startLabel('Try again', state, context.now),
+			resume: startLabel('Resume', state, context.now),
+			stop: 'Stop',
+			'stop-external': 'Stop…',
+			restart: 'Restart services',
+			pin: 'Keep running',
+			unpin: 'Unpin',
+			adopt: 'Adopt',
+			'cancel-start': 'Cancel start…',
+			'open-lane': 'Open lane',
+			'open-logs': 'Open logs',
+		}[id];
+		return {
+			id,
+			label,
+			availability: action
+				? supabaseActionAvailability(stack, action, availabilityContext)
+				: { allowed: true },
+			...(operation ? { operation } : {}),
+			confirmation: operation
+				? supabaseConfirmationKind(operation, state)
+				: { kind: 'none' },
+		};
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,7 +1131,7 @@ export function supabaseBulkEligibility(
 			stopSkips > 0
 				? `Stop skips ${stopSkips}${stoppedSkips === stopSkips ? ' stopped' : ''}`
 				: '',
-			destroySkips > 0 && isSupabaseControlEnabled('bulk-destroy')
+			destroySkips > 0
 				? `Destroy skips ${destroySkips}${running === destroySkips ? ' running' : ''}`
 				: '',
 		]
@@ -1702,12 +1676,6 @@ export type SupabaseRequestCard = Readonly<{
 	}>[];
 }>;
 
-const REQUEST_CONTROLS = {
-	destroy: 'review-destroy',
-	reset: 'review-reset',
-	'start-capacity': 'capacity-requests',
-} as const;
-
 /** `Codex session 3c9e7a12`, or `Codex · by worktree` for a shared MCP identity. */
 export function supabaseRequesterName(
 	requester: Pick<
@@ -1750,10 +1718,9 @@ export function buildSupabaseRequestCards(
 	return state.requests
 		.filter(
 			(request) =>
-				isSupabaseControlEnabled(REQUEST_CONTROLS[request.kind]) &&
-				(request.status === 'failed' ||
-					((request.status === 'pending' || request.status === 'settling') &&
-						request.expiresAt > now))
+				request.status === 'failed' ||
+				((request.status === 'pending' || request.status === 'settling') &&
+					request.expiresAt > now)
 		)
 		.sort((left, right) => left.createdAt - right.createdAt)
 		.map((request) => {
@@ -2130,7 +2097,6 @@ const JOB_VERBS: Readonly<Record<SupabaseJob['kind'], string>> = {
 	'seed-buckets': 'Seeding buckets for',
 	export: 'Exporting',
 	prepare: 'Downloading services for',
-	follow: 'Following',
 	studio: 'Restarting',
 	disable: 'Stopping',
 };
@@ -2700,111 +2666,87 @@ function controlsFor(
 		stack.state === 'not-created' ||
 		stack.state === 'never-started' ||
 		stack.state === 'failed';
-	const when = (control: SupabaseControlId, build: () => SupabaseControl) =>
-		isSupabaseControlEnabled(control) ? build() : undefined;
 	return {
 		start: (controlId: 'start' | 'resume' | 'try-again', label: string) =>
-			when(creates ? 'start' : 'resume', () =>
-				make({
-					id: controlId,
-					label,
-					action: creates ? 'start' : 'resume',
-					operation: { kind: 'start', stackId: id },
-				})
-			),
+			make({
+				id: controlId,
+				label,
+				action: creates ? 'start' : 'resume',
+				operation: { kind: 'start', stackId: id },
+			}),
 		stop: () =>
 			stack.origin === 'external'
-				? when('stop-external', () =>
-						make({
-							id: 'stop-external',
-							label: 'Stop…',
-							action: 'stop',
-							operation: { kind: 'stop', stackIds: [id] },
-						})
-					)
-				: when('stop', () =>
-						make({
-							id: 'stop',
-							label: 'Stop',
-							action: 'stop',
-							operation: { kind: 'stop', stackIds: [id] },
-						})
-					),
+				? make({
+						id: 'stop-external',
+						label: 'Stop…',
+						action: 'stop',
+						operation: { kind: 'stop', stackIds: [id] },
+					})
+				: make({
+						id: 'stop',
+						label: 'Stop',
+						action: 'stop',
+						operation: { kind: 'stop', stackIds: [id] },
+					}),
 		restart: () =>
-			when('restart', () =>
-				make({
-					id: 'restart',
-					label: 'Restart services',
-					action: 'restart',
-					operation: { kind: 'restart', stackId: id },
-				})
-			),
+			make({
+				id: 'restart',
+				label: 'Restart services',
+				action: 'restart',
+				operation: { kind: 'restart', stackId: id },
+			}),
 		stopAndStart: (
 			purpose: 'apply-config' | 'switch-cli' | 'recover-partial',
 			label: string
 		) =>
-			when(purpose === 'switch-cli' ? 'switch-cli' : 'stop-and-start', () =>
-				make({
-					id: `stop-and-start:${purpose}`,
-					label,
-					action: purpose === 'switch-cli' ? 'switch-cli' : 'stop-and-start',
-					operation: { kind: 'stop-and-start', stackId: id, purpose },
-				})
-			),
+			make({
+				id: `stop-and-start:${purpose}`,
+				label,
+				action: purpose === 'switch-cli' ? 'switch-cli' : 'stop-and-start',
+				operation: { kind: 'stop-and-start', stackId: id, purpose },
+			}),
 		reapply: () =>
-			when('reapply-exclusions', () =>
-				make({
-					id: 'reapply-exclusions',
-					label: 'Re-apply exclusions',
-					action: 'reapply-exclusions',
-					operation: { kind: 'reapply-exclusions', stackId: id },
-				})
-			),
+			make({
+				id: 'reapply-exclusions',
+				label: 'Re-apply exclusions',
+				action: 'reapply-exclusions',
+				operation: { kind: 'reapply-exclusions', stackId: id },
+			}),
 		destroy: () =>
-			when('destroy', () =>
-				make({
-					id: 'destroy',
-					label: 'Destroy…',
-					action: 'destroy',
-					operation: { kind: 'destroy', stackIds: [id], removeUploads: false },
-				})
-			),
-		recreate: (control: 'recreate' | 'destroy-and-start', label: string) =>
-			when(control, () =>
-				make({
-					id: 'recreate',
-					label,
-					action: 'recreate',
-					operation: { kind: 'recreate', stackId: id },
-				})
-			),
+			make({
+				id: 'destroy',
+				label: 'Destroy…',
+				action: 'destroy',
+				operation: { kind: 'destroy', stackIds: [id], removeUploads: false },
+			}),
+		recreate: (label: string) =>
+			make({
+				id: 'recreate',
+				label,
+				action: 'recreate',
+				operation: { kind: 'recreate', stackId: id },
+			}),
 		reveal: () =>
-			when('reveal', () =>
-				make({
-					id: 'reveal',
-					label: 'Reveal in Finder',
-					action: 'reveal',
-					operation: { kind: 'reveal', stackId: id, what: 'stack-folder' },
-				})
-			),
+			make({
+				id: 'reveal',
+				label: 'Reveal in Finder',
+				action: 'reveal',
+				operation: { kind: 'reveal', stackId: id, what: 'stack-folder' },
+			}),
 		follow: () =>
-			when('follow-branch', () =>
-				make({
-					id: 'follow-branch',
-					label: 'Follow',
-					action: 'follow-branch',
-					operation: { kind: 'follow-branch', stackId: id },
-				})
-			),
+			make({
+				id: 'follow-branch',
+				label: 'Follow',
+				action: 'follow-branch',
+				operation: { kind: 'follow-branch', stackId: id },
+			}),
 		resumeSaved: () =>
-			when('resume-saved', () =>
-				make({
-					id: 'resume-saved',
-					label: 'Resume with saved settings',
-					action: 'resume-saved',
-					operation: { kind: 'resume-saved', stackId: id },
-				})
-			),
+			make({
+				id: 'resume-saved',
+				label: 'Resume with saved settings',
+				action: 'resume-saved',
+				operation: { kind: 'resume-saved', stackId: id },
+			}),
 		reviewRepository: () =>
 			stack.repositoryId === undefined
 				? undefined
@@ -2879,7 +2821,7 @@ function errorControl(
 		case 'cli_mismatch':
 			return controls.stopAndStart('switch-cli', 'Restart with this CLI');
 		case 'needs_recreate':
-			return controls.recreate('recreate', 'Destroy and recreate…');
+			return controls.recreate('Destroy and recreate…');
 		case 'container_runtime':
 			return controls.destroy();
 		case 'ports_pinned':
@@ -3013,9 +2955,7 @@ export function supabaseDetailNotices(
 			tone: 'danger',
 			title: 'Interrupted.',
 			text: "A first start stopped midway can't be resumed. Destroy it and start again; nothing was saved yet.",
-			controls: [
-				controls.recreate('destroy-and-start', 'Destroy and start again…'),
-			],
+			controls: [controls.recreate('Destroy and start again…')],
 		});
 	}
 	if (stack.state === 'needs-recreate') {
@@ -3033,7 +2973,7 @@ export function supabaseDetailNotices(
 				text: supabaseRevertKeepsStack(changes)
 					? "The saved stack can't adopt this configuration. Revert the listed settings to keep it and its data, or destroy and recreate it for a fresh, migrated, seeded database."
 					: "The saved stack can't adopt this configuration. Recreating destroys its data and starts a fresh, migrated, seeded database.",
-				controls: [controls.recreate('recreate', 'Destroy and recreate…')],
+				controls: [controls.recreate('Destroy and recreate…')],
 				...(changes && changes.length > 0 ? { changes } : {}),
 			},
 			['needs_recreate']
@@ -3253,9 +3193,7 @@ function joinNames(names: readonly string[]): string {
 function stopDelayText(policy: Pick<SupabasePolicy, 'unheldStopDelayMs'>) {
 	const ms = policy.unheldStopDelayMs;
 	if (ms === 0) return 'as soon as nothing holds it';
-	const delay =
-		ms < 120_000 ? `${Math.round(ms / 1_000)} s` : formatHoldDuration(ms);
-	return `${delay} after nothing holds it`;
+	return `${formatStopDelay(ms)} after nothing holds it`;
 }
 
 /**
@@ -3831,10 +3769,7 @@ export function supabaseActivityView(
 		const active = isActiveSupabaseJob(job);
 		const detail = job.error?.title ?? job.latestLine;
 		const startJob =
-			job.kind === 'create' ||
-			job.kind === 'resume' ||
-			job.kind === 'prepare' ||
-			job.kind === 'follow';
+			job.kind === 'create' || job.kind === 'resume' || job.kind === 'prepare';
 		return {
 			id: job.id,
 			title: titleOf(job),
@@ -3849,11 +3784,7 @@ export function supabaseActivityView(
 					? 'danger'
 					: 'default',
 			active,
-			...(active &&
-			startJob &&
-			job.cancellable &&
-			job.cancelRequested !== true &&
-			isSupabaseControlEnabled('cancel-start')
+			...(active && startJob && job.cancellable && job.cancelRequested !== true
 				? { cancel: { kind: 'cancel-job', jobId: job.id } }
 				: {}),
 		};

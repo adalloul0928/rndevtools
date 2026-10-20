@@ -10,7 +10,6 @@ import {
 	EMPTY_SUPABASE_STATE,
 	formatSupabaseSize,
 	isLoopbackHttpUrl,
-	isSupabaseControlEnabled,
 	isSupabaseJobId,
 	type LaneBackendSummary,
 	laneBackendChip,
@@ -21,12 +20,10 @@ import {
 	nextEvents,
 	SUPABASE_AGENT_OPERATIONS,
 	SUPABASE_CONFIRMATION_KINDS,
-	SUPABASE_CONTROL_PHASES,
 	SUPABASE_OPERATION_KINDS,
 	SUPABASE_POLICY_DEFAULTS,
 	SUPABASE_POLICY_ERRORS,
 	SUPABASE_REASONS,
-	SUPABASE_UI_PHASE,
 	SUPABASE_UNREADABLE_RECOVERY,
 	type SupabaseAvailabilityContext,
 	type SupabaseJob,
@@ -61,7 +58,6 @@ import {
 	supabaseInterestSchema,
 	supabaseJobLabel,
 	supabaseOperationActions,
-	supabaseOperationPhase,
 	supabaseOperationReceiptSchema,
 	supabaseOperationSchema,
 	supabasePlatformLabel,
@@ -166,46 +162,7 @@ function context(
 	};
 }
 
-describe('phases', () => {
-	it('ships every phase through 5 and gates later controls by phase', () => {
-		expect(SUPABASE_UI_PHASE).toBe(5);
-		for (const control of Object.keys(SUPABASE_CONTROL_PHASES)) {
-			expect(
-				isSupabaseControlEnabled(
-					control as keyof typeof SUPABASE_CONTROL_PHASES
-				)
-			).toBe(true);
-		}
-		expect(isSupabaseControlEnabled('refresh', 1)).toBe(true);
-		expect(isSupabaseControlEnabled('read-logs', 1)).toBe(true);
-		expect(isSupabaseControlEnabled('start', 1)).toBe(false);
-		expect(isSupabaseControlEnabled('destroy', 3)).toBe(false);
-		expect(isSupabaseControlEnabled('reset', 4)).toBe(false);
-	});
-
-	const onStack = { stackId: checkout.id };
-	it.each([
-		[{ kind: 'copy', what: 'api-url', ...onStack }, 1],
-		[{ kind: 'copy', what: 'inspect-command', ...onStack }, 1],
-		[{ kind: 'copy', what: 'publishable-key', ...onStack }, 3],
-		[{ kind: 'copy', what: 'psql-command', ...onStack }, 3],
-		[{ kind: 'open', surface: 'mailpit', ...onStack }, 3],
-		[{ kind: 'open', surface: 'studio', ...onStack }, 5],
-		[{ kind: 'reveal', what: 'stack-folder', ...onStack }, 4],
-		[{ kind: 'reveal', what: 'export', ...onStack }, 5],
-		[{ kind: 'destroy', stackIds: [stopped.id], removeUploads: false }, 4],
-		[{ kind: 'reset', seed: true, ...onStack }, 5],
-		[{ kind: 'update-policy', patch: { maxRunning: 4 } }, 3],
-		[{ kind: 'update-policy', patch: { branchSwitch: 'warn' } }, 5],
-		[{ kind: 'update-policy', patch: { eagerLanes: true } }, 5],
-	] as const)('puts %o in phase %d', (fields, phase) => {
-		const operation = supabaseOperationSchema.parse({
-			actionId: ACTION,
-			...fields,
-		});
-		expect(supabaseOperationPhase(operation)).toBe(phase);
-	});
-
+describe('operation kinds', () => {
 	it('lists every operation kind once', () => {
 		expect(new Set(SUPABASE_OPERATION_KINDS).size).toBe(
 			SUPABASE_OPERATION_KINDS.length
@@ -1380,7 +1337,7 @@ describe('attentionItems and sidebarBadge', () => {
 		expect(sidebarBadge(off, now)).toBeUndefined();
 	});
 
-	it('falls back to a grey running count, and hides before Phase 3', () => {
+	it('falls back to a grey running count, and hides while discovery is off', () => {
 		const calm: SupabaseState = {
 			...demo,
 			stacks: [checkout],
@@ -1393,7 +1350,6 @@ describe('attentionItems and sidebarBadge', () => {
 			tone: 'default',
 			label: `Supabase, ${demo.capacity.running} running`,
 		});
-		expect(sidebarBadge(demo, now, 1)).toBeUndefined();
 		expect(
 			sidebarBadge(
 				{ ...demo, discovery: { ...demo.discovery, status: 'off' } },

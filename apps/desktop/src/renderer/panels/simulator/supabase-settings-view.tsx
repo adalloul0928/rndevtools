@@ -35,7 +35,6 @@ import {
 } from '@/state/supabase-runtime';
 import { formatHoldDuration } from '../../../shared/device-hold';
 import {
-	isSupabaseControlEnabled,
 	laneDefaultBackend,
 	SUPABASE_POLICY_ERRORS,
 	type SupabaseAppEnvSource,
@@ -348,276 +347,250 @@ export function SupabaseSettingsView({
 						</DisabledReason>
 					</p>
 				)}
-				{isSupabaseControlEnabled('policy-form') ? (
-					<>
-						<SettingsSurface title="Capacity and idle">
-							<div className="supabase-field-grid">
-								<NumberField
-									disabled={locked}
-									error={formState.errors.maxRunning}
-									hint={`1–24 · this Mac's safe ceiling is ${state.capacity.derivedCap}${state.capacity.sysv ? ` (${state.capacity.sysv.limit} slots, 8 kept free)` : ''}`}
-									label="Max running"
-									lockedProps={lockedProps}
-									was={
-										form.maxRunning === undefined
-											? undefined
-											: String(policy.maxRunning)
-									}
-									value={values.maxRunning}
-									onChange={(maxRunning) => update({ maxRunning })}
-								/>
-								<NumberField
-									disabled={locked}
-									error={formState.errors.unheldStopDelayMs}
-									hint="when nothing holds a stack; data is kept"
-									label="Stop after release"
-									lockedProps={lockedProps}
-									unit="s"
-									was={
-										form.unheldStopDelaySeconds === undefined
-											? undefined
-											: String(Math.round(policy.unheldStopDelayMs / 1_000))
-									}
-									value={values.unheldStopDelaySeconds}
-									onChange={(unheldStopDelaySeconds) =>
-										update({ unheldStopDelaySeconds })
-									}
-								/>
-								<div className="supabase-field">
-									<span className="supabase-field-label">Abandoned grace</span>
-									<strong className="supabase-field-static">
-										{formatHoldDuration(policy.abandonedGraceMs)}
-									</strong>
-									<small className="supabase-field-help">
-										the same as Simulator holds
-									</small>
-								</div>
-								<NumberField
-									disabled={locked}
-									error={formState.errors.retentionDays}
-									hint="RN Devtools never deletes on its own"
-									label="Suggest cleanup"
-									lockedProps={lockedProps}
-									unit="days"
-									was={
-										form.retentionDays === undefined
-											? undefined
-											: String(policy.retentionDays)
-									}
-									value={values.retentionDays}
-									onChange={(retentionDays) => update({ retentionDays })}
-								/>
-							</div>
-						</SettingsSurface>
-						<SettingsSurface title="Services">
-							<p className="supabase-settings-note">
-								Exclude by default · new starts and every resume pass these
-								exclusions again.
-							</p>
-							<SettingSwitch
-								description="Turning this off asks first in a system dialog: Studio's SQL endpoint has no authentication while it runs."
-								disabled={!editable.allowed || saving}
-								label="Studio"
-								lockedProps={lockedProps}
-								selected={policy.exclude.includes('studio')}
-								onChange={(selected) =>
-									applyNow({
-										exclude: selected
-											? [...policy.exclude, 'studio']
-											: policy.exclude.filter(
-													(capability) => capability !== 'studio'
-												),
-									})
-								}
-							/>
-							<SettingSwitch
-								description="Analytics wakes with Studio and keeps logs in a local service."
-								disabled={locked}
-								label="Analytics"
-								lockedProps={lockedProps}
-								selected={values.excludeAnalytics}
-								onChange={(excludeAnalytics) => update({ excludeAnalytics })}
-							/>
-							<SettingSwitch
-								description="The connection pooler; most apps talk to the database directly."
-								disabled={locked}
-								label="Pooler"
-								lockedProps={lockedProps}
-								selected={values.excludePooler}
-								onChange={(excludePooler) => update({ excludePooler })}
-							/>
-							{formState.errors.exclude ? (
-								<p className="sim-field-error">{formState.errors.exclude}</p>
-							) : null}
-						</SettingsSurface>
-						<SettingsSurface title="Safety">
-							<SettingSwitch
-								description="They listen on every interface; they are never attached to a lane."
-								disabled={locked}
-								label="Stop Docker or Podman stacks on managed worktrees, once per session"
-								lockedProps={lockedProps}
-								selected={values.stopContainerStacksOnce}
-								onChange={(stopContainerStacksOnce) =>
-									update({ stopContainerStacksOnce })
-								}
-							/>
-							{isSupabaseControlEnabled('policy-trust') ? (
-								<SettingSwitch
-									description="Patch releases of the verified Supabase CLI line pass a live contract check first. Turning this on asks first in a system dialog."
-									disabled={!editable.allowed || saving}
-									label="Allow unverified patch releases"
-									lockedProps={lockedProps}
-									selected={policy.allowUnverifiedPatch}
-									onChange={(allowUnverifiedPatch) =>
-										applyNow({ allowUnverifiedPatch })
-									}
-								/>
-							) : null}
-						</SettingsSurface>
-						<AppVariables
-							error={formState.errors.appEnv}
-							errors={formState.errors}
-							locked={locked}
+				<SettingsSurface title="Capacity and idle">
+					<div className="supabase-field-grid">
+						<NumberField
+							disabled={locked}
+							error={formState.errors.maxRunning}
+							hint={`1–24 · this Mac's safe ceiling is ${state.capacity.derivedCap}${state.capacity.sysv ? ` (${state.capacity.sysv.limit} slots, 8 kept free)` : ''}`}
+							label="Max running"
 							lockedProps={lockedProps}
-							policy={policy}
-							rows={values.appEnv}
-							onChange={(appEnv) => update({ appEnv })}
+							was={
+								form.maxRunning === undefined
+									? undefined
+									: String(policy.maxRunning)
+							}
+							value={values.maxRunning}
+							onChange={(maxRunning) => update({ maxRunning })}
 						/>
-						<SettingsSurface title="Lane defaults">
-							<p className="supabase-settings-note">
-								Auto · Off · Required is a per-lane choice in the Lanes start
-								form.
-							</p>
-							<div className="supabase-lane-defaults">
-								{values.laneDefaults.map((entry) => (
-									<div className="supabase-field" key={entry.environmentId}>
-										<span className="supabase-field-label">
-											{entry.environmentId}
-										</span>
-										<SupabaseSelect
-											{...(editable.allowed
-												? {}
-												: { describedBy: offReasonId })}
-											disabled={locked}
-											label={`Lane default for ${entry.environmentId}`}
-											options={[
-												{ value: 'auto', label: 'Auto' },
-												{ value: 'off', label: 'Off' },
-											]}
-											value={entry.backend}
-											onChange={(backend) =>
-												update({
-													laneDefaults: values.laneDefaults.map((candidate) =>
-														candidate.environmentId === entry.environmentId
-															? { ...candidate, backend }
-															: candidate
-													),
-												})
-											}
-										/>
-									</div>
-								))}
+						<NumberField
+							disabled={locked}
+							error={formState.errors.unheldStopDelayMs}
+							hint="when nothing holds a stack; data is kept"
+							label="Stop after release"
+							lockedProps={lockedProps}
+							unit="s"
+							was={
+								form.unheldStopDelaySeconds === undefined
+									? undefined
+									: String(Math.round(policy.unheldStopDelayMs / 1_000))
+							}
+							value={values.unheldStopDelaySeconds}
+							onChange={(unheldStopDelaySeconds) =>
+								update({ unheldStopDelaySeconds })
+							}
+						/>
+						<div className="supabase-field">
+							<span className="supabase-field-label">Abandoned grace</span>
+							<strong className="supabase-field-static">
+								{formatHoldDuration(policy.abandonedGraceMs)}
+							</strong>
+							<small className="supabase-field-help">
+								the same as Simulator holds
+							</small>
+						</div>
+						<NumberField
+							disabled={locked}
+							error={formState.errors.retentionDays}
+							hint="RN Devtools never deletes on its own"
+							label="Suggest cleanup"
+							lockedProps={lockedProps}
+							unit="days"
+							was={
+								form.retentionDays === undefined
+									? undefined
+									: String(policy.retentionDays)
+							}
+							value={values.retentionDays}
+							onChange={(retentionDays) => update({ retentionDays })}
+						/>
+					</div>
+				</SettingsSurface>
+				<SettingsSurface title="Services">
+					<p className="supabase-settings-note">
+						Exclude by default · new starts and every resume pass these
+						exclusions again.
+					</p>
+					<SettingSwitch
+						description="Turning this off asks first in a system dialog: Studio's SQL endpoint has no authentication while it runs."
+						disabled={!editable.allowed || saving}
+						label="Studio"
+						lockedProps={lockedProps}
+						selected={policy.exclude.includes('studio')}
+						onChange={(selected) =>
+							applyNow({
+								exclude: selected
+									? [...policy.exclude, 'studio']
+									: policy.exclude.filter(
+											(capability) => capability !== 'studio'
+										),
+							})
+						}
+					/>
+					<SettingSwitch
+						description="Analytics wakes with Studio and keeps logs in a local service."
+						disabled={locked}
+						label="Analytics"
+						lockedProps={lockedProps}
+						selected={values.excludeAnalytics}
+						onChange={(excludeAnalytics) => update({ excludeAnalytics })}
+					/>
+					<SettingSwitch
+						description="The connection pooler; most apps talk to the database directly."
+						disabled={locked}
+						label="Pooler"
+						lockedProps={lockedProps}
+						selected={values.excludePooler}
+						onChange={(excludePooler) => update({ excludePooler })}
+					/>
+					{formState.errors.exclude ? (
+						<p className="sim-field-error">{formState.errors.exclude}</p>
+					) : null}
+				</SettingsSurface>
+				<SettingsSurface title="Safety">
+					<SettingSwitch
+						description="They listen on every interface; they are never attached to a lane."
+						disabled={locked}
+						label="Stop Docker or Podman stacks on managed worktrees, once per session"
+						lockedProps={lockedProps}
+						selected={values.stopContainerStacksOnce}
+						onChange={(stopContainerStacksOnce) =>
+							update({ stopContainerStacksOnce })
+						}
+					/>
+					<SettingSwitch
+						description="Patch releases of the verified Supabase CLI line pass a live contract check first. Turning this on asks first in a system dialog."
+						disabled={!editable.allowed || saving}
+						label="Allow unverified patch releases"
+						lockedProps={lockedProps}
+						selected={policy.allowUnverifiedPatch}
+						onChange={(allowUnverifiedPatch) =>
+							applyNow({ allowUnverifiedPatch })
+						}
+					/>
+				</SettingsSurface>
+				<AppVariables
+					error={formState.errors.appEnv}
+					errors={formState.errors}
+					locked={locked}
+					lockedProps={lockedProps}
+					policy={policy}
+					rows={values.appEnv}
+					onChange={(appEnv) => update({ appEnv })}
+				/>
+				<SettingsSurface title="Lane defaults">
+					<p className="supabase-settings-note">
+						Auto · Off · Required is a per-lane choice in the Lanes start form.
+					</p>
+					<div className="supabase-lane-defaults">
+						{values.laneDefaults.map((entry) => (
+							<div className="supabase-field" key={entry.environmentId}>
+								<span className="supabase-field-label">
+									{entry.environmentId}
+								</span>
+								<SupabaseSelect
+									{...(editable.allowed ? {} : { describedBy: offReasonId })}
+									disabled={locked}
+									label={`Lane default for ${entry.environmentId}`}
+									options={[
+										{ value: 'auto', label: 'Auto' },
+										{ value: 'off', label: 'Off' },
+									]}
+									value={entry.backend}
+									onChange={(backend) =>
+										update({
+											laneDefaults: values.laneDefaults.map((candidate) =>
+												candidate.environmentId === entry.environmentId
+													? { ...candidate, backend }
+													: candidate
+											),
+										})
+									}
+								/>
 							</div>
-							{formState.errors.laneDefaults ? (
-								<p className="sim-field-error">
-									{formState.errors.laneDefaults}
-								</p>
-							) : null}
-						</SettingsSurface>
-					</>
-				) : null}
-				{isSupabaseControlEnabled('repository-mode') ? (
-					<RepositoryModes
+						))}
+					</div>
+					{formState.errors.laneDefaults ? (
+						<p className="sim-field-error">{formState.errors.laneDefaults}</p>
+					) : null}
+				</SettingsSurface>
+				<RepositoryModes
+					isBridgeAvailable={isBridgeAvailable}
+					state={state}
+					onOpenRepositories={onOpenRepositories}
+				/>
+				<SettingsSurface title="Branch switch and paths">
+					<div className="supabase-field">
+						<span className="supabase-field-label">Branch switch</span>
+						<fieldset className="sim-layout-toggle supabase-segmented">
+							<legend className="sr-only">Branch switch</legend>
+							{(['follow', 'warn'] as const).map((mode) => (
+								<Button
+									{...lockedProps}
+									aria-pressed={values.branchSwitch === mode}
+									isDisabled={locked}
+									key={mode}
+									size="sm"
+									variant={values.branchSwitch === mode ? 'secondary' : 'ghost'}
+									onPress={() => update({ branchSwitch: mode })}
+								>
+									{mode === 'follow' ? 'Follow' : 'Warn'}
+								</Button>
+							))}
+						</fieldset>
+						<small className="supabase-field-help">
+							{values.branchSwitch === 'follow'
+								? 'Follow moves held stacks after HEAD is stable for 30 s and no rebase or merge is running.'
+								: 'Warn keeps the stack on its branch and says so; switching back reattaches it.'}
+						</small>
+					</div>
+					<PathRows
 						isBridgeAvailable={isBridgeAvailable}
 						state={state}
-						onOpenRepositories={onOpenRepositories}
+						onChoose={(field) => void run({ kind: 'choose-path', field })}
 					/>
-				) : null}
-				{isSupabaseControlEnabled('branch-switch-policy') ||
-				isSupabaseControlEnabled('paths') ? (
-					<SettingsSurface title="Branch switch and paths">
-						{isSupabaseControlEnabled('branch-switch-policy') ? (
-							<div className="supabase-field">
-								<span className="supabase-field-label">Branch switch</span>
-								<fieldset className="sim-layout-toggle supabase-segmented">
-									<legend className="sr-only">Branch switch</legend>
-									{(['follow', 'warn'] as const).map((mode) => (
-										<Button
-											{...lockedProps}
-											aria-pressed={values.branchSwitch === mode}
-											isDisabled={locked}
-											key={mode}
-											size="sm"
-											variant={
-												values.branchSwitch === mode ? 'secondary' : 'ghost'
-											}
-											onPress={() => update({ branchSwitch: mode })}
-										>
-											{mode === 'follow' ? 'Follow' : 'Warn'}
-										</Button>
-									))}
-								</fieldset>
-								<small className="supabase-field-help">
-									{values.branchSwitch === 'follow'
-										? 'Follow moves held stacks after HEAD is stable for 30 s and no rebase or merge is running.'
-										: 'Warn keeps the stack on its branch and says so; switching back reattaches it.'}
-								</small>
-							</div>
-						) : null}
-						{isSupabaseControlEnabled('paths') ? (
-							<PathRows
-								isBridgeAvailable={isBridgeAvailable}
-								state={state}
-								onChoose={(field) => void run({ kind: 'choose-path', field })}
-							/>
-						) : null}
-					</SettingsSurface>
-				) : null}
-				{isSupabaseControlEnabled('hardening') ? (
-					<SettingsSurface title="Hardening (optional)">
-						<p className="supabase-settings-note">
-							Phase 6 options, each off by default. Phases 1–5 work the same
-							while they are off.
-						</p>
-						<SettingSwitch
-							description="Writes a full key set into each worktree's gitignored supabase/.env.local, with the signing key in a 0600 file outside the repository. Agents' own restarts keep the keys. Turning this on asks first in a system dialog."
-							disabled={!editable.allowed || saving}
-							label="Per-stack keys"
-							lockedProps={lockedProps}
-							selected={policy.perStackKeys}
-							warning="Changes worktree files: commit nothing from supabase/.env.local."
-							onChange={(perStackKeys) => applyNow({ perStackKeys })}
-						/>
-						<SettingSwitch
-							description="Leases a block of SUPABASE_*_PORT values from a range RN Devtools owns, so repositories that pin ports can run several worktrees."
-							disabled={!editable.allowed || saving}
-							label="Pinned-ports compatibility"
-							lockedProps={lockedProps}
-							selected={policy.pinnedPortsCompat}
-							warning="Only for repositories that pin ports; others need nothing."
-							onChange={(pinnedPortsCompat) => applyNow({ pinnedPortsCompat })}
-						/>
-						<SettingSwitch
-							description="Lanes start every service at once instead of on first request, for UI automation that can't wait for a service to wake."
-							disabled={!editable.allowed || saving}
-							label="Eager lanes"
-							lockedProps={lockedProps}
-							selected={policy.eagerLanes}
-							warning="Uses about 1 GB more memory per running lane stack."
-							onChange={(eagerLanes) => applyNow({ eagerLanes })}
-						/>
-					</SettingsSurface>
-				) : null}
+				</SettingsSurface>
+				<SettingsSurface title="Hardening (optional)">
+					<p className="supabase-settings-note">
+						Phase 6 options, each off by default. Phases 1–5 work the same while
+						they are off.
+					</p>
+					<SettingSwitch
+						description="Writes a full key set into each worktree's gitignored supabase/.env.local, with the signing key in a 0600 file outside the repository. Agents' own restarts keep the keys. Turning this on asks first in a system dialog."
+						disabled={!editable.allowed || saving}
+						label="Per-stack keys"
+						lockedProps={lockedProps}
+						selected={policy.perStackKeys}
+						warning="Changes worktree files: commit nothing from supabase/.env.local."
+						onChange={(perStackKeys) => applyNow({ perStackKeys })}
+					/>
+					<SettingSwitch
+						description="Leases a block of SUPABASE_*_PORT values from a range RN Devtools owns, so repositories that pin ports can run several worktrees."
+						disabled={!editable.allowed || saving}
+						label="Pinned-ports compatibility"
+						lockedProps={lockedProps}
+						selected={policy.pinnedPortsCompat}
+						warning="Only for repositories that pin ports; others need nothing."
+						onChange={(pinnedPortsCompat) => applyNow({ pinnedPortsCompat })}
+					/>
+					<SettingSwitch
+						description="Lanes start every service at once instead of on first request, for UI automation that can't wait for a service to wake."
+						disabled={!editable.allowed || saving}
+						label="Eager lanes"
+						lockedProps={lockedProps}
+						selected={policy.eagerLanes}
+						warning="Uses about 1 GB more memory per running lane stack."
+						onChange={(eagerLanes) => applyNow({ eagerLanes })}
+					/>
+				</SettingsSurface>
 			</div>
-			{isSupabaseControlEnabled('policy-form') ? (
-				<SettingsFooter
-					applyReason={applyReason}
-					changes={formState.changes}
-					saving={saving}
-					onApply={() => void apply()}
-					onReset={() => setForm({})}
-				/>
-			) : null}
+			<SettingsFooter
+				applyReason={applyReason}
+				changes={formState.changes}
+				saving={saving}
+				onApply={() => void apply()}
+				onReset={() => setForm({})}
+			/>
 		</div>
 	);
 }

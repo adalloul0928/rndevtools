@@ -21,6 +21,8 @@ import {
 	supabasePolicySchema,
 	supabaseRepositoryIdSchema,
 } from '../../shared/supabase-protocol';
+import { readBoundedText } from './bounded-read';
+import { hasSupabaseControlCharacters } from './engine-support';
 
 /**
  * The Supabase policy (`<root>/policy-v1.json`), plus the durable-file
@@ -83,40 +85,15 @@ export async function readSupabaseStoreFile(
 			? { status: 'missing' }
 			: { status: 'invalid', reason: 'unreadable' };
 	}
-	let handle: Awaited<ReturnType<typeof open>>;
-	try {
-		handle = await open(
-			file,
-			constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0)
-		);
-	} catch (error) {
-		return isMissing(error)
-			? { status: 'missing' }
-			: { status: 'invalid', reason: 'unreadable' };
-	}
-	try {
-		const info = await handle.stat();
-		if (!info.isFile()) return { status: 'invalid', reason: 'not-a-file' };
-		if (info.size > maxBytes) return { status: 'invalid', reason: 'too-large' };
-		// One byte past the cap detects a file that grew after the stat.
-		const buffer = Buffer.alloc(maxBytes + 1);
-		let length = 0;
-		while (length < buffer.length) {
-			const { bytesRead } = await handle.read(
-				buffer,
-				length,
-				buffer.length - length,
-				length
-			);
-			if (bytesRead === 0) break;
-			length += bytesRead;
-		}
-		if (length > maxBytes) return { status: 'invalid', reason: 'too-large' };
-		return { status: 'ok', text: buffer.subarray(0, length).toString('utf8') };
-	} catch {
-		return { status: 'invalid', reason: 'unreadable' };
-	} finally {
-		await handle.close().catch(() => undefined);
+	const read = await readBoundedText(file, maxBytes, { noFollow: true });
+	switch (read.status) {
+		case 'ok':
+		case 'missing':
+			return read;
+		case 'error':
+			return { status: 'invalid', reason: 'unreadable' };
+		default:
+			return { status: 'invalid', reason: read.status };
 	}
 }
 
@@ -132,19 +109,25 @@ async function syncDirectory(directory: string): Promise<void> {
 /**
  * Replaces `file` atomically: a 0600 temp file in the same directory, fsync,
  * rename over the target, then a directory fsync. A failure leaves the old
- * file in place.
+ * file in place. With `privateDirectory: false` (a folder main does not own,
+ * such as a worktree's `supabase/`) the directory is used as it is: not
+ * created, chmodded or fsynced.
  */
 export async function writeSupabaseStoreFile(
 	file: string,
 	contents: string,
-	maxBytes: number
+	maxBytes: number,
+	options: Readonly<{ privateDirectory?: boolean }> = {}
 ): Promise<void> {
 	if (Buffer.byteLength(contents, 'utf8') > maxBytes) {
 		throw new RangeError(
 			`${path.basename(file)} would exceed its ${maxBytes}-byte limit.`
 		);
 	}
-	const directory = await ensureSupabaseStoreDirectory(path.dirname(file));
+	const privateDirectory = options.privateDirectory !== false;
+	const directory = privateDirectory
+		? await ensureSupabaseStoreDirectory(path.dirname(file))
+		: path.dirname(file);
 	const name = path.basename(file);
 	const destination = path.join(directory, name);
 	const temporary = path.join(
@@ -175,7 +158,7 @@ export async function writeSupabaseStoreFile(
 		throw error;
 	}
 	await chmod(destination, 0o600);
-	await syncDirectory(directory);
+	if (privateDirectory) await syncDirectory(directory);
 }
 
 /**
@@ -271,14 +254,6 @@ const MAX_PATH_LENGTH = 1_024;
 
 const timestampSchema = z.number().int().nonnegative();
 
-function hasControlCharacters(value: string): boolean {
-	for (let index = 0; index < value.length; index += 1) {
-		const code = value.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
-
 /** A normalized absolute path main chose through its own file dialog. */
 const chosenPathSchema = z
 	.string()
@@ -288,7 +263,7 @@ const chosenPathSchema = z
 		(value) =>
 			path.isAbsolute(value) &&
 			path.normalize(value) === value &&
-			!hasControlCharacters(value),
+			!hasSupabaseControlCharacters(value),
 		{ message: 'Paths must be normalized absolute paths.' }
 	);
 

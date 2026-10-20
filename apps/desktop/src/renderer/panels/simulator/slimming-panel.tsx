@@ -29,7 +29,6 @@ import {
 	DenseVirtualList,
 	formatBytes,
 	SimulatorMetric,
-	SimulatorPanelHeader,
 } from '@/components/simulator-ui';
 import {
 	ConfirmAction,
@@ -37,6 +36,7 @@ import {
 	EmptyPanel,
 	InfoPopover,
 	KeyValue,
+	PanelHeader,
 	PanelNotice,
 	StatusPill,
 	Toolbar,
@@ -237,7 +237,7 @@ export function SlimmingPanel() {
 					if (request) await setEnabled(request);
 				}}
 			/>
-			<SimulatorPanelHeader
+			<PanelHeader
 				actions={
 					<div className="sim-slimming-header-actions">
 						<Switch

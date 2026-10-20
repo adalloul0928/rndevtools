@@ -1,9 +1,10 @@
-import type {
-	SupabaseJob,
-	SupabasePruneSummary,
-	SupabaseStackFlag,
-	SupabaseStackState,
-	SupabaseStackSummary,
+import {
+	isLiveStackState,
+	type SupabaseJob,
+	type SupabasePruneSummary,
+	type SupabaseStackFlag,
+	type SupabaseStackState,
+	type SupabaseStackSummary,
 } from '../../shared/supabase-protocol';
 import type { SupabaseAutoStopReason } from './holds';
 
@@ -37,15 +38,6 @@ const STOPPED_STATES: ReadonlySet<SupabaseStackState> = new Set([
 	'failed',
 	'never-started',
 	'interrupted',
-]);
-
-/** States in which a stack still holds processes. */
-const LIVE_STATES: ReadonlySet<SupabaseStackState> = new Set([
-	'running',
-	'starting',
-	'partial',
-	'unhealthy',
-	'stopping',
 ]);
 
 /** What clean up needs to know about one stack. */
@@ -131,7 +123,7 @@ function notSuggestedReason(
 	if (stack.pinned) return 'pinned';
 	if (stack.held) return 'held';
 	if (stack.origin === 'external') return 'external';
-	if (LIVE_STATES.has(stack.state)) return 'running';
+	if (isLiveStackState(stack.state)) return 'running';
 	return undefined;
 }
 

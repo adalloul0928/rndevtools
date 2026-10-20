@@ -140,15 +140,6 @@ export function initialSupabaseJobSteps(
 			return [...start, ...migrations, ...seed, step('verify'), ...attach];
 		case 'resume':
 			return [...start, step('verify'), ...attach];
-		case 'follow':
-			return [
-				...start,
-				...migrations,
-				...seed,
-				step('verify'),
-				...attach,
-				step('stop', 'Stop the old stack'),
-			];
 		case 'recreate':
 			return [
 				step('destroy'),

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -17,6 +16,7 @@ import {
 	supabaseStateSchema,
 } from '../../shared/supabase-protocol';
 import { sanitizeSupabaseText } from './cli-redact';
+import { hasSupabaseControlCharacters } from './engine-support';
 import {
 	ensureSupabaseStoreDirectory,
 	loadSupabaseStoreFile,
@@ -31,9 +31,9 @@ import {
  * counts from, abandonment clocks that must survive a desktop restart, the
  * exclusions it was last started with, flags such as an interrupted first
  * start, agent requests waiting for the user, and a ring of recent outcomes
- * for local stats. Strict v1, at most 128 records, no secrets: public keys
- * appear only as sha256 fingerprints. Lane holds are not stored; they are
- * derived from the lanes themselves.
+ * for local stats. Strict v1, at most 128 records, no secrets and no keys
+ * (older files may still hold sha256 fingerprints of the public ones). Lane
+ * holds are not stored; they are derived from the lanes themselves.
  */
 
 const STACKS_FILE = 'stacks.json';
@@ -64,20 +64,12 @@ const laneIdSchema = z
 	.string()
 	.regex(/^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
 
-function hasControlCharacters(value: string): boolean {
-	for (let index = 0; index < value.length; index += 1) {
-		const code = value.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
-
 const plainText = (max: number, min = 0) =>
 	z
 		.string()
 		.min(min)
 		.max(max)
-		.refine((value) => !hasControlCharacters(value), {
+		.refine((value) => !hasSupabaseControlCharacters(value), {
 			message: 'Text must not contain control characters.',
 		});
 
@@ -90,7 +82,7 @@ const absolutePathSchema = z
 		(value) =>
 			path.isAbsolute(value) &&
 			path.normalize(value) === value &&
-			!hasControlCharacters(value),
+			!hasSupabaseControlCharacters(value),
 		{ message: 'Paths must be normalized absolute paths.' }
 	);
 /** `refs/heads/<branch>`, another full ref, `detached`, or `ordinary-workspace`. */
@@ -148,7 +140,7 @@ const clockKeySchema = z
 	.string()
 	.max(1_200)
 	.regex(/^(?:claude|codex|other):[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:@\/.*)?$/)
-	.refine((value) => !hasControlCharacters(value));
+	.refine((value) => !hasSupabaseControlCharacters(value));
 
 const createdBySchema = z.strictObject({
 	via: z.enum(['desktop', 'agent', 'external']),
@@ -170,8 +162,9 @@ const recordFlagsSchema = z.strictObject({
 	prepared: z.literal(true).optional(),
 	/** A Docker or Podman stack on a managed identity was stopped once at this time. */
 	containerStoppedAt: timestampSchema.optional(),
-	/** A branch follow moved this stack's holds to another stack. */
+	/** Was: the stack a branch follow moved the holds to. No longer written. */
 	supersededBy: supabaseStackIdSchema.optional(),
+	/** When a branch follow moved this stack's holds to another stack. */
 	supersededAt: timestampSchema.optional(),
 });
 
@@ -241,7 +234,7 @@ const recordSchema = z.strictObject({
 		.array(z.strictObject({ udid: simulatorUdidSchema, at: timestampSchema }))
 		.max(SUPABASE_MAX_SERVED_SIMULATORS)
 		.optional(),
-	/** sha256 of the public keys, to notice when they change; never the keys. */
+	/** Was: sha256 of the public keys. No longer written; older files parse. */
 	keyFingerprints: z
 		.strictObject({
 			publishableKey: fingerprintSchema.optional(),
@@ -393,11 +386,6 @@ export function supabaseRecreateError(
 		record.recreateError ??
 		(record.lastError?.code === 'needs_recreate' ? record.lastError : undefined)
 	);
-}
-
-/** The sha256 fingerprint stored for a public key, so a change is noticed. */
-export function supabaseKeyFingerprint(value: string): string {
-	return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 /** Whether a stored hold belongs to `holder` (and, for a synthetic one, that cwd). */

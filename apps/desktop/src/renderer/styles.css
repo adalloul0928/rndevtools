@@ -4860,10 +4860,6 @@ button:disabled {
 	border-radius: 4px;
 }
 
-.ui-skeleton.is-md {
-	border-radius: 6px;
-}
-
 .ui-skeleton.is-full {
 	border-radius: 999px;
 }

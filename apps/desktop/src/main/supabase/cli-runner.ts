@@ -8,15 +8,15 @@ import { StringDecoder } from 'node:string_decoder';
 import { inspect } from 'node:util';
 import { sanitizeSupabaseText } from './cli-redact';
 import {
-	assertArgvAllowedForPhase,
+	assertSupabaseArgvAllowed,
 	SUPABASE_MAX_CLI_TIMEOUT_MS,
-	type SupabaseRolloutPhase,
 } from './dialect';
+import { hasSupabaseControlCharacters } from './engine-support';
 
 /**
  * Runs a validated Supabase CLI binary. Nothing here knows Supabase command
- * words: argv comes from buildSupabaseArgv and is checked against the rollout
- * phase's allowlist right before every spawn.
+ * words: argv comes from buildSupabaseArgv and is checked against the
+ * allowlist right before every spawn.
  *
  * - argv array, `shell: false`, a curated environment, and a neutral 0700 cwd
  *   (stack owners inherit the cwd for life, so it must not be a worktree);
@@ -131,14 +131,6 @@ export type SupabaseCliEnvironmentOptions = Readonly<{
 	leasedPorts?: Readonly<Record<string, string>>;
 }>;
 
-function hasControlCharacters(value: string): boolean {
-	for (let index = 0; index < value.length; index += 1) {
-		const code = value.charCodeAt(index);
-		if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
-	}
-	return false;
-}
-
 function isAbsolutePath(value: unknown): value is string {
 	return (
 		typeof value === 'string' &&
@@ -146,7 +138,7 @@ function isAbsolutePath(value: unknown): value is string {
 		value.length <= 4096 &&
 		path.isAbsolute(value) &&
 		path.normalize(value) === value &&
-		!hasControlCharacters(value)
+		!hasSupabaseControlCharacters(value)
 	);
 }
 
@@ -184,7 +176,7 @@ function overrideValue(name: string, value: unknown): string {
 	}
 	if (
 		value.length > MAX_ENVIRONMENT_VALUE_LENGTH ||
-		hasControlCharacters(value)
+		hasSupabaseControlCharacters(value)
 	) {
 		throw environmentError(`${name} has an invalid value.`);
 	}
@@ -224,7 +216,11 @@ export function buildSupabaseCliEnvironment(
 	};
 	for (const name of INHERITED_NAMES) {
 		const value = parent[name];
-		if (value !== undefined && value !== '' && !hasControlCharacters(value)) {
+		if (
+			value !== undefined &&
+			value !== '' &&
+			!hasSupabaseControlCharacters(value)
+		) {
 			environment[name] = value;
 		}
 	}
@@ -233,7 +229,7 @@ export function buildSupabaseCliEnvironment(
 			LOCALE_NAME.test(name) &&
 			value !== undefined &&
 			value !== '' &&
-			!hasControlCharacters(value)
+			!hasSupabaseControlCharacters(value)
 		) {
 			environment[name] = value;
 		}
@@ -416,9 +412,10 @@ export class SupabaseCliRunResult {
 export type SupabaseCliRunRequest = Readonly<{
 	/** A binary the resolver validated. */
 	binaryPath: string;
-	/** From buildSupabaseArgv; checked against `phase` before spawning. */
+	/** From buildSupabaseArgv; checked against the allowlist before spawning. */
 	argv: readonly string[];
-	phase: SupabaseRolloutPhase;
+	/** Refuses any command that changes something: a binary not validated yet. */
+	readOnly?: true;
 	/** Neutral working directory; created 0700 when missing. */
 	cwd: string;
 	timeoutMs: number;
@@ -1094,7 +1091,7 @@ export class SupabaseCliRunner {
 				'The Supabase CLI argv is malformed.'
 			);
 		}
-		assertArgvAllowedForPhase(request.phase, request.argv);
+		assertSupabaseArgvAllowed(request.argv, request.readOnly === true);
 		if (!isAbsolutePath(request.cwd)) {
 			throw new SupabaseCliRunnerError(
 				'invalid-request',

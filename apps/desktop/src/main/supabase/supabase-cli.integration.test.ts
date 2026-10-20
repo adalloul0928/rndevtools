@@ -31,9 +31,7 @@ import { type ResolvedSupabaseCli, SupabaseCliResolver } from './cli-resolver';
 import { SupabaseCliRunner, type SupabaseCliRunResult } from './cli-runner';
 import {
 	buildSupabaseArgv,
-	SUPABASE_ARGV_ALLOWLIST,
 	type SupabaseCliOperation,
-	type SupabaseRolloutPhase,
 	supabaseOperationBudget,
 } from './dialect';
 
@@ -65,15 +63,6 @@ const FIRST_START_TIMEOUT_MS = 600_000;
 const FIRST_START_TEST_TIMEOUT_MS = FIRST_START_TIMEOUT_MS + 120_000;
 const SECRET_SHAPED =
 	/sb_secret_|sb_publishable_|eyJ[\w-]+\.[\w-]+|postgres(?:ql)?:\/\/[^\s"]*:[^\s"@]+@|SERVICE_ROLE|SECRET_KEY/;
-
-function firstPhase(kind: SupabaseCliOperation['kind']): SupabaseRolloutPhase {
-	const phases: SupabaseRolloutPhase[] = [1, 3, 4, 5];
-	const phase = phases.find((candidate) =>
-		SUPABASE_ARGV_ALLOWLIST[candidate].includes(kind)
-	);
-	if (phase === undefined) throw new Error(`${kind} is in no rollout phase`);
-	return phase;
-}
 
 function expectOk<T>(outcome: SupabaseOutcome<T>): T {
 	if (!outcome.ok) {
@@ -145,12 +134,10 @@ describe.skipIf(!enabled)('Supabase CLI adapter against a real binary', () => {
 		const resolved = resolvedCli();
 		const argv = buildSupabaseArgv(resolved.dialect, operation);
 		const budget = supabaseOperationBudget(operation);
-		const phase = firstPhase(operation.kind);
 		if (budget.detached) {
 			const handle = await runner.spawnDetached({
 				binaryPath: resolved.binaryPath,
 				argv,
-				phase,
 				cwd,
 				timeoutMs:
 					operation.kind === 'stack.start'
@@ -166,7 +153,6 @@ describe.skipIf(!enabled)('Supabase CLI adapter against a real binary', () => {
 		return runner.run({
 			binaryPath: resolved.binaryPath,
 			argv,
-			phase,
 			cwd,
 			timeoutMs: budget.timeoutMs,
 			interruptGraceMs: budget.interruptGraceMs,
@@ -223,7 +209,7 @@ describe.skipIf(!enabled)('Supabase CLI adapter against a real binary', () => {
 		const probe = await runner.run({
 			binaryPath: sourceBinary,
 			argv: buildSupabaseArgv(null, { kind: 'version' }),
-			phase: 1,
+			readOnly: true,
 			cwd,
 			timeoutMs: 10_000,
 			environment,

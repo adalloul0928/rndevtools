@@ -42,7 +42,6 @@ import {
 	useSupabaseActions,
 } from '@/state/supabase-runtime';
 import {
-	isSupabaseControlEnabled,
 	type SupabaseRepositorySummary,
 	type SupabaseState,
 	supabaseRepositoryActionAvailability,
@@ -275,61 +274,54 @@ function RepositoryDetail({
 				</div>
 			</div>
 			<div className="supabase-repository-controls">
-				{isSupabaseControlEnabled('repository-mode') ? (
-					<div className="supabase-inline-field">
-						<span>Use local Supabase here</span>
-						<SupabaseSelect
-							describedBy={setMode.allowed ? undefined : modeReasonId}
-							disabled={!setMode.allowed || busy}
-							label={`Use local Supabase in ${repository.label}`}
-							options={[
-								{ value: 'auto', label: 'Auto' },
-								{ value: 'off', label: 'Off' },
-							]}
-							value={repository.mode}
-							onChange={(mode) =>
-								void run({
-									kind: 'repository.set-mode',
-									repositoryId: repository.id,
-									mode,
-								})
-							}
-						/>
-						{setMode.allowed ? null : (
-							<DisabledReason id={modeReasonId}>
-								{setMode.reason}
-							</DisabledReason>
-						)}
-					</div>
-				) : null}
-				{isSupabaseControlEnabled('prepare') ? (
-					<div className="supabase-inline-field">
-						<Button
-							{...(prepare.allowed
-								? {}
-								: { 'aria-describedby': prepareReasonId })}
-							isDisabled={!prepare.allowed || busy}
-							size="sm"
-							variant="ghost"
-							onPress={() =>
-								void run({ kind: 'prepare', repositoryId: repository.id })
-							}
-						>
-							<Download aria-hidden="true" className="h-3.5 w-3.5" />
-							Pre-download services
-						</Button>
-						{prepare.allowed ? (
-							<span className="supabase-action-note">
-								One time, up to about 360 MB; new stacks then start in about 5
-								s.
-							</span>
-						) : (
-							<DisabledReason id={prepareReasonId}>
-								{prepare.reason}
-							</DisabledReason>
-						)}
-					</div>
-				) : null}
+				<div className="supabase-inline-field">
+					<span>Use local Supabase here</span>
+					<SupabaseSelect
+						describedBy={setMode.allowed ? undefined : modeReasonId}
+						disabled={!setMode.allowed || busy}
+						label={`Use local Supabase in ${repository.label}`}
+						options={[
+							{ value: 'auto', label: 'Auto' },
+							{ value: 'off', label: 'Off' },
+						]}
+						value={repository.mode}
+						onChange={(mode) =>
+							void run({
+								kind: 'repository.set-mode',
+								repositoryId: repository.id,
+								mode,
+							})
+						}
+					/>
+					{setMode.allowed ? null : (
+						<DisabledReason id={modeReasonId}>{setMode.reason}</DisabledReason>
+					)}
+				</div>
+				<div className="supabase-inline-field">
+					<Button
+						{...(prepare.allowed
+							? {}
+							: { 'aria-describedby': prepareReasonId })}
+						isDisabled={!prepare.allowed || busy}
+						size="sm"
+						variant="ghost"
+						onPress={() =>
+							void run({ kind: 'prepare', repositoryId: repository.id })
+						}
+					>
+						<Download aria-hidden="true" className="h-3.5 w-3.5" />
+						Pre-download services
+					</Button>
+					{prepare.allowed ? (
+						<span className="supabase-action-note">
+							One time, up to about 360 MB; new stacks then start in about 5 s.
+						</span>
+					) : (
+						<DisabledReason id={prepareReasonId}>
+							{prepare.reason}
+						</DisabledReason>
+					)}
+				</div>
 			</div>
 			{repository.checks.length > 0 ? (
 				<div className="sim-capability-list supabase-checks">

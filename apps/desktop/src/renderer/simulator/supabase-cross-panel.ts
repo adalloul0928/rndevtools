@@ -8,14 +8,13 @@ import {
 	supabaseStackForLane,
 } from '@/simulator/supabase-model';
 import {
-	formatHoldDuration,
+	formatStopDelay,
 	holdCountdownLabel,
 	isPathInside,
 } from '../../shared/device-hold';
 import type { LaneView, LaneWorktree } from '../../shared/lane-protocol';
 import {
 	formatSupabaseSize,
-	isSupabaseControlEnabled,
 	isSupabaseStackLanExposed,
 	isSupabaseStackRunning,
 	type LaneBackendChip,
@@ -59,7 +58,7 @@ export function stackIdPrefix(id: string): string {
 export function supabaseChipsVisible(
 	state: Pick<SupabaseState, 'feature'>
 ): boolean {
-	return state.feature.enabled && isSupabaseControlEnabled('chips');
+	return state.feature.enabled;
 }
 
 /**
@@ -105,7 +104,8 @@ export function stackBackendChip(
 	return { label: 'db stopped', tone: 'warning' };
 }
 
-function portOf(url: string | undefined): number | undefined {
+/** The explicit port a URL names, if any. */
+export function portOf(url: string | undefined): number | undefined {
 	if (url === undefined) return undefined;
 	try {
 		const port = Number(new URL(url).port);
@@ -299,7 +299,7 @@ export function laneBackendView(
 	state: SupabaseState,
 	now: number
 ): LaneBackendView | undefined {
-	if (!state.feature.enabled || !isSupabaseControlEnabled('lane-backend')) {
+	if (!state.feature.enabled) {
 		return undefined;
 	}
 	const summary = lane.backend;
@@ -532,7 +532,7 @@ export function laneWorktreeOptionSuffix(
 	info: LaneWorktreeBackend,
 	state: Pick<SupabaseState, 'feature'>
 ): string {
-	if (!isSupabaseControlEnabled('lane-backend') || info.repositoryOff) {
+	if (info.repositoryOff) {
 		return '';
 	}
 	const suffix = laneWorktreeSupabaseSuffix(
@@ -843,7 +843,7 @@ export function releaseBackendPrompt(
 	}
 ): ReleaseBackendPrompt | undefined {
 	const ref = backend.release;
-	if (!ref || !isSupabaseControlEnabled('release')) return undefined;
+	if (!ref) return undefined;
 	const operation: ReleaseBackendPrompt['operation'] = {
 		kind: 'release',
 		stackId: backend.stack.id,
@@ -866,12 +866,7 @@ export function releaseBackendPrompt(
 		!keptBy &&
 		stack.cwdKeepers.length === 0;
 	const delay = state.policy.unheldStopDelayMs;
-	const when =
-		delay === 0
-			? 'at once'
-			: delay < 120_000
-				? `in ${Math.round(delay / 1_000)} s`
-				: `in ${formatHoldDuration(delay)}`;
+	const when = delay === 0 ? 'at once' : `in ${formatStopDelay(delay)}`;
 	return {
 		operation,
 		availability: supabaseActionAvailability(stack, 'release', {
@@ -899,7 +894,7 @@ export function sessionRequestLines(
 	state: Pick<SupabaseState, 'feature' | 'requests'>,
 	now: number
 ): readonly SessionRequestLine[] {
-	if (!state.feature.enabled || !isSupabaseControlEnabled('requests')) {
+	if (!state.feature.enabled) {
 		return [];
 	}
 	return state.requests.flatMap((request): SessionRequestLine[] => {

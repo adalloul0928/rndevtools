@@ -104,7 +104,6 @@ import {
 	useSupabaseActions,
 } from '@/state/supabase-runtime';
 import {
-	isSupabaseControlEnabled,
 	nextEvents,
 	SUPABASE_REASONS,
 	type SupabaseDatabasePayload,
@@ -249,7 +248,7 @@ export function supabaseStudioControls(
 		supabaseStackControl(stack, state, context, spec);
 	const { included, operatorEnabled } = stack.studio;
 	return [
-		!included && isSupabaseControlEnabled('enable-studio')
+		!included
 			? control({
 					id: 'enable-studio',
 					label: 'Enable Studio…',
@@ -257,7 +256,7 @@ export function supabaseStudioControls(
 					operation: { kind: 'set-studio', stackId: stack.id, enabled: true },
 				})
 			: undefined,
-		included && isSupabaseControlEnabled('open-studio')
+		included
 			? control({
 					id: 'open-studio',
 					label: 'Open Studio',
@@ -265,7 +264,7 @@ export function supabaseStudioControls(
 					operation: { kind: 'open', stackId: stack.id, surface: 'studio' },
 				})
 			: undefined,
-		(included || operatorEnabled) && isSupabaseControlEnabled('disable-studio')
+		included || operatorEnabled
 			? control({
 					id: 'disable-studio',
 					label: 'Disable Studio',
@@ -588,13 +587,11 @@ export function SupabaseStackDetail({
 	};
 
 	// The action row: at most four buttons, the rest live in the sections.
-	const actions = isSupabaseControlEnabled('start')
-		? supabaseDetailActions(stack, state, {
-				bridgeAvailable: isBridgeAvailable,
-				pending,
-				now,
-			})
-		: [];
+	const actions = supabaseDetailActions(stack, state, {
+		bridgeAvailable: isBridgeAvailable,
+		pending,
+		now,
+	});
 	const actionIds = new Set(actions.map((action) => action.id));
 	const actionReasons = supabaseActionReasons(actions);
 	const reasonIdFor = (controlId: string) => {
@@ -815,21 +812,18 @@ export function SupabaseStackDetail({
 					onRun={runOperation}
 				/>
 			</DetailSection>
-			{isSupabaseControlEnabled('destroy') ||
-			isSupabaseControlEnabled('reset') ? (
-				<DetailSection
-					anchor={`${reasonPrefix}-section-danger`}
-					open={isOpen('danger')}
-					section="danger"
-					onToggle={toggleSection}
-				>
-					<DangerSection
-						control={control}
-						stack={stack}
-						renderControl={renderControl}
-					/>
-				</DetailSection>
-			) : null}
+			<DetailSection
+				anchor={`${reasonPrefix}-section-danger`}
+				open={isOpen('danger')}
+				section="danger"
+				onToggle={toggleSection}
+			>
+				<DangerSection
+					control={control}
+					stack={stack}
+					renderControl={renderControl}
+				/>
+			</DetailSection>
 		</div>
 	);
 }
@@ -1002,19 +996,18 @@ function OverviewSection({
 					<span className="supabase-also-label">Also held by</span>
 					<ul>
 						{chain.others.map((other) => {
-							const release =
-								other.release && isSupabaseControlEnabled('release')
-									? control({
-											id: 'release',
-											label: other.live ? 'Release…' : 'Release',
-											action: 'release',
-											operation: {
-												kind: 'release',
-												stackId: stack.id,
-												holder: other.release,
-											},
-										})
-									: undefined;
+							const release = other.release
+								? control({
+										id: 'release',
+										label: other.live ? 'Release…' : 'Release',
+										action: 'release',
+										operation: {
+											kind: 'release',
+											stackId: stack.id,
+											holder: other.release,
+										},
+									})
+								: undefined;
 							return (
 								<li key={other.key}>
 									<StatusDot tone={other.live ? 'success' : 'warning'} />
@@ -1253,42 +1246,32 @@ function DatabaseSection({
 	const pendingCount =
 		migrations?.comparable === true ? migrations.pending.length : 0;
 	const mutations = [
-		isSupabaseControlEnabled('apply-migrations')
-			? control({
-					id: 'apply-migrations',
-					label:
-						pendingCount > 0
-							? `Apply ${pendingCount} pending`
-							: 'Apply pending',
-					action: 'apply-migrations',
-					operation: { kind: 'apply-migrations', stackId: stack.id },
-				})
-			: undefined,
-		isSupabaseControlEnabled('export')
-			? control({
-					id: 'export-schema',
-					label: 'Export schema…',
-					action: 'export',
-					operation: { kind: 'export', stackId: stack.id, content: 'schema' },
-				})
-			: undefined,
-		isSupabaseControlEnabled('export')
-			? control({
-					id: 'export-data',
-					label: 'Export data…',
-					action: 'export',
-					operation: { kind: 'export', stackId: stack.id, content: 'data' },
-				})
-			: undefined,
-		isSupabaseControlEnabled('seed-buckets')
-			? control({
-					id: 'seed-buckets',
-					label: 'Re-seed buckets…',
-					action: 'seed-buckets',
-					operation: { kind: 'seed-buckets', stackId: stack.id },
-				})
-			: undefined,
-	].filter((item): item is SupabaseControl => item !== undefined);
+		control({
+			id: 'apply-migrations',
+			label:
+				pendingCount > 0 ? `Apply ${pendingCount} pending` : 'Apply pending',
+			action: 'apply-migrations',
+			operation: { kind: 'apply-migrations', stackId: stack.id },
+		}),
+		control({
+			id: 'export-schema',
+			label: 'Export schema…',
+			action: 'export',
+			operation: { kind: 'export', stackId: stack.id, content: 'schema' },
+		}),
+		control({
+			id: 'export-data',
+			label: 'Export data…',
+			action: 'export',
+			operation: { kind: 'export', stackId: stack.id, content: 'data' },
+		}),
+		control({
+			id: 'seed-buckets',
+			label: 'Re-seed buckets…',
+			action: 'seed-buckets',
+			operation: { kind: 'seed-buckets', stackId: stack.id },
+		}),
+	];
 	const icons: Readonly<Record<string, ReactNode>> = {
 		'apply-migrations': <Upload aria-hidden="true" className="h-3.5 w-3.5" />,
 		'export-schema': <FileDown aria-hidden="true" className="h-3.5 w-3.5" />,
@@ -1645,45 +1628,41 @@ function LogsSection({
 			<p className="sim-inline-note">
 				History stays readable while the stack is stopped.
 			</p>
-			{isSupabaseControlEnabled('logs-auto-refresh') ? (
-				<div className="supabase-log-auto">
-					<label className="supabase-checkbox">
-						<input
-							{...(autoReason === undefined
-								? {}
-								: { 'aria-describedby': autoReasonId })}
-							checked={autoOn}
-							disabled={autoReason !== undefined}
-							type="checkbox"
-							onChange={(event) => {
+			<div className="supabase-log-auto">
+				<label className="supabase-checkbox">
+					<input
+						{...(autoReason === undefined
+							? {}
+							: { 'aria-describedby': autoReasonId })}
+						checked={autoOn}
+						disabled={autoReason !== undefined}
+						type="checkbox"
+						onChange={(event) => {
+							setAutoPaused(false);
+							setAutoStartedAt(event.currentTarget.checked ? Date.now() : null);
+						}}
+					/>
+					Auto-refresh while open
+				</label>
+				{autoReason === undefined ? null : (
+					<DisabledReason id={autoReasonId}>{autoReason}</DisabledReason>
+				)}
+				{autoPaused ? (
+					<span className="supabase-log-paused" role="status">
+						Auto-refresh paused after 10 min.
+						<Button
+							size="sm"
+							variant="ghost"
+							onPress={() => {
 								setAutoPaused(false);
-								setAutoStartedAt(
-									event.currentTarget.checked ? Date.now() : null
-								);
+								setAutoStartedAt(Date.now());
 							}}
-						/>
-						Auto-refresh while open
-					</label>
-					{autoReason === undefined ? null : (
-						<DisabledReason id={autoReasonId}>{autoReason}</DisabledReason>
-					)}
-					{autoPaused ? (
-						<span className="supabase-log-paused" role="status">
-							Auto-refresh paused after 10 min.
-							<Button
-								size="sm"
-								variant="ghost"
-								onPress={() => {
-									setAutoPaused(false);
-									setAutoStartedAt(Date.now());
-								}}
-							>
-								Resume
-							</Button>
-						</span>
-					) : null}
-				</div>
-			) : null}
+						>
+							Resume
+						</Button>
+					</span>
+				) : null}
+			</div>
 		</div>
 	);
 }
@@ -1719,12 +1698,7 @@ function ConnectSection({
 		});
 	const control = (spec: Parameters<typeof supabaseStackControl>[3]) =>
 		supabaseStackControl(stack, state, context, spec);
-	const mainCopy = (
-		what: keyof typeof COPY_ACTIONS,
-		label: string,
-		controlId: Parameters<typeof isSupabaseControlEnabled>[0]
-	) => {
-		if (!isSupabaseControlEnabled(controlId)) return null;
+	const mainCopy = (what: keyof typeof COPY_ACTIONS, label: string) => {
 		const check = availability(COPY_ACTIONS[what]);
 		return (
 			<MainCopyButton
@@ -1736,14 +1710,12 @@ function ConnectSection({
 		);
 	};
 	const running = stack.state === 'running' || stack.state === 'partial';
-	const mailControl = isSupabaseControlEnabled('open-mailpit')
-		? control({
-				id: 'open-mailpit',
-				label: 'Open Mailpit',
-				action: 'open-mailpit',
-				operation: { kind: 'open', stackId: stack.id, surface: 'mailpit' },
-			})
-		: undefined;
+	const mailControl = control({
+		id: 'open-mailpit',
+		label: 'Open Mailpit',
+		action: 'open-mailpit',
+		operation: { kind: 'open', stackId: stack.id, surface: 'mailpit' },
+	});
 	const studioControls = supabaseStudioControls(stack, state, context);
 	const metroLane = stack.lanes.find((lane) => lane.needsMetroRestart);
 	return (
@@ -1776,7 +1748,7 @@ function ConnectSection({
 				<span />
 			</div>
 			<div className="supabase-connect-actions">
-				{mainCopy('psql-command', 'Copy psql command', 'copy-psql')}
+				{mainCopy('psql-command', 'Copy psql command')}
 			</div>
 			<h4 className="supabase-connect-group">Keys</h4>
 			<div className="supabase-connect-row">
@@ -1785,7 +1757,7 @@ function ConnectSection({
 				<span />
 			</div>
 			<div className="supabase-connect-actions">
-				{mainCopy('publishable-key', 'Copy key', 'copy-key')}
+				{mainCopy('publishable-key', 'Copy key')}
 			</div>
 			<div className="supabase-connect-row">
 				<span>Secret</span>
@@ -1803,12 +1775,10 @@ function ConnectSection({
 							: `:${view.mailpit.port}${running ? '' : ' · stopped'}`}
 				</span>
 				<span>
-					{mailControl
-						? renderControl(mailControl, {
-								variant: 'ghost',
-								ariaLabel: `Open Mailpit for ${title}`,
-							})
-						: null}
+					{renderControl(mailControl, {
+						variant: 'ghost',
+						ariaLabel: `Open Mailpit for ${title}`,
+					})}
 				</span>
 			</div>
 			<div className="supabase-connect-row">
@@ -1853,14 +1823,14 @@ function ConnectSection({
 			)}
 			<p className="sim-inline-note">{view.footnotes[0]}</p>
 			<div className="supabase-connect-actions">
-				{mainCopy('app-env', 'Copy app variables', 'copy-app-env')}
+				{mainCopy('app-env', 'Copy app variables')}
 			</div>
 			{view.envShadow.map((line) => (
 				<SupabaseNotice inset key={line} title="Shadowed:" tone="warning">
 					{line}
 				</SupabaseNotice>
 			))}
-			{metroLane && isSupabaseControlEnabled('restart-metro') ? (
+			{metroLane ? (
 				<div className="supabase-connect-metro">
 					<p className="sim-inline-note">
 						Lane :{metroLane.port}'s Metro started before this stack was ready,
@@ -1919,73 +1889,69 @@ function DangerSection({
 	const migrations = stack.migrationCount;
 	return (
 		<div className="supabase-danger">
-			{isSupabaseControlEnabled('reset') ? (
-				<section className="sim-danger-zone supabase-danger-row">
-					<div>
-						<strong>Reset database</strong>
+			<section className="sim-danger-zone supabase-danger-row">
+				<div>
+					<strong>Reset database</strong>
+					<span>
+						Drops all data and auth users, then re-runs{' '}
+						{migrations > 0
+							? `${migrations} ${migrations === 1 ? 'migration' : 'migrations'}`
+							: 'the migrations'}{' '}
+						and the seed (about 5 s). Keeps the stack id, URL, ports and keys.
+						No backup is kept.
+					</span>
+					{withSeed.availability.allowed ? null : (
+						<DisabledReason id={resetReasonId}>
+							{withSeed.availability.reason}
+						</DisabledReason>
+					)}
+				</div>
+				<div className="supabase-danger-actions">
+					{renderControl(withSeed, {
+						variant: 'ghost',
+						reasonPlacement: 'elsewhere',
+						...(withSeed.availability.allowed
+							? {}
+							: { describedBy: resetReasonId }),
+					})}
+					{renderControl(withoutSeed, {
+						variant: 'ghost',
+						reasonPlacement: 'elsewhere',
+						...(withoutSeed.availability.allowed
+							? {}
+							: { describedBy: resetReasonId }),
+					})}
+				</div>
+			</section>
+			<section className="sim-danger-zone supabase-danger-row">
+				<div>
+					<strong>Destroy stack</strong>
+					{destroy.availability.allowed ? (
 						<span>
-							Drops all data and auth users, then re-runs{' '}
-							{migrations > 0
-								? `${migrations} ${migrations === 1 ? 'migration' : 'migrations'}`
-								: 'the migrations'}{' '}
-							and the seed (about 5 s). Keeps the stack id, URL, ports and keys.
-							No backup is kept.
+							Deletes its database and logs and frees 10 ports. Storage uploads
+							stay unless you tick the box in the next dialog. This can't be
+							undone.
 						</span>
-						{withSeed.availability.allowed ? null : (
-							<DisabledReason id={resetReasonId}>
-								{withSeed.availability.reason}
-							</DisabledReason>
-						)}
-					</div>
-					<div className="supabase-danger-actions">
-						{renderControl(withSeed, {
-							variant: 'ghost',
-							reasonPlacement: 'elsewhere',
-							...(withSeed.availability.allowed
-								? {}
-								: { describedBy: resetReasonId }),
-						})}
-						{renderControl(withoutSeed, {
-							variant: 'ghost',
-							reasonPlacement: 'elsewhere',
-							...(withoutSeed.availability.allowed
-								? {}
-								: { describedBy: resetReasonId }),
-						})}
-					</div>
-				</section>
-			) : null}
-			{isSupabaseControlEnabled('destroy') ? (
-				<section className="sim-danger-zone supabase-danger-row">
-					<div>
-						<strong>Destroy stack</strong>
-						{destroy.availability.allowed ? (
-							<span>
-								Deletes its database and logs and frees 10 ports. Storage
-								uploads stay unless you tick the box in the next dialog. This
-								can't be undone.
-							</span>
-						) : (
-							<span id={destroyReasonId}>{destroy.availability.reason}</span>
-						)}
-						{!destroy.availability.allowed &&
-						destroy.availability.reason === SUPABASE_REASONS.stopFirst &&
-						stop.availability.allowed
-							? renderControl(stop, { variant: 'ghost' })
-							: null}
-					</div>
-					<div className="supabase-danger-actions">
-						{renderControl(destroy, {
-							variant: 'danger',
-							reasonPlacement: 'elsewhere',
-							...(destroy.availability.allowed
-								? {}
-								: { describedBy: destroyReasonId }),
-							ariaLabel: `Destroy ${supabaseStackTitle(stack)}`,
-						})}
-					</div>
-				</section>
-			) : null}
+					) : (
+						<span id={destroyReasonId}>{destroy.availability.reason}</span>
+					)}
+					{!destroy.availability.allowed &&
+					destroy.availability.reason === SUPABASE_REASONS.stopFirst &&
+					stop.availability.allowed
+						? renderControl(stop, { variant: 'ghost' })
+						: null}
+				</div>
+				<div className="supabase-danger-actions">
+					{renderControl(destroy, {
+						variant: 'danger',
+						reasonPlacement: 'elsewhere',
+						...(destroy.availability.allowed
+							? {}
+							: { describedBy: destroyReasonId }),
+						ariaLabel: `Destroy ${supabaseStackTitle(stack)}`,
+					})}
+				</div>
+			</section>
 		</div>
 	);
 }

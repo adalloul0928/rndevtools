@@ -11,7 +11,6 @@ import {
 	type LaneBackendSummary,
 	type LaneWorktreeSupabase,
 	SUPABASE_MAX_LOG_CHARACTERS,
-	SUPABASE_UI_PHASE,
 	type SupabaseAgentOperation,
 	type SupabaseAgentResult,
 	type SupabaseDoctorInfo,
@@ -175,7 +174,6 @@ import {
 	type SupabaseStackRecord,
 	SupabaseStackStore,
 	type SupabaseStoredHold,
-	supabaseKeyFingerprint,
 	supabaseRecreateError,
 } from './stack-store';
 import {
@@ -266,7 +264,6 @@ const OFF_ERROR: ClassifiedSupabaseError = Object.freeze({
 const STARTING_JOB_KINDS: ReadonlySet<SupabaseJobKind> = new Set([
 	'create',
 	'resume',
-	'follow',
 	'recreate',
 	'stop-and-start',
 	'studio',
@@ -600,7 +597,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	#homeStateRoot: string | undefined;
 	#drift = new Map<string, Readonly<{ signature: string; since: number }>>();
 	readonly #driftAttempted = new Map<string, string>();
-	readonly #fingerprintWrites = new Map<string, string>();
 	readonly #validated = new Map<
 		string,
 		Readonly<{ at: number; resolution: SupabaseCliResolution }>
@@ -1788,7 +1784,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				const result = await this.runner.run({
 					binaryPath: cli.binaryPath,
 					argv,
-					phase: SUPABASE_UI_PHASE,
 					cwd: this.cwd,
 					timeoutMs: budget.timeoutMs,
 					interruptGraceMs: budget.interruptGraceMs,
@@ -1876,7 +1871,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				const handle = await this.runner.spawnDetached({
 					binaryPath: cli.binaryPath,
 					argv,
-					phase: SUPABASE_UI_PHASE,
 					cwd: this.cwd,
 					timeoutMs: budget.timeoutMs,
 					interruptGraceMs: budget.interruptGraceMs,
@@ -2124,8 +2118,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	#rememberCredentials(
 		stackId: string,
 		credentials: MainOnlyCredentials,
-		running: boolean,
-		options: Readonly<{ persist?: boolean }> = {}
+		running: boolean
 	): void {
 		const old = this.#credentials.get(stackId);
 		const merged = new MainOnlyCredentials({
@@ -2134,47 +2127,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			dbUrl: running ? (credentials.dbUrl ?? old?.dbUrl) : undefined,
 		});
 		this.#credentials.set(stackId, merged);
-		if (options.persist !== false) this.#persistFingerprints(stackId);
-	}
-
-	/** The record's key fingerprints (sha256 only), from main's credentials. */
-	#fingerprintsOf(
-		stackId: string
-	): NonNullable<SupabaseStackRecord['keyFingerprints']> {
-		const credentials = this.#credentials.get(stackId);
-		return {
-			...(credentials?.publishableKey
-				? { publishableKey: supabaseKeyFingerprint(credentials.publishableKey) }
-				: {}),
-			...(credentials?.anonKey
-				? { anonKey: supabaseKeyFingerprint(credentials.anonKey) }
-				: {}),
-		};
-	}
-
-	/** Saves changed fingerprints once, even while an earlier save is queued. */
-	#persistFingerprints(stackId: string): void {
-		const record = this.stackStore.record(stackId);
-		if (!record) return;
-		const fingerprints = this.#fingerprintsOf(stackId);
-		const key = `${fingerprints.publishableKey ?? ''}:${fingerprints.anonKey ?? ''}`;
-		const recorded = `${record.keyFingerprints?.publishableKey ?? ''}:${record.keyFingerprints?.anonKey ?? ''}`;
-		if (key === recorded || this.#fingerprintWrites.get(stackId) === key) {
-			return;
-		}
-		this.#fingerprintWrites.set(stackId, key);
-		this.track(
-			this.stackStore
-				.updateRecord(stackId, (draft) => ({
-					...draft,
-					keyFingerprints: fingerprints,
-				}))
-				.finally(() => {
-					if (this.#fingerprintWrites.get(stackId) === key) {
-						this.#fingerprintWrites.delete(stackId);
-					}
-				})
-		);
 	}
 
 	/**
@@ -3098,11 +3050,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 							...rest,
 							holds: [],
 							pinned: false,
-							flags: {
-								...draft.flags,
-								supersededBy: target,
-								supersededAt: now,
-							},
+							flags: { ...draft.flags, supersededAt: now },
 						};
 					});
 				}
@@ -3669,10 +3617,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 		const start = outcome.value;
 		job?.details({ cancellable: false });
-		// In memory first, so the start's record carries the fingerprints.
-		this.#rememberCredentials(start.id, start.credentials, true, {
-			persist: false,
-		});
+		this.#rememberCredentials(start.id, start.credentials, true);
 		await this.#recordStart(start.id, input, cli);
 		if (start.publicEndpoints) {
 			this.#endpoints.set(start.id, start.publicEndpoints);
@@ -3718,7 +3663,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			studioEnabled: false,
 			flags: {},
 		};
-		// A start clears what an earlier failure or a branch follow noted.
+		// A start clears what an earlier failure or a branch follow noted, and
+		// the key fingerprints older versions wrote.
 		const {
 			failedStart: _failedStart,
 			interrupted: _interrupted,
@@ -3731,6 +3677,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const {
 			lastError: _lastError,
 			recreateError: _recreateError,
+			keyFingerprints: _keyFingerprints,
 			...rest
 		} = base;
 		await this.stackStore.upsertRecord({
@@ -3747,7 +3694,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			binaryPath: cli.binaryPath,
 			runtime: 'native',
 			exclusions: [...input.exclusions],
-			keyFingerprints: this.#fingerprintsOf(stackId),
 			flags,
 		});
 	}
@@ -4787,7 +4733,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 						!active.stackIds.includes(stackId) &&
 						(active.kind === 'create' ||
 							active.kind === 'resume' ||
-							active.kind === 'follow' ||
 							active.kind === 'recreate')
 				).length;
 			const sysv = this.#sysv;

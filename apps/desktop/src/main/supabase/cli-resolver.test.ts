@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import {
 	appendFile,
 	chmod,
@@ -11,6 +12,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	type SupabaseCliResolution,
@@ -199,7 +201,7 @@ describe('SupabaseCliResolver.resolve', () => {
 		expect(runner.requests[0]).toMatchObject({
 			binaryPath: binary,
 			argv: ['--version'],
-			phase: 1,
+			readOnly: true,
 			cwd: probeCwd,
 		});
 	});
@@ -599,6 +601,27 @@ describe('SupabaseCliResolver.validateBinary', () => {
 				allowedRoots: [worktree],
 			}),
 			'binary-symlink'
+		);
+	});
+
+	it('refuses a package.json that is a FIFO without waiting for a writer', async () => {
+		const { worktree, resolver } = await setup();
+		const platformRoot = path.join(
+			worktree,
+			'node_modules',
+			'@supabase',
+			'cli-darwin-arm64'
+		);
+		const binary = await writeBinary(platformRoot);
+		await promisify(execFile)('/usr/bin/mkfifo', [
+			path.join(platformRoot, 'package.json'),
+		]);
+		expectUnavailable(
+			await resolver.validateBinary({
+				binaryPath: binary,
+				allowedRoots: [worktree],
+			}),
+			'invalid-package'
 		);
 	});
 });

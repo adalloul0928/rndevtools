@@ -1,4 +1,4 @@
-import { diagnosticErrorText } from '@rndevtools/core/redact';
+import { errorText } from '@/lib/runtime-action';
 import {
 	applyDemoAction,
 	createDemoDevice,
@@ -101,7 +101,7 @@ async function runAction(value: DesktopAction) {
 		return {
 			actionId: action.actionId,
 			ok: false,
-			error: diagnosticErrorText(error).slice(0, 8 * 1024),
+			error: errorText(error),
 		};
 	}
 }
