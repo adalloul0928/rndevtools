@@ -21,7 +21,6 @@ export const electronViteConfig = {
 		build: {
 			outDir: 'dist/main',
 			sourcemap: true,
-			externalizeDeps: { exclude: ['@rndevtools/core', 'ws', 'zod'] },
 			// `ws` requires these native accelerators inside a try/catch and falls back to
 			// its JS implementations. Bundling them makes Vite hoist an unresolved-import
 			// `throw` to module scope, outside that try/catch, which crashes main on load.
@@ -29,11 +28,7 @@ export const electronViteConfig = {
 		},
 	},
 	preload: {
-		build: {
-			outDir: 'dist/preload',
-			sourcemap: true,
-			externalizeDeps: { exclude: ['@rndevtools/core', 'zod'] },
-		},
+		build: { outDir: 'dist/preload', sourcemap: true },
 	},
 	renderer: {
 		plugins: [react(), tailwindcss()],

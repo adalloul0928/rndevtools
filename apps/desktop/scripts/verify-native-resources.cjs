@@ -66,9 +66,7 @@ function readSupportedManifest(resolvedDirectory) {
 		if (
 			!helper ||
 			helper.name !== expectedFile ||
-			helper.file !== expectedFile ||
-			helper.file !== helper.name ||
-			!/^rndevtools(?:-[a-z-]+)?$/.test(helper.file)
+			helper.file !== expectedFile
 		) {
 			throw new Error(`Native resource manifest is missing ${key}.`);
 		}
@@ -78,10 +76,6 @@ function readSupportedManifest(resolvedDirectory) {
 
 function inspectHelper(resolvedDirectory, key, expectedFile) {
 	const helperPath = path.join(resolvedDirectory, expectedFile);
-	const relativePath = path.relative(resolvedDirectory, helperPath);
-	if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-		throw new Error(`Native helper ${key} escapes its resource directory.`);
-	}
 	const stats = lstatSync(helperPath);
 	if (!stats.isFile() || stats.isSymbolicLink() || (stats.mode & 0o111) === 0) {
 		throw new Error(`Native helper ${key} is not a regular executable file.`);
