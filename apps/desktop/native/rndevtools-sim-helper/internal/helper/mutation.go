@@ -125,7 +125,7 @@ func (service *Service) prepareMutation(
 		// exact tuple acknowledgement before the returned token can be committed.
 		// The commit path below independently evaluates the caller acknowledgement
 		// against the token-bound fresh tuple.
-		"EXPERIMENTAL",
+		compatibility.ExperimentalAcknowledgement,
 		catalog.Version,
 	)
 	if err != nil {
@@ -249,8 +249,7 @@ func (service *Service) mutate(ctx context.Context, request mutationRequest) (Mu
 			false,
 		))
 	}
-	if preparedCheckpoint.Purpose != checkpointPurposePrepared ||
-		preparedCheckpoint.PreparedOperation != request.Operation ||
+	if preparedCheckpoint.PreparedOperation != request.Operation ||
 		preparedCheckpoint.PreparedProfileID != request.ProfileID ||
 		!slices.Equal(
 			preparedCheckpoint.PreparedDesiredServiceIDs,

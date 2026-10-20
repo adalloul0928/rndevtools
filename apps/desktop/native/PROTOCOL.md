@@ -347,9 +347,9 @@ only when applicable; the three rollback booleans are always present.
 
 `checkpointToken` is at most 32,768 UTF-8 bytes. It is a canonical,
 integrity-checked opaque encoding of the exact prior allowlisted set, original
-boot state, Simulator ID, tuple, catalog/fork identities, matrix version, and,
-for preparation, the exact intended operation/profile/desired set plus a
-random preparation ID and bounded preparation-time executable basenames. It
+boot state, Simulator ID, tuple, catalog/fork identities, matrix version, the
+exact intended operation/profile/desired set, a random preparation ID, and
+bounded preparation-time executable basenames. It
 contains no filesystem path, raw command line, or process environment and is
 an integrity binding, not an authorization credential. Commit-time process
 evidence is freshly captured and may differ after an intentional shutdown/boot

@@ -39,10 +39,6 @@ func run() int {
 	)
 }
 
-func runWithIO(args []string, stdin io.Reader, stdout io.Writer, authorizer authorization.RequestAuthorizer) int {
-	return runWithContext(context.Background(), args, stdin, stdout, authorizer)
-}
-
 func runWithContext(
 	parent context.Context,
 	args []string,

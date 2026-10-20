@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,13 +38,13 @@ const (
 var (
 	bootTimeout          = simslim.BootTimeout
 	commandWaitDelay     = 2 * time.Second
-	udidPattern          = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
+	UDIDPattern          = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 	runtimePattern       = regexp.MustCompile(`^com\.apple\.CoreSimulator\.SimRuntime\.iOS-[A-Za-z0-9.-]{1,80}$`)
 	deviceTypePattern    = regexp.MustCompile(`^com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9.-]{1,96}$`)
 	buildLinePattern     = regexp.MustCompile(`(?m)^Build version ([A-Za-z0-9.]{2,32})\s*$`)
 	coreSimulatorPattern = regexp.MustCompile(`(?m)PROJECT:CoreSimulator-([A-Za-z0-9.]{2,32})\s*$`)
 	launchdLabelPattern  = regexp.MustCompile(`^[^\s]{1,512}$`)
-	processNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
+	ProcessNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
 )
 
 type Device struct {
@@ -165,7 +166,7 @@ func (client *Client) List(ctx context.Context) ([]Device, error) {
 }
 
 func (client *Client) Clone(ctx context.Context, simulatorID, name string) (string, string, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return "", "", errors.New("simulator ID is not a canonical UDID")
 	}
 	normalizedName, err := simslim.NormalizeSimulatorName(name)
@@ -176,14 +177,14 @@ func (client *Client) Clone(ctx context.Context, simulatorID, name string) (stri
 	if err != nil {
 		return "", "", errors.New("pinned SimSlim could not safely prepare the clone")
 	}
-	if !udidPattern.MatchString(cloneID) {
+	if !UDIDPattern.MatchString(cloneID) {
 		return "", "", errors.New("pinned SimSlim returned an invalid clone ID")
 	}
 	return cloneID, normalizedName, nil
 }
 
 func (client *Client) PlanDiskCleanup(ctx context.Context, simulatorID string) (DiskCleanupPlan, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return DiskCleanupPlan{}, errors.New("simulator ID is not a canonical UDID")
 	}
 	plan, err := simslim.PlanDiskCleanup(ctx, simulatorID)
@@ -197,7 +198,7 @@ func (client *Client) PlanDiskCleanup(ctx context.Context, simulatorID string) (
 }
 
 func (client *Client) CleanDisk(ctx context.Context, simulatorID string, categoryIDs []string) (DiskCleanupResult, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return DiskCleanupResult{}, errors.New("simulator ID is not a canonical UDID")
 	}
 	validated, err := simslim.ValidateDiskCleanupSelection(categoryIDs)
@@ -310,7 +311,7 @@ func (client *Client) PrepareMutation(ctx context.Context, simulatorID string) (
 // labels are disabled. It never reads process environments. Missing/on-demand
 // jobs contribute no process name; ambiguous launchd/PID mappings fail closed.
 func (client *Client) CaptureRunningServiceProcesses(ctx context.Context, simulatorID string, serviceIDs []string) ([]string, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return nil, errors.New("simulator ID is not a canonical UDID")
 	}
 	if err := validateManagedIDs(serviceIDs); err != nil {
@@ -337,14 +338,14 @@ func (client *Client) CaptureRunningServiceProcesses(ctx context.Context, simula
 	if len(runningJobs) == 0 {
 		return []string{}, nil
 	}
-	processes, err := client.processes(ctx, simulatorID)
+	processes, err := client.measureProcesses(ctx, simulatorID)
 	if err != nil {
 		return nil, errors.New("could not inspect the exact Simulator process tree")
 	}
 	processByPID := make(map[int]string, len(processes))
 	processNameCounts := make(map[string]int, len(processes))
 	for _, process := range processes {
-		if process.PID <= 0 || !processNamePattern.MatchString(process.Command) {
+		if process.PID <= 0 || !ProcessNamePattern.MatchString(process.Command) {
 			return nil, errors.New("the Simulator process tree contained invalid identity data")
 		}
 		if _, duplicatePID := processByPID[process.PID]; duplicatePID {
@@ -382,7 +383,7 @@ func (client *Client) CaptureRunningServiceProcesses(ctx context.Context, simula
 }
 
 func (client *Client) ApplyManagedState(ctx context.Context, simulatorID string, desired []string) (bool, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return false, errors.New("simulator ID is not a canonical UDID")
 	}
 	if err := validateManagedIDs(desired); err != nil {
@@ -409,7 +410,7 @@ func (client *Client) VerifyManagedState(ctx context.Context, simulatorID string
 	}
 	observedProcessNames = sortedUniqueCopy(observedProcessNames)
 	for _, processName := range observedProcessNames {
-		if !processNamePattern.MatchString(processName) {
+		if !ProcessNamePattern.MatchString(processName) {
 			return Verification{}, errors.New("observed process name is invalid")
 		}
 	}
@@ -477,7 +478,7 @@ func (client *Client) VerifyManagedState(ctx context.Context, simulatorID string
 	}
 	evidence.DisabledLaunchdJobRegistrationsAbsent = len(evidence.RegisteredDisabledLaunchdJobIDs) == 0
 	if len(observedProcessNames) > 0 {
-		processes, processErr := client.processes(ctx, simulatorID)
+		processes, processErr := client.measureProcesses(ctx, simulatorID)
 		if processErr != nil {
 			return evidence, &VerificationError{Evidence: evidence, Reason: "could not inspect the exact Simulator process tree"}
 		}
@@ -620,7 +621,7 @@ func (client *Client) statusForBootedDevice(ctx context.Context, device Device) 
 	matchingProfiles := make([]string, 0)
 	for _, profile := range catalog.Profiles() {
 		desired, desiredErr := catalog.DesiredServiceIDs(profile.ID)
-		if desiredErr == nil && slicesEqual(desired, managedDisabled) {
+		if desiredErr == nil && slices.Equal(desired, managedDisabled) {
 			matchingProfiles = append(matchingProfiles, profile.ID)
 		}
 	}
@@ -634,7 +635,7 @@ func (client *Client) statusForBootedDevice(ctx context.Context, device Device) 
 }
 
 func (client *Client) findDevice(ctx context.Context, simulatorID string) (Device, error) {
-	if !udidPattern.MatchString(simulatorID) {
+	if !UDIDPattern.MatchString(simulatorID) {
 		return Device{}, errors.New("simulator ID is not a canonical UDID")
 	}
 	devices, err := client.List(ctx)
@@ -794,13 +795,6 @@ func (client *Client) runXcrun(ctx context.Context, timeout time.Duration, args 
 	return client.runner.Run(ctx, timeout, xcrunExecutable, args...)
 }
 
-func (client *Client) processes(ctx context.Context, simulatorID string) ([]simslim.Process, error) {
-	if client.measureProcesses != nil {
-		return client.measureProcesses(ctx, simulatorID)
-	}
-	return simslim.MeasureProcesses(ctx, simulatorID)
-}
-
 func validateManagedIDs(values []string) error {
 	if len(values) > maximumManagedIDs {
 		return errors.New("managed service set exceeds its safety limit")
@@ -847,7 +841,7 @@ func parseDeviceList(data []byte) ([]Device, error) {
 				break
 			}
 			name, validName := boundedText(device.Name, 128)
-			if !device.Available || !udidPattern.MatchString(device.UDID) || !validName {
+			if !device.Available || !UDIDPattern.MatchString(device.UDID) || !validName {
 				continue
 			}
 			deviceType := ""
@@ -992,8 +986,9 @@ func managedState(values []string) ManagedState {
 }
 
 func sortedUniqueCopy(values []string) []string {
-	set := sliceSet(values)
-	return setDifference(set, map[string]struct{}{})
+	out := append([]string{}, values...)
+	sort.Strings(out)
+	return slices.Compact(out)
 }
 
 func sliceSet(values []string) map[string]struct{} {
@@ -1013,18 +1008,6 @@ func setDifference(left, right map[string]struct{}) []string {
 	}
 	sort.Strings(values)
 	return values
-}
-
-func slicesEqual(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }
 
 var _ io.Writer = (*limitedBuffer)(nil)

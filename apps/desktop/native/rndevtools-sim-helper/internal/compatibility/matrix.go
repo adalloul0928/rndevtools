@@ -20,7 +20,7 @@ var (
 	ErrOperationNotVerified    = errors.New("the operation is not verified for this limited tuple")
 	buildPattern               = regexp.MustCompile(`^[A-Za-z0-9.]{2,32}$`)
 	helperVersionPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$`)
-	sourceCommitPattern        = regexp.MustCompile(`^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$`)
+	SourceCommitPattern        = regexp.MustCompile(`^[a-f0-9]{40}(?:-dirty:[a-f0-9]{64})?$`)
 	runtimePattern             = regexp.MustCompile(`^com\.apple\.CoreSimulator\.SimRuntime\.iOS-([0-9]{1,2})(?:[-.]([0-9]{1,2}))?(?:[-.]([0-9]{1,2}))?$`)
 )
 
@@ -124,7 +124,7 @@ func validTuple(candidate Tuple, expectedCatalogVersion string) bool {
 		!buildPattern.MatchString(candidate.CoreSimulatorBuild) ||
 		!buildPattern.MatchString(candidate.RuntimeBuild) ||
 		!helperVersionPattern.MatchString(candidate.HelperVersion) ||
-		!sourceCommitPattern.MatchString(candidate.HelperBuildCommit) {
+		!SourceCommitPattern.MatchString(candidate.HelperBuildCommit) {
 		return false
 	}
 	if candidate.HostArchitecture != "arm64" && candidate.HostArchitecture != "x64" {

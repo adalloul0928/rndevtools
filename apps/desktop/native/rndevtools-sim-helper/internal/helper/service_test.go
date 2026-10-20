@@ -731,7 +731,7 @@ func TestUndoKeepsTheBootStateTheSimulatorHasWhenUndoStarts(t *testing.T) {
 
 func TestNoChangeUndoKeepsTheCurrentBootState(t *testing.T) {
 	backend := newFakeBackend()
-	target, err := encodeRestorePoint(helperTestUDID, "Shutdown", backend.tuple, []string{})
+	target, err := encodePreparedCheckpoint(helperTestUDID, "Shutdown", backend.tuple, []string{}, protocol.OperationRestoreManaged, "", []string{}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,11 +766,16 @@ func TestUndoRejectsCheckpointAfterCompatibilityTupleChanges(t *testing.T) {
 
 func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 	backend := newFakeBackend()
-	token, err := encodeRestorePoint(helperTestUDID, "Booted", backend.tuple, []string{})
+	token, err := encodePreparedCheckpoint(helperTestUDID, "Booted", backend.tuple, []string{}, protocol.OperationRestoreManaged, "", []string{}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The random preparation ID makes the digest random, so pick a final
+	// character that always differs from the real one.
 	tampered := token[:len(token)-1] + "A"
+	if tampered == token {
+		tampered = token[:len(token)-1] + "E"
+	}
 	if _, err := decodeCheckpoint(tampered); err == nil {
 		t.Fatal("tampered checkpoint passed integrity validation")
 	}
@@ -785,7 +790,9 @@ func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 		Tuple:                       backend.tuple,
 		OriginalBootState:           "Booted",
 		ManagedDisabledServiceIDs:   []string{"com.example.not-allowlisted"},
-		Purpose:                     checkpointPurposeRestore,
+		Purpose:                     checkpointPurposePrepared,
+		PreparationID:               "preparation-0123456789abcdef0123456789abcdef",
+		PreparedOperation:           protocol.OperationRestoreManaged,
 		PreparedDesiredServiceIDs:   []string{},
 		ObservedRunningProcessNames: []string{},
 	}
@@ -802,7 +809,7 @@ func TestCheckpointRejectsTamperingAndNonCatalogLabels(t *testing.T) {
 
 func TestCheckpointContainingEntireManagedCatalogFitsProtocolBound(t *testing.T) {
 	backend := newFakeBackend()
-	token, err := encodeRestorePoint(helperTestUDID, "Booted", backend.tuple, catalog.ManagedServiceIDs())
+	token, err := encodePreparedCheckpoint(helperTestUDID, "Booted", backend.tuple, catalog.ManagedServiceIDs(), protocol.OperationRestoreManaged, "", []string{}, []string{})
 	if err != nil {
 		t.Fatal(err)
 	}

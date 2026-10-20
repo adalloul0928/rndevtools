@@ -30,7 +30,7 @@ func (attestor *stubAttestor) Attest(_ context.Context, _ int) error {
 
 func TestDirectMutationInvocationIsDenied(t *testing.T) {
 	request := mutationRequest(t, protocol.OperationCloneSimulator)
-	authorizer := New(strings.NewReader(""), &stubAttestor{})
+	authorizer := New(strings.NewReader(""), &stubAttestor{}, testBuildCommit)
 	authorizer.parentPID = func() int { return 42 }
 	if apiError := authorizer.Authorize(context.Background(), request); apiError == nil || apiError.Code != "mutation_authorization_required" {
 		t.Fatalf("expected direct mutation denial, got %#v", apiError)
@@ -88,7 +88,7 @@ func TestProductionStyleInheritedPipeRequiresNonBlockingReadDescriptor(t *testin
 
 func TestReadOnlyRequestsDoNotConsumeOrRequireAuthorization(t *testing.T) {
 	request := decodeRequest(t, `{"protocolVersion":2,"requestId":"read-only","operation":"simulator_status","payload":{"simulatorId":"`+testSimulatorID+`"}}`)
-	authorizer := New(nil, nil)
+	authorizer := New(nil, nil, testBuildCommit)
 	if apiError := authorizer.Authorize(context.Background(), request); apiError != nil {
 		t.Fatalf("read-only request unexpectedly denied: %#v", apiError)
 	}
@@ -101,7 +101,7 @@ func TestOperationBoundAuthorizationSucceedsOnce(t *testing.T) {
 	now := time.Unix(1_900_000_000, 0)
 	request := mutationRequest(t, protocol.OperationApplyProfile)
 	attestor := &stubAttestor{}
-	authorizer := NewBound(
+	authorizer := New(
 		bytes.NewReader(envelopeData(t, request, now.Add(15*time.Second), 42)),
 		attestor,
 		testBuildCommit,
@@ -128,7 +128,7 @@ func TestBuildBoundAuthorizationRejectsOlderNativeHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer := NewBound(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
+	authorizer := New(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
 	authorizer.now = func() time.Time { return now }
 	authorizer.parentPID = func() int { return 42 }
 	if apiError := authorizer.Authorize(context.Background(), request); apiError == nil {
@@ -162,7 +162,7 @@ func TestAuthorizationRejectsMismatchesExpiryAndUntrustedParent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			authorizer := New(bytes.NewReader(data), &stubAttestor{error: test.attestError})
+			authorizer := New(bytes.NewReader(data), &stubAttestor{error: test.attestError}, testBuildCommit)
 			authorizer.now = func() time.Time { return now }
 			authorizer.parentPID = func() int { return test.parentPID }
 			apiError := authorizer.Authorize(context.Background(), request)
@@ -200,7 +200,7 @@ func TestAuthorizationBindsTheSimulatorTheHelperActsOnWhenKeysDifferOnlyByCase(t
 				if err != nil {
 					t.Fatal(err)
 				}
-				authorizer := New(bytes.NewReader(data), &stubAttestor{})
+				authorizer := New(bytes.NewReader(data), &stubAttestor{}, testBuildCommit)
 				authorizer.now = func() time.Time { return now }
 				authorizer.parentPID = func() int { return 42 }
 				apiError := authorizer.Authorize(context.Background(), request)

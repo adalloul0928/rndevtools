@@ -157,7 +157,7 @@ func TestRunDeniesEveryDirectMutationBeforeSimulatorAccess(t *testing.T) {
 			authorizer := &denyingAuthorizer{}
 			input := `{"protocolVersion":2,"requestId":"direct","operation":"` + operation + `","payload":` + payload + `}`
 			var output bytes.Buffer
-			if exitCode := runWithIO([]string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 1 {
+			if exitCode := runWithContext(context.Background(), []string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 1 {
 				t.Fatalf("exit code = %d, want 1", exitCode)
 			}
 			if authorizer.calls != 1 {
@@ -178,7 +178,7 @@ func TestRunPreservesDirectReadOnlyHandshake(t *testing.T) {
 	authorizer := &denyingAuthorizer{}
 	input := `{"protocolVersion":2,"requestId":"read","operation":"handshake","payload":{}}`
 	var output bytes.Buffer
-	if exitCode := runWithIO([]string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 0 {
+	if exitCode := runWithContext(context.Background(), []string{"rndevtools-sim-helper"}, strings.NewReader(input), &output, authorizer); exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0: %s", exitCode, output.String())
 	}
 	if authorizer.calls != 0 {

@@ -118,7 +118,7 @@ func TestPinnedForkParsesDisabledOverridesAndPIDOnlySimulatorProcessOutput(t *te
 
 func TestUDIDValidationRejectsArgumentInjection(t *testing.T) {
 	badValues := []string{"booted", testUDID + ";delete", "--set", "../../devices"}
-	if slices.ContainsFunc(badValues, udidPattern.MatchString) {
+	if slices.ContainsFunc(badValues, UDIDPattern.MatchString) {
 		t.Fatal("unsafe simulator identifier passed validation")
 	}
 }
