@@ -84,7 +84,7 @@ runs booted two further Simulators to find an empty one.
 
 **1. A repeated `lane up` failed as a conflict.** In the very first runs an
 agent whose first `lane up` was interrupted retried it and got "already has
-lane", with no path forward. Fixed in `76693d3`: `lane up` for the same app
+lane", with no path forward. Fixed in `c1ebd38`: `lane up` for the same app
 and Simulator now returns the existing lane, restarts Metro if it died, and
 relaunches. Codex's own transcript shows why it matters: it called `lane up`
 three times in one run.

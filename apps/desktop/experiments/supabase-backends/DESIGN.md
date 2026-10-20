@@ -1,7 +1,7 @@
 # Per-worktree local Supabase for lanes: design
 
 > **Status:** implemented on 2026-10-17; [IMPLEMENTATION.md](IMPLEMENTATION.md) records what shipped, how it was verified and where it departs from this design (names say `supabase`, not `backend`). The [as-built notes](#as-built-notes) at the end list engine behaviours that a later repo-wide review changed. Produced on 2026-10-16 from research, a hands-on spike, and tag-level verification; see [FINDINGS.md](FINDINGS.md).
-> **Pinned upstream:** Supabase CLI 2.121.0. Supabase source references are relative to `supabase/cli@v2.121.0` unless they say `@develop`. rndevtools references are relative to the repository root, at commit 88ee67b.
+> **Pinned upstream:** Supabase CLI 2.121.0. Supabase source references are relative to `supabase/cli@v2.121.0` unless they say `@develop`. rndevtools references are relative to the repository root, at commit a415937.
 > **Origin:** three competing designs (managed, adopt, risk-first MVP) were scored by two judges. MVP ranked first and managed second, within about one point of each other, so this design is a synthesis of the two.
 
 ## Verdict
@@ -672,7 +672,7 @@ Nothing goes over the unauthenticated WebSocket broker.
 | Go `internal/setup/hook_supabase.go`, `internal/setup/steering.go` | 2 | - A shell-segment tokenizer and the Supabase rules.<br>- A steering reader validated like the socket: regular file, not a symlink, owned by euid, no group/other write (client.go:150-195), 64 KiB or less, strict v1. |
 | Go `internal/setup/skills/rndevtools-backend/SKILL.md` | 4 | The backend skill. |
 
-## Changed files (anchors at HEAD 88ee67b)
+## Changed files (anchors at HEAD a415937)
 - `packages/core/src/core/redact.ts:1-39` (P0): `sb_secret_` values, URL userinfo passwords, compound secret names; no 64-hex rule.
 - `apps/desktop/src/main/lane-service.ts`:
   - **P0:** redact at 317-329; reservations at 428-531; identity-aware Metro health at 961-976; refuse lane launch by a non-holder at 849-855.

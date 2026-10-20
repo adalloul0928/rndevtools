@@ -10,7 +10,7 @@ The base is native list/detail on the Lanes and Fleet console contract, which bo
 
 **Placement.** A Simulator-workspace tool, **Supabase**:
 - id `supabase`, icon lucide `DatabaseZap`, shortcut ⌘8;
-- Settings moves to ⌘9 (precedent: commit 065491f);
+- Settings moves to ⌘9 (precedent: commit 138d3a7);
 - it sits in a new config-driven **Backend** sidebar group.
 
 It tracks every local stack and shows, for each one, the agent session, lane, Simulator and worktree/branch it is attached to.
@@ -64,7 +64,7 @@ Controls from a later phase are absent in earlier ones, not disabled.
 
 **Choice.** id supabase, label Supabase, DatabaseZap icon, Simulator workspace, Backend group, ⌘8; Settings moves to ⌘9
 
-**Why.** The brief already decided this. DatabaseZap avoids clashing with connected Storage's Database icon, commit 065491f set the precedent for moving Settings, and ⌘0 belongs to Electron.
+**Why.** The brief already decided this. DatabaseZap avoids clashing with connected Storage's Database icon, commit 138d3a7 set the precedent for moving Settings, and ⌘0 belongs to Electron.
 
 ### Layout
 
