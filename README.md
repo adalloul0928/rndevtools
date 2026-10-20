@@ -1,48 +1,51 @@
 # RN Devtools
 
-A desktop workspace for React Native diagnostics, iOS Simulator fleets, and parallel development with isolated local backends.
+A desktop workspace for React Native diagnostics, iOS Simulators, and parallel development across git worktrees.
 
-[Features](#features) · [Install](#install) · [Try the demo](#try-the-demo) · [Development](#development)
+**[Download the macOS preview](https://github.com/adalloul0928/rndevtools/releases/download/desktop-v0.2.0/RN-Devtools-0.2.0-arm64.dmg)** · Apple silicon · Version 0.2.0
 
-![RN Devtools managing three Simulator lanes](docs/images/simulator-fleet.png)
+The app is signed and notarized. **No HeroUI account or license is needed to download or run the packaged app.** [Release notes and checksums](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0).
+
+![RN Devtools Simulator fleet and worktree lanes](docs/images/simulator-fleet.png)
 
 ## Features
 
-- **Parallel Simulator lanes.** Run each git worktree on its own Simulator and Metro port. Reuse native builds when fingerprints match, and keep branch ownership visible.
-- **Local Supabase per worktree.** Manage native Postgres, REST, Auth, Storage, Realtime, and Functions on loopback. Inspect services and logs, apply migrations, and connect each lane to its own backend. This integration is alpha; per-stack signing keys are opt-in.
-- **Connected app diagnostics.** Inspect network requests, console output, storage, React Query, Zustand, navigation, performance, environment, and components. Add host adapters and plugins for your app.
-- **Simulator controls and automation.** Launch apps, open deep links, manage permissions, capture screenshots and recordings, run recipes, and expose the same workflows to coding agents through the CLI and MCP.
+- **Parallel Simulator lanes.** Give each worktree its own Simulator and Metro port. Reuse native builds when fingerprints match.
+- **Local Supabase per worktree.** Manage native Postgres, REST, Auth, Storage, Realtime, and Functions. Inspect services, logs, and migrations. This integration is alpha.
+- **Connected app diagnostics.** Inspect network requests, console output, storage, React Query, Zustand, navigation, performance, environment, and components.
+- **Simulator automation.** Control apps, deep links, and permissions; capture screenshots and recordings; run recipes through the desktop app, bundled CLI, or MCP.
 - **Experimental SimSlim profiles.** Reduce background Simulator services with compatibility checks, verification, checkpoints, and undo.
 
-![Local Supabase stacks with separate services and ports](docs/images/local-supabase.png)
+![Local Supabase stacks and their Simulator lanes](docs/images/local-supabase.png)
 
-![Connected app network requests and redacted payload details](docs/images/network-inspector.png)
+*Per-worktree backends with their Simulator, Metro port, and lifecycle controls.*
 
-*Screenshots show the application with synthetic demo data.*
+![Connected app network inspector](docs/images/network-inspector.png)
+
+*Network requests and redacted payload details. All screenshots show the running desktop app with synthetic demo data.*
 
 ## Install
 
-Download the signed and notarized [RN Devtools 0.2.0 preview for Apple silicon](https://github.com/adalloul0928/rndevtools/releases/download/desktop-v0.2.0/RN-Devtools-0.2.0-arm64.dmg). Open the DMG, drag **RN Devtools** into **Applications**, and launch it. The [release page](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0) includes checksums and preview notes.
-
-The declared minimum is macOS 14. This preview has been tested on one Apple silicon Mac with macOS 27 and Xcode 27; a separate clean-Mac installation and broader version coverage are still pending.
-
-React Native npm packages remain unpublished. Homebrew installation is not available yet. Use the repository's Expo example below to try connected-app diagnostics.
-
-### Requirements
+Open the DMG, drag **RN Devtools** into **Applications**, and launch it. The download includes the native helpers; installing it does not require Node.js, pnpm, or Go.
 
 | Feature | Requires |
 | --- | --- |
-| Desktop app | Apple silicon Mac, macOS 14 or later |
-| Simulator management | Xcode with an installed iOS Simulator runtime |
+| Desktop app | Apple silicon Mac; declared minimum macOS 14 |
+| Simulator management | Xcode and an installed iOS Simulator runtime |
 | Worktree lanes | Git, Node.js, project dependencies, and a compatible Expo development build installed on each Simulator |
-| Local Supabase | The project's own Supabase CLI; the verified example pins 2.121.0 and uses the native runtime |
-| On-device panels | Compatible React Native/Expo dependencies; see the [core package](packages/core/README.md) |
+| Local Supabase | The project's pinned Supabase CLI; the example verifies 2.121.0 with the native runtime |
+| Connected diagnostics | An app using the [React Native host integration](packages/react-native/README.md) |
 
-The prebuilt app includes its native helpers. Node.js, pnpm, Go, and a HeroUI Pro license are not needed merely to install the desktop app; source builds and your app's development workflow have their own requirements.
+### Preview limits
+
+- Tested on one Apple silicon Mac with macOS 27 and Xcode 27. Clean-Mac installation and broader version coverage are still pending.
+- Supabase databases and ports are separate, but default local signing keys are public and shared. Enable **per-stack keys** for JWT signing isolation. These are single-user development stacks.
+- SimSlim is off by default. Unverified platform combinations require experimental acknowledgement.
+- React Native npm packages remain unpublished. Homebrew, Intel Mac, Windows, and Linux downloads are unavailable.
 
 ## Try the demo
 
-The [Expo example](examples/expo-demo/README.md) includes the development client, diagnostic plugins, desktop connection, native build cache, and a local Supabase project.
+The [Expo example](examples/expo-demo/README.md) includes diagnostic plugins, the desktop connection, native build caching, and a local Supabase project. Use Node.js 24, pnpm 12.4.1, and Xcode:
 
 ```sh
 git clone https://github.com/adalloul0928/rndevtools.git
@@ -51,13 +54,11 @@ pnpm install
 pnpm --dir examples/expo-demo exec expo run:ios
 ```
 
-Open RN Devtools alongside the demo to inspect its connection. Building the desktop app from source is described below.
+Open RN Devtools alongside the demo. For your own app, follow the [host integration and production pruning guide](packages/react-native/README.md); keep diagnostics behind a development-only import seam and verify the production bundle.
 
-For your own app, start with the example's host adapter and [production pruning setup](packages/react-native/README.md). Keep diagnostics behind a development-only import seam, use `withDevtoolsPruning`, and verify a production export with `rndevtools-verify-bundle`.
+## Build the desktop app from source
 
-## Development
-
-Use Node.js 24, pnpm 12.4.1, Go 1.27, and Xcode's Swift toolchain. The desktop UI requires a [HeroUI Pro](https://www.heroui.pro/) license and `HEROUI_AUTH_TOKEN`; the React Native packages do not.
+Source builds use Node.js 24, pnpm 12.4.1, Go 1.27, and Xcode's Swift toolchain. **Desktop source builders need a [HeroUI Pro](https://heroui.pro/) license and `HEROUI_AUTH_TOKEN`.** The React Native packages and the demo do not.
 
 ```sh
 pnpm install
@@ -65,23 +66,9 @@ pnpm --filter @rndevtools/desktop native:build
 pnpm --filter @rndevtools/desktop dev
 ```
 
-Privileged native Simulator mutations require a signed packaged app. Set `APPLE_TEAM_ID` in the build environment and follow the [release guide](docs/RELEASING.md). Unsigned development builds can still inspect devices.
+Privileged Simulator mutations require a signed packaged app. Follow the [release guide](docs/RELEASING.md) for signing and packaging, and the [desktop guide](apps/desktop/README.md) for development checks.
 
-```sh
-pnpm check:public
-pnpm quality
-pnpm --filter @rndevtools/desktop quality
-pnpm --filter @rndevtools/desktop test:e2e
-pnpm --dir examples/expo-demo verify:bundle
-```
-
-| Workspace | Purpose |
-| --- | --- |
-| [`packages/core`](packages/core) | On-device panel runtime and diagnostic plugins |
-| [`packages/react-native`](packages/react-native) | Desktop client, authorization, adapters, build cache, and production pruning |
-| [`apps/desktop`](apps/desktop) | Electron inspector, Simulator management, CLI, and native helpers |
-
-Both React Native packages ship TypeScript source so the consuming app's Babel pipeline can compile Reanimated worklets.
+Package guides: [Core diagnostics](packages/core/README.md) · [React Native integration](packages/react-native/README.md).
 
 ## License and credits
 
