@@ -4,7 +4,7 @@ A whole-repo audit of RN Devtools at `553dc95`, run with the [ponytail](https://
 
 - **How it ran:** eight area auditors, each followed by a skeptic that tried to refute every finding. They produced 195 findings; the skeptics refuted none, corrected 47 and added 30 they found themselves.
 - **Load assumed:** one developer’s Mac running one desktop app, a few connected apps and Simulators, and a handful of coding agents at once.
-- **What happened next:** 71 behaviour-preserving lean findings were applied in twelve commits, `fc3479b` to `690eb12` (see [Applied in the cleanup](#applied-in-the-cleanup)). The 148 findings in this document are still open.
+- **What happened next:** 71 behaviour-preserving lean findings were applied in twelve commits, `fc3479b` to `690eb12` (see [Applied in the cleanup](#applied-in-the-cleanup)). The 148 findings in this document are still open, except 2 and 108: commits merged from GitHub in `19eafeb` fixed those, as each one notes.
 - **Line numbers:** findings 1 to 20 point at the code after the cleanup (`690eb12`); findings 21 onward point at `553dc95`, so some have moved.
 
 ## What this repo does
@@ -30,6 +30,7 @@ Not healthy yet. Fix 1, 2 and 3 first: a Release lane can run another branch’s
    - **Problem:** `app.tsx` imports `@rndevtools/core` and the `@rndevtools/react-native` root directly, and the pruning list names only `@/devtools/desktop`. A production bundle built with the example's real config fails `rndevtools-verify-bundle` on 11 devtools markers. CI never runs this check, so nobody saw it.
    - **Fix:** Move every devtools import into one host module, prune that module, and add `quality` and `verify:bundle` for the example to CI.
    - **If we skip it:** Teams that copy the reference setup ship devtools to their users.
+   - **Since the audit:** fixed by `c0a3d04`, merged in `19eafeb`. The app now imports devtools only through `src/devtools/host.tsx`, Metro replaces that one module, and `verify:seam` checks the import graph in the example's `quality` gate, which CI runs. A production export of the merged tree has no devtools markers; at `d9b0014` it had 11.
 
 3. **A failed load followed by one save wipes all saved restore points or scenarios** (`packages/core/src/plugins/restore-repository.ts:475-519`, `scenario-repository.ts:266-313`)
    - **What this is:** The stores that keep restore points and user scenarios on the device.
@@ -438,6 +439,7 @@ Shorter entries, most important first. Each one names the problem and the fix th
 108. **Native helper tests run twice on two macOS runners** [tooling, CI, example and docs; speed] (`.github/workflows/ci.yml:70-92`)
      - **Problem:** On every push to main and every same-repo PR, the Desktop job's `native:check` already runs gofmt, vet, `go test -race`, govulncheck, swift format lint and swift test on the same sources. native-tests repeats a near-subset of that on a second macOS runner.
      - **Fix:** Add `if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository` to native-tests. A skipped required check reports success.
+     - **Since the audit:** fixed by `d8e87f5` and `c0a3d04`, merged in `19eafeb`: one native job runs the Go gate and a Swift build, and the desktop job no longer repeats it.
 109. **FloatingLauncher and MiniPill duplicate the snap-drag logic** [packages/core; lean, merge] (`packages/core/src/components/floating-launcher.tsx:36-137; mini-pill.tsx:42-151`)
      - **Problem:** Both are copies differing only in item width and spring constants, and they must change together (both carry the same 'host echo cancels the spring' fix).
      - **Fix:** Extract a useSnapDrag({ itemWidth, itemHeight, bottomObstructionInset, initialPosition, onPositionChange, spring }) hook returning { gesture, animatedStyle }. Worklets still compile in the host's Babel pipeline.
