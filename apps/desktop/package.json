@@ -7,6 +7,7 @@
 	"main": "dist/main/index.js",
 	"scripts": {
 		"electron:ensure": "node -e \"require('electron')\"",
+		"icons:generate": "node scripts/generate-app-icons.mjs",
 		"dev": "pnpm electron:ensure && electron-vite dev",
 		"dev:simulator": "pnpm native:build && pnpm dev",
 		"start": "pnpm electron:ensure && electron-vite preview",
@@ -78,7 +79,7 @@
 	"build": {
 		"appId": "io.github.adalloul0928.rndevtools",
 		"productName": "RN Devtools",
-		"icon": "build/icon.svg",
+		"icon": "build/icon.png",
 		"asar": true,
 		"beforeBuild": "scripts/before-build.cjs",
 		"afterPack": "scripts/after-pack.cjs",
@@ -99,6 +100,7 @@
 			}
 		],
 		"mac": {
+			"icon": "build/icon.icns",
 			"category": "public.app-category.developer-tools",
 			"minimumSystemVersion": "14.0",
 			"entitlements": "build/entitlements.mac.plist",
