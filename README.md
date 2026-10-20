@@ -1,5 +1,7 @@
 <img src="apps/desktop/build/icon.png" alt="RN Devtools app icon" width="80" height="80" />
 
+*App icon for the next release. The v0.2.0 download uses the previous icon.*
+
 # RN Devtools
 
 A desktop workspace for React Native diagnostics, iOS Simulators, and parallel development across git worktrees.
