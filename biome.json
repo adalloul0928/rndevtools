@@ -8,17 +8,27 @@
 	},
 	"files": {
 		"includes": [
+			"packages/**",
+			"examples/**",
 			"!**/node_modules",
 			"!**/dist",
-			"!**/build",
 			"!**/release",
 			"!**/.turbo"
 		]
 	},
 	"formatter": {
-		"enabled": false
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single"
+		}
 	},
 	"linter": {
-		"enabled": false
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
 	}
 }
