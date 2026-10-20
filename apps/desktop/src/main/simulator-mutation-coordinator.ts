@@ -1,4 +1,4 @@
-const UDID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
+import { UDID_PATTERN } from '../shared/simulator-protocol';
 
 export type SimulatorMutationLease = Readonly<{
 	simulatorUdid: string;

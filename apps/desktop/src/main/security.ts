@@ -1,6 +1,11 @@
 import path from 'node:path';
 import { URL } from 'node:url';
+import {
+	diagnosticErrorText,
+	redactDiagnosticText,
+} from '@rndevtools/core/redact';
 
+const MAX_ERROR_TEXT_LENGTH = 4 * 1024;
 const MAX_EXTERNAL_URL_LENGTH = 8 * 1024;
 const MAX_LOOPBACK_URL_LENGTH = 2 * 1024;
 /** The literal loopback hosts local services listen on, as URL parses them. */
@@ -155,6 +160,14 @@ export function sanitizeDialogText(
 	return characters.length <= maxLength
 		? cleaned
 		: `${characters.slice(0, maxLength - 1).join('')}…`;
+}
+
+/** A thrown value as text that may leave main: redacted, at most 4 KiB. */
+export function safeErrorText(error: unknown): string {
+	return redactDiagnosticText(diagnosticErrorText(error)).slice(
+		0,
+		MAX_ERROR_TEXT_LENGTH
+	);
 }
 
 export function urlsMatchWithoutHash(left: string, right: string): boolean {

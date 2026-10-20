@@ -15,6 +15,7 @@ import {
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 export const DESKTOP_PROTOCOL_VERSION = RNDEVTOOLS_PROTOCOL_VERSION;
 export const DESKTOP_SUPPORTED_PROTOCOL_VERSIONS =
@@ -94,9 +95,7 @@ const devicePlatformSchema = z.enum([
 	'simulator',
 	'unknown',
 ]);
-const simulatorUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const simulatorUdidSchema = z.string().regex(UDID_PATTERN);
 const bundleIdentifierSchema = z
 	.string()
 	.trim()

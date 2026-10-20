@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 import {
 	laneBackendSummarySchema,
 	laneWorktreeSupabaseSchema,
@@ -56,9 +57,7 @@ export const laneIdSchema = z
 	.string()
 	.regex(/^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
 
-const laneUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const laneUdidSchema = z.string().regex(UDID_PATTERN);
 
 const laneEnvironmentIdSchema = z
 	.string()

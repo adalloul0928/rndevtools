@@ -1,19 +1,33 @@
-import type { RecipeDefinition, RecipeStep } from '../shared/recipe-protocol';
+import type { RecipeDefinition } from '../shared/recipe-protocol';
 
-function recipeStepRequiresRunApproval(step: RecipeStep): boolean {
-	return (
-		step.kind === 'slimming.mutation' ||
-		(step.kind === 'restore-point' &&
-			(step.operation === 'restore' || step.operation === 'remove')) ||
-		(step.kind === 'simulator' &&
-			(step.action.operation === 'keychain.reset' ||
-				(step.action.operation === 'privacy.update' &&
-					step.action.privacyOperation === 'reset')))
-	);
+/** How many steps of each privileged kind a recipe has, teardown included. */
+export type RecipeApprovalCounts = {
+	mutations: number;
+	sensitiveResets: number;
+	restorePointChanges: number;
+};
+
+export function recipeApprovalCounts(
+	recipe: RecipeDefinition
+): RecipeApprovalCounts {
+	const steps = [...recipe.steps, ...recipe.teardown];
+	return {
+		mutations: steps.filter((step) => step.kind === 'slimming.mutation').length,
+		sensitiveResets: steps.filter(
+			(step) =>
+				step.kind === 'simulator' &&
+				(step.action.operation === 'keychain.reset' ||
+					(step.action.operation === 'privacy.update' &&
+						step.action.privacyOperation === 'reset'))
+		).length,
+		restorePointChanges: steps.filter(
+			(step) =>
+				step.kind === 'restore-point' &&
+				(step.operation === 'restore' || step.operation === 'remove')
+		).length,
+	};
 }
 
 export function recipeRequiresRunApproval(recipe: RecipeDefinition): boolean {
-	return [...recipe.steps, ...recipe.teardown].some(
-		recipeStepRequiresRunApproval
-	);
+	return Object.values(recipeApprovalCounts(recipe)).some((count) => count > 0);
 }

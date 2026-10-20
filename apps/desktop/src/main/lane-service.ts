@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
+import { setTimeout as wait } from 'node:timers/promises';
+import { redactDiagnosticText } from '@rndevtools/core/redact';
 import {
 	type DeviceAccessDecision,
 	type DeviceHold,
@@ -45,7 +43,6 @@ import {
 	SLIMMING_CONFIRMATIONS,
 	type SlimmingAction,
 	type SlimmingActionReceipt,
-	type SlimmingJob,
 	type SlimmingState,
 } from '../shared/slimming-protocol';
 import {
@@ -55,6 +52,7 @@ import {
 	laneWorktreeSupabaseSchema,
 	sanitizeSupabaseDisplayText,
 } from '../shared/supabase-protocol';
+import { waitForJob } from './job-wait';
 import {
 	laneEnvProblem,
 	type MetroSupervisorPort,
@@ -63,6 +61,7 @@ import {
 } from './lane-metro';
 import type { LaneStore } from './lane-store';
 import { type WorktreeInspectorPort, worktreeInspector } from './lane-worktree';
+import { safeErrorText } from './security';
 import type {
 	SimulatorMutationCoordinatorPort,
 	SimulatorMutationLease,
@@ -75,17 +74,10 @@ import {
 	type SupabaseMetroRestartReason,
 } from './supabase/service-ports';
 
-const TERMINAL_SIMULATOR_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
 const HEALTH_POLL_INTERVAL_MS = 500;
 const RECONCILE_INTERVAL_MS = 5_000;
 /** How long a settled device request stays listed for the agent that made it. */
 const DEVICE_REQUEST_TTL_MS = 30 * 60_000;
-const MAX_ERROR_LENGTH = 4 * 1024;
 /** How long the Metro log of a lane that is gone is kept once it stops growing. */
 const LANE_LOG_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const LANE_LOG_PRUNE_INTERVAL_MS = 60 * 60_000;
@@ -205,18 +197,6 @@ class LaneBackendError extends Error {
 	}
 }
 
-/** The lane a laneEnv is resolved for, as known when its Metro spawns. */
-type LaneEnvTarget = Pick<
-	Lane,
-	| 'id'
-	| 'worktreePath'
-	| 'appPath'
-	| 'branch'
-	| 'simulatorUdid'
-	| 'environment'
-	| 'port'
->;
-
 /**
  * A lane start either produces a lane or, when no Simulator was named and none
  * is free, a device request the user settles from the Lanes panel.
@@ -224,19 +204,6 @@ type LaneEnvTarget = Pick<
 export type LaneStartOutcome =
 	| { lane: LaneView; deviceRequest?: undefined }
 	| { lane?: undefined; deviceRequest: LaneDeviceRequest };
-
-const TERMINAL_SLIMMING_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
 
 /** One line of redacted, bounded text the lane wire accepts as a reason. */
 function backendReason(text: string): string {
@@ -308,17 +275,16 @@ function whenSettled(
 	});
 }
 
+/**
+ * Waits `ms`, rejecting if `signal` aborts during the wait. A signal that is
+ * already aborted does not cut the wait short; a caller that must stop checks
+ * `aborted` itself.
+ */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			signal?.removeEventListener('abort', onAbort);
-			resolve();
-		}, ms);
-		const onAbort = () => {
-			clearTimeout(timer);
-			reject(new Error('Lane operation cancelled.'));
-		};
-		signal?.addEventListener('abort', onAbort, { once: true });
+	return wait(ms, undefined, {
+		signal: signal?.aborted ? undefined : signal,
+	}).catch(() => {
+		throw new Error('Lane operation cancelled.');
 	});
 }
 
@@ -364,11 +330,6 @@ export class LaneService {
 	readonly #worktrees: WorktreeInspectorPort;
 	readonly #environments: readonly LaneEnvironment[];
 	readonly #maxWorkers: number;
-	readonly #resolveLaneEnv:
-		| ((
-				lane: LaneEnvTarget
-		  ) => Promise<Readonly<Record<string, string>> | undefined>)
-		| undefined;
 	readonly #backends: LaneBackendPort | undefined;
 	readonly #now: () => number;
 	readonly #listeners = new Set<LaneListener>();
@@ -403,7 +364,6 @@ export class LaneService {
 		worktrees = worktreeInspector,
 		environments = DEFAULT_LANE_ENVIRONMENTS,
 		metroMaxWorkers = 2,
-		resolveLaneEnv,
 		backends,
 		holds,
 		deviceAccess,
@@ -419,19 +379,9 @@ export class LaneService {
 		environments?: readonly LaneEnvironment[];
 		metroMaxWorkers?: number;
 		/**
-		 * Variables for one lane's Metro on top of its environment's metroEnv,
-		 * asked for each time that Metro spawns: on a start, a resume, or a
-		 * restart. They are a launch input only, never stored in lanes.json or
-		 * echoed in LaneState, because a value may be a key. None by default.
-		 */
-		resolveLaneEnv?: (
-			lane: LaneEnvTarget
-		) => Promise<Readonly<Record<string, string>> | undefined>;
-		/**
 		 * The worktree's own local backend. Without it a lane has none: `auto`
 		 * is recorded as skipped and `required` is refused before boot. Its
-		 * values are applied over resolveLaneEnv's, and like them reach only
-		 * Metro's spawn env.
+		 * values reach only Metro's spawn env.
 		 */
 		backends?: LaneBackendPort;
 		/**
@@ -457,7 +407,6 @@ export class LaneService {
 		this.#worktrees = worktrees;
 		this.#environments = environments;
 		this.#maxWorkers = metroMaxWorkers;
-		this.#resolveLaneEnv = resolveLaneEnv;
 		this.#backends = backends;
 		this.#holds = holds;
 		this.#deviceAccess = deviceAccess;
@@ -570,7 +519,7 @@ export class LaneService {
 			if (this.#stopped) throw new Error('Lanes are shutting down.');
 			switch (operation.kind) {
 				case 'lane.start': {
-					const outcome = await this.startLane(operation, signal);
+					const outcome = await this.#startLane(operation, signal);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
@@ -651,7 +600,7 @@ export class LaneService {
 			return laneOperationReceiptSchema.parse({
 				...base,
 				completed: false,
-				error: safeError(error),
+				error: safeErrorText(error),
 				...(error instanceof LaneBackendError
 					? { backend: error.summary }
 					: {}),
@@ -663,13 +612,6 @@ export class LaneService {
 		const repositoryRoot = await this.#worktrees.repositoryRoot(root);
 		await this.#store.addRepository(repositoryRoot);
 		return this.refresh();
-	}
-
-	startLane(
-		input: LaneStartInput,
-		signal: AbortSignal
-	): Promise<LaneStartOutcome> {
-		return this.#startLane(input, signal);
 	}
 
 	/**
@@ -1237,7 +1179,7 @@ export class LaneService {
 		} catch (error) {
 			this.#updateDeviceRequest(current, {
 				status: 'pending',
-				message: safeError(error),
+				message: safeErrorText(error),
 			});
 			throw error;
 		} finally {
@@ -1388,32 +1330,23 @@ export class LaneService {
 	}
 
 	/**
-	 * Spawns a lane's Metro with its environment's metroEnv and, over the
-	 * variables a wired lane env source resolves for this lane, the public
+	 * Spawns a lane's Metro with its environment's metroEnv and the public
 	 * values its backend serves.
 	 */
 	async #spawnMetro(
-		lane: LaneEnvTarget & Pick<Lane, 'logPath'>,
+		lane: Pick<Lane, 'worktreePath' | 'appPath' | 'port' | 'logPath'>,
 		environment: LaneEnvironment,
 		backendEnv?: BackendEnv
 	): Promise<number> {
-		const resolved = await this.#resolveLaneEnv?.({
-			id: lane.id,
-			worktreePath: lane.worktreePath,
-			...(lane.appPath ? { appPath: lane.appPath } : {}),
-			branch: lane.branch,
-			simulatorUdid: lane.simulatorUdid,
-			environment: lane.environment,
-			port: lane.port,
-		});
-		const laneEnv = { ...resolved, ...backendEnv };
 		return this.#metro.start({
 			worktreePath: laneAppDirectory(lane),
 			port: lane.port,
 			logPath: lane.logPath,
 			maxWorkers: this.#maxWorkers,
 			...(environment.metroEnv ? { metroEnv: environment.metroEnv } : {}),
-			...(Object.keys(laneEnv).length > 0 ? { laneEnv } : {}),
+			...(backendEnv && Object.keys(backendEnv).length > 0
+				? { laneEnv: backendEnv }
+				: {}),
 		});
 	}
 
@@ -1617,7 +1550,7 @@ export class LaneService {
 		} catch (error) {
 			record.metro = 'needs-restart';
 			record.note = backendReason(
-				`Metro could not be restarted with the backend: ${safeError(error)}`
+				`Metro could not be restarted with the backend: ${safeErrorText(error)}`
 			);
 			this.#touch();
 			throw error;
@@ -1756,7 +1689,7 @@ export class LaneService {
 					});
 				}
 			} catch (error) {
-				errors.push(`${root}: ${safeError(error)}`);
+				errors.push(`${root}: ${safeErrorText(error)}`);
 			}
 		}
 		this.#worktreeCache = worktrees
@@ -1834,10 +1767,9 @@ export class LaneService {
 
 	/**
 	 * Replaces the lane's own Metro with a fresh one on the lane's port, given
-	 * `backendEnv` over what the lane env source resolves. The old Metro is
-	 * stopped only once the supervisor proves its PID is this lane's (a
-	 * refusal leaves it running and throws), and the lane stays stored the
-	 * whole time, so its port stays leased.
+	 * `backendEnv`. The old Metro is stopped only once the supervisor proves
+	 * its PID is this lane's (a refusal leaves it running and throws), and the
+	 * lane stays stored the whole time, so its port stays leased.
 	 */
 	async #respawnMetro(
 		lane: Lane,
@@ -1981,7 +1913,7 @@ export class LaneService {
 		const failed = (error: unknown): LaneBackendEnsureResult => ({
 			summary: failedBackend(
 				policy,
-				`The local backend could not be ensured: ${safeError(error)}`
+				`The local backend could not be ensured: ${safeErrorText(error)}`
 			),
 		});
 		let answer: Promise<LaneBackendEnsureResult>;
@@ -2192,7 +2124,7 @@ export class LaneService {
 				(error: unknown): LaneBackendLateAttach => ({
 					summary: failedBackend(
 						'auto',
-						`The local backend did not attach: ${safeError(error)}`
+						`The local backend did not attach: ${safeErrorText(error)}`
 					),
 				})
 			)
@@ -2278,7 +2210,7 @@ export class LaneService {
 		} catch (error) {
 			record.metro = 'needs-restart';
 			record.note = backendReason(
-				`Metro could not be restarted with the backend: ${safeError(error)}`
+				`Metro could not be restarted with the backend: ${safeErrorText(error)}`
 			);
 		}
 	}
@@ -2301,7 +2233,7 @@ export class LaneService {
 			await this.#metro.stop(pid, lane.port, laneAppDirectory(lane));
 		} catch (error) {
 			record.note = backendReason(
-				`The lane requires its local backend, but its Metro could not be stopped: ${safeError(error)}${why}`
+				`The lane requires its local backend, but its Metro could not be stopped: ${safeErrorText(error)}${why}`
 			);
 			return;
 		}
@@ -2332,7 +2264,7 @@ export class LaneService {
 				? `${record.summary.reasonText} `
 				: '';
 			record.note = backendReason(
-				`${why}The dev client did not open: ${safeError(error)}`
+				`${why}The dev client did not open: ${safeErrorText(error)}`
 			);
 		}
 	}
@@ -2355,7 +2287,6 @@ export class LaneService {
 			while (!settled && this.#now() < deadline) {
 				await sleep(CLOCK_POLL_INTERVAL_MS, signal);
 			}
-			return undefined;
 		})();
 		try {
 			return (await Promise.race([value, timeout]))?.result;
@@ -2372,37 +2303,12 @@ export class LaneService {
 		if (!receipt.accepted || !receipt.jobId) {
 			throw new Error(receipt.error ?? 'The Simulator action was rejected.');
 		}
-		const job = await this.#waitForSimulatorJob(receipt.jobId, signal);
+		const job = await waitForJob(this.#simulator, receipt.jobId, signal, {
+			cancel: true,
+			abortError: () => new Error('Lane operation cancelled.'),
+		});
 		if (job.status !== 'complete') throw new Error(job.message);
 		return job;
-	}
-
-	#waitForSimulatorJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SimulatorJob> {
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			const finish = (state: SimulatorState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SIMULATOR_STATUSES.has(job.status)) return;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				this.#simulator.cancelJob(jobId);
-				cleanup();
-				reject(new Error('Lane operation cancelled.'));
-			};
-			const cleanup = () => {
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = this.#simulator.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(this.#simulator.getState());
-			if (signal.aborted) onAbort();
-		});
 	}
 
 	#requireLane(laneId: string): Lane {
@@ -2515,7 +2421,10 @@ export class LaneService {
 						updatedAt: this.#now(),
 					};
 				}
-				const job = await this.#waitForSlimmingJob(receipt.jobId, signal);
+				const job = await waitForJob(slimming, receipt.jobId, signal, {
+					cancel: true,
+					abortError: () => new Error('Lane operation cancelled.'),
+				});
 				return {
 					profileId,
 					status:
@@ -2532,40 +2441,10 @@ export class LaneService {
 			return {
 				profileId,
 				status: 'failed',
-				message: safeError(error),
+				message: safeErrorText(error),
 				updatedAt: this.#now(),
 			};
 		}
-	}
-
-	#waitForSlimmingJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SlimmingJob> {
-		const slimming = this.#slimming;
-		if (!slimming) return Promise.reject(new Error('Slimming unavailable.'));
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			const finish = (state: SlimmingState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SLIMMING_STATUSES.has(job.status)) return;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				slimming.cancelJob(jobId);
-				cleanup();
-				reject(new Error('Lane operation cancelled.'));
-			};
-			const cleanup = () => {
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = slimming.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(slimming.getState());
-			if (signal.aborted) onAbort();
-		});
 	}
 
 	#agentWithTimestamp(

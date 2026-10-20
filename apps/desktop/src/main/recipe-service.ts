@@ -1,8 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
+import { setTimeout as wait } from 'node:timers/promises';
 import type {
 	DesktopAction,
 	DesktopActionResult,
@@ -33,7 +30,6 @@ import {
 import type {
 	SimulatorAction,
 	SimulatorActionReceipt,
-	SimulatorJob,
 	SimulatorState,
 } from '../shared/simulator-protocol';
 import { simulatorActionSchema } from '../shared/simulator-protocol';
@@ -41,12 +37,13 @@ import {
 	SLIMMING_CONFIRMATIONS,
 	type SlimmingAction,
 	type SlimmingActionReceipt,
-	type SlimmingJob,
 	type SlimmingState,
 	slimmingActionSchema,
 } from '../shared/slimming-protocol';
+import { waitForJob } from './job-wait';
 import { recipeRequiresRunApproval } from './recipe-policy';
 import type { RecipeRunRecord, RecipeStore } from './recipe-store';
+import { safeErrorText } from './security';
 import {
 	SimulatorMutationCoordinator,
 	type SimulatorMutationCoordinatorPort,
@@ -73,18 +70,6 @@ const MIN_CONNECTED_WAIT_SLICE_MS = 50;
  * process's event loop, the step timeout and cancellation included.
  */
 const CONNECTED_WAIT_RETRY_MS = 250;
-const TERMINAL_SIMULATOR_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
-const TERMINAL_SLIMMING_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
 
 export type RecipeBrokerPort = {
 	getState: () => DesktopState;
@@ -129,10 +114,6 @@ type TargetContext = {
 	diagnosticBaseline: Set<string>;
 	mutationLease: SimulatorMutationLease;
 };
-
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024);
-}
 
 function actionId(): string {
 	return `recipe-action-${randomUUID()}`;
@@ -233,17 +214,8 @@ function evidenceTarget(
 }
 
 function waitForDelay(durationMs: number, signal: AbortSignal): Promise<void> {
-	if (signal.aborted) return Promise.reject(new Error('Recipe run cancelled.'));
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			signal.removeEventListener('abort', onAbort);
-			resolve();
-		}, durationMs);
-		const onAbort = () => {
-			clearTimeout(timer);
-			reject(new Error('Recipe run cancelled.'));
-		};
-		signal.addEventListener('abort', onAbort, { once: true });
+	return wait(durationMs, undefined, { signal }).catch(() => {
+		throw new Error('Recipe run cancelled.');
 	});
 }
 
@@ -406,7 +378,7 @@ export class RecipeService {
 		} catch (error) {
 			return this.#reject(
 				request,
-				`Fresh Simulator inventory failed: ${safeError(error)}`
+				`Fresh Simulator inventory failed: ${safeErrorText(error)}`
 			);
 		}
 		const canonicalUdids: string[] = [];
@@ -593,7 +565,9 @@ export class RecipeService {
 			this.#appendTimeline(record, {
 				phase: 'run',
 				status: signal.aborted ? 'cancelled' : 'failed',
-				message: signal.aborted ? 'Recipe run cancelled.' : safeError(error),
+				message: signal.aborted
+					? 'Recipe run cancelled.'
+					: safeErrorText(error),
 			});
 		} finally {
 			const statuses = record.run.targets.map((target) => target.status);
@@ -672,7 +646,7 @@ export class RecipeService {
 				currentStepId: undefined,
 				message: runSignal.aborted
 					? 'Recipe target cancelled before execution.'
-					: safeError(error),
+					: safeErrorText(error),
 			});
 			const cleanupController = new AbortController();
 			try {
@@ -705,7 +679,7 @@ export class RecipeService {
 				this.#updateCleanup(record, index, {
 					status: 'failed',
 					failures: [
-						safeError(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
+						safeErrorText(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
 					],
 					message: 'Teardown could not acquire the simulator mutation lease.',
 				});
@@ -789,7 +763,7 @@ export class RecipeService {
 				currentStepId: undefined,
 				message: runSignal.aborted
 					? 'Recipe target cancelled.'
-					: safeError(error),
+					: safeErrorText(error),
 			});
 		} finally {
 			if (!context.connectedDeviceId) {
@@ -839,7 +813,10 @@ export class RecipeService {
 				});
 			} catch (error) {
 				failures.push(
-					`${step.id}: ${safeError(error)}`.slice(0, MAX_CLEANUP_FAILURE_LENGTH)
+					`${step.id}: ${safeErrorText(error)}`.slice(
+						0,
+						MAX_CLEANUP_FAILURE_LENGTH
+					)
 				);
 			}
 			await this.#save(record);
@@ -916,7 +893,7 @@ export class RecipeService {
 					scoped.signal.aborted && parentSignal.aborted
 						? 'cancelled'
 						: 'failed',
-				message: safeError(scoped.signal.reason ?? error),
+				message: safeErrorText(scoped.signal.reason ?? error),
 				targetUdid: context.udid,
 				stepId: step.id,
 			});
@@ -1087,7 +1064,12 @@ export class RecipeService {
 		if (!receipt.accepted || !receipt.jobId) {
 			throw new Error(receipt.error ?? 'Simulator action was rejected.');
 		}
-		const job = await this.#waitForSimulatorJob(receipt.jobId, signal);
+		const job = await waitForJob(this.#simulator, receipt.jobId, signal, {
+			cancel: true,
+			settleMs: SIMULATOR_CANCEL_SETTLE_TIMEOUT_MS,
+			abortError: () =>
+				new Error('Cancelled Simulator action did not reach a terminal state.'),
+		});
 		if (job.status !== 'complete') throw new Error(job.message);
 		if (job.captureId && record !== undefined && targetIndex !== undefined) {
 			const target = evidenceTarget(record, targetIndex);
@@ -1103,46 +1085,6 @@ export class RecipeService {
 			};
 		}
 		return job.captureId;
-	}
-
-	#waitForSimulatorJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SimulatorJob> {
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			let settled = false;
-			let cancellationTimer: NodeJS.Timeout | undefined;
-			const finish = (state: SimulatorState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SIMULATOR_STATUSES.has(job.status)) return;
-				settled = true;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				if (settled || cancellationTimer) return;
-				this.#simulator.cancelJob(jobId);
-				cancellationTimer = setTimeout(() => {
-					settled = true;
-					cleanup();
-					reject(
-						new Error(
-							'Cancelled Simulator action did not reach a terminal state.'
-						)
-					);
-				}, SIMULATOR_CANCEL_SETTLE_TIMEOUT_MS);
-			};
-			const cleanup = () => {
-				if (cancellationTimer) clearTimeout(cancellationTimer);
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = this.#simulator.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(this.#simulator.getState());
-			if (signal.aborted) onAbort();
-		});
 	}
 
 	async #runDesktopAction(value: unknown): Promise<void> {
@@ -1231,51 +1173,18 @@ export class RecipeService {
 			if (!receipt.accepted || !receipt.jobId) {
 				throw new Error(receipt.error ?? 'Slimming mutation was rejected.');
 			}
-			const job = await this.#waitForSlimmingJob(receipt.jobId, signal);
+			const job = await waitForJob(this.#slimming, receipt.jobId, signal, {
+				cancel: true,
+				settleMs: SLIMMING_CANCEL_SETTLE_TIMEOUT_MS,
+				abortError: () =>
+					new Error(
+						'Cancelled Slimming mutation did not reach a terminal state.'
+					),
+			});
 			if (job.status !== 'complete') throw new Error(job.message);
 		} finally {
 			release();
 		}
-	}
-
-	#waitForSlimmingJob(
-		jobId: string,
-		signal: AbortSignal
-	): Promise<SlimmingJob> {
-		return new Promise((resolve, reject) => {
-			let unsubscribe: () => void = () => undefined;
-			let settled = false;
-			let cancellationTimer: NodeJS.Timeout | undefined;
-			const finish = (state: SlimmingState) => {
-				const job = state.jobs.find((candidate) => candidate.id === jobId);
-				if (!job || !TERMINAL_SLIMMING_STATUSES.has(job.status)) return;
-				settled = true;
-				cleanup();
-				resolve(job);
-			};
-			const onAbort = () => {
-				if (settled || cancellationTimer) return;
-				this.#slimming.cancelJob(jobId);
-				cancellationTimer = setTimeout(() => {
-					settled = true;
-					cleanup();
-					reject(
-						new Error(
-							'Cancelled Slimming mutation did not reach a terminal state.'
-						)
-					);
-				}, SLIMMING_CANCEL_SETTLE_TIMEOUT_MS);
-			};
-			const cleanup = () => {
-				if (cancellationTimer) clearTimeout(cancellationTimer);
-				unsubscribe();
-				signal.removeEventListener('abort', onAbort);
-			};
-			unsubscribe = this.#slimming.subscribe(finish);
-			signal.addEventListener('abort', onAbort, { once: true });
-			finish(this.#slimming.getState());
-			if (signal.aborted) onAbort();
-		});
 	}
 
 	#assertStep(

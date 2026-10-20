@@ -14,20 +14,13 @@ import {
 	net,
 	protocol,
 	shell,
-	type WebContents,
 } from 'electron';
-import {
-	type AgentState,
-	agentOperationSchema,
-} from '../shared/agent-protocol';
-import type { BuildInsightsState } from '../shared/build-insights-protocol';
+import { agentOperationSchema } from '../shared/agent-protocol';
 import { IPC_CHANNELS } from '../shared/ipc';
-import type { LaneState } from '../shared/lane-protocol';
 import {
 	DEFAULT_BROKER_HOST,
 	DEFAULT_BROKER_PORT,
 	type DesktopBootstrap,
-	type DesktopState,
 	desktopActionSchema,
 } from '../shared/protocol';
 import type {
@@ -35,7 +28,6 @@ import type {
 	RecipeEvidenceManifest,
 	RecipeRunConfirmationResult,
 	RecipeRunRequest,
-	RecipeState,
 	RecipeSummary,
 } from '../shared/recipe-protocol';
 import { recipeRunConfirmationResultSchema } from '../shared/recipe-protocol';
@@ -51,10 +43,6 @@ import {
 	simulatorConfirmationResultSchema,
 	simulatorJobIdSchema,
 } from '../shared/simulator-protocol';
-import type {
-	SimulatorStreamFrame,
-	SimulatorStreamStatus,
-} from '../shared/simulator-stream-protocol';
 import { simulatorStreamSubscriptionsSchema } from '../shared/simulator-stream-protocol';
 import {
 	type SlimmingAcknowledgementReceipt,
@@ -73,10 +61,7 @@ import {
 	slimmingSettingReceiptSchema,
 	slimmingSettingRequestSchema,
 } from '../shared/slimming-protocol';
-import {
-	laneDefaultBackend,
-	type SupabaseState,
-} from '../shared/supabase-protocol';
+import { laneDefaultBackend } from '../shared/supabase-protocol';
 import { ActionConfirmationStore } from './action-confirmation-store';
 import { AgentCliService } from './agent-cli-service';
 import { runAgentCliSetup } from './agent-cli-setup';
@@ -96,6 +81,10 @@ import { NativeHostClient } from './native-host-client';
 import { runNativePlan } from './native-plan';
 import { stopForQuit } from './quit-sequence';
 import { createRecipeIpcHandlers } from './recipe-ipc';
+import {
+	type RecipeApprovalCounts,
+	recipeApprovalCounts,
+} from './recipe-policy';
 import { RecipeService } from './recipe-service';
 import { RecipeStore } from './recipe-store';
 import {
@@ -194,8 +183,8 @@ let supabaseService: SupabaseServiceApi | undefined;
 const supabaseInterest = createSupabaseInterestGate((senderKey, interest) =>
 	supabaseService?.setInterest(senderKey, interest)
 );
-const supabaseStatePublisher = createSupabaseStatePublisher(
-	broadcastSupabaseState
+const supabaseStatePublisher = createSupabaseStatePublisher((state) =>
+	broadcast(IPC_CHANNELS.supabaseStateChanged, state)
 );
 
 function rendererEntryUrl(): string {
@@ -245,139 +234,13 @@ function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
 	}
 }
 
-function sendState(webContents: WebContents, state: DesktopState): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.stateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastState(state: DesktopState): void {
-	for (const window of windows) sendState(window.webContents, state);
-}
-
-function sendSimulatorState(
-	webContents: WebContents,
-	state: SimulatorState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.simulatorStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastSimulatorState(state: SimulatorState): void {
-	for (const window of windows) sendSimulatorState(window.webContents, state);
-}
-
-function sendSlimmingState(
-	webContents: WebContents,
-	state: SlimmingState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.slimmingStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastSlimmingState(state: SlimmingState): void {
-	for (const window of windows) sendSlimmingState(window.webContents, state);
-}
-
-function sendRecipeState(webContents: WebContents, state: RecipeState): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.recipeStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastRecipeState(state: RecipeState): void {
-	for (const window of windows) sendRecipeState(window.webContents, state);
-}
-
-function sendBuildInsightsState(
-	webContents: WebContents,
-	state: BuildInsightsState
-): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.buildInsightsStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastBuildInsightsState(state: BuildInsightsState): void {
-	for (const window of windows)
-		sendBuildInsightsState(window.webContents, state);
-}
-
-function sendLaneState(webContents: WebContents, state: LaneState): void {
-	if (webContents.isDestroyed()) return;
-	try {
-		webContents.send(IPC_CHANNELS.laneStateChanged, state);
-	} catch {
-		// A renderer can disappear between the destroyed check and send.
-	}
-}
-
-function broadcastLaneState(state: LaneState): void {
-	for (const window of windows) sendLaneState(window.webContents, state);
-}
-
-function broadcastAgentState(state: AgentState): void {
+/** Sends one message to every open renderer, skipping any that is gone. */
+function broadcast(channel: string, ...args: unknown[]): void {
 	for (const window of windows) {
 		const webContents = window.webContents;
 		if (webContents.isDestroyed()) continue;
 		try {
-			webContents.send(IPC_CHANNELS.agentStateChanged, state);
-		} catch {
-			// A renderer can disappear between the destroyed check and send.
-		}
-	}
-}
-
-function broadcastSupabaseState(state: SupabaseState): void {
-	for (const window of windows) {
-		const webContents = window.webContents;
-		if (webContents.isDestroyed()) continue;
-		try {
-			webContents.send(IPC_CHANNELS.supabaseStateChanged, state);
-		} catch {
-			// A renderer can disappear between the destroyed check and send.
-		}
-	}
-}
-
-function broadcastSimulatorStreamFrame(
-	frame: SimulatorStreamFrame,
-	bytes: Uint8Array
-): void {
-	for (const window of windows) {
-		const webContents = window.webContents;
-		if (webContents.isDestroyed()) continue;
-		try {
-			webContents.send(IPC_CHANNELS.simulatorStreamFrame, frame, bytes);
-		} catch {
-			// A renderer can disappear between the destroyed check and send.
-		}
-	}
-}
-
-function broadcastSimulatorStreamStatus(status: SimulatorStreamStatus): void {
-	for (const window of windows) {
-		const webContents = window.webContents;
-		if (webContents.isDestroyed()) continue;
-		try {
-			webContents.send(IPC_CHANNELS.simulatorStreamStatus, status);
+			webContents.send(channel, ...args);
 		} catch {
 			// A renderer can disappear between the destroyed check and send.
 		}
@@ -388,25 +251,64 @@ function ownerWindow(event: IpcMainInvokeEvent): BrowserWindow | undefined {
 	return BrowserWindow.fromWebContents(event.sender) ?? undefined;
 }
 
+// Each dialog is modal to the window that asked for it, when there is one.
+function showMessageBox(
+	owner: BrowserWindow | undefined,
+	options: Electron.MessageBoxOptions
+): Promise<Electron.MessageBoxReturnValue> {
+	return owner
+		? dialog.showMessageBox(owner, options)
+		: dialog.showMessageBox(options);
+}
+
+function showOpenDialog(
+	owner: BrowserWindow | undefined,
+	options: Electron.OpenDialogOptions
+): Promise<Electron.OpenDialogReturnValue> {
+	return owner
+		? dialog.showOpenDialog(owner, options)
+		: dialog.showOpenDialog(options);
+}
+
+function showSaveDialog(
+	owner: BrowserWindow | undefined,
+	options: Electron.SaveDialogOptions
+): Promise<Electron.SaveDialogReturnValue> {
+	return owner
+		? dialog.showSaveDialog(owner, options)
+		: dialog.showSaveDialog(options);
+}
+
+/** A warning whose default is Cancel; true once the operator confirms. */
+async function confirmWarning(
+	event: IpcMainInvokeEvent,
+	title: string,
+	detail: string,
+	confirmLabel: string
+): Promise<boolean> {
+	const result = await showMessageBox(ownerWindow(event), {
+		type: 'warning',
+		title,
+		message: title,
+		detail,
+		buttons: ['Cancel', confirmLabel],
+		defaultId: 0,
+		cancelId: 0,
+		noLink: true,
+	});
+	return result.response === 1;
+}
+
 async function confirmCaptureDelete(
 	event: IpcMainInvokeEvent,
 	capture: { name: string }
 ): Promise<boolean> {
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Delete this capture?',
-		message: 'Delete this capture?',
-		detail: `${capture.name} will be permanently removed from local capture storage.`,
-		buttons: ['Cancel', 'Delete'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Delete this capture?',
+		`${capture.name} will be permanently removed from local capture storage.`,
+		'Delete'
+	);
 }
 
 async function selectCaptureExportDestination(
@@ -419,16 +321,12 @@ async function selectCaptureExportDestination(
 			: capture.mimeType === 'image/jpeg'
 				? ['jpeg', 'jpg']
 				: ['mp4'];
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export Simulator capture',
 		buttonLabel: 'Export',
 		defaultPath: capture.name,
 		filters: [{ name: 'Simulator capture', extensions }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -438,21 +336,12 @@ async function confirmCaptureRetentionUpdate(
 	current: { captureCount: number }
 ): Promise<boolean> {
 	const gibibytes = policy.maxTotalBytes / (1024 * 1024 * 1024);
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Update capture retention?',
-		message: 'Update capture retention?',
-		detail: `Captures older than ${policy.maxAgeDays} day${policy.maxAgeDays === 1 ? '' : 's'} or beyond ${gibibytes.toFixed(1)} GiB will be removed immediately. ${current.captureCount} capture${current.captureCount === 1 ? '' : 's'} are currently stored.`,
-		buttons: ['Cancel', 'Update Retention'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Update capture retention?',
+		`Captures older than ${policy.maxAgeDays} day${policy.maxAgeDays === 1 ? '' : 's'} or beyond ${gibibytes.toFixed(1)} GiB will be removed immediately. ${current.captureCount} capture${current.captureCount === 1 ? '' : 's'} are currently stored.`,
+		'Update Retention'
+	);
 }
 
 async function confirmSimulatorAction(
@@ -463,21 +352,7 @@ async function confirmSimulatorAction(
 ): Promise<boolean> {
 	const copy = simulatorConfirmationCopy(action, target, certificate);
 	if (!copy) return true;
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: copy.title,
-		message: copy.title,
-		detail: copy.detail,
-		buttons: ['Cancel', 'Continue'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(event, copy.title, copy.detail, 'Continue');
 }
 
 async function confirmSlimmingTarget(
@@ -486,76 +361,42 @@ async function confirmSlimmingTarget(
 ): Promise<boolean> {
 	const copy = slimmingConfirmationCopy(target);
 	if (!copy) return true;
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: copy.title,
-		message: copy.title,
-		detail: copy.detail,
-		buttons: ['Cancel', 'Continue'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(event, copy.title, copy.detail, 'Continue');
 }
+
+/** How the run approval dialog names each kind of privileged recipe step. */
+const RECIPE_APPROVAL_STEP_NOUNS: Record<keyof RecipeApprovalCounts, string> = {
+	mutations: 'experimental SimSlim mutation step',
+	sensitiveResets: 'sensitive reset step',
+	restorePointChanges: 'restore-point restore/removal step',
+};
 
 async function requestRecipeRunConfirmation(
 	event: IpcMainInvokeEvent,
 	request: RecipeRunRequest,
 	recipe: RecipeDefinition
 ): Promise<RecipeRunConfirmationResult> {
-	const steps = [...recipe.steps, ...recipe.teardown];
-	const mutationCount = steps.filter(
-		(step) => step.kind === 'slimming.mutation'
-	).length;
-	const sensitiveSimulatorCount = steps.filter(
-		(step) =>
-			step.kind === 'simulator' &&
-			(step.action.operation === 'keychain.reset' ||
-				(step.action.operation === 'privacy.update' &&
-					step.action.privacyOperation === 'reset'))
-	).length;
-	const restorePointMutationCount = steps.filter(
-		(step) =>
-			step.kind === 'restore-point' &&
-			(step.operation === 'restore' || step.operation === 'remove')
-	).length;
+	const counts = recipeApprovalCounts(recipe);
 	const title =
-		mutationCount > 0
+		counts.mutations > 0
 			? 'Run a privileged experimental Simulator recipe?'
 			: 'Run a privileged Simulator recipe?';
-	const actionDescription = [
-		mutationCount > 0
-			? `${mutationCount} experimental SimSlim mutation step${mutationCount === 1 ? '' : 's'}`
-			: undefined,
-		sensitiveSimulatorCount > 0
-			? `${sensitiveSimulatorCount} sensitive reset step${sensitiveSimulatorCount === 1 ? '' : 's'}`
-			: undefined,
-		restorePointMutationCount > 0
-			? `${restorePointMutationCount} restore-point restore/removal step${restorePointMutationCount === 1 ? '' : 's'}`
-			: undefined,
-	]
-		.filter((value): value is string => value !== undefined)
+	const actionDescription = (
+		Object.keys(RECIPE_APPROVAL_STEP_NOUNS) as (keyof RecipeApprovalCounts)[]
+	)
+		.filter((kind) => counts[kind] > 0)
+		.map(
+			(kind) =>
+				`${counts[kind]} ${RECIPE_APPROVAL_STEP_NOUNS[kind]}${counts[kind] === 1 ? '' : 's'}`
+		)
 		.join(' and ');
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
+	const confirmed = await confirmWarning(
+		event,
 		title,
-		message: title,
-		detail: `${recipe.name} revision ${recipe.revision} contains ${actionDescription} and targets these exact Simulator UDIDs: ${request.targetUdids.join(', ')}. ${mutationCount > 0 ? 'SimSlim mutations remain serialized and verified by the signed helper.' : 'Sensitive resets will run only after this one-time exact confirmation.'}`,
-		buttons: ['Cancel', 'Run Recipe'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	if (result.response !== 1) {
+		`${recipe.name} revision ${recipe.revision} contains ${actionDescription} and targets these exact Simulator UDIDs: ${request.targetUdids.join(', ')}. ${counts.mutations > 0 ? 'SimSlim mutations remain serialized and verified by the signed helper.' : 'Sensitive resets will run only after this one-time exact confirmation.'}`,
+		'Run Recipe'
+	);
+	if (!confirmed) {
 		return recipeRunConfirmationResultSchema.parse({
 			actionId: request.actionId,
 			required: true,
@@ -580,36 +421,23 @@ async function confirmRecipeDelete(
 	event: IpcMainInvokeEvent,
 	recipe: RecipeSummary
 ): Promise<boolean> {
-	const options: Electron.MessageBoxOptions = {
-		type: 'warning',
-		title: 'Delete this recipe?',
-		message: 'Delete this recipe?',
-		detail: `${recipe.name} revision ${recipe.revision} will be permanently removed. Existing run evidence remains in local history.`,
-		buttons: ['Cancel', 'Delete'],
-		defaultId: 0,
-		cancelId: 0,
-		noLink: true,
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showMessageBox(owner, options)
-		: await dialog.showMessageBox(options);
-	return result.response === 1;
+	return confirmWarning(
+		event,
+		'Delete this recipe?',
+		`${recipe.name} revision ${recipe.revision} will be permanently removed. Existing run evidence remains in local history.`,
+		'Delete'
+	);
 }
 
 async function selectRecipeImportPath(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title: 'Import recipe',
 		buttonLabel: 'Import',
 		properties: ['openFile'],
 		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -617,16 +445,12 @@ async function selectRecipeExportDestination(
 	event: IpcMainInvokeEvent,
 	recipe: RecipeDefinition
 ): Promise<string | undefined> {
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export recipe',
 		buttonLabel: 'Export',
 		defaultPath: `${recipe.id}.rndevtools-recipe.json`,
 		filters: [{ name: 'Recipe JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -634,16 +458,12 @@ async function selectEvidenceExportDestination(
 	event: IpcMainInvokeEvent,
 	evidence: RecipeEvidenceManifest
 ): Promise<string | undefined> {
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export evidence manifest',
 		buttonLabel: 'Export',
 		defaultPath: `${evidence.id}.rndevtools-evidence.json`,
 		filters: [{ name: 'Evidence JSON', extensions: ['json'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
@@ -651,35 +471,27 @@ async function selectBuildInsightsSource(
 	event: IpcMainInvokeEvent,
 	kind: 'derived-data-root' | 'xcresult'
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title:
 			kind === 'xcresult'
 				? 'Import an Xcode result bundle'
 				: 'Watch a DerivedData directory',
 		buttonLabel: kind === 'xcresult' ? 'Import Result' : 'Watch Directory',
 		properties: ['openDirectory'],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
 async function selectLaneRepository(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title: 'Track a repository for lanes',
 		message:
 			'Choose a git checkout. Its worktrees become available as lane targets.',
 		buttonLabel: 'Track Repository',
 		properties: ['openDirectory'],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -688,7 +500,7 @@ async function selectBuildInsightsExportDestination(
 	format: 'csv' | 'json'
 ): Promise<string | undefined> {
 	const extension = format === 'csv' ? 'csv' : 'json';
-	const options: Electron.SaveDialogOptions = {
+	const result = await showSaveDialog(ownerWindow(event), {
 		title: 'Export local Build Insights',
 		buttonLabel: 'Export',
 		defaultPath: `rndevtools-build-insights.${extension}`,
@@ -699,27 +511,19 @@ async function selectBuildInsightsExportDestination(
 				extensions: [extension],
 			},
 		],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showSaveDialog(owner, options)
-		: await dialog.showSaveDialog(options);
+	});
 	return result.canceled ? undefined : result.filePath;
 }
 
 async function selectXcodeApplication(
 	event: IpcMainInvokeEvent
 ): Promise<string | undefined> {
-	const options: Electron.OpenDialogOptions = {
+	const result = await showOpenDialog(ownerWindow(event), {
 		title: 'Choose an Xcode application',
 		buttonLabel: 'Use Xcode',
 		properties: ['openFile'],
 		filters: [{ name: 'Xcode application', extensions: ['app'] }],
-	};
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	});
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -753,10 +557,7 @@ async function selectSimulatorInput(
 		};
 	}
 	if (!options) return undefined;
-	const owner = ownerWindow(event);
-	const result = owner
-		? await dialog.showOpenDialog(owner, options)
-		: await dialog.showOpenDialog(options);
+	const result = await showOpenDialog(ownerWindow(event), options);
 	return result.canceled ? undefined : result.filePaths[0];
 }
 
@@ -777,9 +578,7 @@ const supabaseDialog: SupabaseDialogPort = {
 			...options,
 			buttons: [...options.buttons],
 		};
-		const result = window
-			? await dialog.showMessageBox(window, messageBox)
-			: await dialog.showMessageBox(messageBox);
+		const result = await showMessageBox(window, messageBox);
 		return {
 			response: result.response,
 			checkboxChecked: result.checkboxChecked,
@@ -796,9 +595,7 @@ const supabaseDialog: SupabaseDialogPort = {
 				extensions: [...filter.extensions],
 			})),
 		};
-		const result = window
-			? await dialog.showSaveDialog(window, save)
-			: await dialog.showSaveDialog(save);
+		const result = await showSaveDialog(window, save);
 		return result.canceled || !result.filePath
 			? { canceled: true }
 			: { canceled: false, filePath: result.filePath };
@@ -813,9 +610,7 @@ const supabaseDialog: SupabaseDialogPort = {
 				? {}
 				: { defaultPath: options.defaultPath }),
 		};
-		const result = window
-			? await dialog.showOpenDialog(window, open)
-			: await dialog.showOpenDialog(open);
+		const result = await showOpenDialog(window, open);
 		return { canceled: result.canceled, filePaths: result.filePaths };
 	},
 };
@@ -1018,7 +813,7 @@ function registerIpc(
 		const action = desktopActionSchema.parse(value);
 		const confirmation = desktopActionConfirmationCopy(action);
 		if (confirmation) {
-			const options: Electron.MessageBoxOptions = {
+			const result = await showMessageBox(ownerWindow(event), {
 				type: confirmation.destructive ? 'warning' : 'question',
 				title: confirmation.title,
 				message: confirmation.message,
@@ -1027,11 +822,7 @@ function registerIpc(
 				defaultId: 0,
 				cancelId: 0,
 				noLink: true,
-			};
-			const owner = ownerWindow(event);
-			const result = owner
-				? await dialog.showMessageBox(owner, options)
-				: await dialog.showMessageBox(options);
+			});
 			if (result.response !== 1) {
 				return {
 					actionId: action.actionId,
@@ -1817,18 +1608,34 @@ if (!app.requestSingleInstanceLock()) {
 				settings
 			);
 			registerSupabaseIpc(supabaseService);
-			broker.subscribe(broadcastState);
-			simulatorService.subscribe(broadcastSimulatorState);
-			slimmingService.subscribe(broadcastSlimmingState);
-			recipeService.subscribe(broadcastRecipeState);
-			buildInsightsService.subscribe(broadcastBuildInsightsState);
-			laneService.subscribe(broadcastLaneState);
-			agentService.subscribe(broadcastAgentState);
+			broker.subscribe((state) => broadcast(IPC_CHANNELS.stateChanged, state));
+			simulatorService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.simulatorStateChanged, state)
+			);
+			slimmingService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.slimmingStateChanged, state)
+			);
+			recipeService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.recipeStateChanged, state)
+			);
+			buildInsightsService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.buildInsightsStateChanged, state)
+			);
+			laneService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.laneStateChanged, state)
+			);
+			agentService.subscribe((state) =>
+				broadcast(IPC_CHANNELS.agentStateChanged, state)
+			);
 			supabaseService.subscribe(supabaseStatePublisher.publish);
 			// The lane start form reads each worktree's project from lane state.
 			supabaseService.subscribe(() => laneService?.backendsChanged());
-			simulatorStreamService.subscribeFrames(broadcastSimulatorStreamFrame);
-			simulatorStreamService.subscribeStatus(broadcastSimulatorStreamStatus);
+			simulatorStreamService.subscribeFrames((frame, bytes) =>
+				broadcast(IPC_CHANNELS.simulatorStreamFrame, frame, bytes)
+			);
+			simulatorStreamService.subscribeStatus((status) =>
+				broadcast(IPC_CHANNELS.simulatorStreamStatus, status)
+			);
 			await Promise.all([
 				broker.start(),
 				simulatorService.start(),

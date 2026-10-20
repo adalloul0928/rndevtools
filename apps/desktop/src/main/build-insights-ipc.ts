@@ -1,7 +1,3 @@
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	BuildInsightsOperationReceipt,
@@ -12,8 +8,7 @@ import {
 	buildInsightsOperationSchema,
 	buildInsightsStateSchema,
 } from '../shared/build-insights-protocol';
-
-const MAX_ERROR_LENGTH = 4 * 1024;
+import { safeErrorText } from './security';
 
 type BuildInsightsIpcService = {
 	getState: () => BuildInsightsState;
@@ -33,13 +28,6 @@ type BuildInsightsIpcDependencies = {
 		format: 'csv' | 'json'
 	) => Promise<string | undefined>;
 };
-
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
 
 export function createBuildInsightsIpcHandlers({
 	service,
@@ -128,7 +116,7 @@ export function createBuildInsightsIpcHandlers({
 					actionId: operation.actionId,
 					kind: operation.kind,
 					completed: false,
-					error: safeError(error),
+					error: safeErrorText(error),
 				});
 			}
 		},

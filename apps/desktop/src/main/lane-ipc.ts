@@ -1,7 +1,3 @@
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import {
 	type LaneOperation,
@@ -11,8 +7,7 @@ import {
 	laneOperationSchema,
 	laneStateSchema,
 } from '../shared/lane-protocol';
-
-const MAX_ERROR_LENGTH = 4 * 1024;
+import { safeErrorText } from './security';
 
 type LaneIpcService = {
 	getState: () => LaneState;
@@ -29,13 +24,6 @@ type LaneIpcDependencies = {
 	/** Native folder picker; the renderer never names a path on its own. */
 	selectRepository: (event: IpcMainInvokeEvent) => Promise<string | undefined>;
 };
-
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
 
 /**
  * Whether `worktreePath` is one main discovered: a listed worktree or a
@@ -112,7 +100,7 @@ export function createLaneIpcHandlers({
 					actionId: operation.actionId,
 					kind: operation.kind,
 					completed: false,
-					error: safeError(error),
+					error: safeErrorText(error),
 				});
 			}
 		},

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { laneAgentSchema, laneIdSchema } from './lane-protocol';
 import { desktopActionSchema } from './protocol';
 import { simulatorInputSchema } from './simulator-input-protocol';
+import { UDID_PATTERN } from './simulator-protocol';
 import {
 	logServiceSchema,
 	logSinceSchema,
@@ -25,9 +26,7 @@ const identifierSchema = z
 	.max(MAX_IDENTIFIER_LENGTH)
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT_LENGTH);
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 const timeoutSchema = z
 	.number()
 	.int()

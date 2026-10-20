@@ -5,6 +5,7 @@ import type {
 	SimulatorMetrics,
 	SimulatorProcessMetric,
 } from '../shared/simulator-protocol';
+import { UDID_PATTERN } from '../shared/simulator-protocol';
 import { runSimulatorCommand } from './simulator-command-runner';
 
 const XCRUN_PATH = '/usr/bin/xcrun';
@@ -27,7 +28,6 @@ const MAX_DISK_OUTPUT_BYTES = 16 * 1024 * 1024;
 const DISK_REFRESH_INTERVAL_MS = 30_000;
 const SERVICE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._\-[\]]{1,255}$/;
 const BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/;
-const UDID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 
 type ServiceProcess = {
 	processId: number;

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 const MAX_SHORT_TEXT = 4 * 1024;
 const MAX_SERVICE_IDS = 1_000;
@@ -8,9 +9,7 @@ const confirmationTokenSchema = z.string().regex(/^confirmation-[a-f0-9]{64}$/);
 const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const timestampSchema = z.number().finite().nonnegative();
-const simulatorUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const simulatorUdidSchema = z.string().regex(UDID_PATTERN);
 const serviceIdentifierSchema = z
 	.string()
 	.trim()

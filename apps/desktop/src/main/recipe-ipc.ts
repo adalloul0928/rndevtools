@@ -1,7 +1,3 @@
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	RecipeDefinition,
@@ -26,8 +22,8 @@ import {
 	recipeStateSchema,
 } from '../shared/recipe-protocol';
 import { recipeRequiresRunApproval } from './recipe-policy';
-
-const MAX_ERROR_LENGTH = 4 * 1024;
+import { recipeSummary } from './recipe-store';
+import { safeErrorText } from './security';
 
 export type RecipeIpcService = {
 	getState: () => RecipeState;
@@ -76,13 +72,6 @@ type RecipeIpcDependencies = {
 	) => Promise<string | undefined>;
 };
 
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
-
 function failedFileOperation(
 	actionId: string,
 	kind: RecipeFileOperationReceipt['kind'],
@@ -92,7 +81,7 @@ function failedFileOperation(
 		actionId,
 		kind,
 		completed: false,
-		error: safeError(error),
+		error: safeErrorText(error),
 	});
 }
 
@@ -218,16 +207,7 @@ export function createRecipeIpcHandlers({
 				if (operation.kind === 'recipe.delete') {
 					const recipe = service.getRecipe(operation.recipeId);
 					if (!recipe) throw new Error('Recipe was not found.');
-					const summary: RecipeSummary = {
-						id: recipe.id,
-						name: recipe.name,
-						...(recipe.description ? { description: recipe.description } : {}),
-						revision: recipe.revision,
-						updatedAt: recipe.updatedAt,
-						stepCount: recipe.steps.length,
-						teardownStepCount: recipe.teardown.length,
-						requiresMutationApproval: recipeRequiresRunApproval(recipe),
-					};
+					const summary = recipeSummary(recipe);
 					if (!(await confirmDelete(event, summary))) {
 						return recipeFileOperationReceiptSchema.parse({
 							actionId: operation.actionId,

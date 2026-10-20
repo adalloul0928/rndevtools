@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
 	type AgentCliCommand,
 	type AgentCliTarget,
@@ -68,6 +69,7 @@ import {
 	supabaseDoctorInfoSchema,
 } from '../shared/supabase-protocol';
 import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
+import { TERMINAL_JOB_STATUSES, waitForJob } from './job-wait';
 import { NativeHostResponseError } from './native-host-client';
 import type { NativePlanResult } from './native-plan';
 import { sanitizeSupabaseText } from './supabase/cli-redact';
@@ -76,12 +78,6 @@ import type {
 	SupabaseServiceApi,
 } from './supabase/service-ports';
 
-const TERMINAL_JOB_STATUSES = new Set([
-	'complete',
-	'failed',
-	'needs-attention',
-	'cancelled',
-]);
 const CONNECTED_WAIT_SLICE_MS = 5_000;
 /**
  * The connected-action contract's shortest wait (a `timeoutMs` of at least
@@ -435,76 +431,8 @@ function abortError(): AgentCliError {
 
 /** Resolves after `ms`, or rejects with {@link abortError} once `signal` aborts. */
 function delay(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise<void>((resolve, reject) => {
-		if (signal.aborted) {
-			reject(abortError());
-			return;
-		}
-		const cleanup = () => signal.removeEventListener('abort', onAbort);
-		const timer = setTimeout(() => {
-			cleanup();
-			resolve();
-		}, ms);
-		const onAbort = () => {
-			clearTimeout(timer);
-			cleanup();
-			reject(abortError());
-		};
-		signal.addEventListener('abort', onAbort, { once: true });
-	});
-}
-
-async function waitForSimulatorJob(
-	service: SimulatorPort,
-	jobId: string,
-	signal: AbortSignal
-): Promise<SimulatorJob> {
-	return await waitForJob(
-		() => service.getState().jobs.find((job) => job.id === jobId),
-		(listener) => service.subscribe(listener),
-		signal
-	);
-}
-
-async function waitForSlimmingJob(
-	service: SlimmingPort,
-	jobId: string,
-	signal: AbortSignal
-): Promise<SlimmingJob> {
-	return await waitForJob(
-		() => service.getState().jobs.find((job) => job.id === jobId),
-		(listener) => service.subscribe(listener),
-		signal
-	);
-}
-
-async function waitForJob<T extends { status: string }>(
-	find: () => T | undefined,
-	subscribe: (listener: () => void) => () => void,
-	signal: AbortSignal
-): Promise<T> {
-	const current = find();
-	if (current && TERMINAL_JOB_STATUSES.has(current.status)) return current;
-	return await new Promise<T>((resolve, reject) => {
-		let unsubscribe: () => void = () => undefined;
-		const settle = () => {
-			const job = find();
-			if (!job || !TERMINAL_JOB_STATUSES.has(job.status)) return;
-			cleanup();
-			resolve(job);
-		};
-		const onAbort = () => {
-			cleanup();
-			reject(abortError());
-		};
-		const cleanup = () => {
-			unsubscribe();
-			signal.removeEventListener('abort', onAbort);
-		};
-		unsubscribe = subscribe(settle);
-		signal.addEventListener('abort', onAbort, { once: true });
-		if (signal.aborted) onAbort();
-		else settle();
+	return sleep(ms, undefined, { signal }).catch(() => {
+		throw abortError();
 	});
 }
 
@@ -524,7 +452,7 @@ async function runSimulatorAction(
 		});
 	}
 	return wait
-		? await waitForSimulatorJob(service, receipt.jobId, signal)
+		? await waitForJob(service, receipt.jobId, signal, { abortError })
 		: receipt;
 }
 
@@ -543,7 +471,7 @@ async function runSlimmingAction(
 			retryable: true,
 		});
 	}
-	return await waitForSlimmingJob(service, receipt.jobId, signal);
+	return await waitForJob(service, receipt.jobId, signal, { abortError });
 }
 
 function ensureComplete<T extends { status: string; message: string }>(
@@ -1132,7 +1060,6 @@ function touchedSimulators(
 		case 'elements':
 		case 'act':
 		case 'network':
-			return fromTarget(command.target);
 		case 'wait':
 			return fromTarget(command.target);
 		case 'slimming':
@@ -1900,13 +1827,17 @@ function createRoutes({
 						.getState()
 						.jobs.find((job) => job.id === jobId);
 					if (simulatorJob) {
-						return await waitForSimulatorJob(simulator, jobId, context.signal);
+						return await waitForJob(simulator, jobId, context.signal, {
+							abortError,
+						});
 					}
 					const slimmingJob = slimming
 						.getState()
 						.jobs.find((job) => job.id === jobId);
 					if (slimmingJob) {
-						return await waitForSlimmingJob(slimming, jobId, context.signal);
+						return await waitForJob(slimming, jobId, context.signal, {
+							abortError,
+						});
 					}
 					throw new AgentCliError({
 						code: 'target_not_found',
@@ -2029,11 +1960,9 @@ function createRoutes({
 				}
 				if (!simulator.cancelJob(job.id))
 					required('The recording is no longer active.');
-				const finished = await waitForSimulatorJob(
-					simulator,
-					job.id,
-					context.signal
-				);
+				const finished = await waitForJob(simulator, job.id, context.signal, {
+					abortError,
+				});
 				return {
 					job: finished,
 					...(finished.captureId

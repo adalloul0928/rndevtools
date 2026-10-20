@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
@@ -432,7 +431,6 @@ export class AgentCliService {
 						})
 					)
 				);
-				return;
 			}
 		});
 		socket.once('end', () => {
@@ -498,7 +496,7 @@ export class AgentCliService {
 		}, this.#livenessProbeMs);
 		try {
 			const result = await this.#handler(request.command, {
-				requestId: request.id || randomUUID(),
+				requestId: request.id,
 				signal: controller.signal,
 				...(request.agent ? { agent: request.agent } : {}),
 			});

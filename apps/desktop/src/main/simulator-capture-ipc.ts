@@ -1,7 +1,3 @@
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	SimulatorCapture,
@@ -17,8 +13,7 @@ import {
 	simulatorCaptureOperationSchema,
 	simulatorCaptureRetentionStateSchema,
 } from '../shared/simulator-protocol';
-
-const MAX_ERROR_LENGTH = 4 * 1024;
+import { safeErrorText } from './security';
 
 export type SimulatorCaptureIpcService = {
 	getCapture: (captureId: string) => SimulatorCapture | undefined;
@@ -53,13 +48,6 @@ type CaptureIpcDependencies = {
 	revealPath: (capturePath: string) => Promise<void> | void;
 };
 
-function operationError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
-
 function failedReceipt(
 	actionId: string,
 	kind: SimulatorCaptureOperationReceipt['kind'],
@@ -71,7 +59,7 @@ function failedReceipt(
 		kind,
 		completed: false,
 		...(captureId ? { captureId } : {}),
-		error: operationError(error),
+		error: safeErrorText(error),
 	});
 }
 

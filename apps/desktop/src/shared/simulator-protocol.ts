@@ -7,12 +7,11 @@ const identifierSchema = z.string().trim().min(1).max(256);
 const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const optionalShortTextSchema = shortTextSchema.optional();
 const timestampSchema = z.number().finite().nonnegative();
+/** A Simulator UDID, in either letter case. */
+export const UDID_PATTERN = /^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i;
 export const udidSchema = z
 	.string()
-	.regex(
-		/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
-		'Invalid simulator UDID.'
-	);
+	.regex(UDID_PATTERN, 'Invalid simulator UDID.');
 const bundleIdentifierSchema = z
 	.string()
 	.trim()

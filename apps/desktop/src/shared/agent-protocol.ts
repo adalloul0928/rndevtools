@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { deviceHoldSchema, isPathInside } from './device-hold';
+import { UDID_PATTERN } from './simulator-protocol';
 
 /**
  * Agents: which coding-agent session is driving which Simulator.
@@ -33,9 +34,7 @@ const identifierSchema = z
 	.string()
 	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
 const timestampSchema = z.number().finite().nonnegative();
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 const pathSchema = z.string().min(1).max(1_024);
 
 const agentKindSchema = z.enum(['claude', 'codex', 'other']);

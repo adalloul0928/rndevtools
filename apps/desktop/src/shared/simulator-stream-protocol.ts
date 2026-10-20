@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 /**
  * Live Simulator screens.
@@ -19,9 +20,7 @@ import { z } from 'zod';
 const MAX_SUBSCRIPTIONS = 32;
 export const SIMULATOR_STREAM_MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
-const simulatorStreamUdidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const simulatorStreamUdidSchema = z.string().regex(UDID_PATTERN);
 
 /**
  * `tile` is for the device wall: small, cheap, a few frames a second. `focus`

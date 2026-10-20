@@ -1,15 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-	chmod,
-	lstat,
-	mkdir,
-	open,
-	readdir,
-	realpath,
-	rename,
-	rm,
-} from 'node:fs/promises';
+import { lstat, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -28,6 +19,12 @@ import {
 	recipeRunSchema,
 	recipeStateSchema,
 } from '../shared/recipe-protocol';
+import {
+	ensurePrivateDirectory,
+	isMissing,
+	syncDirectory,
+	writeFileAtomic,
+} from './private-files';
 import { recipeRequiresRunApproval } from './recipe-policy';
 
 const MAX_RECIPES = 200;
@@ -59,30 +56,7 @@ export type RecipeRunRecord = {
 	evidence: RecipeEvidenceManifest;
 };
 
-function isMissing(error: unknown): boolean {
-	return (error as NodeJS.ErrnoException).code === 'ENOENT';
-}
-
-async function syncDirectory(directory: string): Promise<void> {
-	const handle = await open(directory, constants.O_RDONLY);
-	try {
-		await handle.sync();
-	} finally {
-		await handle.close();
-	}
-}
-
-async function privateDirectory(directory: string): Promise<string> {
-	await mkdir(directory, { recursive: true, mode: 0o700 });
-	const metadata = await lstat(directory);
-	if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-		throw new Error('Recipe storage must be a private local directory.');
-	}
-	await chmod(directory, 0o700);
-	return realpath(directory);
-}
-
-function recipeSummary(recipe: RecipeDefinition): RecipeSummary {
+export function recipeSummary(recipe: RecipeDefinition): RecipeSummary {
 	return {
 		id: recipe.id,
 		name: recipe.name,
@@ -193,7 +167,6 @@ export class RecipeStore {
 				throw new Error('Recipe creation time cannot change across revisions.');
 			}
 			await this.#writeAtomicJson(
-				this.#requiredRecipesDirectory(),
 				this.#recipePath(recipe.id),
 				{
 					format: 'rndevtools-recipe',
@@ -237,7 +210,6 @@ export class RecipeStore {
 				throw new Error('Evidence did not belong to the run.');
 			}
 			await this.#writeAtomicJson(
-				this.#requiredRunsDirectory(),
 				this.#runPath(record.run.id),
 				record,
 				MAX_RUN_FILE_BYTES
@@ -280,9 +252,15 @@ export class RecipeStore {
 	}
 
 	async #initializeInternal(): Promise<void> {
-		const root = await privateDirectory(this.#root);
-		this.#recipesDirectory = await privateDirectory(path.join(root, 'recipes'));
-		this.#runsDirectory = await privateDirectory(path.join(root, 'runs'));
+		const root = await ensurePrivateDirectory(this.#root, 'Recipe storage');
+		this.#recipesDirectory = await ensurePrivateDirectory(
+			path.join(root, 'recipes'),
+			'Recipe storage'
+		);
+		this.#runsDirectory = await ensurePrivateDirectory(
+			path.join(root, 'runs'),
+			'Recipe storage'
+		);
 		await Promise.all([this.#loadRecipes(), this.#loadRuns()]);
 		await this.#recoverInterruptedRuns();
 		await this.#pruneRuns();
@@ -412,7 +390,6 @@ export class RecipeStore {
 				evidence,
 			});
 			await this.#writeAtomicJson(
-				this.#requiredRunsDirectory(),
 				this.#runPath(runId),
 				persisted,
 				MAX_RUN_FILE_BYTES
@@ -477,7 +454,6 @@ export class RecipeStore {
 	}
 
 	async #writeAtomicJson(
-		directory: string,
 		destinationPath: string,
 		value: unknown,
 		maximumBytes: number
@@ -486,29 +462,7 @@ export class RecipeStore {
 		if (Buffer.byteLength(serialized, 'utf8') > maximumBytes) {
 			throw new Error('Recipe JSON exceeded its safe size limit.');
 		}
-		const temporaryPath = path.join(
-			directory,
-			`.recipe-${process.pid}-${randomUUID()}.tmp`
-		);
-		const handle = await open(
-			temporaryPath,
-			constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-			0o600
-		);
-		try {
-			try {
-				await handle.writeFile(serialized, 'utf8');
-				await handle.sync();
-			} finally {
-				await handle.close();
-			}
-			await rename(temporaryPath, destinationPath);
-			await chmod(destinationPath, 0o600);
-			await syncDirectory(directory);
-		} catch (error) {
-			await rm(temporaryPath, { force: true }).catch(() => undefined);
-			throw error;
-		}
+		await writeFileAtomic(destinationPath, serialized, 'recipe');
 	}
 
 	async #writeExternalJson(
@@ -525,7 +479,6 @@ export class RecipeStore {
 			throw new Error('Recipe exports cannot target managed storage.');
 		}
 		await this.#writeAtomicJson(
-			directory,
 			path.join(directory, path.basename(destination)),
 			value,
 			MAX_RUN_FILE_BYTES

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 /**
  * Native Simulator input: taps, swipes, typed text, keys, and hardware buttons
@@ -12,9 +13,7 @@ import { z } from 'zod';
  * device's point or pixel geometry.
  */
 
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 const ratioSchema = z.number().finite().min(0).max(1);
 
 const SIMULATOR_INPUT_MAX_TEXT = 2_048;

@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { writeFileAtomic } from './private-files';
 
 const MAX_SETTINGS_BYTES = 64 * 1024;
 const settingsSchema = z.strictObject({
@@ -60,21 +60,6 @@ export class DesktopSettingsStore {
 	async #writeAtomically(contents: string): Promise<void> {
 		await mkdir(this.#directory, { recursive: true, mode: 0o700 });
 		await chmod(this.#directory, 0o700);
-		const temporaryPath = path.join(
-			this.#directory,
-			`.settings-v1-${process.pid}-${randomUUID()}.tmp`
-		);
-		let handle: Awaited<ReturnType<typeof open>> | undefined;
-		try {
-			handle = await open(temporaryPath, 'wx', 0o600);
-			await handle.writeFile(`${contents}\n`, 'utf8');
-			await handle.sync();
-			await handle.close();
-			handle = undefined;
-			await rename(temporaryPath, this.#filePath);
-		} finally {
-			await handle?.close().catch(() => undefined);
-			await unlink(temporaryPath).catch(() => undefined);
-		}
+		await writeFileAtomic(this.#filePath, `${contents}\n`, 'settings-v1');
 	}
 }

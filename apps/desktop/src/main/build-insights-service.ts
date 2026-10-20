@@ -1,10 +1,6 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { lstat, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import { z } from 'zod';
 import type {
 	BuildInsight,
@@ -13,6 +9,7 @@ import type {
 } from '../shared/build-insights-protocol';
 import { buildInsightSchema } from '../shared/build-insights-protocol';
 import type { BuildInsightsStore } from './build-insights-store';
+import { safeErrorText } from './security';
 import { runSimulatorCommand } from './simulator-command-runner';
 
 const MAX_XCRESULT_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -245,7 +242,7 @@ export class BuildInsightsService {
 					this.#rememberArtifact(key, signature);
 				} catch (error) {
 					this.#readArtifacts.delete(key);
-					failures.push(errorText(error));
+					failures.push(safeErrorText(error));
 				}
 			}
 			const watchError =
@@ -274,7 +271,7 @@ export class BuildInsightsService {
 			this.#store.updateSource(source.id, {
 				status: 'error',
 				lastScannedAt: this.#now(),
-				error: errorText(error),
+				error: safeErrorText(error),
 			});
 		}
 	}
@@ -306,7 +303,7 @@ export class BuildInsightsService {
 				this.#store.updateSource(source.id, {
 					status: 'error',
 					lastScannedAt: this.#now(),
-					error: errorText(error),
+					error: safeErrorText(error),
 				});
 			}
 			throw error;
@@ -348,7 +345,7 @@ export class BuildInsightsService {
 				const timer = this.#watchTimers.get(source.id);
 				if (timer) clearTimeout(timer);
 				this.#watchTimers.delete(source.id);
-				const message = errorText(error);
+				const message = safeErrorText(error);
 				this.#watchErrors.set(source.id, message);
 				this.#store.updateSource(source.id, {
 					status: 'error',
@@ -359,7 +356,7 @@ export class BuildInsightsService {
 			this.#watchers.set(source.id, watcher);
 			this.#watchErrors.delete(source.id);
 		} catch (error) {
-			const message = errorText(error);
+			const message = safeErrorText(error);
 			this.#watchErrors.set(source.id, message);
 			this.#store.updateSource(source.id, {
 				status: 'error',
@@ -595,8 +592,4 @@ function csvCell(value: string): string {
 		? `'${value}`
 		: value;
 	return `"${neutralized.replaceAll('"', '""')}"`;
-}
-
-function errorText(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024);
 }

@@ -2,10 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
-import {
 	diffSimulatorStreamSubscriptions,
 	SIMULATOR_STREAM_MAX_FRAME_BYTES,
 	SIMULATOR_STREAM_PROFILES,
@@ -17,6 +13,7 @@ import {
 	simulatorStreamSubscriptionsSchema,
 	simulatorStreamTargetSize,
 } from '../shared/simulator-stream-protocol';
+import { safeErrorText } from './security';
 import {
 	runSimulatorCommand,
 	type SimulatorCommandOptions,
@@ -26,7 +23,6 @@ import {
 const XCRUN_PATH = '/usr/bin/xcrun';
 const CAPTURE_TIMEOUT_MS = 8_000;
 const STALLED_AFTER_FAILURES = 3;
-const MAX_ERROR_LENGTH = 4 * 1024;
 
 /**
  * Downscales and re-encodes a captured frame. Electron's nativeImage is the
@@ -57,13 +53,6 @@ type Poller = {
 	inFlight: boolean;
 	status: SimulatorStreamStatus['status'];
 };
-
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(
-		0,
-		MAX_ERROR_LENGTH
-	);
-}
 
 /**
  * Bounded live screens through `simctl io screenshot`. One short-lived process
@@ -309,7 +298,7 @@ export class SimulatorStreamService {
 						? 'live'
 						: 'starting';
 			poller.status = next;
-			this.#emitStatus(poller, safeError(error));
+			this.#emitStatus(poller, safeErrorText(error));
 			this.#schedule(
 				poller,
 				simulatorStreamRetryDelayMs(

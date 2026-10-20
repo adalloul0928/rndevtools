@@ -269,7 +269,7 @@ describe('preload bridge', () => {
 			.join('\n');
 		const handled = channelsUsed(main, 'ipcMain\\.handle');
 		const listened = channelsUsed(main, 'ipcMain\\.on');
-		const broadcast = channelsUsed(main, '\\.send');
+		const broadcast = channelsUsed(main, '(?:\\.send|\\bbroadcast)');
 		expect([...invoked].filter((name) => !handled.has(name))).toEqual([]);
 		expect([...sent].filter((name) => !listened.has(name))).toEqual([]);
 		expect([...pushed].filter((name) => !broadcast.has(name))).toEqual([]);

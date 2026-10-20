@@ -1,12 +1,14 @@
 import { z } from 'zod';
+import { UDID_PATTERN } from './simulator-protocol';
 
 export const RNDEVTOOLS_RECIPE_FORMAT_VERSION = 1 as const;
 export const DEFAULT_RECIPE_RUN_CONCURRENCY = 2;
 
 const MAX_SHORT_TEXT = 4 * 1024;
 const MAX_CAMERA_BASE64 = 512 * 1024;
-const MAX_RECIPE_STEPS = 100;
-const MAX_RECIPE_TARGETS = 20;
+export const MAX_RECIPE_STEPS = 100;
+export const MAX_RECIPE_TARGETS = 20;
+export const MAX_RECIPE_CONCURRENCY = 8;
 const MAX_TIMELINE_EVENTS = 5_000;
 const MAX_HISTORY = 500;
 const MAX_RECIPE_BYTES = 8 * 1024 * 1024;
@@ -23,9 +25,7 @@ const shortTextSchema = z.string().max(MAX_SHORT_TEXT);
 const evidenceMessageSchema = z.string().max(256);
 const cleanupFailureSchema = z.string().max(1_024);
 const timestampSchema = z.number().finite().nonnegative();
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 const bundleIdentifierSchema = z
 	.string()
 	.trim()
@@ -525,7 +525,7 @@ export const recipeDefinitionSchema = z
 			.number()
 			.int()
 			.min(1)
-			.max(8)
+			.max(MAX_RECIPE_CONCURRENCY)
 			.default(DEFAULT_RECIPE_RUN_CONCURRENCY),
 		steps: z.array(recipeStepSchema).min(1).max(MAX_RECIPE_STEPS),
 		teardown: z.array(recipeStepSchema).max(MAX_RECIPE_STEPS).default([]),
@@ -610,7 +610,7 @@ const recipePendingRunRequestSchema = z.strictObject({
 	actionId: identifierSchema,
 	recipeId: recipeIdSchema,
 	targetUdids: targetUdidsSchema,
-	concurrency: z.number().int().min(1).max(8),
+	concurrency: z.number().int().min(1).max(MAX_RECIPE_CONCURRENCY),
 });
 
 export const recipeRunSchema = z
@@ -636,7 +636,7 @@ export const recipeRunSchema = z
 		finishedAt: timestampSchema.optional(),
 		progressSequence: z.number().int().nonnegative(),
 		message: shortTextSchema,
-		concurrency: z.number().int().min(1).max(8),
+		concurrency: z.number().int().min(1).max(MAX_RECIPE_CONCURRENCY),
 		targetUdids: targetUdidsSchema,
 		targets: z.array(recipeRunTargetSchema).min(1).max(MAX_RECIPE_TARGETS),
 		pendingRequest: recipePendingRunRequestSchema.optional(),
@@ -737,7 +737,7 @@ export const recipeRunRequestSchema = z.strictObject({
 	actionId: identifierSchema,
 	recipeId: recipeIdSchema,
 	targetUdids: targetUdidsSchema,
-	concurrency: z.number().int().min(1).max(8).optional(),
+	concurrency: z.number().int().min(1).max(MAX_RECIPE_CONCURRENCY).optional(),
 	confirmationToken: confirmationTokenSchema.optional(),
 });
 export type RecipeRunRequest = z.infer<typeof recipeRunRequestSchema>;

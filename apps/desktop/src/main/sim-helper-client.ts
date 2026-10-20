@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { UDID_PATTERN } from '../shared/simulator-protocol';
 import type { SlimmingCompatibility } from '../shared/slimming-protocol';
 import {
 	NativeHelperTrustError,
@@ -30,9 +31,7 @@ const serviceIdsSchema = z.array(serviceIdSchema).max(1_000);
 const processNamesSchema = z
 	.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/))
 	.max(256);
-const udidSchema = z
-	.string()
-	.regex(/^[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i);
+const udidSchema = z.string().regex(UDID_PATTERN);
 
 function boundedCheckpointToken(value: string): string {
 	if (

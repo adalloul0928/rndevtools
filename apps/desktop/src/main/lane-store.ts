@@ -7,11 +7,11 @@ import {
 	readFile,
 	rename,
 	unlink,
-	writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { type Lane, laneSchema } from '../shared/lane-protocol';
+import { writeFileAtomic } from './private-files';
 
 const storedLanesSchema = z.strictObject({
 	version: z.literal(1),
@@ -42,10 +42,6 @@ export class LaneStore {
 	constructor(root: string) {
 		this.#root = path.resolve(root);
 		this.#file = path.join(this.#root, 'lanes.json');
-	}
-
-	get root(): string {
-		return this.#root;
 	}
 
 	logPathFor(laneId: string): string {
@@ -186,11 +182,7 @@ export class LaneStore {
 		const snapshot = JSON.stringify(this.#data, null, '\t');
 		this.#writeQueue = this.#writeQueue
 			.catch(() => undefined)
-			.then(async () => {
-				const temporary = `${this.#file}.${process.pid}.tmp`;
-				await writeFile(temporary, snapshot, { mode: 0o600 });
-				await rename(temporary, this.#file);
-			});
+			.then(() => writeFileAtomic(this.#file, snapshot, 'lanes'));
 		return this.#writeQueue;
 	}
 }

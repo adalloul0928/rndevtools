@@ -1,12 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import {
-	chmod,
-	mkdir,
-	readFile,
-	rename,
-	unlink,
-	writeFile,
-} from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -37,6 +29,7 @@ import {
 	discoverAgentSessions,
 	type SessionDiscoveryResult,
 } from './agent-sessions';
+import { writeFileAtomic } from './private-files';
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const MAX_CLAIMS = 200;
@@ -114,17 +107,9 @@ class AgentClaimStore {
 	async set(claims: readonly AgentClaim[]): Promise<void> {
 		this.#claims = [...claims];
 		const snapshot = `${JSON.stringify({ version: 1, claims: this.#claims }, null, '\t')}\n`;
-		const write = this.#writeQueue.then(async () => {
-			const temporary = `${this.#file}.${process.pid}.${randomUUID()}.tmp`;
-			try {
-				await writeFile(temporary, snapshot, { mode: 0o600 });
-				await chmod(temporary, 0o600).catch(() => undefined);
-				await rename(temporary, this.#file);
-			} catch (error) {
-				await unlink(temporary).catch(() => undefined);
-				throw error;
-			}
-		});
+		const write = this.#writeQueue.then(() =>
+			writeFileAtomic(this.#file, snapshot, 'claims')
+		);
 		this.#writeQueue = write.catch(() => undefined);
 		await write;
 	}

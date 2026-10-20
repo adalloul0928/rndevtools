@@ -1,10 +1,6 @@
 import { constants } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
 import type { IpcMainInvokeEvent } from 'electron';
 import type {
 	SimulatorOnboardingOperation,
@@ -14,6 +10,7 @@ import {
 	simulatorOnboardingOperationSchema,
 	simulatorOnboardingReceiptSchema,
 } from '../shared/simulator-protocol';
+import { safeErrorText } from './security';
 
 const MAX_PATH_BYTES = 4 * 1024;
 
@@ -111,7 +108,7 @@ function failed(
 		actionId: operation.actionId,
 		kind: operation.kind,
 		completed: false,
-		error: redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024),
+		error: safeErrorText(error),
 	});
 }
 

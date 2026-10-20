@@ -54,10 +54,6 @@ type StagedCertificateRecord = {
 	udid: string;
 };
 
-function isRootCertificateAction(action: RootCertificateAction): boolean {
-	return action.trustRoot;
-}
-
 function sha256(bytes: Uint8Array): string {
 	return createHash('sha256').update(bytes).digest('hex');
 }
@@ -354,7 +350,7 @@ export class StagedCertificateStore {
 		artifact: StagedCertificate
 	): void {
 		if (
-			!isRootCertificateAction(action) ||
+			!action.trustRoot ||
 			this.#staged.get(artifact) !== senderId ||
 			this.#records.has(token)
 		) {
@@ -388,7 +384,7 @@ export class StagedCertificateStore {
 		this.#records.delete(token);
 		clearTimeout(record.timer);
 		if (
-			!isRootCertificateAction(action) ||
+			!action.trustRoot ||
 			record.senderId !== senderId ||
 			record.actionId !== action.actionId ||
 			record.udid !== action.udid ||

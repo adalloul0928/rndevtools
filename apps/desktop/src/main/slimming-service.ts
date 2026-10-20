@@ -1,8 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-	diagnosticErrorText,
-	redactDiagnosticText,
-} from '@rndevtools/core/redact';
+import { redactDiagnosticText } from '@rndevtools/core/redact';
 import type { DeviceAccessDecision } from '../shared/device-hold';
 import type {
 	SlimmingAcknowledgementReceipt,
@@ -26,6 +23,7 @@ import {
 	slimmingSettingRequestSchema,
 	slimmingStateSchema,
 } from '../shared/slimming-protocol';
+import { safeErrorText } from './security';
 import {
 	compatibilityForPublic,
 	mutationEvidenceFromError,
@@ -115,10 +113,6 @@ type InternalJob = {
 	emergencyRecoveryTargets: Set<string>;
 };
 
-function safeError(error: unknown): string {
-	return redactDiagnosticText(diagnosticErrorText(error)).slice(0, 4 * 1024);
-}
-
 function helperStateFromError(error: unknown): SlimmingState['helper'] {
 	const kind =
 		error && typeof error === 'object' && 'kind' in error
@@ -127,7 +121,7 @@ function helperStateFromError(error: unknown): SlimmingState['helper'] {
 	return {
 		status: kind === 'untrusted' ? 'untrusted' : 'unavailable',
 		readOnlyAvailable: false,
-		error: safeError(error),
+		error: safeErrorText(error),
 	};
 }
 
@@ -253,7 +247,7 @@ function mutationFailureDetail(error: unknown): string {
 }
 
 function describeMutationFailure(error: unknown): string {
-	return `${safeError(error)}${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
+	return `${safeErrorText(error)}${redactDiagnosticText(mutationFailureDetail(error))}`.slice(
 		0,
 		4 * 1024
 	);
@@ -390,7 +384,7 @@ export class SlimmingService {
 			this.#state.setting = {
 				experimentalMutationsEnabled: false,
 				disabledDisposition: 'restore-failed',
-				warning: `Safety state could not load. Mutations are blocked: ${safeError(error)}`,
+				warning: `Safety state could not load. Mutations are blocked: ${safeErrorText(error)}`,
 			};
 		}
 		await this.refresh();
@@ -668,7 +662,7 @@ export class SlimmingService {
 				actionId: request.actionId,
 				accepted: false,
 				state: this.getState(),
-				error: safeError(error),
+				error: safeErrorText(error),
 			};
 		}
 	}
@@ -1977,7 +1971,7 @@ export class SlimmingService {
 							mapDeviceState(device.state) === 'shutdown'
 								? 'Preview or mutate to inspect this Shutdown Simulator through a temporary, automatically restored boot.'
 								: result.status === 'rejected'
-									? safeError(result.reason)
+									? safeErrorText(result.reason)
 									: 'Managed service inspection is unavailable while the Simulator changes state.',
 					};
 				}
