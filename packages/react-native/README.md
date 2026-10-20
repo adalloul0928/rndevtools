@@ -228,13 +228,16 @@ module.exports = ({ config }) => ({
 Then build as usual: `npx expo run:ios --device <udid> --no-bundler`. The
 first worktree builds and uploads; later ones with the same fingerprint are
 installed from
-`~/Library/Caches/rndevtools/native/<platform>/<configuration>/<toolchain>/<hash>/`
-(`RNDEVTOOLS_BUILD_CACHE_DIR` or the `cacheDirectory` option relocates it).
+`~/Library/Caches/rndevtools/native/v2/<platform>/<configuration>/<toolchain>/<hash>/`
+(`RNDEVTOOLS_BUILD_CACHE_DIR` or the `cacheDirectory` option relocates the root).
+The `v2` namespace keeps the immutable lock protocol separate from older
+worktrees. Legacy entries remain untouched; the first build with this provider
+populates the new namespace.
 Entries are split by platform, build configuration, and toolchain (CPU
 architecture plus, for iOS, the `xcodebuild -version` output), so a Release
 binary is never installed for a Debug run and an Xcode upgrade never serves a
-build from the old SDK. The build lock is claimed in one step, and when a
-builder dies only one waiter takes its lock over. An entry's binary is never
+build from the old SDK. Claims are immutable; when a builder dies or releases
+its claim, waiters compete for one shared successor. An entry's binary is never
 replaced once stored, so a second upload of the same fingerprint cannot
 remove an app that another worktree is installing. Delete the directory to
 start clean; there is no eviction.

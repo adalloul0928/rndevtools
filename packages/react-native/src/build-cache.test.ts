@@ -136,7 +136,7 @@ describe('build cache provider', () => {
 			TOOLCHAIN,
 		);
 		expect(ios).toBe(
-			path.join(cacheDirectory, 'ios', 'Debug', iosToolchain, HASH),
+			path.join(cacheDirectory, 'v2', 'ios', 'Debug', iosToolchain, HASH),
 		);
 		const release = entryDirectory(
 			{
@@ -148,7 +148,7 @@ describe('build cache provider', () => {
 			TOOLCHAIN,
 		);
 		expect(release).toBe(
-			path.join(cacheDirectory, 'ios', 'Release', iosToolchain, HASH),
+			path.join(cacheDirectory, 'v2', 'ios', 'Release', iosToolchain, HASH),
 		);
 		const android = entryDirectory(
 			{
@@ -160,7 +160,14 @@ describe('build cache provider', () => {
 			TOOLCHAIN,
 		);
 		expect(android).toBe(
-			path.join(cacheDirectory, 'android', 'debug', androidToolchain, HASH),
+			path.join(
+				cacheDirectory,
+				'v2',
+				'android',
+				'debug',
+				androidToolchain,
+				HASH,
+			),
 		);
 		// Hostile segments cannot climb out of the cache root.
 		const hostile = entryDirectory(
@@ -180,6 +187,75 @@ describe('build cache provider', () => {
 			/rndevtools[/\\]native$/,
 		);
 	});
+
+	it.each([true, false])(
+		'keeps legacy cache entries untouched (published: %s)',
+		async (published) => {
+			const context = {
+				fingerprintHash: HASH,
+				platform: 'ios',
+				runOptions: {},
+			};
+			const legacy = path.join(
+				cacheDirectory,
+				'ios',
+				'Debug',
+				toolchainSegment('ios'),
+				HASH,
+			);
+			const legacyApp = makeApp(legacy, 'Legacy.app');
+			const lock = JSON.stringify({ pid: 4_194_303, startedAt: 0 });
+			const metadata = JSON.stringify({ artifact: 'Legacy.app' });
+			writeFileSync(path.join(legacyApp, 'ExampleApp'), 'legacy binary');
+			writeFileSync(path.join(legacy, 'build.lock'), lock);
+			if (published)
+				writeFileSync(path.join(legacy, 'artifact.json'), metadata);
+			const provider = createBuildCacheProvider();
+			expect(
+				await provider.resolveBuildCache(context, { cacheDirectory }),
+			).toBeNull();
+			const entry = entryDirectory(context, { cacheDirectory });
+			expect(entry).toBe(
+				path.join(
+					cacheDirectory,
+					'v2',
+					'ios',
+					'Debug',
+					toolchainSegment('ios'),
+					HASH,
+				),
+			);
+			await expect(
+				createBuildCacheProvider().resolveBuildCache(context, {
+					cacheDirectory,
+					waitTimeoutMs: 0,
+				}),
+			).rejects.toThrow(/timed out/);
+			expect(
+				await provider.uploadBuildCache(
+					{ ...context, buildPath: makeApp(work) },
+					{ cacheDirectory },
+				),
+			).toBe(path.join(entry, 'ExampleApp.app'));
+			expect(readdirSync(entry).sort()).toEqual([
+				'ExampleApp.app',
+				'artifact.json',
+			]);
+			expect(readdirSync(legacy).sort()).toEqual(
+				published
+					? ['Legacy.app', 'artifact.json', 'build.lock']
+					: ['Legacy.app', 'build.lock'],
+			);
+			expect(readFileSync(path.join(legacy, 'build.lock'), 'utf8')).toBe(lock);
+			expect(readFileSync(path.join(legacyApp, 'ExampleApp'), 'utf8')).toBe(
+				'legacy binary',
+			);
+			if (published)
+				expect(readFileSync(path.join(legacy, 'artifact.json'), 'utf8')).toBe(
+					metadata,
+				);
+		},
+	);
 
 	it('keys iOS entries by Xcode version and arch so an upgraded toolchain never serves a stale build', () => {
 		const before = toolchainSegment('ios', TOOLCHAIN);
@@ -736,6 +812,7 @@ cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
 		expect(stored).toBe(
 			path.join(
 				cacheDirectory,
+				'v2',
 				'android',
 				'debug',
 				toolchainSegment('android'),

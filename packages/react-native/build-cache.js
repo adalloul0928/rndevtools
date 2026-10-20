@@ -147,6 +147,7 @@ function entryDirectory(context, options = {}, internals = {}) {
 		: defaultCacheRoot();
 	return path.join(
 		root,
+		'v2',
 		safeSegment(context.platform, 'unknown-platform'),
 		safeSegment(configurationOf(context.runOptions)),
 		toolchainSegment(context.platform, internals),
