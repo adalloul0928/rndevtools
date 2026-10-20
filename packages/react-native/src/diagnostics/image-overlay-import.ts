@@ -35,42 +35,8 @@ export type PreparedRemoteImage = Readonly<{
 	file: File;
 }>;
 
-function byteAt(bytes: Uint8Array, offset: number): number {
-	return bytes[offset] ?? 0;
-}
-
-function readUint16BigEndian(bytes: Uint8Array, offset: number): number {
-	return byteAt(bytes, offset) * 256 + byteAt(bytes, offset + 1);
-}
-
-function readUint16LittleEndian(bytes: Uint8Array, offset: number): number {
-	return byteAt(bytes, offset) + byteAt(bytes, offset + 1) * 256;
-}
-
-function readUint24LittleEndian(bytes: Uint8Array, offset: number): number {
-	return (
-		byteAt(bytes, offset) +
-		byteAt(bytes, offset + 1) * 256 +
-		byteAt(bytes, offset + 2) * 65_536
-	);
-}
-
-function readUint32BigEndian(bytes: Uint8Array, offset: number): number {
-	return (
-		byteAt(bytes, offset) * 16_777_216 +
-		byteAt(bytes, offset + 1) * 65_536 +
-		byteAt(bytes, offset + 2) * 256 +
-		byteAt(bytes, offset + 3)
-	);
-}
-
-function readUint32LittleEndian(bytes: Uint8Array, offset: number): number {
-	return (
-		byteAt(bytes, offset) +
-		byteAt(bytes, offset + 1) * 256 +
-		byteAt(bytes, offset + 2) * 65_536 +
-		byteAt(bytes, offset + 3) * 16_777_216
-	);
+function readUint24LittleEndian(view: DataView, offset: number): number {
+	return view.getUint16(offset, true) + view.getUint8(offset + 2) * 65_536;
 }
 
 function ascii(bytes: Uint8Array, offset: number, length: number): string {
@@ -90,30 +56,32 @@ function inspectPng(bytes: Uint8Array): VerifiedImageMetadata | null {
 	) {
 		return null;
 	}
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	return {
 		mimeType: 'image/png',
-		width: readUint32BigEndian(bytes, 16),
-		height: readUint32BigEndian(bytes, 20),
+		width: view.getUint32(16),
+		height: view.getUint32(20),
 	};
 }
 
 function inspectJpeg(bytes: Uint8Array): VerifiedImageMetadata | null {
 	if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	let offset = 2;
 	while (offset + 3 < bytes.length) {
-		while (offset < bytes.length && byteAt(bytes, offset) === 0xff) offset += 1;
+		while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
 		if (offset >= bytes.length) break;
-		const marker = byteAt(bytes, offset);
+		const marker = view.getUint8(offset);
 		offset += 1;
 		if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) continue;
 		if (marker === 0xd9 || marker === 0xda || offset + 1 >= bytes.length) break;
-		const segmentLength = readUint16BigEndian(bytes, offset);
+		const segmentLength = view.getUint16(offset);
 		if (segmentLength < 2 || offset + segmentLength > bytes.length) break;
 		if (JPEG_SOF_MARKERS.has(marker) && segmentLength >= 7) {
 			return {
 				mimeType: 'image/jpeg',
-				height: readUint16BigEndian(bytes, offset + 3),
-				width: readUint16BigEndian(bytes, offset + 5),
+				height: view.getUint16(offset + 3),
+				width: view.getUint16(offset + 5),
 			};
 		}
 		offset += segmentLength;
@@ -129,24 +97,25 @@ function inspectWebp(bytes: Uint8Array): VerifiedImageMetadata | null {
 	) {
 		return null;
 	}
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 	let offset = 12;
 	while (offset + 8 <= bytes.length) {
 		const chunk = ascii(bytes, offset, 4);
-		const chunkSize = readUint32LittleEndian(bytes, offset + 4);
+		const chunkSize = view.getUint32(offset + 4, true);
 		const payload = offset + 8;
 		if (chunkSize > bytes.length - payload) return null;
 		if (chunk === 'VP8X' && chunkSize >= 10) {
 			return {
 				mimeType: 'image/webp',
-				width: readUint24LittleEndian(bytes, payload + 4) + 1,
-				height: readUint24LittleEndian(bytes, payload + 7) + 1,
+				width: readUint24LittleEndian(view, payload + 4) + 1,
+				height: readUint24LittleEndian(view, payload + 7) + 1,
 			};
 		}
 		if (chunk === 'VP8L' && chunkSize >= 5 && bytes[payload] === 0x2f) {
-			const b1 = byteAt(bytes, payload + 1);
-			const b2 = byteAt(bytes, payload + 2);
-			const b3 = byteAt(bytes, payload + 3);
-			const b4 = byteAt(bytes, payload + 4);
+			const b1 = view.getUint8(payload + 1);
+			const b2 = view.getUint8(payload + 2);
+			const b3 = view.getUint8(payload + 3);
+			const b4 = view.getUint8(payload + 4);
 			return {
 				mimeType: 'image/webp',
 				width: 1 + (((b2 & 0x3f) << 8) | b1),
@@ -162,8 +131,8 @@ function inspectWebp(bytes: Uint8Array): VerifiedImageMetadata | null {
 		) {
 			return {
 				mimeType: 'image/webp',
-				width: readUint16LittleEndian(bytes, payload + 6) & 0x3fff,
-				height: readUint16LittleEndian(bytes, payload + 8) & 0x3fff,
+				width: view.getUint16(payload + 6, true) & 0x3fff,
+				height: view.getUint16(payload + 8, true) & 0x3fff,
 			};
 		}
 		offset = payload + chunkSize + (chunkSize % 2);

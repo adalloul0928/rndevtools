@@ -348,14 +348,7 @@ function socketUrl(host: string, port: number): string {
 }
 
 function isLocalBrokerHost(hostname: string): boolean {
-	const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-	return (
-		normalized === 'localhost' ||
-		normalized === '127.0.0.1' ||
-		normalized === '::1' ||
-		normalized === '0:0:0:0:0:0:0:1' ||
-		normalized === '10.0.2.2'
-	);
+	return hostname === '10.0.2.2' || isLoopbackBrokerHost(hostname);
 }
 
 function isLoopbackBrokerHost(hostname: string): boolean {
@@ -601,19 +594,6 @@ export function startDesktopClient(
 				'warn',
 				'transport',
 				`Failed to send desktop message: ${diagnosticErrorText(error)}`,
-			);
-			return false;
-		}
-	};
-
-	const send = (message: unknown, target = socket): boolean => {
-		try {
-			return sendSerialized(JSON.stringify(message), target);
-		} catch (error) {
-			record(
-				'warn',
-				'transport',
-				`Failed to serialize desktop message: ${diagnosticErrorText(error)}`,
 			);
 			return false;
 		}
@@ -905,15 +885,30 @@ export function startDesktopClient(
 		 * connection ends with it, so going over can only end it a frame sooner.
 		 */
 		const refuse = (actionId: string, error: string, closeReason: string) => {
-			send({ type: 'action-result', actionId, ok: false, error }, nextSocket);
+			sendSerialized(
+				JSON.stringify({ type: 'action-result', actionId, ok: false, error }),
+				nextSocket,
+			);
 			closeConnection(1008, closeReason);
+		};
+
+		/** Moves on to the next candidate after this one failed to open. */
+		const scheduleNextCandidate = () => {
+			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
+			if (candidateIndex === 0) {
+				record(
+					'warn',
+					'transport',
+					'Could not reach a desktop broker candidate; retrying discovery.',
+				);
+			}
+			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
 		};
 
 		connectTimer = setTimeout(() => {
 			if (!opened && socket === nextSocket) {
 				socket = undefined;
 				connectTimer = undefined;
-				candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
 				try {
 					nextSocket.close();
 				} catch (error) {
@@ -923,14 +918,7 @@ export function startDesktopClient(
 						`Timed-out socket could not close: ${diagnosticErrorText(error)}`,
 					);
 				}
-				if (candidateIndex === 0) {
-					record(
-						'warn',
-						'transport',
-						'Could not reach a desktop broker candidate; retrying discovery.',
-					);
-				}
-				scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
+				scheduleNextCandidate();
 			}
 		}, CONNECT_TIMEOUT_MS);
 
@@ -1121,15 +1109,7 @@ export function startDesktopClient(
 				scheduleReconnect(delay);
 				return;
 			}
-			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
-			if (candidateIndex === 0) {
-				record(
-					'warn',
-					'transport',
-					'Could not reach a desktop broker candidate; retrying discovery.',
-				);
-			}
-			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
+			scheduleNextCandidate();
 		};
 	};
 

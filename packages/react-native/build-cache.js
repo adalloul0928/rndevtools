@@ -262,14 +262,6 @@ function lockOwner(text) {
 	}
 }
 
-function readLockOwner(lockPath) {
-	try {
-		return lockOwner(fs.readFileSync(lockPath, 'utf8'));
-	} catch {
-		return 0;
-	}
-}
-
 /** The lock's text, owner and write time, or null when there is no lock. */
 function readLock(lockPath) {
 	let handle;
@@ -392,8 +384,7 @@ function createBuildCacheProvider(internals = {}) {
 				);
 			}
 			const shapeOk =
-				name.endsWith(extension) &&
-				(extension === '.app' ? stat.isDirectory() : stat.isFile());
+				name.endsWith(extension) && hasArtifactShape(buildPath, stat);
 			if (!shapeOk) {
 				throw new Error(
 					`build-cache: expected a ${extension} ${extension === '.app' ? 'bundle' : 'file'} for ${context.platform}, received ${buildPath}.`,
@@ -436,9 +427,13 @@ function createBuildCacheProvider(internals = {}) {
 		} finally {
 			// Release our claim whether or not the upload succeeded, so waiters
 			// either find the artifact or get to build themselves.
-			if (readLockOwner(lockPath) === process.pid) {
-				fs.rmSync(lockPath, { force: true });
+			let owner;
+			try {
+				owner = readLock(lockPath)?.owner;
+			} catch {
+				// A lock that cannot be read is not ours to release.
 			}
+			if (owner === process.pid) fs.rmSync(lockPath, { force: true });
 		}
 	}
 

@@ -90,8 +90,7 @@ function fixtureBytes(base64: string): number {
 	return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
-function extensionForFixture(fixture: ActiveMediaFixture | DebugCameraFixture) {
-	if (!('mimeType' in fixture)) return 'bin';
+function extensionForFixture(fixture: Pick<ActiveMediaFixture, 'mimeType'>) {
 	if (fixture.mimeType === 'image/jpeg') return 'jpg';
 	if (fixture.mimeType === 'image/png') return 'png';
 	if (fixture.mimeType === 'image/webp') return 'webp';
