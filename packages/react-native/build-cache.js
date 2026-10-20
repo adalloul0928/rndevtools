@@ -59,6 +59,9 @@ const LOCK_POLL_INTERVAL_MS = 1_000;
  */
 const UNREADABLE_LOCK_GRACE_MS = 10_000;
 const LOCK_FILE = 'build.lock';
+const MAX_LOCK_GENERATIONS = 128;
+const LOCK_RECORD =
+	/^build\.lock(?:\.[a-f0-9]{64}\.(?:next|released)|\.released)?$/;
 const ARTIFACT_FILE = 'artifact.json';
 // What `link` fails with where a filesystem has no hard links.
 const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
@@ -291,33 +294,27 @@ function isAbandoned(lock) {
 	return Date.now() - lock.writtenAt > UNREADABLE_LOCK_GRACE_MS;
 }
 
-/**
- * Removes the abandoned lock `observed`, and only that one. It is renamed
- * aside first, so of several waiters that judged it abandoned only one moves
- * it. A waiter that finds it moved a different lock, a claim made since it
- * looked, puts that claim back; if a third process claimed in that instant,
- * the result is one duplicate build, which uploads tolerate.
- */
-function reclaimAbandonedLock(lockPath, observed) {
-	const aside = `${lockPath}.${uniqueSuffix()}.abandoned`;
-	try {
-		fs.renameSync(lockPath, aside);
-	} catch (error) {
-		if (error && error.code === 'ENOENT') return;
-		throw error;
-	}
-	try {
-		const moved = fs.readFileSync(aside, 'utf8');
-		if (moved !== observed.text) createExclusive(lockPath, moved);
-	} finally {
-		fs.rmSync(aside, { force: true });
-	}
+/** An immutable claim has one successor, so stale readers cannot move a live lock. */
+function claimRecord(entry, text, kind) {
+	const digest = crypto.createHash('sha256').update(text).digest('hex');
+	return path.join(entry, `${LOCK_FILE}.${digest}.${kind}`);
 }
 
 function tryClaimLock(lockPath) {
-	return createExclusive(
-		lockPath,
-		`${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`,
+	const text = `${JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: uniqueSuffix() })}\n`;
+	return createExclusive(lockPath, text) ? text : null;
+}
+
+function clearPublishedClaims(entry) {
+	for (const name of fs.readdirSync(entry)) {
+		if (LOCK_RECORD.test(name))
+			fs.rmSync(path.join(entry, name), { force: true });
+	}
+}
+
+function throwWaitTimeout(lock, lockPath, waitTimeoutMs) {
+	throw new Error(
+		`build-cache: timed out after ${Math.round(waitTimeoutMs / 1_000)}s waiting for ${lock.owner ? `PID ${lock.owner}` : 'another process'} to finish building this fingerprint (${lockPath}).`,
 	);
 }
 
@@ -330,34 +327,60 @@ function sleep(ms) {
  * build it. Waits while another process holds the claim, so parallel lanes
  * with the same fingerprint produce one build.
  */
-async function claimOrWait(entry, { waitTimeoutMs, now, sleep: wait }) {
+async function claimOrWait(entry, { waitTimeoutMs, now, sleep: wait, claims }) {
 	fs.mkdirSync(entry, { recursive: true });
-	const lockPath = path.join(entry, LOCK_FILE);
+	const initialLock = path.join(entry, LOCK_FILE);
+	let lockPath = initialLock;
+	const visited = new Set([lockPath]);
 	const deadline = now() + waitTimeoutMs;
 	for (;;) {
 		const hit = readArtifact(entry);
 		if (hit) return hit;
-		if (tryClaimLock(lockPath)) return null;
+		const text = tryClaimLock(lockPath);
+		if (text) {
+			// An uploader may have published between our first read and the claim.
+			const published = readArtifact(entry);
+			if (published) {
+				clearPublishedClaims(entry);
+				return published;
+			}
+			claims.set(entry, { path: lockPath, text });
+			return null;
+		}
 		const lock = readLock(lockPath);
 		// Released since the claim attempt: try again straight away.
 		if (!lock) continue;
-		if (isAbandoned(lock)) {
-			// The builder died without uploading. Take it over.
-			reclaimAbandonedLock(lockPath, lock);
+		if (
+			isAbandoned(lock) ||
+			fs.existsSync(claimRecord(entry, lock.text, 'released'))
+		) {
+			const next = claimRecord(entry, lock.text, 'next');
+			if (visited.has(next) || visited.size >= MAX_LOCK_GENERATIONS) {
+				throw new Error(
+					'build-cache: corrupt or excessive cache lock generations. Clear this cache entry and retry.',
+				);
+			}
+			if (visited.size > 1 && now() >= deadline) {
+				throwWaitTimeout(lock, lockPath, waitTimeoutMs);
+			}
+			visited.add(next);
+			lockPath = next;
 			continue;
 		}
 		if (now() >= deadline) {
-			throw new Error(
-				`build-cache: timed out after ${Math.round(waitTimeoutMs / 1_000)}s waiting for ${lock.owner ? `PID ${lock.owner}` : 'another process'} to finish building this fingerprint (${lockPath}).`,
-			);
+			throwWaitTimeout(lock, lockPath, waitTimeoutMs);
 		}
 		await wait(LOCK_POLL_INTERVAL_MS);
+		lockPath = initialLock;
+		visited.clear();
+		visited.add(lockPath);
 	}
 }
 
 function createBuildCacheProvider(internals = {}) {
 	const now = internals.now || Date.now;
 	const wait = internals.sleep || sleep;
+	const claims = new Map();
 
 	async function resolveBuildCache(context, options = {}) {
 		const entry = entryDirectory(context, options, internals);
@@ -365,12 +388,12 @@ function createBuildCacheProvider(internals = {}) {
 			Number.isFinite(options.waitTimeoutMs) && options.waitTimeoutMs >= 0
 				? options.waitTimeoutMs
 				: DEFAULT_WAIT_TIMEOUT_MS;
-		return claimOrWait(entry, { waitTimeoutMs, now, sleep: wait });
+		return claimOrWait(entry, { waitTimeoutMs, now, sleep: wait, claims });
 	}
 
 	async function uploadBuildCache(context, options = {}) {
 		const entry = entryDirectory(context, options, internals);
-		const lockPath = path.join(entry, LOCK_FILE);
+		const claim = claims.get(entry);
 		try {
 			const buildPath = path.resolve(String(context.buildPath || ''));
 			const name = path.basename(buildPath);
@@ -425,15 +448,17 @@ function createBuildCacheProvider(internals = {}) {
 			}
 			return finalPath;
 		} finally {
-			// Release our claim whether or not the upload succeeded, so waiters
-			// either find the artifact or get to build themselves.
-			let owner;
-			try {
-				owner = readLock(lockPath)?.owner;
-			} catch {
-				// A lock that cannot be read is not ours to release.
+			if (readArtifact(entry)) {
+				clearPublishedClaims(entry);
+			} else if (claim && readLock(claim.path)?.text === claim.text) {
+				// Failed claims remain immutable: reusing their path would let a
+				// delayed reader create a second branch of the ownership chain.
+				createExclusive(
+					claimRecord(entry, claim.text, 'released'),
+					'released\n',
+				);
 			}
-			if (owner === process.pid) fs.rmSync(lockPath, { force: true });
+			if (claims.get(entry) === claim) claims.delete(entry);
 		}
 	}
 

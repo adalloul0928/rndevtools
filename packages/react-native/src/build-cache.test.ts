@@ -15,7 +15,9 @@ type Fs = {
 	) => void;
 	writeFileSync: (p: string, data: string) => void;
 	existsSync: (p: string) => boolean;
-	readFileSync: (p: string, encoding: 'utf8') => string;
+	readFileSync: (p: string | number, encoding: 'utf8') => string;
+	linkSync: (source: string, destination: string) => void;
+	renameSync: (source: string, destination: string) => void;
 	readdirSync: (p: string) => string[];
 	statSync: (p: string) => { isDirectory: () => boolean };
 	utimesSync: (p: string, atime: Date, mtime: Date) => void;
@@ -301,9 +303,20 @@ describe('build cache provider', () => {
 			JSON.stringify({ pid: 4_194_303, startedAt: 0 }),
 		);
 		expect(await resolveBuildCache(context, { cacheDirectory })).toBeNull();
-		expect(
-			JSON.parse(readFileSync(path.join(entry, 'build.lock'), 'utf8')).pid,
-		).toBe(process.pid);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		await uploadBuildCache(
+			{ ...context, buildPath: makeApp(work) },
+			{ cacheDirectory },
+		);
+		expect(readdirSync(entry).sort()).toEqual([
+			'ExampleApp.app',
+			'artifact.json',
+		]);
 	});
 
 	it('treats a lock whose owner is not written yet as held, not abandoned', async () => {
@@ -333,8 +346,8 @@ describe('build cache provider', () => {
 		expect(await provider.resolveBuildCache(context, { cacheDirectory })).toBe(
 			path.join(entry, 'ExampleApp.app'),
 		);
-		// The waiter never replaced the claim with its own.
-		expect(readFileSync(path.join(entry, 'build.lock'), 'utf8')).toBe('');
+		expect(clock).toBe(2_000);
+		expect(existsSync(path.join(entry, 'build.lock'))).toBe(false);
 	});
 
 	it('reclaims a lock that stays unreadable past the grace period', async () => {
@@ -351,8 +364,20 @@ describe('build cache provider', () => {
 		const anHourAgo = new Date(Date.now() - 60 * 60 * 1_000);
 		utimesSync(lockPath, anHourAgo, anHourAgo);
 		expect(await resolveBuildCache(context, { cacheDirectory })).toBeNull();
-		expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid);
-		expect(readdirSync(entry)).toEqual(['build.lock']);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		await uploadBuildCache(
+			{ ...context, buildPath: makeApp(work) },
+			{ cacheDirectory },
+		);
+		expect(readdirSync(entry).sort()).toEqual([
+			'ExampleApp.app',
+			'artifact.json',
+		]);
 	});
 
 	it('gives exactly one of several racing processes the claim on an abandoned lock', async () => {
@@ -424,6 +449,208 @@ cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
 		}
 	});
 
+	it('returns a published artifact when another builder finishes during claim acquisition', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const entry = entryDirectory(context, { cacheDirectory });
+		const originalLink = fs.linkSync;
+		const builder = createBuildCacheProvider();
+		let upload: Promise<string | null> | undefined;
+		const spy = jest
+			.spyOn(fs, 'linkSync')
+			.mockImplementation((source, target) => {
+				if (target === path.join(entry, 'build.lock') && !upload) {
+					upload = builder.uploadBuildCache(
+						{ ...context, buildPath: makeApp(work) },
+						{ cacheDirectory },
+					);
+				}
+				originalLink(source, target);
+			});
+		try {
+			expect(await resolveBuildCache(context, { cacheDirectory })).toBe(
+				path.join(entry, 'ExampleApp.app'),
+			);
+			await upload;
+			expect(readdirSync(entry).sort()).toEqual([
+				'ExampleApp.app',
+				'artifact.json',
+			]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it('never exposes a live successor claim while an older reclaimer resumes', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const entry = entryDirectory(context, { cacheDirectory });
+		const lockPath = path.join(entry, 'build.lock');
+		mkdirSync(entry, { recursive: true });
+		writeFileSync(lockPath, JSON.stringify({ pid: 4_194_303, startedAt: 0 }));
+		const options = { cacheDirectory, waitTimeoutMs: 0 };
+		const originalRead = fs.readFileSync;
+		const originalRename = fs.renameSync;
+		let advanced = false;
+		let owner: Promise<string | null> | undefined;
+		let third: Promise<string | null> | undefined;
+		const reader = jest
+			.spyOn(fs, 'readFileSync')
+			.mockImplementation((file, encoding) => {
+				const text = originalRead(file, encoding);
+				if (typeof file === 'number' && text.includes('4194303') && !advanced) {
+					advanced = true;
+					owner = createBuildCacheProvider().resolveBuildCache(
+						context,
+						options,
+					);
+				}
+				return text;
+			});
+		const renamer = jest
+			.spyOn(fs, 'renameSync')
+			.mockImplementation((source, target) => {
+				const live =
+					source === lockPath &&
+					JSON.parse(originalRead(source, 'utf8')).pid === process.pid;
+				originalRename(source, target);
+				if (live)
+					third = createBuildCacheProvider().resolveBuildCache(
+						context,
+						options,
+					);
+			});
+		try {
+			await expect(
+				createBuildCacheProvider().resolveBuildCache(context, options),
+			).rejects.toThrow(/timed out/);
+			expect(advanced).toBe(true);
+			await expect(owner).resolves.toBeNull();
+			third ??= createBuildCacheProvider().resolveBuildCache(context, options);
+			await expect(third).rejects.toThrow(/timed out/);
+		} finally {
+			reader.mockRestore();
+			renamer.mockRestore();
+		}
+	});
+
+	it('does not release another provider instance claim after an unrelated upload fails', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const owner = createBuildCacheProvider();
+		const unrelated = createBuildCacheProvider();
+		expect(
+			await owner.resolveBuildCache(context, { cacheDirectory }),
+		).toBeNull();
+		const invalid = path.join(work, 'invalid.ipa');
+		writeFileSync(invalid, 'not an app');
+		await expect(
+			unrelated.uploadBuildCache(
+				{ ...context, buildPath: invalid },
+				{ cacheDirectory },
+			),
+		).rejects.toThrow(/expected/);
+		await expect(
+			unrelated.resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+	});
+
+	it('ignores release markers left behind by a previous claim', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const entry = entryDirectory(context, { cacheDirectory });
+		mkdirSync(entry, { recursive: true });
+		writeFileSync(path.join(entry, 'build.lock.released'), 'released\n');
+		const owner = createBuildCacheProvider();
+		expect(
+			await owner.resolveBuildCache(context, { cacheDirectory }),
+		).toBeNull();
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		const invalid = path.join(work, 'invalid.ipa');
+		writeFileSync(invalid, 'not an app');
+		await expect(
+			owner.uploadBuildCache(
+				{ ...context, buildPath: invalid },
+				{ cacheDirectory },
+			),
+		).rejects.toThrow(/expected/);
+		// Simulate interruption after cleanup removed the claim but left its release record.
+		rmSync(path.join(entry, 'build.lock'));
+		const next = createBuildCacheProvider();
+		expect(
+			await next.resolveBuildCache(context, { cacheDirectory }),
+		).toBeNull();
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		await next.uploadBuildCache(
+			{ ...context, buildPath: makeApp(work) },
+			{ cacheDirectory },
+		);
+		expect(readdirSync(entry).sort()).toEqual([
+			'ExampleApp.app',
+			'artifact.json',
+		]);
+	});
+
+	it('bounds corrupted repeated-content generations instead of looping', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const entry = entryDirectory(context, { cacheDirectory });
+		mkdirSync(entry, { recursive: true });
+		const stale = JSON.stringify({ pid: 4_194_303, startedAt: 0 });
+		writeFileSync(path.join(entry, 'build.lock'), stale);
+		expect(
+			await createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+			}),
+		).toBeNull();
+		const successor = readdirSync(entry).find((name) => name.endsWith('.next'));
+		writeFileSync(path.join(entry, successor as string), stale);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, { cacheDirectory }),
+		).rejects.toThrow(/corrupt or excessive cache lock generations/);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/corrupt or excessive cache lock generations/);
+	});
+
+	it('checks the timeout while following multiple abandoned generations', async () => {
+		const context = { fingerprintHash: HASH, platform: 'ios', runOptions: {} };
+		const entry = entryDirectory(context, { cacheDirectory });
+		mkdirSync(entry, { recursive: true });
+		writeFileSync(
+			path.join(entry, 'build.lock'),
+			JSON.stringify({ pid: 4_194_303, startedAt: 0 }),
+		);
+		expect(
+			await createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+			}),
+		).toBeNull();
+		const successor = readdirSync(entry).find((name) => name.endsWith('.next'));
+		writeFileSync(
+			path.join(entry, successor as string),
+			JSON.stringify({ pid: 4_194_303, startedAt: 1 }),
+		);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		expect(readdirSync(entry)).toHaveLength(2);
+	});
+
 	it('gives up waiting after the timeout with a message naming the owner', async () => {
 		let clock = 0;
 		const provider = createBuildCacheProvider({
@@ -468,8 +695,29 @@ cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
 			uploadBuildCache({ ...context, buildPath: notAnApp }, { cacheDirectory }),
 		).rejects.toThrow(/expected a \.app bundle for ios/);
 		const entry = entryDirectory(context, { cacheDirectory });
-		expect(existsSync(path.join(entry, 'build.lock'))).toBe(false);
 		expect(existsSync(path.join(entry, 'artifact.json'))).toBe(false);
+		const next = createBuildCacheProvider();
+		expect(
+			await next.resolveBuildCache(context, { cacheDirectory }),
+		).toBeNull();
+		// An old provider retry cannot release the new provider's same-PID claim.
+		await expect(
+			uploadBuildCache({ ...context, buildPath: notAnApp }, { cacheDirectory }),
+		).rejects.toThrow(/expected/);
+		await expect(
+			createBuildCacheProvider().resolveBuildCache(context, {
+				cacheDirectory,
+				waitTimeoutMs: 0,
+			}),
+		).rejects.toThrow(/timed out/);
+		await next.uploadBuildCache(
+			{ ...context, buildPath: makeApp(work, 'build.lock.app') },
+			{ cacheDirectory },
+		);
+		expect(readdirSync(entry).sort()).toEqual([
+			'artifact.json',
+			'build.lock.app',
+		]);
 	});
 
 	it('stores Android APKs as files', async () => {
