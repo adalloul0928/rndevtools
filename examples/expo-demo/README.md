@@ -50,12 +50,11 @@ recommends for per-worktree local Supabase. It does three things:
 
 With local Supabase turned on in the desktop app's Supabase tab, a lane started on this app gets its own native stack. Its Metro receives only the stack's public URL and publishable key, under the variable names configured in that tab.
 
-RN Devtools runs the worktree's own CLI and never a global one, so a real app adds `supabase` as an exact devDependency. 2.121.0 is the release RN Devtools verifies. This example leaves the dependency out to keep its install small.
-
-To start a stack yourself:
+RN Devtools runs the worktree's own CLI and never a global one, so a real app adds `supabase` as an exact devDependency. 2.121.0 is the release RN Devtools verifies. This example leaves the CLI out on purpose to keep its install small, so add it before you or a lane starts a stack. This workspace's `minimumReleaseAge` refuses releases younger than seven days, so the add fails until the pinned release is a week old:
 
 ```sh
-pnpm exec supabase start --runtime native
+pnpm --dir examples/expo-demo add -D -E supabase@2.121.0
+pnpm --dir examples/expo-demo exec supabase start --runtime native   # start a stack yourself
 ```
 
 Never use `--runtime auto`: it prefers Docker, whose stacks listen on every interface.

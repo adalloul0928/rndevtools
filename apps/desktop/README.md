@@ -78,10 +78,16 @@ That command verifies the pinned vendored SimSlim source, builds the Go and
 Swift helpers for the current architecture, then starts Electron.
 
 The pinned Electron release has no install hook, so `pnpm install` deliberately
-does not fetch the runtime. The first `dev`, `package`, or `make` prints
-`Downloading Electron binary...` and pulls roughly 110 MB from GitHub releases;
-every later run reuses it. On an offline machine or behind a proxy, set
-`ELECTRON_MIRROR` before that first run.
+does not fetch the runtime. The first `dev` or `start` prints
+`Downloading Electron binary...` and pulls roughly 110 MB from GitHub releases
+into `node_modules/electron/dist`; every later run reuses it. `package` and
+`make` never use that copy: electron-builder downloads the same zip through its
+own `@electron/get`, reuses one already in Electron's cache
+(`~/Library/Caches/electron` on macOS), and still fetches `SHASUMS256.txt` on
+every run. Packaging offline therefore needs a seeded `SHASUMS256.txt-44.7.0`
+(named for the pinned version) in that cache root, or electron-builder's
+`electronDist` option. On an offline machine or behind a proxy, set
+`ELECTRON_MIRROR` before the first run; it applies to both downloads.
 
 The mobile diagnostics client starts only when the host's
 `shouldStartDesktopClient({ isDevelopmentBuild })` check passes: in a

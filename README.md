@@ -74,8 +74,8 @@ pnpm --filter @rndevtools/desktop native:build   # Go + Swift helpers
 pnpm --filter @rndevtools/desktop dev
 ```
 
-Native helper builds need Go, Swift, and `govulncheck`
-(`go install golang.org/x/vuln/cmd/govulncheck@v1.8.0`).
+Native helper builds need Go and Swift. `native:check` additionally needs
+`govulncheck` (`go install golang.org/x/vuln/cmd/govulncheck@v1.8.0`).
 
 Simulator mutation is gated on code signing: the helper verifies that its
 parent process is signed by a pinned Apple Team ID, injected at build time from
