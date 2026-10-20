@@ -11,12 +11,16 @@ pnpm quality
 
 `packages/core` and `packages/react-native` build with no special access. The
 Electron app in `apps/desktop` needs a HeroUI Pro license and a
-`HEROUI_AUTH_TOKEN` to install its renderer dependencies, plus Go, Swift, and
-`govulncheck` for the native helpers.
+`HEROUI_AUTH_TOKEN`. Without one `pnpm install` still succeeds, but the
+licensed package is not hydrated, so the desktop typecheck and build fail on a
+missing module. The native helpers need Go, Swift, and `govulncheck`, and no
+license.
 
-CI cannot run the desktop job for pull requests from forks, because forked PRs
-cannot read repository secrets. If your change touches `apps/desktop`, say so in
-the PR and a maintainer will run that job.
+Pull requests from forks cannot read repository secrets, so CI skips the
+Electron gate for them and says so in a notice. Everything else runs: both npm
+packages, the example app, and the full Go and Swift helper gate. If your
+change touches the renderer under `apps/desktop`, say so in the PR and a
+maintainer will run that job.
 
 ## Ground rules
 

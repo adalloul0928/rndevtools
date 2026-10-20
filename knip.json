@@ -30,7 +30,7 @@
 		},
 		"examples/expo-demo": {
 			"entry": [
-				"src/lib/devtools-disabled.ts!"
+				"src/lib/devtools-host-disabled.tsx!"
 			],
 			"ignoreDependencies": [
 				"expo-updates",

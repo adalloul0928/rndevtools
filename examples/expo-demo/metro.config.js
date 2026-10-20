@@ -11,9 +11,9 @@ module.exports = withDevtoolsPruning(config, {
 	projectRoot: __dirname,
 	replace: [
 		{
-			module: '@/devtools/desktop',
-			path: 'src/devtools/desktop',
-			stub: 'src/lib/devtools-disabled.ts',
+			module: '@/devtools/host',
+			path: 'src/devtools/host',
+			stub: 'src/lib/devtools-host-disabled.tsx',
 		},
 	],
 });

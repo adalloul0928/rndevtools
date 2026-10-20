@@ -7,7 +7,8 @@
 		"lint": "biome check src",
 		"typecheck": "tsc --noEmit",
 		"verify:bundle": "expo export --platform ios --output-dir ./build --no-bytecode && rndevtools-verify-bundle ./build",
-		"quality": "pnpm lint && pnpm typecheck"
+		"quality": "pnpm lint && pnpm typecheck && pnpm verify:seam",
+		"verify:seam": "node scripts/verify-prune-seam.mjs"
 	},
 	"dependencies": {
 		"@expo/material-symbols": "catalog:",
