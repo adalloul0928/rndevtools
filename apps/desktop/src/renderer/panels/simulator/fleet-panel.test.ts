@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { setChecklistHidden } from '@/lib/onboarding';
 import type { LaneView } from '../../../shared/lane-protocol';
 import {
 	createSupabaseDemoState,
@@ -45,6 +46,9 @@ vi.mock('@/state/agent-runtime', () => ({
 }));
 vi.mock('@/state/simulator-stream-runtime', () => ({
 	useLiveScreen: () => ({ screen: undefined, status: undefined }),
+}));
+vi.mock('@/state/recipe-runtime', () => ({
+	useRecipeRuntime: () => ({ state: { recipes: [] } }),
 }));
 
 describe('Simulator Fleet destructive-action policy', () => {
@@ -216,9 +220,13 @@ describe('Simulator Fleet first discovery', () => {
 			selectedDevice: undefined,
 			setSelectedDeviceUdid: () => undefined,
 			state: {
-				capability: { status },
+				capability: {
+					status,
+					runtimeAvailability: { total: 0, available: 0 },
+				},
 				devices: [],
 				runtimes: [],
+				captures: [],
 				metrics: { byDevice: {}, status: 'checking' },
 				jobs: [],
 				deviceTypes: [],
@@ -227,7 +235,7 @@ describe('Simulator Fleet first discovery', () => {
 			},
 		};
 		runtimes.lanes = {
-			state: { lanes: [] },
+			state: { lanes: [], repositories: [], worktrees: [] },
 			pendingOperation: null,
 			runOperation: () => undefined,
 			focusLane: () => undefined,
@@ -242,10 +250,21 @@ describe('Simulator Fleet first discovery', () => {
 			renderWithoutTargets('available', true),
 		]) {
 			expect(html).toContain('Looking for Simulators');
-			expect(html).not.toContain('No Simulator target discovered');
+			expect(html).not.toContain('Welcome to RN Devtools');
 		}
+	});
+
+	it('greets an empty fleet with Get started until it is hidden', () => {
 		expect(renderWithoutTargets('available', false)).toContain(
-			'No Simulator target discovered'
+			'Welcome to RN Devtools'
 		);
+		setChecklistHidden(true);
+		try {
+			expect(renderWithoutTargets('available', false)).toContain(
+				'No Simulator target discovered'
+			);
+		} finally {
+			setChecklistHidden(false);
+		}
 	});
 });

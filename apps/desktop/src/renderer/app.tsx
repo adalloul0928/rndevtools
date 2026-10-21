@@ -25,6 +25,8 @@ import {
 	useState,
 } from 'react';
 import { PanelErrorBoundary } from '@/components/error-boundary';
+import { GetStartedCard, useGetStarted } from '@/components/get-started';
+import { SetupFlow } from '@/components/setup-flow';
 import { ActionNotice, StatusPill } from '@/components/status-ui';
 import {
 	type ActionNoticeRuntime,
@@ -36,6 +38,7 @@ import {
 } from '@/lib/action-notice';
 import { requestNetworkFilter, useAppTraffic } from '@/lib/app-traffic';
 import { setAppearancePreference, useAppearance } from '@/lib/appearance';
+import { useOnboarding } from '@/lib/onboarding';
 import { formatShortcutRange } from '@/lib/shell-navigation';
 import { appTrafficBanner } from '@/simulator/app-traffic-model';
 import {
@@ -473,6 +476,7 @@ export function App() {
 					onDismiss={notice.clear}
 				/>
 			) : null}
+			<SetupFlow />
 		</div>
 	);
 }
@@ -848,6 +852,7 @@ function SimulatorSidebar({
 				))}
 			</nav>
 			<footer className="desktop-sidebar-footer">
+				<GetStartedCard />
 				<button
 					aria-label={`Simulator capability ${state.capability.status}${state.capability.xcodeVersion ? ` · Xcode ${state.capability.xcodeVersion}` : ''} · open Settings`}
 					className="broker-summary simulator-capability-summary"
@@ -1039,9 +1044,14 @@ function SimulatorContent({
 	setActiveTool: (tool: SimulatorToolId) => void;
 }) {
 	const { state } = useSimulatorRuntime();
+	const { checklistHidden } = useOnboarding();
+	const { progress } = useGetStarted();
+	// While Get started shows in the sidebar it already says what is left.
+	const checklistShown = !checklistHidden && !progress.complete;
 	return (
 		<>
 			{state.capability.status !== 'available' &&
+			!checklistShown &&
 			!TOOLS_WITHOUT_SETUP_BANNER.has(activeTool) ? (
 				<button
 					aria-label="Simulator setup needs attention · open Settings"

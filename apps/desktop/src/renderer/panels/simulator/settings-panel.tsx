@@ -14,6 +14,7 @@ import {
 	MonitorUp,
 	Moon,
 	Network,
+	Rocket,
 	ShieldCheck,
 	Smartphone,
 	Sun,
@@ -34,6 +35,7 @@ import {
 	type ReadinessStatus,
 } from '@/components/ui';
 import { setAppearancePreference, useAppearance } from '@/lib/appearance';
+import { openSetup, setChecklistHidden, useOnboarding } from '@/lib/onboarding';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
@@ -320,6 +322,8 @@ export function SettingsPanel() {
 
 					<AppearanceSurface />
 
+					<GetStartedSurface />
+
 					<aside className="sim-settings-aside">
 						<Disclosure title="Advanced tools & permissions">
 							<section className="sim-security-boundary">
@@ -440,6 +444,51 @@ function AppearanceSurface() {
 							</Button>
 						))}
 					</fieldset>
+				</div>
+			</div>
+		</section>
+	);
+}
+
+/** Setup again, and the way back for a hidden Get started. */
+function GetStartedSurface() {
+	const { checklistHidden } = useOnboarding();
+	return (
+		<section className="sim-surface">
+			<header className="sim-surface-header">
+				<div>
+					<h2>Get started</h2>
+				</div>
+			</header>
+			<div className="sim-capability-list">
+				<div className="sim-capability-row">
+					<span className="sim-capability-icon">
+						<Rocket className="h-4 w-4" />
+					</span>
+					<div className="sim-capability-copy">
+						<div>
+							<strong>Setup and checklist</strong>
+						</div>
+						<p>
+							{checklistHidden
+								? 'Get started is hidden from the sidebar.'
+								: 'Get started stays in the sidebar until every task is done.'}
+						</p>
+					</div>
+					<div className="flex shrink-0 items-center gap-2">
+						{checklistHidden ? (
+							<Button
+								size="sm"
+								variant="ghost"
+								onPress={() => setChecklistHidden(false)}
+							>
+								Show in sidebar
+							</Button>
+						) : null}
+						<Button size="sm" variant="secondary" onPress={() => openSetup()}>
+							Run setup again
+						</Button>
+					</div>
 				</div>
 			</div>
 		</section>

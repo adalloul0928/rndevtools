@@ -165,6 +165,12 @@ export class DesktopHarness {
 		const window = await app.firstWindow();
 		await window.waitForLoadState('domcontentloaded');
 		await window.waitForSelector('.desktop-provider', { timeout: 30_000 });
+		// A fresh profile would open first-run setup over the panels under test.
+		await window.evaluate(() =>
+			window.localStorage.setItem('rndevtools.desktop.onboarding.setup', 'done')
+		);
+		await window.reload();
+		await window.waitForSelector('.desktop-provider', { timeout: 30_000 });
 		return new DesktopHarness(app, window);
 	}
 
