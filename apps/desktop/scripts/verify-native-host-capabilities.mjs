@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { desktopVersion } from './native-host-version.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopDirectory = resolve(scriptDirectory, '..');
@@ -29,6 +30,11 @@ if (process.argv.length > 3) {
 }
 
 try {
+	// Electron marks a host untrusted, disabling native permission state and
+	// image composition, when its v2 or v3 handshake reports a version other
+	// than the manifest's appVersion. The build writes that from package.json,
+	// which is also the packaged app's version.
+	const appVersion = desktopVersion();
 	const stats = lstatSync(helperPath);
 	assert.equal(stats.isFile(), true, 'native host must be a regular file');
 	assert.equal(
@@ -46,6 +52,7 @@ try {
 		runtimeDownloads: false,
 		simulatorMutation: false,
 	});
+	assertHelperVersion(legacyHandshake, appVersion);
 
 	const currentHandshake = invoke(2, 'capability-handshake', 'handshake');
 	assert.deepEqual(currentHandshake.result.capabilities.operations, [
@@ -55,6 +62,11 @@ try {
 	]);
 	assert.equal(currentHandshake.result.capabilities.capabilityInspection, true);
 	assert.equal(currentHandshake.result.capabilities.liveCaptureSessions, false);
+	assertHelperVersion(currentHandshake, appVersion);
+	assertHelperVersion(
+		invoke(3, 'composition-handshake', 'handshake'),
+		appVersion
+	);
 
 	const { result } = invoke(2, 'capability-status', 'capability_status');
 	assert.ok(['arm64', 'x86_64'].includes(result.architecture));
@@ -103,10 +115,18 @@ try {
 	});
 
 	process.stdout.write(
-		`Verified native-host protocols and read-only capability status at ${helperPath}.\n`
+		`Verified native-host ${appVersion} protocols and read-only capability status at ${helperPath}.\n`
 	);
 } catch (error) {
 	fail(error instanceof Error ? (error.stack ?? error.message) : String(error));
+}
+
+function assertHelperVersion(handshake, appVersion) {
+	assert.equal(
+		handshake.result.helperVersion,
+		appVersion,
+		`protocol v${handshake.protocolVersion} handshake reports helperVersion ${handshake.result.helperVersion}, but the desktop app version is ${appVersion}`
+	);
 }
 
 function invoke(protocolVersion, requestId, operation) {

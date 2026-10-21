@@ -13,6 +13,10 @@ import {
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+	nativeHostVersionDrift,
+	syncNativeHostVersionSource,
+} from './native-host-version.mjs';
+import {
 	SIMSLIM_PATCH_SET,
 	SIMSLIM_PATCH_SHA256,
 	SIMSLIM_UPSTREAM_COMMIT,
@@ -45,6 +49,19 @@ const packageManifest = JSON.parse(
 );
 const catalogVersion = 'simslim-v0.12.2-6518ba7e-rndevtools.1-presets.3';
 verifyVendoredSimSlim(goPackage);
+// The Go helpers take the version through -ldflags below; the Swift host
+// compiles it from a committed generated source. Regenerate that source before
+// hashing the source identity so no build yields a host whose handshake
+// Electron rejects. A public release must match its commit, so it refuses a
+// stale file instead of rewriting it.
+if (process.env.RNDEVTOOLS_RELEASE_MODE === 'public') {
+	const versionDrift = nativeHostVersionDrift(desktopDirectory);
+	if (versionDrift) fail(versionDrift);
+} else if (syncNativeHostVersionSource(desktopDirectory).changed) {
+	console.warn(
+		`Regenerated the native host version for ${packageManifest.version}. Commit HelperVersion.swift with the version change.`
+	);
+}
 const sourceCommit = nativeSourceIdentity();
 
 const options = parseOptions(process.argv.slice(2));
