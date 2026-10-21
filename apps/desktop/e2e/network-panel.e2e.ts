@@ -64,12 +64,12 @@ test('pause toggles between live and paused view', async () => {
 test('selecting a request switches detail tabs', async () => {
 	const firstRow = harness.window.locator('.desktop-grid [role="row"]').nth(1);
 	await firstRow.click();
-	const headersTab = harness.window.getByRole('button', {
-		name: 'headers',
+	const headersTab = harness.window.getByRole('tab', {
+		name: 'Headers',
 		exact: true,
 	});
 	await headersTab.click();
-	await expect(headersTab).toHaveAttribute('aria-pressed', 'true');
+	await expect(headersTab).toHaveAttribute('aria-selected', 'true');
 	await expect(
 		harness.window.getByText('Request headers').first()
 	).toBeVisible();

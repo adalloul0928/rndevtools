@@ -208,6 +208,15 @@ export function DenseVirtualList<T extends object>({
 	);
 }
 
+const TARGET_STATE_LABELS: Record<SimulatorDevice['state'], string> = {
+	booted: 'Booted',
+	shutdown: 'Shut down',
+	booting: 'Booting',
+	shuttingDown: 'Shutting down',
+	creating: 'Creating',
+	unknown: 'Unknown',
+};
+
 export function TargetStatePill({
 	state,
 }: {
@@ -223,7 +232,8 @@ export function TargetStatePill({
 					: 'default';
 	return (
 		<span className={`sim-state-pill is-${tone}`}>
-			{state === 'shuttingDown' ? 'shutting down' : state}
+			<span aria-hidden="true" className="sim-state-dot" />
+			{TARGET_STATE_LABELS[state]}
 		</span>
 	);
 }

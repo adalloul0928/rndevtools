@@ -240,10 +240,13 @@ export function CodePreview({
 	value,
 	label,
 	maxHeight = 320,
+	actions,
 }: {
 	value: string | undefined;
 	label?: string;
 	maxHeight?: number;
+	/** Controls beside Copy in the label row, such as a format toggle. */
+	actions?: ReactNode;
 }) {
 	if (value === undefined) {
 		return <p className="text-xs text-(--text-3)">No captured value.</p>;
@@ -254,7 +257,10 @@ export function CodePreview({
 			{label ? (
 				<div className="flex h-8 items-center justify-between border-b border-foreground/8 px-3 font-mono text-xs uppercase tracking-[0.06em] text-(--text-3)">
 					<span>{label}</span>
-					<CopyButton value={value} />
+					<span className="flex items-center gap-2 normal-case tracking-normal">
+						{actions}
+						<CopyButton value={value} />
+					</span>
 				</div>
 			) : null}
 			<pre

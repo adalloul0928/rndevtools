@@ -1,10 +1,6 @@
 import { Asterisk, ChevronRight, Cpu } from 'lucide-react';
 import { Badge } from '@/components/ui';
-import {
-	agentLabel,
-	type FleetSlimSummary,
-	shortPath,
-} from '@/simulator/fleet-model';
+import { agentLabel, shortPath } from '@/simulator/fleet-model';
 import type { Lane, LaneAgent } from '../../shared/lane-protocol';
 import { laneHealth, laneSlimSummary } from '../../shared/lane-protocol';
 
@@ -82,20 +78,6 @@ export function AgentBadge({
 				<code className="agent-badge-session">{agent.sessionId}</code>
 			) : null}
 		</span>
-	);
-}
-
-export function SlimChip({ slim }: { slim: FleetSlimSummary }) {
-	const tone =
-		slim.level === 'slim'
-			? 'success'
-			: slim.level === 'partial'
-				? 'warning'
-				: 'default';
-	return (
-		<Badge tone={tone} className="slim-chip">
-			<span title={slim.detail}>{slim.label}</span>
-		</Badge>
 	);
 }
 
