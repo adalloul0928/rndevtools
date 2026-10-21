@@ -210,12 +210,12 @@ export function DiagnosticsPanel() {
 						icon={<Radio className="h-4 w-4" />}
 						title="Connection endpoints"
 					>
-						<p className="m-0 border-b border-white/8 px-4 py-3 text-xs text-(--text-3)">
+						<p className="m-0 border-b border-foreground/8 px-4 py-3 text-xs text-(--text-3)">
 							Use the first reachable WebSocket URL from a development device.
 						</p>
 						{broker?.urls.map((url) => (
 							<div
-								className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+								className="flex items-center gap-3 border-b border-foreground/[0.06] px-4 py-3 last:border-0"
 								key={url}
 							>
 								<span
@@ -233,7 +233,7 @@ export function DiagnosticsPanel() {
 							</p>
 						) : null}
 						{broker?.error ? (
-							<div className="flex items-start gap-2 border-t border-red-400/15 bg-red-400/[0.05] px-4 py-3 text-xs leading-5 text-red-200">
+							<div className="flex items-start gap-2 border-t border-danger/15 bg-danger/[0.05] px-4 py-3 text-xs leading-5 text-danger-text">
 								<CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{' '}
 								{broker.error}
 							</div>
@@ -287,7 +287,7 @@ export function DiagnosticsPanel() {
 					) : (
 						filtered.map((entry) => (
 							<div
-								className="grid grid-cols-[78px_72px_110px_minmax(0,1fr)] items-start gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+								className="grid grid-cols-[78px_72px_110px_minmax(0,1fr)] items-start gap-3 border-b border-foreground/[0.06] px-4 py-3 last:border-0"
 								key={`${entry.scope}-${entry.id}`}
 							>
 								<span className="font-mono text-xs text-(--text-3)">
@@ -351,14 +351,14 @@ function HealthCard({
 	footer?: ReactNode;
 }) {
 	const color = {
-		brand: 'border-(--brand-border) bg-(--brand-soft) text-(--brand)',
-		warning: 'border-amber-400/15 bg-amber-400/[0.055] text-amber-300',
-		danger: 'border-red-400/15 bg-red-400/[0.055] text-red-300',
-		default: 'border-white/10 bg-white/[0.04] text-(--muted)',
+		brand: 'border-(--brand-border) bg-(--brand-soft) text-(--brand-text)',
+		warning: 'border-warning/15 bg-warning/[0.055] text-warning-text',
+		danger: 'border-danger/15 bg-danger/[0.055] text-danger-text',
+		default: 'border-foreground/10 bg-foreground/[0.04] text-(--muted)',
 	}[tone];
 	return (
 		<Card
-			className="rounded-lg border border-white/8 bg-white/[0.025] p-4 shadow-none"
+			className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4 shadow-none"
 			variant="secondary"
 		>
 			<div className="flex items-start justify-between gap-3">
@@ -389,7 +389,7 @@ function HealthCard({
 
 function VersionRow({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="flex items-center justify-between gap-3 border-t border-white/[0.06] py-2 first:border-0">
+		<div className="flex items-center justify-between gap-3 border-t border-foreground/[0.06] py-2 first:border-0">
 			<span className="text-xs text-(--text-3)">{label}</span>
 			<InlineCode className="max-w-[170px] truncate">{value}</InlineCode>
 		</div>

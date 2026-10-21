@@ -130,7 +130,7 @@ export function ZustandPanel() {
 				</PanelNotice>
 			) : null}
 			<div className="zustand-layout grid min-h-0 flex-1 grid-cols-[300px_minmax(360px,1fr)_340px]">
-				<div className="panel-scroll border-r border-white/8 p-3">
+				<div className="panel-scroll border-r border-foreground/8 p-3">
 					{filtered.length === 0 ? (
 						<EmptyPanel
 							icon={<Store className="h-5 w-5" />}
@@ -142,7 +142,7 @@ export function ZustandPanel() {
 							{filtered.map((store) => (
 								<button
 									aria-pressed={selected?.id === store.id}
-									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === store.id ? 'border-white/18 bg-white/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === store.id ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
 									key={store.id}
 									type="button"
 									onClick={() => setSelectedId(store.id)}
@@ -180,7 +180,7 @@ export function ZustandPanel() {
 						</div>
 					)}
 				</div>
-				<div className="panel-scroll border-r border-white/8 p-5">
+				<div className="panel-scroll border-r border-foreground/8 p-5">
 					{selected ? (
 						<>
 							<div className="mb-4 flex items-start justify-between gap-4">
@@ -199,7 +199,7 @@ export function ZustandPanel() {
 										: 'Read only'}
 								</div>
 							</div>
-							<dl className="mb-4 rounded-lg border border-white/8 bg-white/[0.02] px-3">
+							<dl className="mb-4 rounded-lg border border-foreground/8 bg-foreground/[0.02] px-3">
 								<KeyValue label="Registry id" value={selected.id} mono />
 								<KeyValue
 									label="Projected keys"
@@ -226,7 +226,7 @@ export function ZustandPanel() {
 							/>
 							{selected.error ? (
 								<div
-									className="mt-4 rounded-md border border-red-400/20 bg-red-400/[0.06] p-3 text-xs text-red-300"
+									className="mt-4 rounded-md border border-danger/20 bg-danger/[0.06] p-3 text-xs text-danger-text"
 									role="alert"
 								>
 									{selected.error}
@@ -256,7 +256,7 @@ export function ZustandPanel() {
 									>
 										<TextArea
 											aria-label={`JSON patch for ${selected.title}`}
-											className="min-h-32 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-white/25"
+											className="min-h-32 w-full rounded-md border border-foreground/10 bg-background/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-foreground/25"
 											value={patchDraft}
 											onChange={(event) => {
 												if (!selected) return;
@@ -373,7 +373,7 @@ export function ZustandPanel() {
 						<div className="space-y-2">
 							{selectedChanges.map((change) => (
 								<div
-									className="rounded-lg border border-white/8 bg-white/[0.025] p-3"
+									className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-3"
 									key={change.id}
 								>
 									<div className="flex items-center justify-between gap-2">
@@ -403,14 +403,14 @@ export function ZustandPanel() {
 						</div>
 					)}
 					{selectedReceipts.length > 0 ? (
-						<div className="mt-5 border-t border-white/8 pt-4">
+						<div className="mt-5 border-t border-foreground/8 pt-4">
 							<div className="mb-3 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 								Mutation receipts
 							</div>
 							<div className="space-y-2">
 								{selectedReceipts.map((receipt) => (
 									<div
-										className="rounded-lg border border-white/8 bg-white/[0.025] p-3"
+										className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-3"
 										key={receipt.id}
 									>
 										<div className="flex items-center justify-between gap-2">
@@ -430,7 +430,7 @@ export function ZustandPanel() {
 											{receipt.changedKeys.join(', ') || 'no projected changes'}
 										</p>
 										{receipt.error ? (
-											<p className="mb-0 mt-2 text-xs leading-4 text-red-300">
+											<p className="mb-0 mt-2 text-xs leading-4 text-danger-text">
 												{receipt.error}
 											</p>
 										) : null}

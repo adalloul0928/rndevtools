@@ -1,5 +1,9 @@
 import { errorText } from '@/lib/runtime-action';
 import {
+	type AppearanceBridge,
+	appearancePreferenceSchema,
+} from '../../shared/appearance-protocol';
+import {
 	applyDemoAction,
 	createDemoDevice,
 	tickDemoDevice,
@@ -127,5 +131,35 @@ export function createBrowserBridge(): DesktopBridge {
 			};
 		},
 		runAction,
+	};
+}
+
+const APPEARANCE_KEY = 'rndevtools.desktop.appearance';
+
+/**
+ * The preview keeps its appearance in local storage. It cannot move the
+ * page's `prefers-color-scheme`, so Light and Dark hold through the class
+ * the renderer sets instead.
+ */
+export function createBrowserAppearanceBridge(): AppearanceBridge {
+	return {
+		getAppearance: async () => {
+			try {
+				return appearancePreferenceSchema
+					.catch('system')
+					.parse(localStorage.getItem(APPEARANCE_KEY));
+			} catch {
+				return 'system';
+			}
+		},
+		setAppearance: async (value) => {
+			const preference = appearancePreferenceSchema.parse(value);
+			try {
+				localStorage.setItem(APPEARANCE_KEY, preference);
+			} catch {
+				// Persistence is optional in the preview; the choice still applies.
+			}
+			return preference;
+		},
 	};
 }

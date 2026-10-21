@@ -167,16 +167,16 @@ export function ScenariosPanel() {
 				description="Run bounded, versioned app-state transactions with full preflight, rollback capture, active-state visibility, and one-tap undo."
 				meta={
 					runtime.recoveryError ? (
-						<span className="flex items-center gap-1.5 text-(--danger)">
+						<span className="flex items-center gap-1.5 text-(--danger-text)">
 							<ShieldAlert className="h-3 w-3" /> Recovery data needs attention
 						</span>
 					) : runtime.active ? (
-						<span className="flex items-center gap-1.5 text-(--warning)">
+						<span className="flex items-center gap-1.5 text-(--warning-text)">
 							<ShieldAlert className="h-3 w-3" /> {runtime.active.scenarioName}{' '}
 							{runtime.active.recoveryRequired ? 'needs recovery' : 'active'}
 						</span>
 					) : (
-						<span className="flex items-center gap-1.5 text-(--brand)">
+						<span className="flex items-center gap-1.5 text-(--brand-text)">
 							<CheckCircle2 className="h-3 w-3" /> No scenario override
 						</span>
 					)
@@ -226,7 +226,7 @@ export function ScenariosPanel() {
 				}
 			/>
 			<div className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)]">
-				<div className="panel-scroll border-r border-white/8 p-4">
+				<div className="panel-scroll border-r border-foreground/8 p-4">
 					<div className="mb-2 flex items-center justify-between px-1">
 						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Available scenarios
@@ -248,7 +248,7 @@ export function ScenariosPanel() {
 									<button
 										aria-current={isSelected ? 'true' : undefined}
 										aria-pressed={isSelected}
-										className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+										className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
 										key={scenario.id}
 										type="button"
 										onClick={() => setSelectedId(scenario.id)}
@@ -280,7 +280,7 @@ export function ScenariosPanel() {
 								aria-label="Scenario import JSON"
 								aria-describedby="scenario-import-feedback"
 								aria-invalid={!importValidation.ok}
-								className="min-h-36 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-4 text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
+								className="min-h-36 w-full rounded-md border border-foreground/10 bg-background/30 p-3 font-mono text-xs leading-4 text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
 								maxLength={512 * 1024}
 								value={importText}
 								onChange={(event) => setImportText(event.currentTarget.value)}
@@ -290,7 +290,7 @@ export function ScenariosPanel() {
 								id="scenario-import-feedback"
 							>
 								<span
-									className={`text-xs ${importValidation.ok ? 'text-(--brand)' : 'text-(--text-3)'}`}
+									className={`text-xs ${importValidation.ok ? 'text-(--brand-text)' : 'text-(--text-3)'}`}
 								>
 									{importValidation.ok
 										? 'Document looks valid — bundled IDs stay protected.'
@@ -334,7 +334,7 @@ export function ScenariosPanel() {
 					{selected ? (
 						<div className="mx-auto max-w-3xl">
 							{runtime.recoveryError ? (
-								<div className="mb-5 rounded-lg border border-(--danger)/25 bg-(--danger)/[0.08] p-4 text-xs text-(--danger)">
+								<div className="mb-5 rounded-lg border border-(--danger)/25 bg-(--danger)/[0.08] p-4 text-xs text-(--danger-text)">
 									{runtime.recoveryError}
 								</div>
 							) : null}
@@ -410,7 +410,7 @@ export function ScenariosPanel() {
 												{variable.label}
 												{variable.required ? ' *' : ''}
 												<input
-													className="mt-1 h-9 w-full rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
+													className="mt-1 h-9 w-full rounded-md border border-foreground/10 bg-background/30 px-3 text-xs text-(--foreground) outline-none transition-colors focus:border-(--brand-border)"
 													value={drafts[variable.id] ?? ''}
 													onChange={(event) =>
 														setVariablesByScenario((current) => ({
@@ -426,14 +426,14 @@ export function ScenariosPanel() {
 										))}
 									</div>
 									{variableError ? (
-										<p className="mb-0 mt-2 text-xs text-(--danger)">
+										<p className="mb-0 mt-2 text-xs text-(--danger-text)">
 											{variableError}
 										</p>
 									) : null}
 								</SectionCard>
 							) : null}
-							<div className="grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
-								<div className="border-r border-white/8 p-4">
+							<div className="grid grid-cols-3 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
+								<div className="border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Steps
 									</p>
@@ -441,7 +441,7 @@ export function ScenariosPanel() {
 										{selected.steps.length}
 									</p>
 								</div>
-								<div className="border-r border-white/8 p-4">
+								<div className="border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Variables
 									</p>
@@ -461,10 +461,10 @@ export function ScenariosPanel() {
 							<div className="mt-5 space-y-2">
 								{selected.steps.map((step, index) => (
 									<div
-										className="flex items-center gap-3 rounded-lg border border-white/8 bg-white/[0.02] p-3"
+										className="flex items-center gap-3 rounded-lg border border-foreground/8 bg-foreground/[0.02] p-3"
 										key={step.id}
 									>
-										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 font-mono text-xs tabular-nums text-(--muted)">
+										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-foreground/10 font-mono text-xs tabular-nums text-(--muted)">
 											{index + 1}
 										</span>
 										<div>
@@ -494,7 +494,7 @@ export function ScenariosPanel() {
 										{latestReceipt.stepResults.length} step results
 									</p>
 									{latestReceipt.error ? (
-										<p className="mb-0 mt-2 text-xs text-(--danger)">
+										<p className="mb-0 mt-2 text-xs text-(--danger-text)">
 											{latestReceipt.error}
 										</p>
 									) : null}

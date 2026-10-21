@@ -55,14 +55,22 @@ const SERIES = {
 	brand: {
 		line: 'var(--brand)',
 		tint: 'bg-(--brand-soft)',
-		text: 'text-(--brand)',
+		text: 'text-(--brand-text)',
 	},
-	amber: { line: '#f4b942', tint: 'bg-amber-400/10', text: 'text-amber-300' },
-	green: { line: '#4ade80', tint: 'bg-green-400/10', text: 'text-green-300' },
+	amber: {
+		line: 'var(--warning)',
+		tint: 'bg-warning/10',
+		text: 'text-warning-text',
+	},
+	green: {
+		line: 'var(--chart-cpu)',
+		tint: 'bg-brand/10',
+		text: 'text-green-700 dark:text-green-300',
+	},
 	violet: {
-		line: '#a78bfa',
+		line: 'var(--chart-memory)',
 		tint: 'bg-violet-400/10',
-		text: 'text-violet-300',
+		text: 'text-violet-700 dark:text-violet-300',
 	},
 } as const;
 
@@ -87,7 +95,7 @@ function MetricCard({
 }) {
 	const color = SERIES[tone];
 	return (
-		<div className="relative overflow-hidden rounded-lg border border-white/8 bg-white/[0.025] p-4">
+		<div className="relative overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4">
 			<div className="flex items-start justify-between gap-3">
 				<div>
 					<div className="flex items-center gap-1 text-xs text-(--text-3)">
@@ -115,13 +123,7 @@ function MetricCard({
 				viewBox="0 0 180 40"
 				preserveAspectRatio="none"
 			>
-				<line
-					x1="0"
-					x2="180"
-					y1="39.5"
-					y2="39.5"
-					stroke="rgba(255,255,255,.08)"
-				/>
+				<line x1="0" x2="180" y1="39.5" y2="39.5" stroke="var(--separator)" />
 				<polyline
 					fill="none"
 					points={sparklinePoints(values, 180, 36, 0, maxValue)}
@@ -298,7 +300,7 @@ export function PerformancePanel() {
 						actions={
 							<span className="flex items-center gap-1.5 font-mono text-xs text-(--text-3)">
 								<span
-									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-(--danger)' : 'bg-white/20'}`}
+									className={`h-1.5 w-1.5 rounded-full ${review?.isActive ? 'animate-pulse bg-(--danger)' : 'bg-foreground/20'}`}
 								/>
 								{review?.isActive ? 'Recording' : `${samples.length} samples`}
 							</span>
@@ -310,7 +312,7 @@ export function PerformancePanel() {
 						<PerformanceTrace samples={samples.slice(-120)} />
 					</SectionCard>
 					<SectionCard icon={<Activity />} title="Review summary">
-						<div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/8 bg-white/8">
+						<div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-foreground/8 bg-foreground/8">
 							{[
 								['Duration', formatDuration(summary?.durationMs)],
 								[
@@ -323,7 +325,7 @@ export function PerformancePanel() {
 								],
 								['Long frames', summary?.longFrameCount ?? '—'],
 							].map(([label, value]) => (
-								<div className="bg-[#0a0a0a] p-3" key={label}>
+								<div className="bg-surface p-3" key={label}>
 									<p className="m-0 text-xs uppercase tracking-[0.06em] text-(--text-3)">
 										{label}
 									</p>
@@ -345,7 +347,7 @@ export function PerformancePanel() {
 						) : (
 							routeStats.map((route) => (
 								<div
-									className="grid grid-cols-[minmax(0,1fr)_70px_70px] items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+									className="grid grid-cols-[minmax(0,1fr)_70px_70px] items-center gap-3 border-b border-foreground/[0.06] px-4 py-3 last:border-0"
 									key={route.route}
 								>
 									<div className="min-w-0">
@@ -360,7 +362,7 @@ export function PerformancePanel() {
 										{route.jsFps.toFixed(1)} fps
 									</span>
 									<span
-										className={`text-right font-mono text-xs ${route.lag > 32 ? 'text-amber-300' : 'text-(--brand)'}`}
+										className={`text-right font-mono text-xs ${route.lag > 32 ? 'text-warning-text' : 'text-(--brand-text)'}`}
 									>
 										{route.lag.toFixed(1)} ms
 									</span>
@@ -371,7 +373,7 @@ export function PerformancePanel() {
 					<SectionCard title="Latest samples" bodyClassName="p-0">
 						<div className="max-h-[340px] overflow-auto">
 							<table className="w-full border-collapse text-left">
-								<thead className="sticky top-0 bg-[#0b0b0b] text-xs uppercase tracking-[0.06em] text-(--text-3)">
+								<thead className="sticky top-0 bg-overlay text-xs uppercase tracking-[0.06em] text-(--text-3)">
 									<tr>
 										<th className="px-4 py-2 font-medium">JS FPS</th>
 										<th className="px-3 py-2 font-medium">Loop lag</th>
@@ -395,14 +397,14 @@ export function PerformancePanel() {
 											.reverse()
 											.map((sample) => (
 												<tr
-													className="border-t border-white/[0.06] font-mono text-xs text-(--muted)"
+													className="border-t border-foreground/[0.06] font-mono text-xs text-(--muted)"
 													key={sample.id}
 												>
 													<td className="px-4 py-2.5 text-(--foreground)">
 														{sample.jsFps.toFixed(1)}
 													</td>
 													<td
-														className={`px-3 py-2.5 ${sample.eventLoopLagMs > 32 ? 'text-amber-300' : ''}`}
+														className={`px-3 py-2.5 ${sample.eventLoopLagMs > 32 ? 'text-warning-text' : ''}`}
 													>
 														{sample.eventLoopLagMs.toFixed(1)} ms
 													</td>
@@ -449,7 +451,7 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 					<span className="h-1.5 w-3 rounded-full bg-(--brand)" /> JS FPS
 				</span>
 				<span className="flex items-center gap-1.5">
-					<span className="h-1.5 w-3 rounded-full bg-amber-400" /> Loop lag
+					<span className="h-1.5 w-3 rounded-full bg-warning" /> Loop lag
 				</span>
 			</div>
 			<svg
@@ -466,14 +468,14 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 						x2={width}
 						y1={(line / 4) * (height - 20)}
 						y2={(line / 4) * (height - 20)}
-						stroke="rgba(255,255,255,.07)"
+						stroke="var(--separator)"
 						strokeDasharray="3 5"
 					/>
 				))}
 				<polyline
 					fill="none"
 					points={lagPoints}
-					stroke="#f4b942"
+					stroke="var(--warning)"
 					strokeLinecap="round"
 					strokeLinejoin="round"
 					strokeOpacity=".65"

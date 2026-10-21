@@ -204,7 +204,7 @@ export function QueryPanel() {
 				}
 			/>
 			<Toolbar>
-				<div className="flex rounded-md border border-white/8 bg-black/25 p-0.5">
+				<div className="flex rounded-md border border-foreground/8 bg-background/25 p-0.5">
 					{(['queries', 'mutations'] as const).map((value) => (
 						<Button
 							aria-pressed={tab === value}
@@ -385,7 +385,7 @@ export function QueryPanel() {
 						<div className="grid gap-3">
 							{visibleMutations.map((mutation) => (
 								<div
-									className="rounded-lg border border-white/8 bg-white/[0.025] p-4"
+									className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4"
 									key={mutation.id}
 								>
 									<div className="flex items-start justify-between gap-4">
@@ -417,7 +417,7 @@ export function QueryPanel() {
 										</div>
 									) : null}
 									{mutation.errorText ? (
-										<div className="mt-3 rounded-md border border-red-400/20 bg-red-400/[0.06] p-3 text-xs text-red-300">
+										<div className="mt-3 rounded-md border border-danger/20 bg-danger/[0.06] p-3 text-xs text-danger-text">
 											{mutation.errorText}
 										</div>
 									) : null}
@@ -509,7 +509,7 @@ export function QueryPanel() {
 									/>
 								</dl>
 								{selected.errorText ? (
-									<div className="mb-4 rounded-md border border-red-400/20 bg-red-400/[0.06] p-3 text-xs text-red-300">
+									<div className="mb-4 rounded-md border border-danger/20 bg-danger/[0.06] p-3 text-xs text-danger-text">
 										{selected.errorText}
 									</div>
 								) : null}

@@ -2,6 +2,8 @@ export const IPC_CHANNELS = {
 	getBootstrap: 'rndevtools-desktop:get-bootstrap',
 	stateChanged: 'rndevtools-desktop:state-changed',
 	runAction: 'rndevtools-desktop:run-action',
+	getAppearance: 'rndevtools-desktop:appearance:get',
+	setAppearance: 'rndevtools-desktop:appearance:set',
 	getSimulatorState: 'rndevtools-desktop:simulator:get-state',
 	simulatorStateChanged: 'rndevtools-desktop:simulator:state-changed',
 	refreshSimulators: 'rndevtools-desktop:simulator:refresh',

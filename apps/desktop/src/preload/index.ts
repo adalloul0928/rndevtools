@@ -7,6 +7,11 @@ import {
 	agentStateSchema,
 } from '../shared/agent-protocol';
 import {
+	type AppearanceBridge,
+	type AppearancePreference,
+	appearancePreferenceSchema,
+} from '../shared/appearance-protocol';
+import {
 	type BuildInsightsBridge,
 	type BuildInsightsOperation,
 	type BuildInsightsOperationReceipt,
@@ -206,6 +211,7 @@ function subscribeToState<T>(
 }
 
 const bridge: DesktopBridge &
+	AppearanceBridge &
 	SimulatorBridge &
 	SlimmingBridge &
 	RecipeBridge &
@@ -231,6 +237,16 @@ const bridge: DesktopBridge &
 		return desktopActionResultSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.runAction, validatedAction)
 		) as DesktopActionResult;
+	},
+	getAppearance: async () =>
+		appearancePreferenceSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.getAppearance)
+		) as AppearancePreference,
+	setAppearance: async (preference: AppearancePreference) => {
+		const validated = appearancePreferenceSchema.parse(preference);
+		return appearancePreferenceSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.setAppearance, validated)
+		) as AppearancePreference;
 	},
 	getSimulatorState: async () =>
 		simulatorStateSchema.parse(

@@ -45,6 +45,38 @@ describe('DesktopSettingsStore', () => {
 		});
 	});
 
+	it('defaults the appearance to system and persists a chosen one', async () => {
+		const { root, store } = await fixture();
+		await store.load();
+		expect(store.appearance).toBe('system');
+		await store.setAppearance('light');
+		expect(store.appearance).toBe('light');
+		const reloaded = new DesktopSettingsStore(root);
+		expect(await reloaded.load()).toEqual({ version: 1, appearance: 'light' });
+		expect(reloaded.appearance).toBe('light');
+	});
+
+	it('keeps every other field when one changes, even with writes queued together', async () => {
+		const { root, store } = await fixture();
+		await store.load();
+		await Promise.all([
+			store.setXcodeDeveloperDirectory(
+				'/Applications/Xcode.app/Contents/Developer'
+			),
+			store.setAppearance('dark'),
+		]);
+		expect(await new DesktopSettingsStore(root).load()).toEqual({
+			version: 1,
+			xcodeDeveloperDirectory: '/Applications/Xcode.app/Contents/Developer',
+			appearance: 'dark',
+		});
+
+		await store.setXcodeDeveloperDirectory(undefined);
+		expect(
+			JSON.parse(await readFile(path.join(root, 'settings-v1.json'), 'utf8'))
+		).toEqual({ version: 1, appearance: 'dark' });
+	});
+
 	it('fails closed on malformed state instead of replacing it', async () => {
 		const { root, store } = await fixture();
 		await writeFile(path.join(root, 'settings-v1.json'), '{"version":2}');

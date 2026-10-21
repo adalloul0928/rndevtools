@@ -221,12 +221,12 @@ export function ComponentsPanel() {
 							? currentScreenHash.slice(0, 10)
 							: 'v1 / unknown'}
 					</span>
-					<span className="text-white/15">/</span>
+					<span className="text-foreground/15">/</span>
 					<span>
 						{targets.length} of {summary?.sourceTargetCount ?? targets.length}{' '}
 						registered
 					</span>
-					<span className="text-white/15">/</span>
+					<span className="text-foreground/15">/</span>
 					<span>{mapped.length} mapped in viewport</span>
 				</div>
 			</Toolbar>
@@ -272,7 +272,7 @@ export function ComponentsPanel() {
 				</PanelNotice>
 			) : null}
 			<div className="grid min-h-0 flex-1 grid-cols-[300px_minmax(320px,.9fr)_minmax(360px,1.1fr)] max-[1160px]:grid-cols-[280px_minmax(320px,1fr)]">
-				<div className="panel-scroll border-r border-white/8 p-3">
+				<div className="panel-scroll border-r border-foreground/8 p-3">
 					{filtered.length === 0 ? (
 						<EmptyPanel
 							icon={<BoxSelect className="h-5 w-5" />}
@@ -284,7 +284,7 @@ export function ComponentsPanel() {
 							{visibleTargets.map((target) => (
 								<button
 									aria-pressed={selected?.id === target.id}
-									className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${selected?.id === target.id ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+									className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${selected?.id === target.id ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
 									key={target.id}
 									type="button"
 									onClick={() => setSelectedId(target.id)}
@@ -302,7 +302,7 @@ export function ComponentsPanel() {
 									</p>
 									<div className="mt-2 flex items-center gap-2 text-xs text-(--text-3)">
 										{target.bounds ? (
-											<Crosshair className="h-3 w-3 text-(--brand)" />
+											<Crosshair className="h-3 w-3 text-(--brand-text)" />
 										) : null}
 										<span className="truncate">
 											{target.testID ?? target.targetKey ?? target.id}
@@ -314,7 +314,7 @@ export function ComponentsPanel() {
 					)}
 				</div>
 
-				<div className="panel-scroll border-r border-white/8 p-5 max-[1160px]:hidden">
+				<div className="panel-scroll border-r border-foreground/8 p-5 max-[1160px]:hidden">
 					<div className="mb-4">
 						<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							Measured coordinate map
@@ -433,7 +433,7 @@ export function ComponentsPanel() {
 								>
 									{selectedRenderEvents.map((event) => (
 										<div
-											className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] bg-black/10 px-2.5 py-2"
+											className="flex items-center justify-between gap-3 rounded-md border border-foreground/[0.06] bg-background/10 px-2.5 py-2"
 											key={event.id}
 										>
 											<div className="min-w-0">

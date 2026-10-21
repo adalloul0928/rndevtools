@@ -349,7 +349,7 @@ export function NetworkPanel() {
 				title="Network"
 				description="Every instrumented request, with privacy-safe headers, bodies, timing, and failure context."
 				meta={
-					<span className="flex items-center gap-1.5 text-(--brand)">
+					<span className="flex items-center gap-1.5 text-(--brand-text)">
 						<Radio className="h-3 w-3" /> {paused ? 'View paused' : 'Live view'}
 					</span>
 				}
@@ -500,7 +500,7 @@ export function NetworkPanel() {
 				</Button>
 				{setProfileReason ? (
 					<span
-						className="shrink-0 text-xs text-(--warning)"
+						className="shrink-0 text-xs text-(--warning-text)"
 						id="network-set-reason"
 					>
 						{setProfileReason}
@@ -603,7 +603,7 @@ function NetworkDetail({
 }) {
 	return (
 		<div className="flex h-full flex-col">
-			<div className="border-b border-white/8 p-4">
+			<div className="border-b border-foreground/8 p-4">
 				<div className="mb-3 flex items-center gap-2">
 					<MethodBadge method={entry.method} />
 					<StatusPill tone={statusTone(entry)}>
@@ -618,12 +618,12 @@ function NetworkDetail({
 					{formatBytes(entry.responseBytes)}
 				</p>
 			</div>
-			<div className="flex h-9 shrink-0 items-end gap-4 border-b border-white/8 px-4">
+			<div className="flex h-9 shrink-0 items-end gap-4 border-b border-foreground/8 px-4">
 				{(['overview', 'headers', 'request', 'response'] as const).map(
 					(value) => (
 						<button
 							aria-pressed={tab === value}
-							className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-white text-white' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
+							className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-foreground text-foreground' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
 							key={value}
 							type="button"
 							onClick={() => onTabChange(value)}
