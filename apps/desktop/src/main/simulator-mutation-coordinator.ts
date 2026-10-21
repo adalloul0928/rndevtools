@@ -12,6 +12,18 @@ export type SimulatorMutationCoordinatorPort = {
 		operation: (lease: SimulatorMutationLease) => Promise<T>,
 		existingLease?: SimulatorMutationLease
 	) => Promise<T>;
+	/**
+	 * Runs `operation` under the Simulator's lease only when nobody holds it or
+	 * waits for it, and otherwise resolves `{ acquired: false }` at once. For
+	 * background work that must neither queue behind a foreground mutation nor
+	 * wait on a caller that already holds the lease: lanes and recipes refresh
+	 * SimSlim from inside their own lease.
+	 */
+	tryRunExclusive: <T>(
+		simulatorUdid: string,
+		signal: AbortSignal,
+		operation: (lease: SimulatorMutationLease) => Promise<T>
+	) => Promise<{ acquired: true; value: T } | { acquired: false }>;
 };
 
 /**
@@ -94,6 +106,25 @@ export class SimulatorMutationCoordinator
 			this.#activeOwners.delete(lease.owner);
 			release();
 		}
+	}
+
+	async tryRunExclusive<T>(
+		simulatorUdid: string,
+		signal: AbortSignal,
+		operation: (lease: SimulatorMutationLease) => Promise<T>
+	): Promise<{ acquired: true; value: T } | { acquired: false }> {
+		if (!UDID_PATTERN.test(simulatorUdid)) {
+			throw new Error('Simulator mutation target must be an exact UDID.');
+		}
+		// A UDID keeps its tail until its last claimant releases, so a tail means
+		// the lease is held or awaited. Nothing is awaited between this check and
+		// runExclusive setting the tail, so no claimant can slip in between.
+		if (this.#tails.has(simulatorUdid.toUpperCase()))
+			return { acquired: false };
+		return {
+			acquired: true,
+			value: await this.runExclusive(simulatorUdid, signal, operation),
+		};
 	}
 
 	#abortError(signal: AbortSignal): Error {

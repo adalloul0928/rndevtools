@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SlimmingSimulatorStatus } from '../../shared/slimming-protocol';
 import {
 	allSelectedCheckpointsAvailable,
+	allSelectedNeedAttention,
 	isExactExperimentalAcknowledgement,
 	managedOverrideUdids,
 	restoreAndDisableInput,
@@ -83,6 +84,28 @@ describe('Slimming renderer safety model', () => {
 			})
 		).toBe(false);
 		expect(allSelectedCheckpointsAvailable([], {})).toBe(false);
+	});
+
+	it('offers forgetting a restore point only when every selected target needs attention', () => {
+		const stuck = status(FIRST_UDID, {
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+		});
+		expect(
+			allSelectedNeedAttention([FIRST_UDID], { [FIRST_UDID]: stuck })
+		).toBe(true);
+		expect(
+			allSelectedNeedAttention([FIRST_UDID, SECOND_UDID], {
+				[FIRST_UDID]: stuck,
+				[SECOND_UDID]: status(SECOND_UDID, { checkpointAvailable: true }),
+			})
+		).toBe(false);
+		expect(
+			allSelectedNeedAttention([FIRST_UDID], {
+				[FIRST_UDID]: status(FIRST_UDID, { condition: 'needs-attention' }),
+			})
+		).toBe(false);
+		expect(allSelectedNeedAttention([], {})).toBe(false);
 	});
 
 	it('binds acknowledgement to the exact sorted set of current unknown tuples', () => {

@@ -67,6 +67,29 @@ describe('slimming protocol', () => {
 		).toThrow();
 	});
 
+	it('lets only the operator forget an emergency restore point, with its own exact confirmation', () => {
+		const forget = {
+			actionId: 'forget',
+			kind: 'pending.forget',
+			simulatorUdids: [UDID],
+			confirmation: SLIMMING_CONFIRMATIONS.forget,
+		};
+		expect(slimmingActionSchema.parse(forget)).toEqual(forget);
+		expect(() =>
+			slimmingActionSchema.parse({
+				...forget,
+				confirmation: SLIMMING_CONFIRMATIONS.undo,
+			})
+		).toThrow();
+		// No agent request can express it.
+		expect(() =>
+			slimmingActionSchema.parse({
+				...forget,
+				requester: { kind: 'codex', sessionId: 'thread-1' },
+			})
+		).toThrow();
+	});
+
 	it('bounds sequential batches and rejects duplicate simulator identifiers', () => {
 		expect(() =>
 			slimmingActionSchema.parse({

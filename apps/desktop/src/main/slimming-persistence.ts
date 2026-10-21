@@ -354,11 +354,16 @@ export class SlimmingPersistence {
 		});
 	}
 
+	/**
+	 * Settles the exact pending record. `clear` drops it, its emergency
+	 * checkpoint token included, without promoting anything; its optional
+	 * operation records why, in the same write.
+	 */
 	async resolvePendingMutation(
 		simulatorUdid: string,
 		pendingMutationId: string,
 		resolution:
-			| { kind: 'clear' }
+			| { kind: 'clear'; operation?: SlimmingOperationMetadata }
 			| {
 					kind: 'complete';
 					checkpointMetadata?: SlimmingCheckpointMetadata;
@@ -372,10 +377,9 @@ export class SlimmingPersistence {
 			resolution.kind === 'complete' && resolution.checkpointMetadata
 				? checkpointMetadataSchema.parse(resolution.checkpointMetadata)
 				: undefined;
-		const validatedOperation =
-			resolution.kind === 'clear'
-				? undefined
-				: operationMetadataSchema.parse(resolution.operation);
+		const validatedOperation = resolution.operation
+			? operationMetadataSchema.parse(resolution.operation)
+			: undefined;
 		await this.#update((draft) => {
 			const pending = draft.pendingMutations[udid];
 			if (!pending || pending.id !== exactPendingId) {

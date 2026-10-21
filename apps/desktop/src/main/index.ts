@@ -1513,15 +1513,9 @@ if (!app.requestSingleInstanceLock()) {
 			});
 			agentService = new AgentService({
 				directory: path.join(app.getPath('userData'), 'agents'),
-				lanes: () =>
-					laneService?.getState().lanes.map((lane) => ({
-						id: lane.id,
-						simulatorUdid: lane.simulatorUdid,
-						worktreePath: lane.worktreePath,
-						agent: lane.agent,
-						metro: lane.metro,
-						startedAt: lane.startedAt,
-					})) ?? [],
+				// Stored lanes and the starts still booting toward one, so a claim
+				// cannot land on a device a lane is about to take.
+				lanes: () => laneService?.holdingLanes() ?? [],
 				// Supabase stack holders get the same abandonment clocks as lanes.
 				holders: () => supabaseService?.holderKeys() ?? [],
 			});

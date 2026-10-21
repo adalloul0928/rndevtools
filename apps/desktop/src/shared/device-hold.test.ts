@@ -61,6 +61,28 @@ describe('resolveDeviceHolds', () => {
 		expect(holds.has(C)).toBe(false);
 	});
 
+	it('lets a starting lane hold a free device but never take one a claim already has', () => {
+		const holds = resolveDeviceHolds({
+			lanes: [
+				{ ...lane(A, claude), starting: true },
+				{ ...lane(B, claude), starting: true },
+			],
+			claims: [{ simulatorUdid: B, ...codex }],
+			liveSessionKeys: new Set(['claude:s1', 'codex:t1']),
+			missingSince: new Map(),
+			now,
+		});
+		expect(holds.get(A)).toMatchObject({
+			via: 'lane',
+			laneId: 'lane-1',
+			holder: claude,
+		});
+		expect(holds.get(B)).toMatchObject({ via: 'claim', holder: codex });
+		// So the claimant keeps its device, and the start is the one refused.
+		expect(decideDeviceAccess(holds.get(A), codex, now).allowed).toBe(false);
+		expect(decideDeviceAccess(holds.get(B), claude, now).allowed).toBe(false);
+	});
+
 	it('marks a hold abandoned when its session is gone and schedules the release', () => {
 		const since = now - 4 * 60_000;
 		const holds = resolveDeviceHolds({

@@ -65,6 +65,59 @@ describe('SimulatorMutationCoordinator', () => {
 		await Promise.all(tasks);
 	});
 
+	it('tries a lease without ever waiting: refused while held, taken once free', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const signal = new AbortController().signal;
+		const entered = deferred();
+		const release = deferred();
+		const operation = vi.fn(async () => 'ran');
+		const held = coordinator.runExclusive(UDID, signal, async () => {
+			entered.resolve();
+			// The holder itself trying again is refused, never a wait on itself.
+			await expect(
+				coordinator.tryRunExclusive(UDID, signal, operation)
+			).resolves.toEqual({ acquired: false });
+			await release.promise;
+		});
+		await entered.promise;
+		await expect(
+			coordinator.tryRunExclusive(UDID.toLowerCase(), signal, operation)
+		).resolves.toEqual({ acquired: false });
+		expect(operation).not.toHaveBeenCalled();
+		await expect(
+			coordinator.tryRunExclusive(SECOND_UDID, signal, operation)
+		).resolves.toEqual({ acquired: true, value: 'ran' });
+
+		release.resolve();
+		await held;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await expect(
+			coordinator.tryRunExclusive(UDID, signal, operation)
+		).resolves.toEqual({ acquired: true, value: 'ran' });
+		await expect(
+			coordinator.tryRunExclusive('not-a-udid', signal, operation)
+		).rejects.toThrow('exact UDID');
+	});
+
+	it('holds a lease it took against claimants that come later', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const signal = new AbortController().signal;
+		const entered = deferred();
+		const release = deferred();
+		const tried = coordinator.tryRunExclusive(UDID, signal, async () => {
+			entered.resolve();
+			await release.promise;
+		});
+		const later = vi.fn(async () => undefined);
+		const queued = coordinator.runExclusive(UDID, signal, later);
+		await entered.promise;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		expect(later).not.toHaveBeenCalled();
+		release.resolve();
+		await Promise.all([tried, queued]);
+		expect(later).toHaveBeenCalledOnce();
+	});
+
 	it('cancels a queued claimant promptly without allowing later work to overtake', async () => {
 		const coordinator = new SimulatorMutationCoordinator();
 		const firstEntered = deferred();

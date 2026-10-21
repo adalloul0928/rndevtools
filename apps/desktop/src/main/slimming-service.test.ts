@@ -32,6 +32,8 @@ const UDID = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 const SECOND_UDID = '11111111-2222-3333-4444-555555555555';
 const RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-5';
 const PROFILE = 'rndevtools-development';
+/** The longest reconciliation backs off between inspections. */
+const MAX_BACKOFF_MS = 10 * 60_000;
 const temporaryDirectories: string[] = [];
 
 const AVAILABLE_SIMULATOR_CAPABILITY: SimulatorCapability = {
@@ -1548,5 +1550,267 @@ describe('slimming service', () => {
 			checkpointAvailable: true,
 		});
 		await restarted.service.stop();
+	});
+
+	it('leaves the journal of an apply that starts during a refresh to that apply', async () => {
+		const helper = new FakeHelper();
+		const { directory, service } = await createService(
+			helper,
+			undefined,
+			new SimulatorMutationCoordinator()
+		);
+		await enableAndAcknowledge(service, 'overlap');
+		// A background poll is inside its status pass when the apply arrives.
+		const refreshEntered = deferred();
+		const releaseRefresh = deferred();
+		const status = helper.simulatorStatus.getMockImplementation();
+		if (!status) throw new Error('Fake status implementation is unavailable.');
+		helper.simulatorStatus.mockImplementationOnce(async (...arguments_) => {
+			refreshEntered.resolve();
+			await releaseRefresh.promise;
+			return status(...arguments_);
+		});
+		const refreshing = service.refresh();
+		await refreshEntered.promise;
+
+		// The apply journals its restore point, then waits inside the commit.
+		const commitEntered = deferred();
+		const releaseCommit = deferred();
+		const apply = helper.applyProfile.getMockImplementation();
+		if (!apply) throw new Error('Fake apply implementation is unavailable.');
+		helper.applyProfile.mockImplementationOnce(async (...arguments_) => {
+			commitEntered.resolve();
+			await releaseCommit.promise;
+			return apply(...arguments_);
+		});
+		const receipt = service.runAction(
+			action({
+				actionId: 'overlap-apply',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+			})
+		);
+		expect(receipt.accepted).toBe(true);
+		await commitEntered.promise;
+		const journal = (await readPersistedState(directory)).pendingMutations[
+			UDID
+		];
+		expect(journal).toBeDefined();
+
+		// The poll reaches reconciliation while the commit is still running.
+		releaseRefresh.resolve();
+		await refreshing;
+		expect(
+			(await readPersistedState(directory)).pendingMutations[UDID]
+		).toEqual(journal);
+
+		releaseCommit.resolve();
+		const job = await waitForJob(service, receipt.jobId ?? '');
+		expect(job.status).toBe('complete');
+		const persisted = await readPersistedState(directory);
+		expect(persisted.pendingMutations[UDID]).toBeUndefined();
+		expect(persisted.checkpoints[UDID]?.token).toBe(journal?.checkpointToken);
+		// Reconciliation never inspected the device the job was mutating.
+		expect(
+			helper.prepareMutation.mock.calls.map(([, operation]) => operation)
+		).toEqual(['apply_profile']);
+		await service.stop();
+	});
+
+	describe('a pending record that needs attention', () => {
+		/**
+		 * Leaves the interrupted apply's record behind, then restarts on a
+		 * helper that can prove neither its before nor its target state.
+		 */
+		async function stuckRecord(
+			deviceState: 'Booted' | 'Shutdown',
+			mutationCoordinator?: SimulatorMutationCoordinatorPort
+		) {
+			const helper = new FakeHelper();
+			const first = await createService(helper);
+			await enableAndAcknowledge(first.service, 'stuck');
+			helper.applyError = new Error('Injected exit after prepare.');
+			expect((await runApply(first.service, 'stuck-apply')).status).toBe(
+				'needs-attention'
+			);
+			const pending = (await readPersistedState(first.directory))
+				.pendingMutations[UDID];
+			if (!pending) throw new Error('The interrupted apply left no record.');
+			await first.service.stop();
+
+			const restartedHelper = new FakeHelper();
+			restartedHelper.deviceState = deviceState;
+			restartedHelper.preflightVerificationVerified = false;
+			restartedHelper.preparedStates.set(
+				pending.checkpointToken,
+				pending.beforeServiceIds
+			);
+			const clock = { now: 1_000_000 };
+			const service = new SlimmingService({
+				resourceDirectory: '/unused',
+				persistenceDirectory: first.directory,
+				appVersion: '0.1.0',
+				helper: restartedHelper,
+				...(mutationCoordinator ? { mutationCoordinator } : {}),
+				pollIntervalMs: 60_000,
+				now: () => clock.now,
+			});
+			await service.start();
+			return {
+				clock,
+				directory: first.directory,
+				helper: restartedHelper,
+				pending,
+				service,
+				/** Every inspection of a shut-down Simulator boots it. */
+				inspections: () =>
+					restartedHelper.prepareMutation.mock.calls.filter(
+						([udid]) => udid === UDID
+					).length,
+			};
+		}
+
+		it('boots a shut-down Simulator for restart reconciliation once, not on every poll', async () => {
+			const stuck = await stuckRecord('Shutdown');
+			expect(stuck.inspections()).toBe(1);
+			for (let tick = 0; tick < 3; tick += 1) {
+				stuck.clock.now += 60_000;
+				await stuck.service.refresh();
+			}
+			expect(stuck.inspections()).toBe(1);
+			expect(stuck.service.getState().statusBySimulator[UDID]).toMatchObject({
+				condition: 'needs-attention',
+				checkpointAvailable: true,
+				message: expect.stringContaining('Boot this Simulator'),
+			});
+			expect(
+				(await readPersistedState(stuck.directory)).pendingMutations[UDID]
+			).toEqual(stuck.pending);
+
+			// Once it is booted, reconciliation inspects again, then backs off.
+			stuck.helper.deviceState = 'Booted';
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(2);
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(2);
+			stuck.clock.now += 2 * 60_000;
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(3);
+			stuck.clock.now += 2 * 60_000;
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(3);
+			stuck.clock.now += 2 * 60_000;
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(4);
+			expect(stuck.service.getState().statusBySimulator[UDID]?.condition).toBe(
+				'needs-attention'
+			);
+			await stuck.service.stop();
+		});
+
+		it('never waits on the Simulator lease, so a lease holder can refresh', async () => {
+			const coordinator = new SimulatorMutationCoordinator();
+			const stuck = await stuckRecord('Booted', coordinator);
+			expect(stuck.inspections()).toBe(1);
+			stuck.clock.now += 2 * 60_000;
+			// Lanes and recipes refresh SimSlim from inside their own lease.
+			await coordinator.runExclusive(
+				UDID,
+				new AbortController().signal,
+				async () => {
+					await stuck.service.refresh();
+				}
+			);
+			expect(stuck.inspections()).toBe(1);
+			expect(stuck.service.getState().statusBySimulator[UDID]?.condition).toBe(
+				'needs-attention'
+			);
+
+			// Once the lease is free, the next pass inspects the record.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(2);
+			await stuck.service.stop();
+		});
+
+		it('polls with every window hidden only as often as reconciliation backs off', async () => {
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+			try {
+				const stuck = await stuckRecord('Booted');
+				stuck.service.setPollingActive(false);
+				const polls = () => stuck.helper.handshake.mock.calls.length;
+				const before = polls();
+				// Restart reconciliation left the record waiting two polls.
+				vi.advanceTimersByTime(60_000);
+				expect(polls()).toBe(before);
+				stuck.clock.now += 2 * 60_000;
+				vi.advanceTimersByTime(60_000);
+				expect(polls()).toBe(before + 1);
+				await stuck.service.refresh();
+				expect(stuck.inspections()).toBe(2);
+				// Now it waits four.
+				stuck.clock.now += 2 * 60_000;
+				vi.advanceTimersByTime(60_000);
+				expect(polls()).toBe(before + 1);
+				await stuck.service.stop();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('can be forgotten, which ends its reconciliation and unblocks a restore', async () => {
+			const stuck = await stuckRecord('Booted');
+			const forget = (actionId: string) =>
+				stuck.service.runAction(
+					action({
+						actionId,
+						kind: 'pending.forget',
+						simulatorUdids: [UDID],
+						confirmation: SLIMMING_CONFIRMATIONS.forget,
+					})
+				);
+			const receipt = forget('forget-stuck');
+			expect(receipt.accepted).toBe(true);
+			expect(
+				(await waitForJob(stuck.service, receipt.jobId ?? '')).status
+			).toBe('complete');
+			const persisted = await readPersistedState(stuck.directory);
+			expect(persisted.pendingMutations[UDID]).toBeUndefined();
+			expect(JSON.stringify(persisted)).not.toContain(
+				stuck.pending.checkpointToken
+			);
+			expect(
+				stuck.service.getState().operationsBySimulator[UDID]?.[0]
+			).toMatchObject({ kind: 'pending.forget', status: 'complete' });
+			expect(stuck.service.getState().statusBySimulator[UDID]).toMatchObject({
+				condition: 'unknown',
+				checkpointAvailable: false,
+			});
+
+			// Nothing is left to reconcile, or to forget.
+			stuck.clock.now += MAX_BACKOFF_MS;
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(1);
+			expect(forget('forget-again')).toMatchObject({
+				accepted: false,
+				error: `${UDID} has no emergency restore point to forget.`,
+			});
+
+			// A restore, refused while the record existed, now runs.
+			const restore = stuck.service.runAction(
+				action({
+					actionId: 'restore-after-forget',
+					kind: 'profile.restore',
+					simulatorUdids: [UDID],
+					confirmation: SLIMMING_CONFIRMATIONS.restore,
+				})
+			);
+			expect(
+				(await waitForJob(stuck.service, restore.jobId ?? '')).status
+			).toBe('complete');
+			await stuck.service.stop();
+		});
 	});
 });

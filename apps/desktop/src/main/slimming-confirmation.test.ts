@@ -56,6 +56,20 @@ describe('slimming confirmation copy', () => {
 		expect(copy?.detail.match(/[A-Fa-f0-9-]{36}/g)).toHaveLength(20);
 	});
 
+	it('asks before forgetting an emergency restore point, naming every target', () => {
+		const forget = slimmingConfirmationTargetSchema.parse({
+			actionId: 'forget',
+			kind: 'pending.forget',
+			simulatorUdids: [UDIDS[0], UDIDS[1]],
+			confirmation: SLIMMING_CONFIRMATIONS.forget,
+		});
+		const copy = slimmingConfirmationCopy(forget);
+		expect(copy?.title).toBe('Forget the emergency restore point?');
+		expect(copy?.detail).toContain('nothing can undo that mutation');
+		expect(copy?.detail).toContain('Targets (2):');
+		expect(copy?.detail).toContain(UDIDS[1]);
+	});
+
 	it('binds a one-time approval to the exact profile and complete UDID list', () => {
 		const confirmations = new ActionConfirmationStore({
 			now: () => 1,

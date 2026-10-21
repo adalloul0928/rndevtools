@@ -54,6 +54,29 @@ export function allSelectedCheckpointsAvailable(
 	);
 }
 
+/**
+ * Whether every selected target shows an interrupted mutation's emergency
+ * restore point that needs attention, which is when forgetting it is offered.
+ * Main still refuses a target with nothing pending.
+ */
+export function allSelectedNeedAttention(
+	selectedUdids: readonly string[],
+	statusBySimulator: Readonly<
+		Record<string, SlimmingSimulatorStatus | undefined>
+	>
+): boolean {
+	return (
+		selectedUdids.length > 0 &&
+		selectedUdids.every((udid) => {
+			const status = statusBySimulator[udid];
+			return (
+				status?.condition === 'needs-attention' &&
+				status.checkpointAvailable === true
+			);
+		})
+	);
+}
+
 export function unknownCompatibilityBinding(
 	statuses: readonly SlimmingSimulatorStatus[]
 ): string | null {

@@ -18,6 +18,9 @@ import type { Lane } from './lane-protocol';
  * the holder was first missed, when the desktop releases it so the device
  * returns to the pool without anyone's cooperation.
  *
+ * A lane start holds its Simulator from the moment it reserves it, before
+ * its lane is stored, but yields to a claim that was there first.
+ *
  * Both the lane service and the slimming service ask this one resolver, so a
  * device cannot be rebooted by a slim while another agent's lane is on it.
  */
@@ -162,6 +165,13 @@ export type DeviceHoldInputs = HolderLivenessInputs & {
 		 * from the checkout root, above the app.
 		 */
 		worktreePath?: string | undefined;
+		/**
+		 * A start that has reserved the device but not stored its lane yet. It
+		 * holds the device against anyone who comes later, but never takes it
+		 * from a claim that is already there: the start checks again before it
+		 * stores its lane, and fails instead.
+		 */
+		starting?: boolean | undefined;
 	})[];
 	/** Agent claims: a device, and the session that claimed it. */
 	claims: readonly {
@@ -180,19 +190,25 @@ export function resolveDeviceHolds(
 	inputs: DeviceHoldInputs
 ): Map<string, DeviceHold> {
 	const holds = new Map<string, DeviceHold>();
-	for (const lane of inputs.lanes) {
-		const udid = lane.simulatorUdid.toUpperCase();
+	const laneHold = (lane: DeviceHoldInputs['lanes'][number]): DeviceHold => {
 		const holder = lane.agent
 			? { kind: lane.agent.kind, sessionId: lane.agent.sessionId }
 			: undefined;
-		holds.set(
-			udid,
-			finish(
-				inputs,
-				{ simulatorUdid: udid, via: 'lane', laneId: lane.id, holder },
-				lane.worktreePath
-			)
+		return finish(
+			inputs,
+			{
+				simulatorUdid: lane.simulatorUdid.toUpperCase(),
+				via: 'lane',
+				laneId: lane.id,
+				holder,
+			},
+			lane.worktreePath
 		);
+	};
+	for (const lane of inputs.lanes) {
+		if (!lane.starting) {
+			holds.set(lane.simulatorUdid.toUpperCase(), laneHold(lane));
+		}
 	}
 	for (const claim of inputs.claims) {
 		const udid = claim.simulatorUdid.toUpperCase();
@@ -205,6 +221,10 @@ export function resolveDeviceHolds(
 				holder: { kind: claim.kind, sessionId: claim.sessionId },
 			})
 		);
+	}
+	for (const lane of inputs.lanes) {
+		const udid = lane.simulatorUdid.toUpperCase();
+		if (lane.starting && !holds.has(udid)) holds.set(udid, laneHold(lane));
 	}
 	return holds;
 }

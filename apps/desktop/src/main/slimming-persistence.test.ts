@@ -89,6 +89,78 @@ describe('slimming persistence', () => {
 		expect(reloaded.snapshot().operationsBySimulator[UDID]).toHaveLength(1);
 	});
 
+	it('clears only the exact pending record, records why in the same write, and keeps the last checkpoint', async () => {
+		const { directory, store } = await fixture();
+		await store.load();
+		const pending = (id: string, checkpointToken: string) => ({
+			id,
+			actionId: `action-${id}`,
+			operation: 'apply_profile' as const,
+			startedAt: 1,
+			checkpointToken,
+			originalBootState: 'Booted' as const,
+			beforeServiceIds: [],
+			desiredServiceIds: ['com.apple.feedbackd'],
+			compatibilityKey: `compatibility-${'a'.repeat(64)}`,
+			compatibilityStatus: 'unknown' as const,
+			matrixVersion: 'matrix-v1',
+			tuple: {
+				macOSBuild: '25F80',
+				xcodeBuild: '17F113',
+				coreSimulatorBuild: '1051.55',
+				runtimeIdentifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
+				runtimeBuild: '23F77',
+				hostArchitecture: 'arm64' as const,
+				helperVersion: '0.1.0',
+				helperBuildCommit: 'b'.repeat(40),
+				catalogVersion: 'catalog-v1',
+			},
+		});
+		const operation = (id: string, kind: string) => ({
+			id,
+			actionId: `action-${id}`,
+			kind,
+			status: 'complete' as const,
+			startedAt: 1,
+			finishedAt: 2,
+			message: 'Done.',
+		});
+		await store.beginPendingMutation(UDID, pending('pending-1', 'last-change'));
+		await store.resolvePendingMutation(UDID, 'pending-1', {
+			kind: 'complete',
+			checkpointMetadata: {
+				id: 'checkpoint-1',
+				createdAt: 1,
+				sourceOperationId: 'operation-1',
+				helperVersion: '0.1.0',
+				catalogVersion: 'catalog-v1',
+				compatibilityMatrixVersion: 'matrix-v1',
+			},
+			operation: operation('operation-1', 'profile.apply'),
+		});
+		await store.beginPendingMutation(UDID, pending('pending-2', 'emergency'));
+
+		await expect(
+			store.resolvePendingMutation(UDID, 'pending-other', { kind: 'clear' })
+		).rejects.toThrow('no longer matches');
+		expect(store.pendingMutation(UDID)?.id).toBe('pending-2');
+
+		await store.resolvePendingMutation(UDID, 'pending-2', {
+			kind: 'clear',
+			operation: operation('forgotten', 'pending.forget'),
+		});
+		const reloaded = new SlimmingPersistence(directory);
+		await reloaded.load();
+		expect(reloaded.pendingMutation(UDID)).toBeUndefined();
+		expect(reloaded.checkpointToken(UDID)).toBe('last-change');
+		expect(
+			reloaded.snapshot().operationsBySimulator[UDID]?.map((entry) => entry.id)
+		).toEqual(['forgotten', 'operation-1']);
+		expect(
+			await readFile(path.join(directory, 'state-v1.json'), 'utf8')
+		).not.toContain('emergency');
+	});
+
 	it('fails closed on malformed existing state instead of silently replacing it', async () => {
 		const { directory, store } = await fixture();
 		await writeFile(
