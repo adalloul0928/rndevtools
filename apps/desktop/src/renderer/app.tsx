@@ -4,14 +4,15 @@ import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	Cable,
 	ChevronDown,
-	Command,
 	Cpu,
 	DatabaseZap,
+	Moon,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Radio,
 	Settings2,
 	Smartphone,
+	Sun,
 	TerminalSquare,
 } from 'lucide-react';
 import {
@@ -34,6 +35,7 @@ import {
 	selectActionNotice,
 } from '@/lib/action-notice';
 import { requestNetworkFilter, useAppTraffic } from '@/lib/app-traffic';
+import { setAppearancePreference, useAppearance } from '@/lib/appearance';
 import { formatShortcutRange } from '@/lib/shell-navigation';
 import { appTrafficBanner } from '@/simulator/app-traffic-model';
 import {
@@ -54,7 +56,7 @@ import {
 	useSupabaseSidebarBadge,
 } from '@/state/supabase-runtime';
 import { isToolId, toolGroups } from '@/tool-config';
-import type { PerformanceSample, ToolId } from '../shared/protocol';
+import type { DeviceSession, ToolId } from '../shared/protocol';
 import type { SupabaseSidebarBadge } from '../shared/supabase-protocol';
 
 type WorkspaceId = 'simulator' | 'connected';
@@ -64,16 +66,25 @@ type WorkspaceRoute = {
 	simulatorTool: SimulatorToolId;
 };
 
-const TRACE_BAR_COUNT = 28;
-const TRACE_BAR_MAX_HEIGHT = 14;
-const TRACE_BAR_MIN_HEIGHT = 2;
-const TRACE_SLOTS = Array.from(
-	{ length: TRACE_BAR_COUNT },
-	(_, index) => `trace-${index}`
-);
+const PLATFORM_LABELS: Record<DeviceSession['info']['platform'], string> = {
+	ios: 'iOS',
+	android: 'Android',
+	web: 'Web',
+	simulator: 'Simulator',
+	unknown: 'Unknown platform',
+};
 
 function sidebarShortcut(platform: string | undefined): string {
 	return platform === 'darwin' ? '⌘B' : 'Ctrl+B';
+}
+
+/** `booted` as `Booted`, for status words shown at the start of a line. */
+function sentenceCase(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function countLabel(count: number, noun: string): string {
+	return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 function workspaceShortcut(
@@ -549,141 +560,135 @@ function Titlebar({
 				</div>
 				<div className="titlebar-trail">
 					{workspace === 'simulator' ? (
-						<FleetTrace
-							devices={simulator.state.devices}
-							metrics={simulator.state.metrics.byDevice}
-						/>
+						<div className="titlebar-readouts">
+							<span className="titlebar-readout">
+								{booted > 0 ? (
+									<span
+										aria-hidden="true"
+										className="connection-dot is-online"
+									/>
+								) : null}
+								<strong>{booted}</strong> booted
+							</span>
+							<span className="titlebar-readout">
+								<strong>{activeJobs}</strong>{' '}
+								{activeJobs === 1 ? 'job' : 'jobs'}
+							</span>
+							{simulator.state.capability.xcodeVersion ? (
+								<span className="titlebar-readout is-optional">
+									Xcode{' '}
+									<strong>{simulator.state.capability.xcodeVersion}</strong>
+								</span>
+							) : null}
+						</div>
 					) : (
-						<LiveTrace
-							samples={desktop.selectedDevice?.tools.performance.samples}
-						/>
+						<div className="titlebar-readouts">
+							<Tooltip delay={500}>
+								<button
+									aria-current={
+										connectedTool === 'diagnostics' ? 'page' : undefined
+									}
+									aria-label={`${connected} live ${connected === 1 ? 'connection' : 'connections'} · open Diagnostics`}
+									className="titlebar-readout is-button no-drag"
+									type="button"
+									onClick={() => {
+										if (connectedTool !== 'diagnostics')
+											setConnectedTool('diagnostics');
+									}}
+								>
+									<span
+										aria-hidden="true"
+										className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
+									/>
+									<strong>{connected}</strong> live
+								</button>
+								<Tooltip.Content>
+									{connected} live{' '}
+									{connected === 1 ? 'connection' : 'connections'} · open
+									Diagnostics
+								</Tooltip.Content>
+							</Tooltip>
+							{latest ? (
+								<>
+									<span className="titlebar-readout">
+										<strong>{latest.jsFps.toFixed(0)}</strong> fps
+									</span>
+									<span className="titlebar-readout">
+										<strong>{latest.eventLoopLagMs.toFixed(1)} ms</strong> lag
+									</span>
+									{latest.memoryMb === undefined ? null : (
+										<span className="titlebar-readout is-optional">
+											<strong>{latest.memoryMb.toFixed(0)} MB</strong> memory
+										</span>
+									)}
+								</>
+							) : null}
+						</div>
 					)}
-					<div className="titlebar-metrics no-drag">
+					<div className="titlebar-controls no-drag">
 						{workspace === 'simulator' ? (
-							<>
-								<Metric label="Booted" value={String(booted)} />
-								<Metric label="Jobs" value={String(activeJobs)} />
-								<Metric
-									label="Xcode"
-									value={simulator.state.capability.xcodeVersion ?? '—'}
-								/>
-								<span aria-hidden="true" className="titlebar-rule" />
-								<div className="titlebar-controls">
-									<NativeSelect
-										className="device-select"
-										fullWidth={false}
-										variant="secondary"
-									>
-										<NativeSelect.Trigger
-											aria-label="Selected Simulator"
-											disabled={simulator.state.devices.length === 0}
-											value={simulator.selectedDevice?.udid ?? ''}
-											onChange={(event) =>
-												simulator.setSelectedDeviceUdid(
-													event.currentTarget.value
-												)
-											}
-										>
-											{simulator.state.devices.length === 0 ? (
-												<NativeSelect.Option value="">
-													No Simulator
-												</NativeSelect.Option>
-											) : null}
-											{simulator.state.devices.map((device) => (
-												<NativeSelect.Option
-													key={device.udid}
-													value={device.udid}
-												>
-													{device.name} · {device.state}
-												</NativeSelect.Option>
-											))}
-											<NativeSelect.Indicator>
-												<ChevronDown className="h-3 w-3" />
-											</NativeSelect.Indicator>
-										</NativeSelect.Trigger>
-									</NativeSelect>
-								</div>
-							</>
+							<NativeSelect
+								className="device-select"
+								fullWidth={false}
+								variant="secondary"
+							>
+								<NativeSelect.Trigger
+									aria-label="Selected Simulator"
+									disabled={simulator.state.devices.length === 0}
+									value={simulator.selectedDevice?.udid ?? ''}
+									onChange={(event) =>
+										simulator.setSelectedDeviceUdid(event.currentTarget.value)
+									}
+								>
+									{simulator.state.devices.length === 0 ? (
+										<NativeSelect.Option value="">
+											No Simulator
+										</NativeSelect.Option>
+									) : null}
+									{simulator.state.devices.map((device) => (
+										<NativeSelect.Option key={device.udid} value={device.udid}>
+											{device.name} · {device.state}
+										</NativeSelect.Option>
+									))}
+									<NativeSelect.Indicator>
+										<ChevronDown className="h-3 w-3" />
+									</NativeSelect.Indicator>
+								</NativeSelect.Trigger>
+							</NativeSelect>
 						) : (
-							<>
-								<Metric
-									label="JS"
-									value={latest ? `${latest.jsFps.toFixed(0)} fps` : '—'}
-								/>
-								<Metric
-									label="Lag"
-									value={
-										latest ? `${latest.eventLoopLagMs.toFixed(1)} ms` : '—'
+							<NativeSelect
+								className="device-select"
+								fullWidth={false}
+								variant="secondary"
+							>
+								<NativeSelect.Trigger
+									aria-label="Selected development device"
+									disabled={!desktop.state?.devices.length}
+									value={desktop.selectedDevice?.info.id ?? ''}
+									onChange={(event) =>
+										desktop.setSelectedDeviceId(event.currentTarget.value)
 									}
-								/>
-								<Metric
-									label="Memory"
-									value={
-										latest?.memoryMb === undefined
-											? '—'
-											: `${latest.memoryMb.toFixed(0)} MB`
-									}
-								/>
-								<span aria-hidden="true" className="titlebar-rule" />
-								<div className="titlebar-controls">
-									<Tooltip delay={500}>
-										<button
-											aria-current={
-												connectedTool === 'diagnostics' ? 'page' : undefined
-											}
-											aria-label={`${connected} live ${connected === 1 ? 'connection' : 'connections'} · open Diagnostics`}
-											className="connection-button"
-											type="button"
-											onClick={() => {
-												if (connectedTool !== 'diagnostics')
-													setConnectedTool('diagnostics');
-											}}
+								>
+									{!desktop.state?.devices.length ? (
+										<NativeSelect.Option value="">
+											No device
+										</NativeSelect.Option>
+									) : null}
+									{desktop.state?.devices.map((device) => (
+										<NativeSelect.Option
+											key={device.info.id}
+											value={device.info.id}
 										>
-											<span
-												className={`connection-dot ${desktop.state?.broker.status === 'listening' ? 'is-online' : ''}`}
-											/>
-											{connected} live
-										</button>
-										<Tooltip.Content>
-											{connected} live{' '}
-											{connected === 1 ? 'connection' : 'connections'} · open
-											Diagnostics
-										</Tooltip.Content>
-									</Tooltip>
-									<NativeSelect
-										className="device-select"
-										fullWidth={false}
-										variant="secondary"
-									>
-										<NativeSelect.Trigger
-											aria-label="Selected development device"
-											disabled={!desktop.state?.devices.length}
-											value={desktop.selectedDevice?.info.id ?? ''}
-											onChange={(event) =>
-												desktop.setSelectedDeviceId(event.currentTarget.value)
-											}
-										>
-											{!desktop.state?.devices.length ? (
-												<NativeSelect.Option value="">
-													No device
-												</NativeSelect.Option>
-											) : null}
-											{desktop.state?.devices.map((device) => (
-												<NativeSelect.Option
-													key={device.info.id}
-													value={device.info.id}
-												>
-													{device.info.name} · {device.status}
-												</NativeSelect.Option>
-											))}
-											<NativeSelect.Indicator>
-												<ChevronDown className="h-3 w-3" />
-											</NativeSelect.Indicator>
-										</NativeSelect.Trigger>
-									</NativeSelect>
-								</div>
-							</>
+											{device.info.name} · {device.status}
+										</NativeSelect.Option>
+									))}
+									<NativeSelect.Indicator>
+										<ChevronDown className="h-3 w-3" />
+									</NativeSelect.Indicator>
+								</NativeSelect.Trigger>
+							</NativeSelect>
 						)}
+						<AppearanceToggle />
 					</div>
 				</div>
 			</div>
@@ -727,104 +732,28 @@ function WorkspaceSwitcher({
 	);
 }
 
-function LiveTrace({
-	samples,
-}: {
-	samples: readonly PerformanceSample[] | undefined;
-}) {
-	const trace = samples?.slice(-TRACE_BAR_COUNT) ?? [];
-	const offset = TRACE_BAR_COUNT - trace.length;
-
+/**
+ * Flips between light and dark. It sets an explicit preference; System is
+ * chosen in Settings.
+ */
+function AppearanceToggle() {
+	const { theme, available } = useAppearance();
+	const next = theme === 'dark' ? 'light' : 'dark';
+	const label = `Switch to ${next} appearance`;
 	return (
-		<div
-			className="titlebar-live"
-			aria-label="Live JavaScript performance trace"
-			role="img"
-		>
-			<div className="live-bars">
-				{TRACE_SLOTS.map((slot, index) => {
-					const sample = trace[index - offset];
-					return (
-						<span
-							className={sample ? 'is-live' : ''}
-							key={slot}
-							style={{
-								height: sample
-									? Math.max(
-											TRACE_BAR_MIN_HEIGHT,
-											TRACE_BAR_MAX_HEIGHT -
-												Math.min(12, sample.eventLoopLagMs / 4)
-										)
-									: TRACE_BAR_MIN_HEIGHT,
-							}}
-						/>
-					);
-				})}
-			</div>
-			<span className="live-label">
-				{trace.length > 0 ? 'Live runtime' : 'Awaiting samples'}
-			</span>
-		</div>
-	);
-}
-
-function FleetTrace({
-	devices,
-	metrics,
-}: {
-	devices: ReturnType<typeof useSimulatorRuntime>['state']['devices'];
-	metrics: ReturnType<
-		typeof useSimulatorRuntime
-	>['state']['metrics']['byDevice'];
-}) {
-	const visible = devices.slice(-TRACE_BAR_COUNT);
-	const offset = TRACE_BAR_COUNT - visible.length;
-	const booted = devices.filter((device) => device.state === 'booted').length;
-
-	return (
-		<div
-			className="titlebar-live"
-			aria-label={`Live Simulator fleet trace: ${booted} of ${devices.length} booted`}
-			role="img"
-		>
-			<div className="live-bars">
-				{TRACE_SLOTS.map((slot, index) => {
-					const device = visible[index - offset];
-					const sample = device ? metrics[device.udid] : undefined;
-					const height =
-						device?.state === 'booted'
-							? Math.max(
-									5,
-									Math.min(
-										TRACE_BAR_MAX_HEIGHT,
-										5 + Math.round((sample?.cpuPercent ?? 0) / 12)
-									)
-								)
-							: TRACE_BAR_MIN_HEIGHT;
-					return (
-						<span
-							className={device?.state === 'booted' ? 'is-live' : ''}
-							key={device?.udid ?? slot}
-							style={{ height }}
-						/>
-					);
-				})}
-			</div>
-			<span className="live-label">
-				{devices.length > 0
-					? `${booted}/${devices.length} fleet live`
-					: 'No targets'}
-			</span>
-		</div>
-	);
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-	return (
-		<div className="titlebar-metric">
-			<span>{label}</span>
-			<strong>{value}</strong>
-		</div>
+		<Tooltip delay={500}>
+			<Button
+				aria-label={label}
+				className="titlebar-icon-button"
+				isDisabled={!available}
+				isIconOnly
+				variant="ghost"
+				onPress={() => void setAppearancePreference(next)}
+			>
+				{theme === 'dark' ? <Sun /> : <Moon />}
+			</Button>
+			<Tooltip.Content>{label}</Tooltip.Content>
+		</Tooltip>
 	);
 }
 
@@ -840,16 +769,15 @@ function SimulatorSidebar({
 	const recipe = useRecipeRuntime();
 	const supabase = useSupabaseSidebarBadge();
 	const navigationModifier = bootstrap?.platform === 'darwin' ? '⌘' : 'Ctrl+';
-	const unavailable = Object.values(state.capability.features).filter(
-		(ready) => !ready
-	).length;
 	return (
 		<aside
 			className="desktop-sidebar simulator-sidebar"
 			aria-label="Simulator workspace"
 		>
-			<header className="device-summary simulator-summary">
-				<div className="device-icon simulator-device-icon">
+			<header className="device-summary">
+				<div
+					className={`device-icon ${selectedDevice?.state === 'booted' ? 'is-live' : ''}`}
+				>
 					<Smartphone className="h-4 w-4" />
 				</div>
 				<div className="min-w-0 flex-1">
@@ -858,7 +786,7 @@ function SimulatorSidebar({
 					</p>
 					<p className="device-meta">
 						{selectedDevice
-							? `${selectedDevice.state} · ${state.runtimes.length} runtimes`
+							? `${sentenceCase(selectedDevice.state)} · ${countLabel(state.runtimes.length, 'runtime')}`
 							: 'No mobile connection required'}
 					</p>
 				</div>
@@ -877,7 +805,6 @@ function SimulatorSidebar({
 								const badge = simulatorBadge(tool.id, {
 									state,
 									recipeCount: recipe.state.recipes.length,
-									unavailableCapabilities: unavailable,
 									supabase,
 								});
 								return (
@@ -893,7 +820,16 @@ function SimulatorSidebar({
 									>
 										<Icon className="h-3.5 w-3.5" />
 										<span className="flex-1 text-left">{tool.label}</span>
-										{badge ? (
+										{tool.tag ? (
+											<span className="tool-tag">{tool.tag}</span>
+										) : null}
+										{badge?.dot ? (
+											<span
+												aria-hidden="true"
+												className={`tool-dot is-${badge.tone}`}
+											/>
+										) : badge &&
+											(badge.value > 0 || badge.tone !== 'default') ? (
 											<span
 												className={`tool-count ${badge.tone === 'default' ? '' : `is-${badge.tone}`}`}
 											>
@@ -920,7 +856,7 @@ function SimulatorSidebar({
 				>
 					<Cpu className="h-3.5 w-3.5" />
 					<div className="min-w-0 flex-1 text-left">
-						<p>{state.capability.status}</p>
+						<p>{CAPABILITY_STATUS_LABELS[state.capability.status]}</p>
 						<code>
 							{state.capability.xcodeVersion
 								? `Xcode ${state.capability.xcodeVersion}`
@@ -931,17 +867,11 @@ function SimulatorSidebar({
 						className={`connection-dot ${state.capability.status === 'available' ? 'is-online' : ''}`}
 					/>
 				</button>
-				<div className="shortcut-hint">
-					<span>
-						{bootstrap?.platform === 'darwin' ? (
-							<Command className="h-3 w-3" />
-						) : (
-							'Ctrl'
-						)}{' '}
-						{SIMULATOR_SHORTCUT_RANGE}
-					</span>
-					<span>Navigate Simulator</span>
-				</div>
+				<p className="shortcut-hint">
+					{navigationModifier}
+					{SIMULATOR_SHORTCUT_RANGE} switch tools ·{' '}
+					{sidebarShortcut(bootstrap?.platform)} sidebar
+				</p>
 			</footer>
 		</aside>
 	);
@@ -952,19 +882,27 @@ type SimulatorBadge = Readonly<{
 	tone: 'default' | 'warning' | 'danger';
 	/** Replaces the nav item's accessible name when the count needs words. */
 	label?: string;
+	/** Shows a dot instead of the count. */
+	dot?: boolean;
 }>;
 
+const CAPABILITY_STATUS_LABELS = {
+	checking: 'Checking setup',
+	available: 'Ready',
+	unavailable: 'Needs setup',
+} as const;
+
 /**
- * The count beside a Simulator tool: plain counts for most tools, Settings'
- * amber capability count, and the Supabase runtime's memoised badge (red
- * for danger, amber for requests and warnings, a grey running count).
+ * The count beside a Simulator tool: plain counts for most tools (a zero is
+ * not shown), an amber dot on Settings while required setup is incomplete,
+ * and the Supabase runtime's memoised badge (red for danger, amber for
+ * requests and warnings, a grey running count).
  */
 function simulatorBadge(
 	tool: SimulatorToolId,
 	context: {
 		state: ReturnType<typeof useSimulatorRuntime>['state'];
 		recipeCount: number;
-		unavailableCapabilities: number;
 		supabase: SupabaseSidebarBadge | undefined;
 	}
 ): SimulatorBadge | undefined {
@@ -985,8 +923,13 @@ function simulatorBadge(
 		case 'supabase':
 			return context.supabase;
 		case 'settings':
-			return context.unavailableCapabilities > 0
-				? { value: context.unavailableCapabilities, tone: 'warning' }
+			return state.capability.status === 'unavailable'
+				? {
+						value: 0,
+						tone: 'warning',
+						dot: true,
+						label: 'Settings · setup needs attention',
+					}
 				: undefined;
 		default:
 			return undefined;
@@ -1001,14 +944,15 @@ function DesktopSidebar({
 	setActiveTool: (tool: ToolId) => void;
 }) {
 	const { bootstrap, selectedDevice, state } = useDesktopRuntime();
-	const shortcut = bootstrap?.platform === 'darwin' ? '⌘ B' : 'Ctrl B';
 	return (
 		<aside
 			className="desktop-sidebar"
 			aria-label="Connected app developer tools"
 		>
 			<header className="device-summary">
-				<div className="device-icon">
+				<div
+					className={`device-icon ${selectedDevice && selectedDevice.status !== 'offline' ? 'is-live' : ''}`}
+				>
 					<Cable className="h-4 w-4" />
 				</div>
 				<div className="min-w-0 flex-1">
@@ -1017,7 +961,7 @@ function DesktopSidebar({
 					</p>
 					<p className="device-meta">
 						{selectedDevice
-							? `${selectedDevice.info.appVersion ?? 'dev'} · ${selectedDevice.info.platform}`
+							? `${selectedDevice.info.appVersion ?? 'dev'} · ${PLATFORM_LABELS[selectedDevice.info.platform]}`
 							: 'Waiting for connection'}
 					</p>
 				</div>
@@ -1051,9 +995,7 @@ function DesktopSidebar({
 									>
 										<Icon className="h-3.5 w-3.5" />
 										<span className="flex-1 text-left">{tool.label}</span>
-										{count !== undefined ? (
-											<span className="tool-count">{count}</span>
-										) : null}
+										{count ? <span className="tool-count">{count}</span> : null}
 									</Button>
 								);
 							})}
@@ -1070,7 +1012,7 @@ function DesktopSidebar({
 				>
 					<Radio className="h-3.5 w-3.5" />
 					<div className="min-w-0 flex-1 text-left">
-						<p>{state?.broker.status ?? 'Starting broker'}</p>
+						<p>{sentenceCase(state?.broker.status ?? 'starting broker')}</p>
 						<code>
 							{state
 								? `${state.broker.host}:${state.broker.port}`
@@ -1081,15 +1023,9 @@ function DesktopSidebar({
 						className={`connection-dot ${state?.broker.status === 'listening' ? 'is-online' : ''}`}
 					/>
 				</button>
-				<div className="shortcut-hint">
-					<span>
-						{bootstrap?.platform === 'darwin' ? (
-							<Command className="h-3 w-3" />
-						) : null}{' '}
-						{shortcut}
-					</span>
-					<span>Toggle sidebar</span>
-				</div>
+				<p className="shortcut-hint">
+					{sidebarShortcut(bootstrap?.platform)} shows or hides the sidebar
+				</p>
 			</footer>
 		</aside>
 	);

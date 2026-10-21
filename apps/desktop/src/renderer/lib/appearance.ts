@@ -10,6 +10,8 @@ export type ResolvedTheme = 'light' | 'dark';
 
 export type AppearanceSnapshot = {
 	preference: AppearancePreference;
+	/** What the window shows: the preference, or macOS's choice for system. */
+	theme: ResolvedTheme;
 	/** False when nothing can store a preference, so the control is disabled. */
 	available: boolean;
 	error: string | null;
@@ -56,6 +58,7 @@ let bridge: AppearanceBridge | null = null;
 let systemDark: MediaQueryList | null = null;
 let snapshot: AppearanceSnapshot = {
 	preference: 'system',
+	theme: 'dark',
 	available: false,
 	error: null,
 };
@@ -64,7 +67,7 @@ let shownTheme: ResolvedTheme | null = null;
 const listeners = new Set<() => void>();
 
 function render(): void {
-	const theme = resolveTheme(snapshot.preference, systemDark?.matches ?? false);
+	const theme = snapshot.theme;
 	if (theme === shownTheme) return;
 	const root = document.documentElement;
 	const switching = shownTheme !== null;
@@ -80,8 +83,12 @@ function render(): void {
 	}
 }
 
-function publish(next: Partial<AppearanceSnapshot>): void {
-	snapshot = { ...snapshot, ...next };
+function publish(next: Partial<Omit<AppearanceSnapshot, 'theme'>> = {}): void {
+	const merged = { ...snapshot, ...next };
+	snapshot = {
+		...merged,
+		theme: resolveTheme(merged.preference, systemDark?.matches ?? false),
+	};
 	render();
 	for (const listener of listeners) listener();
 }
@@ -95,9 +102,8 @@ function publish(next: Partial<AppearanceSnapshot>): void {
 export function startAppearance(): void {
 	bridge = appearanceBridge();
 	systemDark = window.matchMedia('(prefers-color-scheme: dark)');
-	systemDark.addEventListener('change', render);
-	snapshot = { ...snapshot, available: bridge !== null };
-	render();
+	systemDark.addEventListener('change', () => publish());
+	publish({ available: bridge !== null });
 	bridge?.getAppearance().then(
 		(preference) => {
 			if (latestRequest === 0) publish({ preference });

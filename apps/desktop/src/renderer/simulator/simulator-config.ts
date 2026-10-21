@@ -33,6 +33,8 @@ export type SimulatorToolDefinition = {
 	icon: ComponentType<{ className?: string }>;
 	shortcut: number;
 	group: SimulatorToolGroup;
+	/** A short release-stage tag beside the label, such as Alpha. */
+	tag?: string;
 };
 
 /**
@@ -105,6 +107,7 @@ export const simulatorTools: SimulatorToolDefinition[] = [
 		icon: DatabaseZap,
 		shortcut: 8,
 		group: 'backend',
+		tag: 'Alpha',
 	},
 	{
 		id: 'settings',
