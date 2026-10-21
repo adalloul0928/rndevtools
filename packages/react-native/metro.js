@@ -5,6 +5,10 @@ const path = require('node:path');
 const DEFAULT_SOURCE_EXTS = ['js', 'jsx', 'json', 'ts', 'tsx'];
 const DEFAULT_PLATFORMS = ['ios', 'android'];
 
+// Every package in this scope is devtools code. A pruned bundle may reach one
+// only through a `replace` stub.
+const DEVTOOLS_SCOPE = '@rndevtools/';
+
 function isFile(candidate) {
 	try {
 		return fs.statSync(candidate).isFile();
@@ -47,14 +51,75 @@ function packageFiles(specifier, projectRoot) {
 	}
 }
 
+/** The `name` in `directory/package.json`, when that file exists and has one. */
+function packageNameIn(directory) {
+	try {
+		const { name } = JSON.parse(
+			fs.readFileSync(path.join(directory, 'package.json'), 'utf8'),
+		);
+		return typeof name === 'string' ? name : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
- * Metro resolver that swaps devtools modules for inert stubs in release builds.
+ * Looks up the package a directory belongs to: the `name` of the nearest
+ * `package.json` at or above it that has one. Going by name rather than by a
+ * `node_modules/@rndevtools/` path also catches a workspace or `link:`
+ * install, which Metro reports by its real path outside node_modules. Each
+ * directory is read once.
+ */
+function packageLookup() {
+	const names = new Map();
+	const nameOf = (directory) => {
+		if (names.has(directory)) return names.get(directory);
+		const parent = path.dirname(directory);
+		const name =
+			packageNameIn(directory) ??
+			(parent === directory ? undefined : nameOf(parent));
+		names.set(directory, name);
+		return name;
+	};
+	return nameOf;
+}
+
+/**
+ * Reads an on/off option. Only a boolean counts: an environment variable
+ * passed straight through is a string whatever it says, so it is refused
+ * rather than guessed at.
+ */
+function switchOption(options, name) {
+	const value = options[name];
+	if (value === undefined || typeof value === 'boolean') return value === true;
+	const given =
+		typeof value === 'string'
+			? `the string ${JSON.stringify(value)}`
+			: value === null
+				? 'null'
+				: typeof value;
+	throw new TypeError(
+		`withDevtoolsPruning: \`${name}\` must be true or false, not ${given}. Compare an environment variable with the value you mean instead of passing it through.`,
+	);
+}
+
+/**
+ * Metro resolver that swaps devtools modules for inert stubs in release
+ * bundles.
  *
  * Devtools code is only safe to ship because it never reaches a production
  * bundle. Tree shaking is not a strong enough guarantee for that: a single
  * retained import pulls in panels, adapters, and the diagnostics they reach.
  * This replaces the modules at resolution time instead, so the graph is cut
  * rather than trimmed, and pairs with `verifyPrunedBundle` to prove it.
+ *
+ * Pruning fails closed. It applies to every bundle Metro does not build as a
+ * development bundle, read from the `dev` flag of Metro's resolution context,
+ * the flag that also sets `__DEV__`. A release build is pruned without the app
+ * setting any variable, and a context that carries no flag is treated as a
+ * release. While pruning, an import that resolves into an `@rndevtools/*`
+ * package without going through a `replace` entry throws, naming the import,
+ * instead of adding that package to the bundle.
  *
  * Each entry names a module the app imports, the file it resolves to, and the
  * stub to use instead. The stub must export the same shape as the real module
@@ -71,7 +136,6 @@ function packageFiles(specifier, projectRoot) {
  * const { withDevtoolsPruning } = require('@rndevtools/react-native/metro');
  *
  * module.exports = withDevtoolsPruning(config, {
- *   enabled: process.env.APP_VARIANT === 'production',
  *   projectRoot: __dirname,
  *   replace: [
  *     {
@@ -84,17 +148,31 @@ function packageFiles(specifier, projectRoot) {
  *
  * @param {object} config Metro config to extend.
  * @param {object} options
- * @param {boolean} options.enabled Whether to prune. Pass `false` for dev builds.
  * @param {string} options.projectRoot Absolute root that relative paths resolve against.
  * @param {ReadonlyArray<{module: string, path?: string, stub: string}>} options.replace
  *   `path` is the file `module` resolves to, relative to `projectRoot`, with or
  *   without its extension. Leave it out only when `module` is itself such a
  *   path or an installed package.
+ * @param {boolean} [options.enabled] `true` prunes development bundles too.
+ *   Left out, or `false`, release bundles alone are pruned: it never turns
+ *   pruning off.
+ * @param {boolean} [options.keepInReleaseBundles] `true` turns pruning off,
+ *   so release bundles keep their devtools. Only for an internal build that
+ *   deliberately ships them; `rndevtools-verify-bundle` fails on its bundle.
  * @returns {object} The same config, with `resolver.resolveRequest` wrapped.
  */
 function withDevtoolsPruning(config, options) {
-	const { enabled, projectRoot, replace } = options ?? {};
-	if (!enabled) return config;
+	const settings = options ?? {};
+	const always = switchOption(settings, 'enabled');
+	const keep = switchOption(settings, 'keepInReleaseBundles');
+	if (always && keep) {
+		throw new Error(
+			'withDevtoolsPruning: `enabled: true` prunes every bundle and `keepInReleaseBundles: true` prunes none. Pass one or the other.',
+		);
+	}
+	// The one deliberate way to ship devtools in a release bundle.
+	if (keep) return config;
+	const { projectRoot, replace } = settings;
 	if (!projectRoot) throw new Error('withDevtoolsPruning requires projectRoot');
 	if (!Array.isArray(replace) || replace.length === 0) {
 		throw new Error('withDevtoolsPruning requires a non-empty replace list');
@@ -167,22 +245,76 @@ function withDevtoolsPruning(config, options) {
 		}
 	};
 
+	// Metro reports real paths, so messages name files from the real root.
+	let root = projectRoot;
+	try {
+		root = fs.realpathSync(projectRoot);
+	} catch {
+		// A missing root already failed the stub check above.
+	}
+	const shown = (file) => {
+		const relative = path.relative(root, file);
+		return relative === '..' ||
+			relative.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(relative)
+			? file
+			: relative;
+	};
+
+	// The app is never devtools code itself, even when its package is named
+	// in the scope, as an example app in this toolkit's own workspace is.
+	const packageOf = packageLookup();
+	const appPackage = packageOf(root);
+	const devtoolsPackageOf = (file) => {
+		const name = packageOf(path.dirname(file));
+		return name?.startsWith(DEVTOOLS_SCOPE) && name !== appPackage
+			? name
+			: undefined;
+	};
+	// An asset request resolves to files too, so a devtools image is refused
+	// like devtools code.
+	const filesOf = (resolution) =>
+		resolution?.type === 'sourceFile'
+			? [resolution.filePath]
+			: resolution?.type === 'assetFiles'
+				? resolution.filePaths
+				: [];
+	const refuseDevtools = (context, moduleName, resolution) => {
+		for (const file of filesOf(resolution)) {
+			const name = devtoolsPackageOf(file);
+			if (!name) continue;
+			const importer = context.originModulePath
+				? shown(context.originModulePath)
+				: 'the bundle';
+			throw new Error(
+				`withDevtoolsPruning: ${moduleName}, imported by ${importer}, resolves to ${shown(file)} in ${name}. A pruned bundle must not contain ${name}, so the build stops here instead of shipping it. Import devtools only through a module listed in \`replace\`, which Metro swaps for its stub, or pass \`keepInReleaseBundles: true\` for a build that deliberately ships devtools.`,
+			);
+		}
+	};
+
 	const previous = resolver.resolveRequest;
+	const resolveNext = (context, moduleName, platform) =>
+		previous
+			? previous(context, moduleName, platform)
+			: context.resolveRequest(context, moduleName, platform);
 	resolver.resolveRequest = (context, moduleName, platform) => {
+		// A development bundle keeps its devtools. Only Metro's own `true`
+		// marks one, so a context without the flag is pruned like a release.
+		if (!always && context.dev === true) {
+			return resolveNext(context, moduleName, platform);
+		}
 		// An alias may only be resolvable by Babel, so it is matched by name
 		// before anything tries to resolve it.
 		const aliased = entries.find((entry) => moduleName === entry.module);
 		if (aliased) return context.resolveRequest(context, aliased.stub, platform);
-		const resolution = previous
-			? previous(context, moduleName, platform)
-			: context.resolveRequest(context, moduleName, platform);
+		const resolution = resolveNext(context, moduleName, platform);
 		const pruned =
 			resolution?.type === 'sourceFile'
 				? targetFor(resolution.filePath)
 				: undefined;
-		return pruned
-			? context.resolveRequest(context, pruned.stub, platform)
-			: resolution;
+		if (pruned) return context.resolveRequest(context, pruned.stub, platform);
+		refuseDevtools(context, moduleName, resolution);
+		return resolution;
 	};
 	config.resolver = resolver;
 	return config;

@@ -131,7 +131,6 @@ resolution time so devtools code is never reachable:
 const { withDevtoolsPruning } = require('@rndevtools/react-native/metro');
 
 module.exports = withDevtoolsPruning(config, {
-  enabled: process.env.APP_VARIANT === 'production',
   projectRoot: __dirname,
   replace: [
     {
@@ -152,10 +151,50 @@ itself a project-relative path or an installed package. A `path` or stub that
 names no file fails the config load, so a moved module cannot silently stay in
 the bundle.
 
+Pruning fails closed. It applies to every release bundle, meaning every
+bundle Metro builds with `dev: false`. Metro hands the resolver that flag for
+each bundle, the same flag that sets `__DEV__`, so there is no environment
+variable to set and none to forget. That covers `expo export` (and so EAS
+Update), Xcode and Gradle release builds, which bundle with `--dev false`
+(`expo run:ios --configuration Release`, `expo run:android --variant release`,
+EAS Build), and `expo start --no-dev`. A resolver context without the flag is
+treated as a release. Development bundles are left alone.
+
+While a bundle is pruned, an import that resolves into any `@rndevtools/*`
+package without going through a `replace` entry fails the build, naming the
+import and the module that made it, instead of quietly adding the package to
+the bundle. A package is recognised by the `name` in its `package.json`, so a
+workspace or `link:` install counts too.
+
+Two options change the default. Both must be real booleans; an environment
+variable passed straight through is a string, and is refused.
+
+- `enabled: true` prunes development bundles too, to try the release graph in
+  development. `enabled: false` is the same as leaving it out: it never turns
+  pruning off.
+- `keepInReleaseBundles: true` turns pruning off, so release bundles keep their
+  devtools. It exists for an internal build that deliberately ships the tools,
+  such as a preview for testers. Derive it from an exact match, for example
+  `keepInReleaseBundles: process.env.APP_VARIANT === 'preview'`, so that a
+  build which forgets the variable is still pruned.
+
+`projectRoot` and `replace` are checked on every config load, development
+included, unless `keepInReleaseBundles` is `true`.
+
+The guarantee does not cover:
+
+- A build with `keepInReleaseBundles: true`, such as that preview. It ships
+  devtools by design and `rndevtools-verify-bundle` fails on it, so never let a
+  store build inherit the setting.
+- A bundle built with `dev: true`, wherever it ends up. `expo export:embed` and
+  `react-native bundle` build one unless they are given `--dev false`.
+- Your own diagnostics that import nothing from `@rndevtools/*`. Only a
+  `replace` entry cuts them out, and only a `--marker` finds them.
+
 Then prove it over a real export, in CI:
 
 ```sh
-npx expo export --platform ios --output-dir ./build
+npx expo export --platform ios --platform android --output-dir ./build
 npx rndevtools-verify-bundle ./build --marker "My Debug Panel"
 ```
 
@@ -172,11 +211,14 @@ package's `/desktop`, `/authorization` and `/adapters/storage`, and core's
 package's image overlay builds on), `/plugins/network-presentation`, `/redact`
 and `/serialize` (which loads `/redact`). The one exception is core's
 `/format`: its three formatters hold no string specific enough to look for,
-so importing it alone goes unnoticed. Expo's experimental tree shaking
-(`EXPO_UNSTABLE_TREE_SHAKING`) removes a marker together with the code that
-holds it, so there an import goes unnoticed when the code it keeps holds
-none, as `getDevtoolsAuthorization` on its own does. The `--marker` flag adds
-strings specific to your own panels; `verifyPrunedBundle(root, markers)` from
+so the verifier misses it when it is imported alone. Expo's experimental tree
+shaking (`EXPO_UNSTABLE_TREE_SHAKING`) removes a marker together with the code
+that holds it, so there the verifier misses an import when the code it keeps
+holds none, as `getDevtoolsAuthorization` on its own does. A pruned build
+refuses both imports anyway, because resolution runs before tree shaking; the
+verifier is what still catches a config that stopped pruning. The `--marker`
+flag adds strings specific to your own panels;
+`verifyPrunedBundle(root, markers)` from
 `@rndevtools/react-native/verify-bundle` checks the built-in markers as well
 as the ones you pass.
 

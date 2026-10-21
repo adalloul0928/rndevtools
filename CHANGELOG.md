@@ -19,6 +19,18 @@
   bundles. A `path` or stub that names no file, or an alias entry without
   `path`, now fails the config load, so configs that relied on alias-only
   matching must add `path`.
+- **Breaking:** `withDevtoolsPruning` prunes every release bundle, meaning
+  every bundle Metro builds with `dev: false`, by default. It reads Metro's own
+  `dev` flag rather than an app variable, so a release build that never sets
+  one, such as `expo run:ios --configuration Release` or an EAS profile
+  without it, no longer ships devtools. `enabled: false` no longer turns
+  pruning off, `enabled: true` still prunes development bundles too, and
+  `keepInReleaseBundles: true` is the only way to keep devtools in a release
+  bundle. Both options must be booleans, and `projectRoot` and `replace` are
+  validated on every config load, development included.
+- While pruning, an import that resolves into an `@rndevtools/*` package
+  without going through a `replace` entry fails the build, naming the import
+  and the module that made it, instead of adding the package to the bundle.
 - **Breaking:** `verifyPrunedBundle(root, markers)` checks `markers` in
   addition to the default markers instead of replacing them, so a caller that
   passed its own shorter list now also fails on any default marker.
