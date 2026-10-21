@@ -1,6 +1,10 @@
 import { chmod, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import {
+	type AppearancePreference,
+	appearancePreferenceSchema,
+} from '../shared/appearance-protocol';
 import { writeFileAtomic } from './private-files';
 
 const MAX_SETTINGS_BYTES = 64 * 1024;
@@ -11,8 +15,10 @@ const settingsSchema = z.strictObject({
 		.min(1)
 		.max(4 * 1024)
 		.optional(),
+	appearance: appearancePreferenceSchema.optional(),
 });
 type DesktopSettings = z.infer<typeof settingsSchema>;
+type DesktopSettingsPatch = Partial<Omit<DesktopSettings, 'version'>>;
 
 export class DesktopSettingsStore {
 	readonly #directory: string;
@@ -41,16 +47,35 @@ export class DesktopSettingsStore {
 		return { ...this.#settings };
 	}
 
+	get appearance(): AppearancePreference {
+		return this.#settings.appearance ?? 'system';
+	}
+
 	async setXcodeDeveloperDirectory(value: string | undefined): Promise<void> {
-		const nextSettings = settingsSchema.parse({
-			version: 1,
-			...(value ? { xcodeDeveloperDirectory: value } : {}),
-		});
-		const snapshot = JSON.stringify(nextSettings);
+		await this.#update({ xcodeDeveloperDirectory: value || undefined });
+	}
+
+	async setAppearance(value: AppearancePreference): Promise<void> {
+		await this.#update({ appearance: value });
+	}
+
+	/**
+	 * Applies a patch to the settings in effect when its turn in the queue
+	 * comes, so queued writes to different fields never undo each other. An
+	 * undefined field is removed.
+	 */
+	async #update(patch: DesktopSettingsPatch): Promise<void> {
 		const write = this.#writeQueue
 			.catch(() => undefined)
 			.then(async () => {
-				await this.#writeAtomically(snapshot);
+				const nextSettings = settingsSchema.parse(
+					Object.fromEntries(
+						Object.entries({ ...this.#settings, ...patch }).filter(
+							([, value]) => value !== undefined
+						)
+					)
+				);
+				await this.#writeAtomically(JSON.stringify(nextSettings));
 				this.#settings = nextSettings;
 			});
 		this.#writeQueue = write;

@@ -205,7 +205,7 @@ export function ConsolePanel() {
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
 				meta={
-					<span className="flex items-center gap-1.5 text-(--brand)">
+					<span className="flex items-center gap-1.5 text-(--brand-text)">
 						<ShieldCheck className="h-3 w-3" /> Logger-backed · redacted
 					</span>
 				}
@@ -377,11 +377,11 @@ export function ConsolePanel() {
 									maxHeight={520}
 								/>
 							) : (
-								<div className="rounded-md border border-white/8 bg-white/[0.025] p-4 text-xs text-(--text-3)">
+								<div className="rounded-md border border-foreground/8 bg-foreground/[0.025] p-4 text-xs text-(--text-3)">
 									No structured attributes were attached to this event.
 								</div>
 							)}
-							<div className="mt-4 flex items-center gap-2 rounded-md border border-(--brand-border) bg-(--brand-soft) p-3 text-xs leading-5 text-(--brand)">
+							<div className="mt-4 flex items-center gap-2 rounded-md border border-(--brand-border) bg-(--brand-soft) p-3 text-xs leading-5 text-(--brand-text)">
 								<Braces className="h-4 w-4 shrink-0" /> Sensitive keys, tokens,
 								emails, and identifiers are redacted before this event reaches
 								desktop.

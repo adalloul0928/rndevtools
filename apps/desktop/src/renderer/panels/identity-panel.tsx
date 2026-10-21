@@ -84,11 +84,11 @@ export function IdentityPanel() {
 				<div
 					className={`flex shrink-0 items-center gap-4 border-b px-5 py-4 ${active.status === 'needs-attention' ? 'border-(--danger)/25 bg-(--danger)/[0.06]' : 'border-(--warning)/25 bg-(--warning)/[0.06]'}`}
 				>
-					<div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-black/30">
+					<div className="grid h-9 w-9 place-items-center rounded-full border border-foreground/10 bg-background/30">
 						{active.status === 'needs-attention' ? (
-							<ShieldAlert className="h-4 w-4 text-(--danger)" />
+							<ShieldAlert className="h-4 w-4 text-(--danger-text)" />
 						) : (
-							<UserRoundCheck className="h-4 w-4 text-(--warning)" />
+							<UserRoundCheck className="h-4 w-4 text-(--warning-text)" />
 						)}
 					</div>
 					<div className="min-w-0 flex-1">
@@ -102,7 +102,7 @@ export function IdentityPanel() {
 							exact original actor session.
 						</p>
 						{active.error ? (
-							<p className="mb-0 mt-1 text-xs text-(--danger)">
+							<p className="mb-0 mt-1 text-xs text-(--danger-text)">
 								{active.error}
 							</p>
 						) : null}
@@ -132,7 +132,7 @@ export function IdentityPanel() {
 								const selected = active?.target.personaId === persona.id;
 								return (
 									<Card
-										className="rounded-lg border border-white/8 bg-white/[0.025] shadow-none"
+										className="rounded-lg border border-foreground/8 bg-foreground/[0.025] shadow-none"
 										key={persona.id}
 										variant="secondary"
 									>
@@ -190,10 +190,10 @@ export function IdentityPanel() {
 						No managed identity sessions yet.
 					</p>
 				) : (
-					<div className="overflow-hidden rounded-lg border border-white/8">
+					<div className="overflow-hidden rounded-lg border border-foreground/8">
 						{session.history.map((entry) => (
 							<div
-								className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3 last:border-0"
+								className="flex items-center gap-3 border-b border-foreground/[0.06] px-4 py-3 last:border-0"
 								key={entry.id}
 							>
 								<div className="min-w-0 flex-1 text-xs text-(--foreground)">

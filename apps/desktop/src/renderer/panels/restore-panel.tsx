@@ -74,10 +74,10 @@ export function RestorePanel() {
 				}
 			/>
 			<div className="grid min-h-0 flex-1 grid-cols-[360px_minmax(0,1fr)]">
-				<div className="panel-scroll border-r border-white/8 p-4">
-					<div className="mb-4 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+				<div className="panel-scroll border-r border-foreground/8 p-4">
+					<div className="mb-4 rounded-lg border border-foreground/10 bg-foreground/[0.035] p-4">
 						<div className="mb-3 flex items-center gap-2">
-							<div className="grid h-8 w-8 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand)">
+							<div className="grid h-8 w-8 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand-text)">
 								<Camera className="h-3.5 w-3.5" />
 							</div>
 							<div>
@@ -94,7 +94,7 @@ export function RestorePanel() {
 								Checkpoint label
 							</Label>
 							<Input
-								className="h-9 rounded-md border border-white/10 bg-black/30 px-3 text-xs text-(--foreground)"
+								className="h-9 rounded-md border border-foreground/10 bg-background/30 px-3 text-xs text-(--foreground)"
 								maxLength={120}
 								placeholder="Before testing empty state"
 							/>
@@ -161,13 +161,13 @@ export function RestorePanel() {
 							{points.map((point) => (
 								<button
 									aria-pressed={selected?.id === point.id}
-									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === point.id ? 'border-white/18 bg-white/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/12 hover:bg-white/[0.04]'}`}
+									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === point.id ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
 									key={point.id}
 									type="button"
 									onClick={() => setSelectedId(point.id)}
 								>
 									<div className="flex items-start gap-3">
-										<div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand)">
+										<div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border border-(--brand-border) bg-(--brand-soft) text-(--brand-text)">
 											<ArchiveRestore className="h-3.5 w-3.5" />
 										</div>
 										<div className="min-w-0 flex-1">
@@ -213,7 +213,7 @@ export function RestorePanel() {
 									>
 										<Label className="sr-only">Restore point label</Label>
 										<Input
-											className="h-8 w-72 rounded-md border border-white/10 bg-black/30 px-2 text-xs text-(--foreground)"
+											className="h-8 w-72 rounded-md border border-foreground/10 bg-background/30 px-2 text-xs text-(--foreground)"
 											maxLength={120}
 										/>
 									</TextField>
@@ -311,8 +311,8 @@ export function RestorePanel() {
 									</p>
 								);
 							})()}
-							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-white/8 bg-white/[0.025]">
-								<div className="border-r border-white/8 p-4">
+							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
+								<div className="border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Sources
 									</p>
@@ -320,7 +320,7 @@ export function RestorePanel() {
 										{selected.sources.length}
 									</p>
 								</div>
-								<div className="border-r border-white/8 p-4">
+								<div className="border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Size
 									</p>
@@ -342,7 +342,7 @@ export function RestorePanel() {
 									const isSelected = selectedSourceIds.includes(source.id);
 									return (
 										<div
-											className={`rounded-lg border p-4 ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-white/8 bg-white/[0.02] opacity-60'}`}
+											className={`rounded-lg border p-4 ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-foreground/8 bg-foreground/[0.02] opacity-60'}`}
 											key={source.id}
 										>
 											<div className="mb-3 flex items-center justify-between gap-3">
@@ -419,7 +419,7 @@ export function RestorePanel() {
 								</div>
 							) : null}
 							<div className="mt-5 rounded-lg border border-(--brand-border) bg-(--brand-soft) p-4">
-								<div className="flex items-center gap-2 text-xs font-medium text-(--brand)">
+								<div className="flex items-center gap-2 text-xs font-medium text-(--brand-text)">
 									<ShieldCheck className="h-4 w-4" /> Restore safety boundary
 								</div>
 								<p className="mb-0 mt-2 text-xs leading-5 text-(--muted)">

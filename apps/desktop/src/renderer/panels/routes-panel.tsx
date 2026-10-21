@@ -99,7 +99,7 @@ export function RoutesPanel() {
 				description="See the current Expo Router stack, browse the generated sitemap, and navigate to explicit static routes."
 				meta={
 					<span
-						className={`flex items-center gap-1.5 ${current ? 'text-(--brand)' : 'text-(--text-3)'}`}
+						className={`flex items-center gap-1.5 ${current ? 'text-(--brand-text)' : 'text-(--text-3)'}`}
 					>
 						<Navigation2 className="h-3 w-3" />{' '}
 						{current?.path ?? 'No active route'}
@@ -127,7 +127,7 @@ export function RoutesPanel() {
 				</PanelNotice>
 			) : null}
 			<div className="grid min-h-0 flex-1 grid-cols-[minmax(380px,1fr)_360px]">
-				<div className="panel-scroll border-r border-white/8 p-4">
+				<div className="panel-scroll border-r border-foreground/8 p-4">
 					{filtered.length === 0 ? (
 						<EmptyPanel
 							icon={<MapIcon className="h-5 w-5" />}
@@ -142,13 +142,13 @@ export function RoutesPanel() {
 									<button
 										aria-current={isSelected ? 'true' : undefined}
 										aria-pressed={isSelected}
-										className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-white/18 bg-white/[0.07]' : 'border-transparent hover:border-white/8 hover:bg-white/[0.035]'}`}
+										className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-transparent hover:border-foreground/8 hover:bg-foreground/[0.035]'}`}
 										key={route.id}
 										type="button"
 										onClick={() => setSelectedId(route.id)}
 									>
 										<div
-											className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border ${route.isCurrent ? 'border-(--brand-border) bg-(--brand-soft) text-(--brand)' : 'border-white/8 bg-white/[0.03] text-(--text-3)'}`}
+											className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border ${route.isCurrent ? 'border-(--brand-border) bg-(--brand-soft) text-(--brand-text)' : 'border-foreground/8 bg-foreground/[0.03] text-(--text-3)'}`}
 										>
 											<RouteIcon className="h-3.5 w-3.5" />
 										</div>
@@ -165,7 +165,7 @@ export function RoutesPanel() {
 												{route.path}
 											</p>
 										</div>
-										<ArrowRight className="h-3.5 w-3.5 text-white/15 transition-transform group-hover:translate-x-0.5 group-hover:text-(--muted)" />
+										<ArrowRight className="h-3.5 w-3.5 text-foreground/15 transition-transform group-hover:translate-x-0.5 group-hover:text-(--muted)" />
 									</button>
 								);
 							})}
@@ -188,7 +188,7 @@ export function RoutesPanel() {
 									{selected.kind}
 								</StatusPill>
 							</div>
-							<div className="mb-4 rounded-md border border-white/8 bg-black/30 p-3 font-mono text-xs text-(--foreground)">
+							<div className="mb-4 rounded-md border border-foreground/8 bg-background/30 p-3 font-mono text-xs text-(--foreground)">
 								{selected.path}
 							</div>
 							<dl className="mb-4">
@@ -232,7 +232,7 @@ export function RoutesPanel() {
 								</p>
 							) : null}
 							{selected.filename ? (
-								<div className="mt-3 flex items-start gap-2 rounded-md border border-white/8 bg-white/[0.025] p-3 text-xs leading-5 text-(--text-3)">
+								<div className="mt-3 flex items-start gap-2 rounded-md border border-foreground/8 bg-foreground/[0.025] p-3 text-xs leading-5 text-(--text-3)">
 									<FileCode2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
 									<InlineCode className="break-all">
 										{selected.filename}
@@ -248,7 +248,7 @@ export function RoutesPanel() {
 							description="Pick a route to inspect its descriptor and navigate on device."
 						/>
 					)}
-					<div className="mt-6 border-t border-white/8 pt-4">
+					<div className="mt-6 border-t border-foreground/8 pt-4">
 						<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 							<History className="h-3.5 w-3.5" /> Recent navigation
 						</div>
@@ -260,7 +260,7 @@ export function RoutesPanel() {
 							<div className="space-y-2">
 								{recentEvents.map((event) => (
 									<div
-										className="rounded-md border border-white/8 bg-white/[0.025] p-3"
+										className="rounded-md border border-foreground/8 bg-foreground/[0.025] p-3"
 										key={event.id}
 									>
 										<div className="flex items-center justify-between gap-3">
@@ -291,7 +291,7 @@ export function RoutesPanel() {
 												.join(' · ')}
 										</p>
 										{event.error ? (
-											<p className="mb-0 mt-2 text-xs leading-4 text-(--danger)">
+											<p className="mb-0 mt-2 text-xs leading-4 text-(--danger-text)">
 												{event.error}
 											</p>
 										) : null}

@@ -593,7 +593,7 @@ function ActionWorkbench({
 	return (
 		<div className="sim-workbench">
 			<div className="sim-workbench-icon">
-				<Icon className="h-5 w-5 text-(--brand)" />
+				<Icon className="h-5 w-5 text-(--brand-text)" />
 			</div>
 			<p className="sim-eyebrow">{action.category} action</p>
 			<div className="panel-heading">

@@ -184,7 +184,7 @@ export function SearchControl({
 			value={value}
 			onChange={onChange}
 		>
-			<SearchField.Group className="h-8 rounded-md border border-white/10 bg-black/30 shadow-none transition-colors focus-within:border-white/25">
+			<SearchField.Group className="h-8 rounded-md border border-foreground/10 bg-background/30 shadow-none transition-colors focus-within:border-foreground/25">
 				<Search
 					className="ml-2.5 h-3.5 w-3.5 text-(--text-3)"
 					aria-hidden="true"
@@ -193,7 +193,7 @@ export function SearchControl({
 					className="h-full min-w-0 flex-1 bg-transparent px-2 text-sm text-(--foreground) outline-none placeholder:text-(--text-3)"
 					placeholder={placeholder}
 				/>
-				<SearchField.ClearButton className="mr-1 grid h-6 w-6 place-items-center rounded text-(--text-3) hover:bg-white/8 hover:text-(--foreground)">
+				<SearchField.ClearButton className="mr-1 grid h-6 w-6 place-items-center rounded text-(--text-3) hover:bg-foreground/8 hover:text-(--foreground)">
 					<X className="h-3.5 w-3.5" />
 				</SearchField.ClearButton>
 			</SearchField.Group>
@@ -250,15 +250,15 @@ export function CodePreview({
 	}
 	const displayValue = value.length === 0 ? '∅ (empty string)' : value;
 	return (
-		<div className="overflow-hidden rounded-md border border-white/8 bg-black/35">
+		<div className="overflow-hidden rounded-md border border-foreground/8 bg-background/35">
 			{label ? (
-				<div className="flex h-8 items-center justify-between border-b border-white/8 px-3 font-mono text-xs uppercase tracking-[0.06em] text-(--text-3)">
+				<div className="flex h-8 items-center justify-between border-b border-foreground/8 px-3 font-mono text-xs uppercase tracking-[0.06em] text-(--text-3)">
 					<span>{label}</span>
 					<CopyButton value={value} />
 				</div>
 			) : null}
 			<pre
-				className="m-0 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-[1.65] text-[#d4d4d4]"
+				className="m-0 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-[1.65] text-text-soft"
 				style={{ maxHeight }}
 			>
 				{displayValue}
@@ -290,7 +290,7 @@ export function CopyButton({
 		<Tooltip delay={400}>
 			<Button
 				aria-label={feedback}
-				className="h-6 min-w-6 rounded p-0 text-(--text-3) hover:bg-white/8 hover:text-(--foreground)"
+				className="h-6 min-w-6 rounded p-0 text-(--text-3) hover:bg-foreground/8 hover:text-(--foreground)"
 				isIconOnly
 				variant="ghost"
 				onPress={() => {
@@ -314,7 +314,7 @@ export function KeyValue({
 	mono?: boolean;
 }) {
 	return (
-		<div className="grid grid-cols-[132px_minmax(0,1fr)] gap-4 border-b border-white/[0.06] py-2.5 last:border-0">
+		<div className="grid grid-cols-[132px_minmax(0,1fr)] gap-4 border-b border-foreground/[0.06] py-2.5 last:border-0">
 			<dt className="text-xs text-(--text-3)">{label}</dt>
 			<dd
 				className={`m-0 min-w-0 break-words text-xs text-(--foreground) ${mono ? 'font-mono text-xs' : ''}`}
@@ -397,8 +397,8 @@ export function ConfirmAction({
 				{triggerIcon}
 				{triggerLabel}
 			</AlertDialog.Trigger>
-			<AlertDialog.Backdrop className="bg-black/70 backdrop-blur-sm">
-				<AlertDialog.Container className="border border-white/12 bg-[#0b0b0b] shadow-2xl">
+			<AlertDialog.Backdrop className="bg-black/40 backdrop-blur-sm dark:bg-black/70">
+				<AlertDialog.Container className="border border-foreground/12 bg-overlay shadow-2xl">
 					<AlertDialog.Dialog>
 						<AlertDialog.Header>
 							<AlertDialog.Icon status={tone}>
@@ -413,7 +413,10 @@ export function ConfirmAction({
 							</Button>
 							<Button
 								{...(tone === 'warning'
-									? { className: 'bg-amber-600 text-white hover:bg-amber-500' }
+									? {
+											className:
+												'bg-warning text-warning-foreground hover:bg-warning/90',
+										}
 									: {})}
 								onPress={onConfirm}
 								size="sm"
@@ -616,7 +619,7 @@ export function DetailPlaceholder({
 	return (
 		<div className="grid h-full place-items-center p-8 text-center">
 			<div>
-				<ChevronRight className="mx-auto mb-3 h-5 w-5 text-white/20" />
+				<ChevronRight className="mx-auto mb-3 h-5 w-5 text-foreground/20" />
 				<p className="m-0 text-xs text-(--text-3)">{label}</p>
 			</div>
 		</div>

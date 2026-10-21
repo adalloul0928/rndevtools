@@ -10,10 +10,14 @@ import {
 	Frame,
 	Laptop,
 	LockKeyhole,
+	Monitor,
 	MonitorUp,
+	Moon,
 	Network,
 	ShieldCheck,
 	Smartphone,
+	Sun,
+	SunMoon,
 	TerminalSquare,
 	Video,
 } from 'lucide-react';
@@ -29,6 +33,7 @@ import {
 	ReadinessRow,
 	type ReadinessStatus,
 } from '@/components/ui';
+import { setAppearancePreference, useAppearance } from '@/lib/appearance';
 import {
 	type SimulatorOnboardingOperationInput,
 	useSimulatorRuntime,
@@ -37,6 +42,7 @@ import {
 	useSupabaseNavigation,
 	useSupabaseState,
 } from '@/state/supabase-runtime';
+import type { AppearancePreference } from '../../../shared/appearance-protocol';
 import type {
 	SimulatorCapability,
 	SimulatorNativeState,
@@ -278,7 +284,7 @@ export function SettingsPanel() {
 		<section className="panel-root">
 			<PanelHeader
 				actions={<RefreshSimulatorsButton />}
-				description="Check Xcode and manage optional macOS permissions. Basic simulator controls work without a connected app."
+				description="Check Xcode, manage optional macOS permissions, and choose a theme. Basic simulator controls work without a connected app."
 				meta={requiredReady ? 'Core controls ready' : 'Setup required'}
 				title="Settings"
 			/>
@@ -311,6 +317,8 @@ export function SettingsPanel() {
 							</div>
 						</Disclosure>
 					</section>
+
+					<AppearanceSurface />
 
 					<aside className="sim-settings-aside">
 						<Disclosure title="Advanced tools & permissions">
@@ -379,6 +387,59 @@ export function SettingsPanel() {
 							</section>
 						</Disclosure>
 					</aside>
+				</div>
+			</div>
+		</section>
+	);
+}
+
+const APPEARANCE_OPTIONS: readonly {
+	value: AppearancePreference;
+	label: string;
+	icon: ComponentType<{ className?: string }>;
+}[] = [
+	{ value: 'system', label: 'System', icon: Monitor },
+	{ value: 'light', label: 'Light', icon: Sun },
+	{ value: 'dark', label: 'Dark', icon: Moon },
+];
+
+function AppearanceSurface() {
+	const { preference, available, error } = useAppearance();
+	return (
+		<section className="sim-surface">
+			<header className="sim-surface-header">
+				<div>
+					<h2>Appearance</h2>
+				</div>
+			</header>
+			<div className="sim-capability-list">
+				<div className="sim-capability-row">
+					<span className="sim-capability-icon">
+						<SunMoon className="h-4 w-4" />
+					</span>
+					<div className="sim-capability-copy">
+						<div>
+							<strong>Theme</strong>
+						</div>
+						<p>System follows macOS. Light and Dark stay fixed.</p>
+						{error ? <p className="sim-field-error">{error}</p> : null}
+					</div>
+					<fieldset className="sim-layout-toggle">
+						<legend className="sr-only">Theme</legend>
+						{APPEARANCE_OPTIONS.map(({ value, label, icon: Icon }) => (
+							<Button
+								aria-pressed={preference === value}
+								isDisabled={!available}
+								key={value}
+								size="sm"
+								variant={preference === value ? 'secondary' : 'ghost'}
+								onPress={() => void setAppearancePreference(value)}
+							>
+								<Icon className="h-3.5 w-3.5" />
+								{label}
+							</Button>
+						))}
+					</fieldset>
 				</div>
 			</div>
 		</section>

@@ -30,77 +30,126 @@
 @theme inline {
 	--font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	--font-mono: 'Geist Mono Variable', 'SFMono-Regular', Consolas, monospace;
+	--color-brand: var(--brand);
+	--color-brand-text: var(--brand-text);
+	--color-success-text: var(--success-text);
+	--color-warning-text: var(--warning-text);
+	--color-danger-text: var(--danger-text);
+	--color-info: var(--info);
+	--color-info-text: var(--info-text);
+	--color-text-soft: var(--text-soft);
+	--color-text-secondary: var(--text-secondary);
+	--color-text-3: var(--text-3);
+	--color-text-4: var(--text-4);
+	--color-bg-sunken: var(--bg-sunken);
 }
 
 @layer theme {
+	/*
+	 * Every colour is light-dark(light, dark), resolved against color-scheme.
+	 * Without a class, color-scheme follows prefers-color-scheme, which main
+	 * drives through nativeTheme.themeSource, so the first paint already
+	 * matches the appearance setting; lib/appearance.ts then mirrors the result
+	 * onto <html> as .light or .dark for HeroUI's own variables. Dark values are the
+	 * original palette; light values keep its order and pass WCAG AA on white.
+	 */
 	:root,
+	.light,
 	.dark,
+	[data-theme='light'],
 	[data-theme='dark'] {
-		color-scheme: dark;
-		--background: #000;
-		--foreground: #ededed;
-		--surface: #0a0a0a;
+		--background: light-dark(#fff, #000);
+		--foreground: light-dark(#171717, #ededed);
+		/* A hair off the base: panel headers, stat strips and sunken lists. */
+		--bg-sunken: light-dark(#fafafa, #050505);
+		--surface: light-dark(#fff, #0a0a0a);
 		--surface-foreground: var(--foreground);
-		--surface-secondary: #111;
+		--surface-secondary: light-dark(#f5f5f5, #111);
 		--surface-secondary-foreground: var(--foreground);
-		--surface-tertiary: #171717;
+		--surface-tertiary: light-dark(#ededed, #171717);
 		--surface-tertiary-foreground: var(--foreground);
-		--overlay: #0b0b0b;
+		--overlay: light-dark(#fff, #0b0b0b);
 		--overlay-foreground: var(--foreground);
-		--muted: #a1a1a1;
-		--default: #1a1a1a;
+		--muted: light-dark(#575757, #a1a1a1);
+		--default: light-dark(#ebebeb, #1a1a1a);
 		--default-foreground: var(--foreground);
-		--accent: #ededed;
-		--accent-foreground: #000;
+		--accent: light-dark(#171717, #ededed);
+		--accent-foreground: light-dark(#fff, #000);
 		/*
 		 * Single brand accent (Supabase green). It carries active states, links,
 		 * focus, live/progress indicators, and positive/success semantics. Primary
-		 * push-button fill stays near-white (--accent) in the Vercel idiom; the
-		 * green is used as a restrained highlight, not a flood fill.
+		 * push-button fill stays near-white in dark and near-black in light
+		 * (--accent) in the Vercel idiom; the green is used as a restrained
+		 * highlight, not a flood fill. --brand is for dots, bars, fills and
+		 * borders; --brand-text is the shade that reads as text on each ground.
 		 */
-		--brand: #3ecf8e;
-		--brand-soft: rgb(62 207 142 / 14%);
-		--brand-border: rgb(62 207 142 / 40%);
-		--success: #3ecf8e;
+		--brand: light-dark(#179a5f, #3ecf8e);
+		--brand-text: light-dark(#0b7049, #3ecf8e);
+		--brand-soft: color-mix(in oklab, var(--brand) 14%, transparent);
+		--brand-border: color-mix(in oklab, var(--brand) 40%, transparent);
+		--success: var(--brand);
+		--success-text: var(--brand-text);
 		--success-foreground: #000;
-		--success-soft: rgb(62 207 142 / 14%);
-		--warning: #f4b942;
+		--success-soft: color-mix(in oklab, var(--success) 14%, transparent);
+		--warning: light-dark(#b06f00, #f4b942);
+		--warning-text: light-dark(#8f5400, #f4b942);
 		--warning-foreground: #000;
-		--warning-soft: rgb(244 185 66 / 14%);
-		--danger: #f87171;
-		--danger-foreground: #000;
-		--danger-soft: rgb(248 113 113 / 14%);
-		--danger-border: rgb(248 113 113 / 25%);
-		--warning-border: rgb(244 185 66 / 25%);
+		--warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+		--warning-border: color-mix(in oklab, var(--warning) 25%, transparent);
+		--danger: light-dark(#d93636, #f87171);
+		--danger-text: light-dark(#c42b2b, #f87171);
+		--danger-foreground: light-dark(#fff, #000);
+		--danger-soft: color-mix(in oklab, var(--danger) 14%, transparent);
+		--danger-border: color-mix(in oklab, var(--danger) 25%, transparent);
 		/* Blue is only ever in-flight work: starting, stopping, queued. */
-		--info: #93c5fd;
-		--info-soft: rgb(96 165 250 / 10%);
-		--info-border: rgb(96 165 250 / 25%);
-		--border: rgb(255 255 255 / 11%);
-		--separator: rgb(255 255 255 / 8%);
-		--focus: #3ecf8e;
-		--link: #3ecf8e;
-		--field-background: #090909;
+		--info: light-dark(#1d5fd1, #93c5fd);
+		--info-text: light-dark(#1b58c4, #93c5fd);
+		--info-soft: color-mix(in oklab, var(--info) 10%, transparent);
+		--info-border: color-mix(in oklab, var(--info) 25%, transparent);
+		--border: color-mix(in oklab, var(--foreground) 11%, transparent);
+		--separator: color-mix(in oklab, var(--foreground) 8%, transparent);
+		--focus: var(--brand);
+		--link: var(--brand-text);
+		--field-background: light-dark(#fff, #090909);
 		--field-foreground: var(--foreground);
-		--field-placeholder: #8a8a8a;
-		--field-border: rgb(255 255 255 / 12%);
+		--field-placeholder: light-dark(#737373, #8a8a8a);
+		--field-border: color-mix(in oklab, var(--foreground) 12%, transparent);
 		--field-border-width: 1px;
 		--field-radius: 6px;
 		--surface-shadow: none;
 		--field-shadow: none;
-		--overlay-shadow: 0 24px 80px rgb(0 0 0 / 70%);
-		--radius: 4px;
-		--signal: #3ecf8e;
+		--overlay-shadow: 0 24px 80px light-dark(rgb(0 0 0 / 14%), rgb(0 0 0 / 70%));
+		--signal: var(--brand);
+		/* Secondary performance series, kept apart from the brand green. */
+		--chart-cpu: light-dark(#16a34a, #4ade80);
+		--chart-memory: light-dark(#7c3aed, #a78bfa);
+		/* Text, strongest to weakest. */
 		--text-1: var(--foreground);
+		--text-soft: light-dark(#262626, #d4d4d4);
+		--text-secondary: light-dark(#404040, #bababa);
 		--text-2: var(--muted);
-		--text-3: #8a8a8a;
-		--text-4: #929292;
+		--text-4: light-dark(#5e5e5e, #929292);
+		--text-3: light-dark(#666666, #8a8a8a);
 		--titlebar-height: 48px;
 		/* macOS draws the traffic lights at x:16; clear them plus a 12px gutter. */
 		--titlebar-macos-inset: 80px;
 		--sidebar-width: 228px;
 		--font-size-caption: 12px;
 		--font-size-control: 14px;
+	}
+
+	:root {
+		color-scheme: light dark;
+	}
+
+	.light,
+	[data-theme='light'] {
+		color-scheme: light;
+	}
+
+	.dark,
+	[data-theme='dark'] {
+		color-scheme: dark;
 	}
 }
 
@@ -115,7 +164,7 @@ body,
 	height: 100%;
 	margin: 0;
 	overflow: hidden;
-	background: #000;
+	background: var(--background);
 }
 
 body {
@@ -147,7 +196,7 @@ button:disabled {
 }
 
 ::selection {
-	background: rgb(62 207 142 / 30%);
+	background: color-mix(in oklab, var(--brand) 30%, transparent);
 }
 
 ::-webkit-scrollbar {
@@ -162,7 +211,7 @@ button:disabled {
 ::-webkit-scrollbar-thumb {
 	border: 3px solid transparent;
 	border-radius: 999px;
-	background: rgb(255 255 255 / 15%);
+	background: color-mix(in oklab, var(--foreground) 15%, transparent);
 	background-clip: padding-box;
 }
 
@@ -170,7 +219,7 @@ button:disabled {
 	display: block;
 	height: 100%;
 	min-height: 0;
-	background: #000;
+	background: var(--background);
 }
 
 .desktop-body {
@@ -182,8 +231,8 @@ button:disabled {
 .titlebar {
 	-webkit-app-region: drag;
 	height: var(--titlebar-height);
-	border-bottom: 1px solid rgb(255 255 255 / 9%);
-	background: #090909;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
+	background: var(--surface);
 	user-select: none;
 }
 
@@ -233,7 +282,7 @@ button:disabled {
 	width: 1px;
 	height: 16px;
 	flex: 0 0 auto;
-	background: rgb(255 255 255 / 10%);
+	background: color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 
 /*
@@ -274,8 +323,8 @@ button:disabled {
 }
 
 .titlebar-icon-button:hover {
-	border-color: rgb(255 255 255 / 10%);
-	background: rgb(255 255 255 / 5%);
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 	color: var(--foreground);
 }
 
@@ -292,9 +341,9 @@ button:disabled {
 	gap: 9px;
 	height: 26px;
 	padding: 0 10px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2.5%);
+	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 }
 
 .live-bars {
@@ -308,11 +357,11 @@ button:disabled {
 	display: block;
 	width: 2px;
 	border-radius: 1px;
-	background: rgb(255 255 255 / 9%);
+	background: color-mix(in oklab, var(--foreground) 9%, transparent);
 }
 
 .live-bars span.is-live {
-	background: #3ecf8e;
+	background: var(--brand);
 }
 
 .live-label {
@@ -366,9 +415,9 @@ button:disabled {
 	gap: 6px;
 	height: 26px;
 	padding: 0 9px;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2.5%);
+	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 	color: var(--text-3);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
@@ -376,7 +425,7 @@ button:disabled {
 }
 
 .connection-button:hover {
-	border-color: rgb(255 255 255 / 16%);
+	border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
 	color: var(--muted);
 }
 
@@ -391,18 +440,18 @@ button:disabled {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: #555;
+	background: color-mix(in oklab, var(--foreground) 36%, transparent);
 }
 
 .connection-dot.is-online,
 .device-status.is-online {
-	background: #3ecf8e;
-	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
+	background: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 8%, transparent);
 }
 
 .device-status.is-simulated {
-	background: #3ecf8e;
-	box-shadow: 0 0 0 3px rgb(62 207 142 / 9%);
+	background: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 9%, transparent);
 }
 
 .device-select {
@@ -414,9 +463,9 @@ button:disabled {
 .device-select [data-slot='native-select-trigger'] {
 	height: 26px;
 	min-height: 26px;
-	border-color: rgb(255 255 255 / 10%);
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 6px;
-	background: #0c0c0c;
+	background: var(--field-background);
 }
 
 .device-select select {
@@ -437,8 +486,8 @@ button:disabled {
 	flex-direction: column;
 	overflow: hidden;
 	border: 0;
-	border-right: 1px solid rgb(255 255 255 / 9%);
-	background: #080808;
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
+	background: var(--surface);
 }
 
 .device-summary {
@@ -448,7 +497,7 @@ button:disabled {
 	gap: 10px;
 	height: 62px;
 	padding: 10px 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .device-icon {
@@ -456,10 +505,10 @@ button:disabled {
 	width: 30px;
 	height: 30px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 4%);
-	color: #999;
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
+	color: var(--text-4);
 }
 
 .device-name,
@@ -473,7 +522,7 @@ button:disabled {
 .device-name {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #d4d4d4;
+	color: var(--text-soft);
 }
 
 .device-meta {
@@ -481,7 +530,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: capitalize;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .desktop-sidebar-content {
@@ -509,7 +558,7 @@ button:disabled {
 	font-weight: 500;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .tool-nav-item {
@@ -521,41 +570,41 @@ button:disabled {
 	padding: 0 8px;
 	border: 1px solid transparent;
 	border-radius: 5px;
-	color: #8a8a8a;
+	color: var(--text-3);
 	font-size: var(--font-size-control);
 	font-weight: 450;
 }
 
 .tool-nav-item:hover {
-	background: rgb(255 255 255 / 3%);
-	color: #aaa;
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
+	color: var(--muted);
 }
 
 .tool-nav-item.is-current {
-	border-color: rgb(255 255 255 / 8%);
-	background: rgb(255 255 255 / 6%);
-	color: #ededed;
+	border-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
+	color: var(--text-1);
 }
 
 .tool-nav-item.is-current svg {
-	color: #3ecf8e;
+	color: var(--brand-text);
 }
 
 .tool-count {
 	min-width: 19px;
 	padding: 1px 4px;
 	border-radius: 4px;
-	background: rgb(255 255 255 / 5%);
+	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-align: center;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .desktop-sidebar-footer {
 	flex: 0 0 auto;
 	padding: 8px;
-	border-top: 1px solid rgb(255 255 255 / 7%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .broker-summary {
@@ -564,14 +613,14 @@ button:disabled {
 	gap: 9px;
 	width: 100%;
 	padding: 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
-	color: #8a8a8a;
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
+	color: var(--text-3);
 }
 
 .broker-summary:hover {
-	border-color: rgb(255 255 255 / 13%);
+	border-color: color-mix(in oklab, var(--foreground) 13%, transparent);
 }
 
 .broker-summary p,
@@ -586,13 +635,13 @@ button:disabled {
 .broker-summary p {
 	font-size: var(--font-size-control);
 	text-transform: capitalize;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .broker-summary code {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .shortcut-hint {
@@ -607,9 +656,9 @@ button:disabled {
 
 .shortcut-hint kbd {
 	padding: 2px 5px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 4px;
-	background: rgb(255 255 255 / 4%);
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
 	color: var(--text-3);
@@ -622,7 +671,7 @@ button:disabled {
 	min-height: 0;
 	flex: 1 1 auto;
 	overflow: hidden;
-	background: #000;
+	background: var(--background);
 }
 
 .desktop-content {
@@ -640,17 +689,17 @@ button:disabled {
 	gap: 10px;
 	min-height: 32px;
 	padding: 7px 14px;
-	border-bottom: 1px solid rgb(248 113 113 / 20%);
-	background: rgb(248 113 113 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--danger) 20%, transparent);
+	background: color-mix(in oklab, var(--danger) 7%, transparent);
 	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: rgb(254 202 202 / 78%);
+	color: var(--danger-text);
 }
 
 .runtime-banner strong {
 	flex: 0 0 auto;
 	font-weight: 600;
-	color: #fca5a5;
+	color: var(--danger-text);
 }
 
 .runtime-banner span {
@@ -662,9 +711,9 @@ button:disabled {
 
 .offline-banner {
 	justify-content: center;
-	border-color: rgb(244 185 66 / 18%);
-	background: rgb(244 185 66 / 6%);
-	color: rgb(253 230 138 / 72%);
+	border-color: color-mix(in oklab, var(--warning) 18%, transparent);
+	background: color-mix(in oklab, var(--warning) 6%, transparent);
+	color: var(--warning-text);
 }
 
 .panel-root {
@@ -685,8 +734,8 @@ button:disabled {
 	justify-content: space-between;
 	gap: 24px;
 	padding: 16px 22px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #030303;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .panel-toolbar {
@@ -698,8 +747,8 @@ button:disabled {
 	gap: 8px;
 	overflow: visible;
 	padding: 6px 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #070707;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .panel-toolbar > * {
@@ -719,11 +768,11 @@ button:disabled {
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .split-panel > .detail-pane {
-	border-left: 1px solid rgb(255 255 255 / 8%);
+	border-left: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .desktop-grid {
@@ -762,7 +811,7 @@ button:disabled {
 	width: 3px;
 	height: 13px;
 	border-radius: 2px;
-	background: #3ecf8e;
+	background: var(--brand);
 	animation: loading-bars 0.8s ease-in-out infinite alternate;
 }
 
@@ -796,10 +845,10 @@ button:disabled {
 	height: 44px;
 	margin-bottom: 16px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 9px;
-	background: rgb(255 255 255 / 3%);
-	color: #8a8a8a;
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
+	color: var(--text-3);
 }
 
 .waiting-state h1 {
@@ -813,7 +862,7 @@ button:disabled {
 	margin: 8px 0 0;
 	font-size: 12px;
 	line-height: 1.6;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .fatal-error {
@@ -831,10 +880,10 @@ button:disabled {
 	height: 44px;
 	margin-bottom: 14px;
 	place-items: center;
-	border: 1px solid rgb(248 113 113 / 22%);
+	border: 1px solid color-mix(in oklab, var(--danger) 22%, transparent);
 	border-radius: 9px;
-	background: rgb(248 113 113 / 8%);
-	color: #fca5a5;
+	background: color-mix(in oklab, var(--danger) 8%, transparent);
+	color: var(--danger-text);
 }
 
 .fatal-error-eyebrow {
@@ -843,7 +892,7 @@ button:disabled {
 	font-size: var(--font-size-control);
 	letter-spacing: 0.09em;
 	text-transform: uppercase;
-	color: #f87171;
+	color: var(--danger-text);
 }
 
 .fatal-error h1 {
@@ -870,9 +919,9 @@ button:disabled {
 	min-width: 0;
 	margin: 0;
 	padding: 2px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 7px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .workspace-switcher button {
@@ -882,22 +931,22 @@ button:disabled {
 	padding: 0 8px;
 	border: 1px solid transparent;
 	border-radius: 5px;
-	color: #929292;
+	color: var(--text-4);
 	font-size: var(--font-size-control);
 }
 
 .workspace-switcher button:hover {
-	color: #b8b8b8;
+	color: var(--text-secondary);
 }
 
 .workspace-switcher button.is-current {
-	border-color: rgb(255 255 255 / 10%);
-	background: rgb(255 255 255 / 7%);
-	color: #ededed;
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	background: color-mix(in oklab, var(--foreground) 7%, transparent);
+	color: var(--text-1);
 }
 
 .workspace-switcher button.is-current svg {
-	color: #3ecf8e;
+	color: var(--brand-text);
 }
 
 .workspace-switcher kbd,
@@ -905,17 +954,17 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	font-weight: 450;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .simulator-summary {
-	background: rgb(62 207 142 / 2.5%);
+	background: color-mix(in oklab, var(--brand) 2.5%, transparent);
 }
 
 .simulator-device-icon {
-	border-color: rgb(62 207 142 / 16%);
-	background: rgb(62 207 142 / 7%);
-	color: var(--brand);
+	border-color: color-mix(in oklab, var(--brand) 16%, transparent);
+	background: color-mix(in oklab, var(--brand) 7%, transparent);
+	color: var(--brand-text);
 }
 
 .tool-nav-item .tool-shortcut {
@@ -928,17 +977,17 @@ button:disabled {
 }
 
 .tool-count.is-warning {
-	background: rgb(244 185 66 / 12%);
-	color: #e6b85a;
+	background: color-mix(in oklab, var(--warning) 12%, transparent);
+	color: var(--warning-text);
 }
 
 .tool-count.is-danger {
 	background: var(--danger-soft);
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .simulator-capability-summary {
-	border-color: rgb(62 207 142 / 10%);
+	border-color: color-mix(in oklab, var(--brand) 10%, transparent);
 }
 
 .simulator-onboarding-banner {
@@ -949,20 +998,20 @@ button:disabled {
 	gap: 8px;
 	padding: 6px 14px;
 	border: 0;
-	border-bottom: 1px solid rgb(244 185 66 / 17%);
-	background: rgb(244 185 66 / 6%);
-	color: #b99755;
+	border-bottom: 1px solid color-mix(in oklab, var(--warning) 17%, transparent);
+	background: color-mix(in oklab, var(--warning) 6%, transparent);
+	color: var(--warning-text);
 	font-size: var(--font-size-control);
 	text-align: left;
 }
 
 .simulator-onboarding-banner:hover {
-	background: rgb(244 185 66 / 9%);
-	color: #d5ad5d;
+	background: color-mix(in oklab, var(--warning) 9%, transparent);
+	color: var(--warning-text);
 }
 
 .simulator-onboarding-banner strong {
-	color: #e1bc72;
+	color: var(--warning-text);
 	font-weight: 550;
 }
 
@@ -985,9 +1034,9 @@ button:disabled {
 	align-items: flex-start;
 	gap: 8px;
 	padding: 7px 14px;
-	border-bottom: 1px solid rgb(248 113 113 / 16%);
-	background: rgb(248 113 113 / 6%);
-	color: #d48787;
+	border-bottom: 1px solid color-mix(in oklab, var(--danger) 16%, transparent);
+	background: color-mix(in oklab, var(--danger) 6%, transparent);
+	color: var(--danger-text);
 	font-size: var(--font-size-control);
 }
 
@@ -999,7 +1048,7 @@ button:disabled {
 
 .sim-bridge-notice strong {
 	flex: 0 0 auto;
-	color: #f1a0a0;
+	color: var(--danger-text);
 }
 
 .sim-bridge-notice span {
@@ -1026,9 +1075,9 @@ button:disabled {
 .sim-filter-select [data-slot='native-select-trigger'] {
 	height: 30px;
 	min-height: 30px;
-	border-color: rgb(255 255 255 / 10%);
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: #090909;
+	background: var(--field-background);
 }
 
 .sim-target-select select,
@@ -1037,14 +1086,14 @@ button:disabled {
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-toolbar-meta {
 	margin-left: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-toolbar-spacer {
@@ -1055,7 +1104,7 @@ button:disabled {
 	width: 1px;
 	height: 20px;
 	margin: 0 2px;
-	background: rgb(255 255 255 / 9%);
+	background: color-mix(in oklab, var(--foreground) 9%, transparent);
 }
 
 .sim-toolbar-field {
@@ -1065,13 +1114,13 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-toolbar-field [data-slot='input'] {
 	height: 30px;
-	border-color: rgb(255 255 255 / 10%);
-	background: #090909;
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	background: var(--field-background);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
 	text-transform: none;
@@ -1091,8 +1140,8 @@ button:disabled {
 	min-height: 82px;
 	flex: 0 0 auto;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #030303;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-metric {
@@ -1100,7 +1149,7 @@ button:disabled {
 	min-width: 0;
 	padding: 12px 15px;
 	border: 0;
-	border-right: 1px solid rgb(255 255 255 / 7%);
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 0;
 	background: transparent;
 	box-shadow: none;
@@ -1125,7 +1174,7 @@ button:disabled {
 	font-weight: 500;
 	letter-spacing: 0.07em;
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-metric-icon {
@@ -1133,20 +1182,20 @@ button:disabled {
 	width: 22px;
 	height: 22px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 3%);
-	color: #929292;
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
+	color: var(--text-4);
 }
 
 .sim-metric.is-success .sim-metric-icon {
-	border-color: rgb(62 207 142 / 17%);
-	color: #6ccf96;
+	border-color: color-mix(in oklab, var(--brand) 17%, transparent);
+	color: var(--brand-text);
 }
 
 .sim-metric.is-warning .sim-metric-icon {
-	border-color: rgb(244 185 66 / 17%);
-	color: #d5ad5d;
+	border-color: color-mix(in oklab, var(--warning) 17%, transparent);
+	color: var(--warning-text);
 }
 
 .sim-metric.is-info .sim-metric-icon {
@@ -1156,7 +1205,7 @@ button:disabled {
 
 .sim-metric.is-danger .sim-metric-icon {
 	border-color: var(--danger-border);
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .sim-metric-content {
@@ -1177,12 +1226,12 @@ button:disabled {
 	letter-spacing: -0.04em;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #e5e5e5;
+	color: var(--text-1);
 }
 
 .sim-metric-content span {
 	font-size: var(--font-size-control);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-fleet-layout,
@@ -1233,7 +1282,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #888;
+	color: var(--text-3);
 }
 
 .sim-slimming-profile-select {
@@ -1244,9 +1293,9 @@ button:disabled {
 .sim-create-select [data-slot='native-select-trigger'] {
 	height: 30px;
 	min-height: 30px;
-	border-color: rgb(255 255 255 / 10%);
+	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: #090909;
+	background: var(--field-background);
 }
 
 .sim-slimming-profile-select select,
@@ -1255,7 +1304,7 @@ button:disabled {
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-slimming-targets {
@@ -1279,9 +1328,9 @@ button:disabled {
 .sim-slimming-action-card {
 	margin-top: 14px;
 	padding: 13px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 7px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-slimming-action-copy strong,
@@ -1292,14 +1341,14 @@ button:disabled {
 .sim-slimming-action-copy strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #d0d0d0;
+	color: var(--text-soft);
 }
 
 .sim-slimming-action-copy span {
 	margin-top: 4px;
 	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-slimming-action-buttons {
@@ -1313,11 +1362,11 @@ button:disabled {
 	gap: 9px;
 	margin-top: 10px;
 	padding: 10px;
-	border: 1px solid rgb(244 185 66 / 18%);
+	border: 1px solid color-mix(in oklab, var(--warning) 18%, transparent);
 	border-radius: 6px;
-	background: rgb(244 185 66 / 4%);
+	background: color-mix(in oklab, var(--warning) 4%, transparent);
 	text-align: left;
-	color: #b79858;
+	color: var(--warning-text);
 }
 
 .sim-unknown-ack strong,
@@ -1334,7 +1383,7 @@ button:disabled {
 	margin-top: 3px;
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #806f4d;
+	color: var(--warning-text);
 }
 
 .sim-ack-dialog-body,
@@ -1349,7 +1398,7 @@ button:disabled {
 	margin: 0;
 	font-size: var(--font-size-control);
 	line-height: 1.55;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-tuple-list,
@@ -1360,9 +1409,9 @@ button:disabled {
 	flex-direction: column;
 	gap: 5px;
 	padding: 8px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .sim-tuple-list > div {
@@ -1371,7 +1420,7 @@ button:disabled {
 	flex-direction: column;
 	gap: 3px;
 	padding-bottom: 5px;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .sim-tuple-list > div:last-child {
@@ -1384,13 +1433,13 @@ button:disabled {
 .sim-ack-input code {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #8ebef0;
+	color: var(--info-text);
 }
 
 .sim-tuple-list span {
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-ack-input {
@@ -1401,12 +1450,12 @@ button:disabled {
 
 .sim-ack-input > span {
 	font-size: var(--font-size-control);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-ack-input [data-slot='input'] {
-	border: 1px solid rgb(244 185 66 / 30%);
-	background: #060606;
+	border: 1px solid color-mix(in oklab, var(--warning) 30%, transparent);
+	background: var(--bg-sunken);
 	font-family: 'Geist Mono Variable', monospace;
 }
 
@@ -1415,31 +1464,31 @@ button:disabled {
 	flex-direction: column;
 	gap: 4px;
 	padding: 9px 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-disable-choice.is-recommended {
-	border-color: rgb(62 207 142 / 22%);
-	background: rgb(62 207 142 / 5%);
+	border-color: color-mix(in oklab, var(--brand) 22%, transparent);
+	background: color-mix(in oklab, var(--brand) 5%, transparent);
 }
 
 .sim-disable-choice.is-risky {
-	border-color: rgb(248 113 113 / 16%);
-	background: rgb(248 113 113 / 3%);
+	border-color: color-mix(in oklab, var(--danger) 16%, transparent);
+	background: color-mix(in oklab, var(--danger) 3%, transparent);
 }
 
 .sim-disable-choice strong {
 	font-size: var(--font-size-control);
 	font-weight: 560;
-	color: #bebebe;
+	color: var(--text-secondary);
 }
 
 .sim-disable-choice span {
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-slimming-grid {
@@ -1459,10 +1508,10 @@ button:disabled {
 	align-items: flex-start;
 	gap: 8px;
 	padding: 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 2%);
-	color: #6ccf96;
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
+	color: var(--brand-text);
 }
 
 .sim-profile-categories strong,
@@ -1474,7 +1523,7 @@ button:disabled {
 .sim-profile-categories strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #bcbcbc;
+	color: var(--text-secondary);
 }
 
 .sim-profile-categories small,
@@ -1482,11 +1531,11 @@ button:disabled {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-profile-categories em {
-	color: #a48755;
+	color: var(--warning-text);
 }
 
 .sim-evidence-grid,
@@ -1499,9 +1548,9 @@ button:disabled {
 .sim-evidence-grid > div,
 .sim-device-metrics > div {
 	padding: 9px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-evidence-grid span,
@@ -1516,7 +1565,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-evidence-grid strong,
@@ -1525,7 +1574,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 12px;
 	font-weight: 520;
-	color: #c9c9c9;
+	color: var(--text-soft);
 }
 
 .sim-target-status-table {
@@ -1534,9 +1583,9 @@ button:disabled {
 }
 
 .sim-target-status-table details {
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-target-status-table summary {
@@ -1561,7 +1610,7 @@ button:disabled {
 .sim-target-status-table summary strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #bbb;
+	color: var(--text-secondary);
 }
 
 .sim-target-status-table summary code {
@@ -1571,13 +1620,13 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-target-status-table dl {
 	margin: 0;
 	padding: 0 9px 6px;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .sim-slimming-jobs {
@@ -1587,9 +1636,9 @@ button:disabled {
 
 .sim-slimming-job {
 	padding: 9px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-slimming-job header,
@@ -1607,49 +1656,49 @@ button:disabled {
 
 .sim-slimming-job header strong {
 	font-size: var(--font-size-control);
-	color: #bdbdbd;
+	color: var(--text-secondary);
 }
 
 .sim-slimming-job header code,
 .sim-slimming-job footer {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-slimming-job p {
 	margin: 7px 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-job-progress {
 	height: 3px;
 	overflow: hidden;
 	border-radius: 3px;
-	background: rgb(255 255 255 / 7%);
+	background: color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .sim-job-progress span {
 	display: block;
 	height: 100%;
-	background: #3ecf8e;
+	background: var(--brand);
 }
 
 .sim-helper-status {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	color: #888;
+	color: var(--text-3);
 }
 
 .sim-helper-status.is-available {
-	color: #6ccf96;
+	color: var(--brand-text);
 }
 
 .sim-helper-status.is-untrusted,
 .sim-helper-status.is-unavailable {
-	color: #d5ad5d;
+	color: var(--warning-text);
 }
 
 .sim-fleet-create {
@@ -1659,8 +1708,8 @@ button:disabled {
 	align-items: center;
 	gap: 8px;
 	padding: 9px 14px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #050505;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-create-count [data-slot='input'] {
@@ -1680,8 +1729,8 @@ button:disabled {
 
 .sim-manage-target-row [data-slot='input'] {
 	height: 30px;
-	border-color: rgb(255 255 255 / 9%);
-	background: #080808;
+	border-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+	background: var(--field-background);
 	font-size: var(--font-size-control);
 }
 
@@ -1690,7 +1739,7 @@ button:disabled {
 	max-height: 260px;
 	overflow: auto;
 	margin-top: 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
 }
 
@@ -1700,7 +1749,7 @@ button:disabled {
 	justify-content: space-between;
 	gap: 12px;
 	padding: 7px 8px;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .sim-process-list > div:last-child {
@@ -1721,12 +1770,12 @@ button:disabled {
 
 .sim-process-list strong {
 	font-weight: 520;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-process-list code {
 	margin-top: 2px;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-disk-summary {
@@ -1738,9 +1787,9 @@ button:disabled {
 
 .sim-disk-summary > div {
 	padding: 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-disk-summary span,
@@ -1753,7 +1802,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-disk-summary strong {
@@ -1761,7 +1810,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
 	font-weight: 520;
-	color: #bdbdbd;
+	color: var(--text-secondary);
 }
 
 .sim-disk-storage,
@@ -1779,10 +1828,10 @@ button:disabled {
 	align-items: center;
 	gap: 8px;
 	padding: 7px 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #060606;
-	color: #858585;
+	background: var(--bg-sunken);
+	color: var(--text-3);
 }
 
 .sim-disk-storage > div {
@@ -1798,8 +1847,8 @@ button:disabled {
 }
 
 .sim-disk-categories > button.is-selected {
-	border-color: rgb(62 207 142 / 20%);
-	background: rgb(62 207 142 / 5%);
+	border-color: color-mix(in oklab, var(--brand) 20%, transparent);
+	background: color-mix(in oklab, var(--brand) 5%, transparent);
 }
 
 .sim-disk-categories > button.is-protected {
@@ -1819,7 +1868,7 @@ button:disabled {
 .sim-disk-categories strong {
 	font-size: var(--font-size-caption);
 	font-weight: 540;
-	color: #a9a9a9;
+	color: var(--muted);
 }
 
 .sim-disk-storage small,
@@ -1829,23 +1878,23 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	font-style: normal;
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-disk-categories em {
-	color: #89724f;
+	color: var(--warning-text);
 }
 
 .sim-disk-storage code,
 .sim-disk-categories code {
 	font-size: var(--font-size-caption);
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-disk-category-check {
 	display: grid;
 	place-items: center;
-	color: #579de3;
+	color: var(--info-text);
 }
 
 .sim-disk-cleanup-action {
@@ -1855,9 +1904,9 @@ button:disabled {
 	gap: 12px;
 	margin-top: 8px;
 	padding: 8px;
-	border: 1px solid rgb(62 207 142 / 10%);
+	border: 1px solid color-mix(in oklab, var(--brand) 10%, transparent);
 	border-radius: 5px;
-	background: rgb(62 207 142 / 3%);
+	background: color-mix(in oklab, var(--brand) 3%, transparent);
 }
 
 .sim-disk-cleanup-action strong,
@@ -1867,7 +1916,7 @@ button:disabled {
 
 .sim-disk-cleanup-action strong {
 	font-size: var(--font-size-caption);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-disk-cleanup-action span,
@@ -1875,14 +1924,14 @@ button:disabled {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-disk-last-cleanup {
 	padding: 6px 8px;
-	border-left: 2px solid #4e9a68;
-	background: rgb(78 154 104 / 4%);
-	color: #76a184;
+	border-left: 2px solid var(--brand);
+	background: color-mix(in oklab, var(--brand) 4%, transparent);
+	color: var(--brand-text);
 }
 
 .camera-fixture-layout {
@@ -1890,17 +1939,17 @@ button:disabled {
 	min-height: 0;
 	flex: 1;
 	grid-template-columns: minmax(0, 1fr) minmax(260px, 32%);
-	background: #030303;
+	background: var(--bg-sunken);
 }
 
 .camera-fixture-main {
 	padding: 18px;
-	border-right: 1px solid rgb(255 255 255 / 8%);
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .camera-drop-card {
-	border: 1px dashed rgb(255 255 255 / 14%);
-	background: rgb(255 255 255 / 2%);
+	border: 1px dashed color-mix(in oklab, var(--foreground) 14%, transparent);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 	box-shadow: none;
 }
 
@@ -1919,10 +1968,10 @@ button:disabled {
 	width: 42px;
 	height: 42px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 9px;
-	background: #080808;
-	color: #898989;
+	background: var(--surface);
+	color: var(--text-3);
 }
 
 .camera-drop-icon svg {
@@ -1934,7 +1983,7 @@ button:disabled {
 	margin: 14px 0 0;
 	font-size: 13px;
 	font-weight: 560;
-	color: #d1d1d1;
+	color: var(--text-soft);
 }
 
 .camera-drop-card p {
@@ -1942,7 +1991,7 @@ button:disabled {
 	margin: 6px 0 14px;
 	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .camera-file-label {
@@ -1952,16 +2001,16 @@ button:disabled {
 	align-items: center;
 	gap: 6px;
 	padding: 0 10px;
-	border: 1px solid rgb(255 255 255 / 11%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 11%, transparent);
 	border-radius: 6px;
-	background: #151515;
+	background: var(--surface-tertiary);
 	font-size: var(--font-size-control);
 	font-weight: 520;
-	color: #d0d0d0;
+	color: var(--text-soft);
 }
 
 .camera-file-label:hover {
-	background: #1d1d1d;
+	background: var(--surface-tertiary);
 }
 
 .camera-file-label input {
@@ -1982,8 +2031,8 @@ button:disabled {
 .camera-fixture-fields [data-slot='input'],
 .camera-preset-grid [data-slot='input'] {
 	height: 32px;
-	border-color: rgb(255 255 255 / 9%);
-	background: #080808;
+	border-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+	background: var(--field-background);
 	font-size: var(--font-size-control);
 }
 
@@ -2003,7 +2052,7 @@ button:disabled {
 }
 
 .camera-preset-grid [data-slot='content'] > svg {
-	color: #989898;
+	color: var(--text-4);
 }
 
 .camera-preset-grid strong,
@@ -2013,13 +2062,13 @@ button:disabled {
 
 .camera-preset-grid strong {
 	font-size: var(--font-size-control);
-	color: #bbb;
+	color: var(--text-secondary);
 }
 
 .camera-preset-grid span {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .camera-preset-grid [data-slot='input'] {
@@ -2028,19 +2077,19 @@ button:disabled {
 
 .camera-fixture-aside {
 	padding: 18px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .camera-fixture-aside header {
 	padding-bottom: 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .camera-fixture-aside h2 {
 	margin: 3px 0 0;
 	font-size: 13px;
 	font-weight: 560;
-	color: #ccc;
+	color: var(--text-soft);
 }
 
 .camera-fixture-aside dl {
@@ -2050,12 +2099,12 @@ button:disabled {
 .camera-fixture-aside > p {
 	margin: 14px 0 0;
 	padding: 10px;
-	border: 1px solid rgb(62 207 142 / 12%);
+	border: 1px solid color-mix(in oklab, var(--brand) 12%, transparent);
 	border-radius: 6px;
-	background: rgb(62 207 142 / 4%);
+	background: color-mix(in oklab, var(--brand) 4%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.55;
-	color: #66829e;
+	color: var(--info-text);
 }
 
 .sim-captures-layout {
@@ -2083,14 +2132,14 @@ button:disabled {
 }
 
 .sim-list-pane {
-	border-right: 1px solid rgb(255 255 255 / 8%);
-	background: #030303;
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-detail-pane,
 .sim-scenario-detail,
 .sim-build-detail {
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .sim-virtual-list {
@@ -2126,21 +2175,21 @@ button:disabled {
 	gap: 10px;
 	padding: 7px 10px;
 	border: 0;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	border-radius: 0;
 	background: transparent;
-	color: #aaa;
+	color: var(--muted);
 	outline: none;
 }
 
 .sim-list-item:hover {
-	background: rgb(255 255 255 / 2.5%);
+	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 }
 
 .sim-list-item.is-selected,
 .sim-list-item[aria-current='true'] {
-	box-shadow: inset 2px 0 #3ecf8e;
-	background: rgb(62 207 142 / 7%);
+	box-shadow: inset 2px 0 var(--brand);
+	background: color-mix(in oklab, var(--brand) 7%, transparent);
 }
 
 .sim-list-leading,
@@ -2150,16 +2199,16 @@ button:disabled {
 	height: 28px;
 	flex: 0 0 28px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 3%);
-	color: #888;
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
+	color: var(--text-3);
 }
 
 .sim-list-item.is-selected .sim-list-leading {
-	border-color: rgb(62 207 142 / 18%);
-	background: rgb(62 207 142 / 8%);
-	color: #78b9ff;
+	border-color: color-mix(in oklab, var(--brand) 18%, transparent);
+	background: color-mix(in oklab, var(--brand) 8%, transparent);
+	color: var(--info-text);
 }
 
 .sim-list-copy {
@@ -2180,13 +2229,13 @@ button:disabled {
 .sim-list-copy strong {
 	font-size: var(--font-size-control);
 	font-weight: 540;
-	color: #cfcfcf;
+	color: var(--text-soft);
 }
 
 .sim-list-copy span {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-state-pill {
@@ -2195,20 +2244,20 @@ button:disabled {
 	flex: 0 0 auto;
 	align-items: center;
 	padding: 0 6px;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 4px;
-	background: rgb(255 255 255 / 3%);
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-state-pill.is-success {
-	border-color: rgb(62 207 142 / 20%);
-	background: rgb(62 207 142 / 8%);
-	color: #75d69d;
+	border-color: color-mix(in oklab, var(--brand) 20%, transparent);
+	background: color-mix(in oklab, var(--brand) 8%, transparent);
+	color: var(--brand-text);
 }
 
 .sim-state-pill.is-info {
@@ -2218,15 +2267,15 @@ button:disabled {
 }
 
 .sim-state-pill.is-warning {
-	border-color: rgb(244 185 66 / 20%);
-	background: rgb(244 185 66 / 8%);
-	color: #dab664;
+	border-color: color-mix(in oklab, var(--warning) 20%, transparent);
+	background: color-mix(in oklab, var(--warning) 8%, transparent);
+	color: var(--warning-text);
 }
 
 .sim-state-pill.is-danger {
-	border-color: rgb(248 113 113 / 20%);
-	background: rgb(248 113 113 / 8%);
-	color: #ee9292;
+	border-color: color-mix(in oklab, var(--danger) 20%, transparent);
+	background: color-mix(in oklab, var(--danger) 8%, transparent);
+	color: var(--danger-text);
 }
 
 .sim-list-empty {
@@ -2243,23 +2292,23 @@ button:disabled {
 .sim-list-empty strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-list-empty span {
 	max-width: 280px;
 	font-size: var(--font-size-control);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-toolbar-field [data-slot='input'],
 .sim-field [data-slot='input'] {
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: #080808;
+	background: var(--field-background);
 	box-shadow: none;
-	color: #d4d4d4;
+	color: var(--text-soft);
 }
 
 .sim-eyebrow {
@@ -2269,7 +2318,7 @@ button:disabled {
 	font-weight: 500;
 	letter-spacing: 0.09em;
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-target-detail,
@@ -2298,7 +2347,7 @@ button:disabled {
 	font-size: 16px;
 	font-weight: 600;
 	letter-spacing: -0.035em;
-	color: #dedede;
+	color: var(--text-1);
 }
 
 .sim-detail-heading > div > span,
@@ -2306,7 +2355,7 @@ button:disabled {
 	display: block;
 	margin-top: 4px;
 	font-size: var(--font-size-control);
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-action-row {
@@ -2316,12 +2365,12 @@ button:disabled {
 	gap: 7px;
 	margin-top: 18px;
 	padding-bottom: 20px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-detail-section {
 	padding: 18px 0;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-detail-section h3,
@@ -2330,7 +2379,7 @@ button:disabled {
 	margin: 0;
 	font-size: var(--font-size-control);
 	font-weight: 560;
-	color: #c7c7c7;
+	color: var(--text-secondary);
 }
 
 .sim-section-heading {
@@ -2344,13 +2393,13 @@ button:disabled {
 .sim-section-heading > svg {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-section-heading p {
 	margin: 3px 0 0;
 	font-size: var(--font-size-control);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-installed-apps {
@@ -2365,9 +2414,9 @@ button:disabled {
 	align-items: center;
 	gap: 8px;
 	padding: 7px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-app-icon {
@@ -2406,19 +2455,19 @@ button:disabled {
 .sim-installed-apps strong {
 	font-size: var(--font-size-control);
 	font-weight: 520;
-	color: #bbb;
+	color: var(--text-secondary);
 }
 
 .sim-installed-apps code {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-section-empty {
 	margin: 10px 0 0;
 	font-size: var(--font-size-control);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-danger-zone {
@@ -2428,16 +2477,16 @@ button:disabled {
 	gap: 16px;
 	margin-top: 18px;
 	padding: 12px;
-	border: 1px solid rgb(248 113 113 / 13%);
+	border: 1px solid color-mix(in oklab, var(--danger) 13%, transparent);
 	border-radius: 7px;
-	background: rgb(248 113 113 / 4%);
+	background: color-mix(in oklab, var(--danger) 4%, transparent);
 }
 
 .sim-danger-zone span {
 	display: block;
 	margin-top: 3px;
 	font-size: var(--font-size-control);
-	color: #8b6a6a;
+	color: var(--text-3);
 }
 
 .sim-workbench-icon {
@@ -2446,10 +2495,10 @@ button:disabled {
 	height: 40px;
 	margin-bottom: 16px;
 	place-items: center;
-	border: 1px solid rgb(62 207 142 / 16%);
+	border: 1px solid color-mix(in oklab, var(--brand) 16%, transparent);
 	border-radius: 8px;
-	background: rgb(62 207 142 / 7%);
-	color: #79baff;
+	background: color-mix(in oklab, var(--brand) 7%, transparent);
+	color: var(--info-text);
 }
 
 .sim-form-stack {
@@ -2466,9 +2515,9 @@ button:disabled {
 	justify-content: space-between;
 	gap: 12px;
 	padding: 9px 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-switch-copy {
@@ -2482,13 +2531,13 @@ button:disabled {
 .sim-switch-copy strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #c4c4c4;
+	color: var(--text-secondary);
 }
 
 .sim-switch-copy small {
 	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-field {
@@ -2502,7 +2551,7 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-coordinate-fields {
@@ -2512,14 +2561,14 @@ button:disabled {
 }
 
 .sim-coordinate-fields [aria-invalid='true'] {
-	border-color: rgb(248 113 113 / 45%);
+	border-color: color-mix(in oklab, var(--danger) 45%, transparent);
 }
 
 .sim-field-help {
 	margin: 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-inline-note {
@@ -2528,18 +2577,18 @@ button:disabled {
 	gap: 7px;
 	margin-top: 12px;
 	padding: 8px 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 	font-size: var(--font-size-control);
 	line-height: 1.45;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-inline-note.is-warning {
-	border-color: rgb(244 185 66 / 16%);
-	background: rgb(244 185 66 / 5%);
-	color: #b2955c;
+	border-color: color-mix(in oklab, var(--warning) 16%, transparent);
+	background: color-mix(in oklab, var(--warning) 5%, transparent);
+	color: var(--warning-text);
 }
 
 .sim-run-footer {
@@ -2549,7 +2598,7 @@ button:disabled {
 	gap: 16px;
 	margin-top: 18px;
 	padding-top: 16px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-run-footer strong,
@@ -2560,21 +2609,21 @@ button:disabled {
 .sim-run-footer strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #bbb;
+	color: var(--text-secondary);
 }
 
 .sim-run-footer span {
 	margin-top: 3px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-surface {
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	border-right: 1px solid rgb(255 255 255 / 8%);
-	background: #030303;
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-surface:last-child {
@@ -2607,8 +2656,8 @@ button:disabled {
 	justify-content: space-between;
 	gap: 12px;
 	padding: 10px 14px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #050505;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-surface-header h2 {
@@ -2619,13 +2668,13 @@ button:disabled {
 .sim-subpane-header code {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-subpane-header {
 	height: 38px;
 	font-size: var(--font-size-control);
-	color: #898989;
+	color: var(--text-3);
 }
 
 .sim-build-list {
@@ -2634,20 +2683,20 @@ button:disabled {
 }
 
 .sim-capture-preview {
-	border-right: 1px solid rgb(255 255 255 / 8%);
-	background: #020202;
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .sim-capture-inspector,
 .sim-automation-inspector {
 	padding: 15px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .sim-capture-inspector > header,
 .sim-automation-inspector > header {
 	padding-bottom: 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-capture-inspector h2,
@@ -2666,7 +2715,7 @@ button:disabled {
 .sim-capture-inspector-section {
 	margin-top: 18px;
 	padding-top: 16px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-capture-inspector-section > header {
@@ -2680,7 +2729,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-capture-row-tags {
@@ -2696,9 +2745,9 @@ button:disabled {
 	width: 24px;
 	height: 24px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 5px;
-	color: #818181;
+	color: var(--text-3);
 }
 
 .sim-inspector-actions {
@@ -2706,7 +2755,7 @@ button:disabled {
 	gap: 7px;
 	margin-top: 14px;
 	padding-top: 14px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-preview-stage {
@@ -2728,7 +2777,7 @@ button:disabled {
 	border: 5px solid #262626;
 	border-radius: 30px;
 	background: #0e0e0e;
-	box-shadow: 0 16px 44px rgb(0 0 0 / 55%);
+	box-shadow: 0 16px 44px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 55%));
 }
 
 .sim-preview-device.is-design {
@@ -2741,7 +2790,7 @@ button:disabled {
 	border: 1px solid rgb(255 255 255 / 10%);
 	border-radius: 8px;
 	background: #090909;
-	box-shadow: 0 18px 54px rgb(0 0 0 / 48%);
+	box-shadow: 0 18px 54px light-dark(rgb(0 0 0 / 16%), rgb(0 0 0 / 48%));
 }
 
 .sim-composition-preview {
@@ -2877,9 +2926,9 @@ button:disabled {
 	place-items: center;
 	align-content: center;
 	gap: 8px;
-	background: #080808;
+	background: var(--surface);
 	font-size: var(--font-size-caption);
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-preview-placeholder,
@@ -2890,7 +2939,7 @@ button:disabled {
 	gap: 7px;
 	padding: 20px;
 	text-align: center;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-preview-placeholder span,
@@ -2903,15 +2952,15 @@ button:disabled {
 .sim-preview-placeholder strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-preview-placeholder.is-error {
 	position: absolute;
 	z-index: 3;
 	inset: 0;
-	background: #090505;
-	color: #d98282;
+	background: var(--bg-sunken);
+	color: var(--danger-text);
 }
 
 .sim-capture-recovery {
@@ -2921,12 +2970,12 @@ button:disabled {
 	gap: 8px;
 	margin-bottom: 14px;
 	padding: 9px 10px;
-	border: 1px solid rgb(244 185 66 / 18%);
+	border: 1px solid color-mix(in oklab, var(--warning) 18%, transparent);
 	border-radius: 6px;
-	background: rgb(244 185 66 / 6%);
+	background: color-mix(in oklab, var(--warning) 6%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #a98b4e;
+	color: var(--warning-text);
 }
 
 .sim-capture-recovery svg {
@@ -2935,7 +2984,7 @@ button:disabled {
 
 .sim-capture-recovery strong {
 	font-weight: 600;
-	color: #d0ad61;
+	color: var(--warning-text);
 }
 
 .sim-empty-preview {
@@ -2946,7 +2995,7 @@ button:disabled {
 .sim-empty-preview strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-preview-meta {
@@ -2966,28 +3015,28 @@ button:disabled {
 .sim-preview-meta strong {
 	font-size: var(--font-size-control);
 	font-weight: 540;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-preview-meta span,
 .sim-preview-meta code {
 	margin-top: 3px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-retention-summary {
 	display: grid;
 	margin: 12px 0;
 	padding: 0;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: #030303;
+	background: var(--bg-sunken);
 }
 
 .sim-retention-summary > div {
 	padding: 7px 9px;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .sim-retention-summary > div:last-child {
@@ -3000,17 +3049,17 @@ button:disabled {
 	gap: 7px;
 	margin: 12px 0;
 	padding: 9px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-retention-status.is-error {
-	border-color: rgb(248 113 113 / 18%);
-	background: rgb(248 113 113 / 5%);
-	color: #c97777;
+	border-color: color-mix(in oklab, var(--danger) 18%, transparent);
+	background: color-mix(in oklab, var(--danger) 5%, transparent);
+	color: var(--danger-text);
 }
 
 .sim-retention-status svg {
@@ -3035,24 +3084,24 @@ button:disabled {
 .sim-retention-fields > div > small {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-retention-fields [data-slot='input'] {
 	height: 30px;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: #080808;
+	background: var(--field-background);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	color: #d4d4d4;
+	color: var(--text-soft);
 }
 
 .sim-field-error {
 	margin: 8px 0 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #db8585;
+	color: var(--danger-text);
 }
 
 .sim-scenario-detail {
@@ -3061,9 +3110,9 @@ button:disabled {
 .sim-recent-run {
 	margin-top: 14px;
 	padding: 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: #020202;
+	background: var(--bg-sunken);
 }
 
 .sim-recent-run header {
@@ -3079,21 +3128,21 @@ button:disabled {
 	gap: 6px;
 	font-size: var(--font-size-caption);
 	font-weight: 550;
-	color: #8d8d8d;
+	color: var(--text-3);
 }
 
 .sim-recent-run p {
 	margin: 7px 0 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-recent-run > strong {
 	display: block;
 	margin-top: 9px;
 	font-size: var(--font-size-control);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-build-row-metrics {
@@ -3105,26 +3154,26 @@ button:disabled {
 
 .sim-build-row-metrics code {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-build-row-metrics span {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-settings-scroll {
 	flex: 1 1 auto;
 	padding: 18px;
-	background: #020202;
+	background: var(--bg-sunken);
 }
 
 .sim-settings-layout > .sim-surface,
 .sim-settings-aside > .sim-surface,
 .sim-security-boundary {
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 8px;
-	background: #070707;
+	background: var(--bg-sunken);
 }
 
 .sim-settings-layout {
@@ -3137,7 +3186,7 @@ button:disabled {
 
 .sim-settings-layout > .sim-surface,
 .sim-settings-aside > .sim-surface {
-	border-right: 1px solid rgb(255 255 255 / 8%);
+	border-right: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-settings-layout .sim-surface-header {
@@ -3155,7 +3204,7 @@ button:disabled {
 	align-items: center;
 	gap: 10px;
 	padding: 10px 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .sim-capability-row:last-child {
@@ -3167,10 +3216,10 @@ button:disabled {
 	width: 30px;
 	height: 30px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 3%);
-	color: #848484;
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
+	color: var(--text-3);
 }
 
 .sim-capability-copy {
@@ -3186,24 +3235,24 @@ button:disabled {
 .sim-capability-copy strong {
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #bdbdbd;
+	color: var(--text-secondary);
 }
 
 .sim-capability-copy > div > span {
 	padding: 1px 4px;
 	border-radius: 3px;
-	background: rgb(255 255 255 / 5%);
+	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-capability-copy p {
 	margin: 3px 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-capability-copy code {
@@ -3212,13 +3261,13 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #5e7790;
+	color: var(--info-text);
 }
 
 .sim-capability-copy .sim-capability-next-step {
 	max-width: 680px;
 	margin-top: 6px;
-	color: #8b8b8b;
+	color: var(--text-3);
 }
 
 .sim-capability-action {
@@ -3239,17 +3288,17 @@ button:disabled {
 	background: transparent;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #76a9dc;
+	color: var(--info-text);
 	cursor: pointer;
 }
 
 .sim-capability-feature-link:hover {
-	background: rgb(62 207 142 / 7%);
-	color: #a7cff6;
+	background: color-mix(in oklab, var(--brand) 7%, transparent);
+	color: var(--info-text);
 }
 
 .sim-capability-feature-link:focus-visible {
-	outline: 2px solid rgb(62 207 142 / 65%);
+	outline: 2px solid color-mix(in oklab, var(--brand) 65%, transparent);
 	outline-offset: 1px;
 }
 
@@ -3262,15 +3311,15 @@ button:disabled {
 
 .sim-security-boundary {
 	padding: 12px;
-	border-color: rgb(62 207 142 / 12%);
-	background: rgb(62 207 142 / 3%);
+	border-color: color-mix(in oklab, var(--brand) 12%, transparent);
+	background: color-mix(in oklab, var(--brand) 3%, transparent);
 }
 
 .sim-security-boundary header {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	color: #86a6c6;
+	color: var(--info-text);
 }
 
 .sim-security-boundary strong {
@@ -3282,7 +3331,7 @@ button:disabled {
 	margin: 7px 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.55;
-	color: #68798b;
+	color: var(--text-3);
 }
 
 .sim-security-boundary > div {
@@ -3296,11 +3345,11 @@ button:disabled {
 	align-items: center;
 	gap: 4px;
 	padding: 3px 5px;
-	border: 1px solid rgb(62 207 142 / 10%);
+	border: 1px solid color-mix(in oklab, var(--brand) 10%, transparent);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #6987a3;
+	color: var(--info-text);
 }
 
 .sim-security-boundary > div svg {
@@ -3332,7 +3381,7 @@ button:disabled {
 	justify-content: center;
 	gap: 8px;
 	font-size: var(--font-size-control);
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .recipe-row-state {
@@ -3340,15 +3389,15 @@ button:disabled {
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 6px;
-	color: #b48a52;
+	color: var(--warning-text);
 }
 
 .recipe-dirty-dot {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
-	background: #3ecf8e;
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 8%, transparent);
+	background: var(--brand);
 }
 
 .recipe-definition-header {
@@ -3356,8 +3405,8 @@ button:disabled {
 	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 10px 16px;
 	padding: 14px 16px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #040404;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .recipe-definition-title {
@@ -3376,10 +3425,10 @@ button:disabled {
 .recipe-field textarea,
 .recipe-field select {
 	width: 100%;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: #090909;
-	color: #d5d5d5;
+	background: var(--field-background);
+	color: var(--text-soft);
 	outline: none;
 }
 
@@ -3399,7 +3448,7 @@ button:disabled {
 	padding: 7px 9px;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #878787;
+	color: var(--text-3);
 }
 
 .recipe-definition-title input:focus,
@@ -3407,8 +3456,8 @@ button:disabled {
 .recipe-field input:focus,
 .recipe-field textarea:focus,
 .recipe-field select:focus {
-	border-color: rgb(62 207 142 / 46%);
-	box-shadow: 0 0 0 2px rgb(62 207 142 / 8%);
+	border-color: color-mix(in oklab, var(--brand) 46%, transparent);
+	box-shadow: 0 0 0 2px color-mix(in oklab, var(--brand) 8%, transparent);
 }
 
 .recipe-header-meta {
@@ -3426,25 +3475,25 @@ button:disabled {
 	max-width: 100%;
 	overflow: hidden;
 	padding: 3px 5px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-header-meta .is-dirty {
-	border-color: rgb(62 207 142 / 18%);
-	background: rgb(62 207 142 / 6%);
-	color: #79aee2;
+	border-color: color-mix(in oklab, var(--brand) 18%, transparent);
+	background: color-mix(in oklab, var(--brand) 6%, transparent);
+	color: var(--info-text);
 }
 
 .recipe-header-meta .is-invalid {
-	border-color: rgb(220 90 90 / 18%);
-	background: rgb(220 90 90 / 5%);
-	color: #c77a7a;
+	border-color: color-mix(in oklab, var(--danger) 18%, transparent);
+	background: color-mix(in oklab, var(--danger) 5%, transparent);
+	color: var(--danger-text);
 }
 
 .recipe-segmented-control {
@@ -3455,9 +3504,9 @@ button:disabled {
 	gap: 2px;
 	margin: 0;
 	padding: 2px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: #080808;
+	background: var(--surface);
 }
 
 .recipe-segmented-control .button {
@@ -3500,14 +3549,14 @@ button:disabled {
 	margin: 9px 0 12px;
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-lane-note span {
 	flex: 0 0 auto;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-execution-rail {
@@ -3529,12 +3578,12 @@ button:disabled {
 	bottom: -7px;
 	left: 19px;
 	width: 1px;
-	background: rgb(62 207 142 / 17%);
+	background: color-mix(in oklab, var(--brand) 17%, transparent);
 	content: '';
 }
 
 .recipe-execution-rail.is-teardown li:not(:last-child)::after {
-	background: rgb(197 147 82 / 18%);
+	background: color-mix(in oklab, var(--warning) 18%, transparent);
 }
 
 .recipe-execution-rail button {
@@ -3548,36 +3597,36 @@ button:disabled {
 	gap: 9px;
 	margin: 0 0 7px;
 	padding: 6px 9px 6px 6px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: #070707;
+	background: var(--bg-sunken);
 	text-align: left;
-	color: #8a8a8a;
+	color: var(--text-3);
 	cursor: pointer;
 }
 
 .recipe-execution-rail button:hover {
-	border-color: rgb(255 255 255 / 12%);
-	background: #0a0a0a;
+	border-color: color-mix(in oklab, var(--foreground) 12%, transparent);
+	background: var(--surface);
 }
 
 .recipe-execution-rail button:focus-visible,
 .recipe-target-list button:focus-visible,
 .recipe-run-history button:focus-visible {
-	outline: 2px solid rgb(62 207 142 / 65%);
+	outline: 2px solid color-mix(in oklab, var(--brand) 65%, transparent);
 	outline-offset: -2px;
 }
 
 .recipe-execution-rail button.is-selected {
-	border-color: rgb(62 207 142 / 26%);
-	box-shadow: inset 2px 0 #3ecf8e;
-	background: rgb(62 207 142 / 5%);
+	border-color: color-mix(in oklab, var(--brand) 26%, transparent);
+	box-shadow: inset 2px 0 var(--brand);
+	background: color-mix(in oklab, var(--brand) 5%, transparent);
 }
 
 .recipe-execution-rail.is-teardown button.is-selected {
-	border-color: rgb(197 147 82 / 25%);
-	box-shadow: inset 2px 0 #c59352;
-	background: rgb(197 147 82 / 4%);
+	border-color: color-mix(in oklab, var(--warning) 25%, transparent);
+	box-shadow: inset 2px 0 var(--warning);
+	background: color-mix(in oklab, var(--warning) 4%, transparent);
 }
 
 .recipe-rail-marker {
@@ -3585,14 +3634,14 @@ button:disabled {
 	width: 27px;
 	height: 27px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 50%;
-	background: #0c0c0c;
-	color: #8194a8;
+	background: var(--surface);
+	color: var(--info-text);
 }
 
 .is-teardown .recipe-rail-marker {
-	color: #a78b67;
+	color: var(--warning-text);
 }
 
 .recipe-rail-copy {
@@ -3608,7 +3657,7 @@ button:disabled {
 	font-weight: 550;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #c1c1c1;
+	color: var(--text-secondary);
 }
 
 .recipe-rail-copy small,
@@ -3618,11 +3667,11 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-execution-rail button > svg {
-	color: #b66f6f;
+	color: var(--danger-text);
 }
 
 .recipe-step-actions {
@@ -3632,7 +3681,7 @@ button:disabled {
 	gap: 4px;
 	margin-top: 13px;
 	padding: 8px 0;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .recipe-step-editor {
@@ -3652,7 +3701,7 @@ button:disabled {
 	font-size: 12px;
 	font-weight: 560;
 	letter-spacing: -0.02em;
-	color: #c7c7c7;
+	color: var(--text-secondary);
 }
 
 .recipe-editor-section-heading code {
@@ -3661,7 +3710,7 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-field-grid {
@@ -3679,7 +3728,7 @@ button:disabled {
 	gap: 9px;
 	margin-top: 10px;
 	padding-top: 10px;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .recipe-field {
@@ -3692,13 +3741,13 @@ button:disabled {
 .recipe-field > span {
 	font-size: var(--font-size-caption);
 	font-weight: 520;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-field > small {
 	font-size: var(--font-size-caption);
 	line-height: 1.45;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-field [data-slot='input'],
@@ -3729,9 +3778,9 @@ button:disabled {
 	justify-content: space-between;
 	gap: 10px;
 	padding: 9px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #070707;
+	background: var(--bg-sunken);
 }
 
 .recipe-scope-note,
@@ -3742,18 +3791,18 @@ button:disabled {
 	gap: 6px;
 	margin: 2px 0 0;
 	padding: 8px;
-	border: 1px solid rgb(62 207 142 / 12%);
+	border: 1px solid color-mix(in oklab, var(--brand) 12%, transparent);
 	border-radius: 5px;
-	background: rgb(62 207 142 / 3%);
+	background: color-mix(in oklab, var(--brand) 3%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #70849a;
+	color: var(--info-text);
 }
 
 .recipe-danger-note {
-	border-color: rgb(214 150 70 / 16%);
-	background: rgb(214 150 70 / 4%);
-	color: #9a7b58;
+	border-color: color-mix(in oklab, var(--warning) 16%, transparent);
+	background: color-mix(in oklab, var(--warning) 4%, transparent);
+	color: var(--warning-text);
 }
 
 .recipe-fixture-picker {
@@ -3762,10 +3811,10 @@ button:disabled {
 	align-items: center;
 	gap: 9px;
 	padding: 9px;
-	border: 1px dashed rgb(255 255 255 / 13%);
+	border: 1px dashed color-mix(in oklab, var(--foreground) 13%, transparent);
 	border-radius: 6px;
-	background: #060606;
-	color: #a1a1a1;
+	background: var(--bg-sunken);
+	color: var(--muted);
 }
 
 .recipe-fixture-picker strong,
@@ -3775,13 +3824,13 @@ button:disabled {
 
 .recipe-fixture-picker strong {
 	font-size: var(--font-size-caption);
-	color: #aaa;
+	color: var(--muted);
 }
 
 .recipe-fixture-picker span {
 	margin-top: 2px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-fixture-picker label {
@@ -3789,7 +3838,7 @@ button:disabled {
 	align-items: center;
 	gap: 4px;
 	padding: 5px 7px;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
 	font-size: var(--font-size-caption);
 	cursor: pointer;
@@ -3807,12 +3856,12 @@ button:disabled {
 .recipe-validation-summary {
 	margin-top: 10px;
 	padding: 9px;
-	border: 1px solid rgb(214 90 90 / 18%);
+	border: 1px solid color-mix(in oklab, var(--danger) 18%, transparent);
 	border-radius: 5px;
-	background: rgb(214 90 90 / 4%);
+	background: color-mix(in oklab, var(--danger) 4%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #b97474;
+	color: var(--danger-text);
 }
 
 .recipe-inline-errors {
@@ -3829,7 +3878,7 @@ button:disabled {
 .recipe-inline-errors strong,
 .recipe-validation-summary code {
 	margin-right: 4px;
-	color: #d19090;
+	color: var(--danger-text);
 }
 
 .recipe-validation-summary header {
@@ -3852,7 +3901,7 @@ button:disabled {
 .recipe-run-history {
 	margin-top: 13px;
 	padding-top: 13px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .recipe-section-title,
@@ -3864,13 +3913,13 @@ button:disabled {
 	margin-bottom: 7px;
 	font-size: var(--font-size-caption);
 	font-weight: 550;
-	color: #999;
+	color: var(--text-4);
 }
 
 .recipe-section-title code,
 .recipe-run-history > header code {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-target-list {
@@ -3879,16 +3928,16 @@ button:disabled {
 	overflow: auto;
 	margin: 0;
 	padding: 0;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #030303;
+	background: var(--bg-sunken);
 }
 
 .recipe-target-list > p {
 	margin: 0;
 	padding: 12px;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-target-list button {
@@ -3899,10 +3948,10 @@ button:disabled {
 	gap: 7px;
 	padding: 7px;
 	border: 0;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	background: transparent;
 	text-align: left;
-	color: #888;
+	color: var(--text-3);
 	cursor: pointer;
 }
 
@@ -3911,7 +3960,7 @@ button:disabled {
 }
 
 .recipe-target-list button.is-selected {
-	background: rgb(62 207 142 / 6%);
+	background: color-mix(in oklab, var(--brand) 6%, transparent);
 }
 
 .recipe-target-check {
@@ -3919,13 +3968,13 @@ button:disabled {
 	width: 15px;
 	height: 15px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 14%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
 	border-radius: 3px;
 }
 
 .recipe-target-list button.is-selected .recipe-target-check {
-	border-color: #3ecf8e;
-	background: #3ecf8e;
+	border-color: var(--brand);
+	background: var(--brand);
 	color: #050505;
 }
 
@@ -3940,14 +3989,14 @@ button:disabled {
 .recipe-target-list strong {
 	font-size: var(--font-size-caption);
 	font-weight: 520;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .recipe-target-list small {
 	margin-top: 2px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-concurrency-field {
@@ -3956,25 +4005,25 @@ button:disabled {
 
 .recipe-approval-preview {
 	padding: 10px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .recipe-approval-preview.is-required {
-	border-color: rgb(214 150 70 / 18%);
-	background: rgb(214 150 70 / 3%);
+	border-color: color-mix(in oklab, var(--warning) 18%, transparent);
+	background: color-mix(in oklab, var(--warning) 3%, transparent);
 }
 
 .recipe-approval-preview > header {
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	color: #8d8d8d;
+	color: var(--text-3);
 }
 
 .recipe-approval-preview.is-required > header {
-	color: #b58c5b;
+	color: var(--warning-text);
 }
 
 .recipe-approval-preview header span,
@@ -4003,11 +4052,11 @@ button:disabled {
 
 .recipe-approval-counts span {
 	padding: 5px 3px;
-	border: 1px solid rgb(255 255 255 / 6%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	border-radius: 4px;
 	font-size: var(--font-size-caption);
 	text-align: center;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-approval-counts b {
@@ -4016,7 +4065,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .recipe-approval-preview ul {
@@ -4027,7 +4076,7 @@ button:disabled {
 
 .recipe-approval-preview li {
 	padding: 5px 0;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .recipe-approval-preview li strong,
@@ -4037,7 +4086,7 @@ button:disabled {
 
 .recipe-approval-preview li strong {
 	font-size: var(--font-size-caption);
-	color: #a88b68;
+	color: var(--warning-text);
 }
 
 .recipe-approval-preview li span,
@@ -4047,7 +4096,7 @@ button:disabled {
 	margin: 4px 0 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-run-actions {
@@ -4056,7 +4105,7 @@ button:disabled {
 }
 
 .recipe-active-run.needs-attention {
-	border-color: rgb(214 150 70 / 18%);
+	border-color: color-mix(in oklab, var(--warning) 18%, transparent);
 }
 
 .recipe-pending-approval-actions {
@@ -4064,21 +4113,21 @@ button:disabled {
 	gap: 7px;
 	margin: 8px 0;
 	padding: 8px;
-	border: 1px solid rgb(62 207 142 / 16%);
+	border: 1px solid color-mix(in oklab, var(--brand) 16%, transparent);
 	border-radius: 5px;
-	background: rgb(62 207 142 / 4%);
+	background: color-mix(in oklab, var(--brand) 4%, transparent);
 }
 
 .recipe-pending-approval-actions p {
 	margin: 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #78899a;
+	color: var(--text-3);
 }
 
 .recipe-pending-approval-actions code {
 	font-size: var(--font-size-caption);
-	color: #91b9df;
+	color: var(--info-text);
 }
 
 .recipe-progress-track {
@@ -4086,14 +4135,14 @@ button:disabled {
 	overflow: hidden;
 	margin-top: 9px;
 	border-radius: 99px;
-	background: rgb(255 255 255 / 8%);
+	background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .recipe-progress-track span {
 	display: block;
 	height: 100%;
 	border-radius: inherit;
-	background: #3ecf8e;
+	background: var(--brand);
 }
 
 .recipe-target-progress {
@@ -4110,15 +4159,15 @@ button:disabled {
 	align-items: center;
 	gap: 5px;
 	padding: 6px;
-	border: 1px solid rgb(255 255 255 / 6%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	border-radius: 4px;
-	background: #050505;
+	background: var(--bg-sunken);
 }
 
 .recipe-target-progress strong,
 .recipe-target-progress code {
 	font-size: var(--font-size-caption);
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .recipe-target-progress small,
@@ -4127,11 +4176,11 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	font-style: normal;
 	line-height: 1.4;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-target-progress em {
-	color: #8c765b;
+	color: var(--warning-text);
 }
 
 .recipe-status-dot {
@@ -4139,34 +4188,34 @@ button:disabled {
 	width: 5px;
 	height: 5px;
 	border-radius: 50%;
-	background: #686868;
+	background: color-mix(in oklab, var(--foreground) 44%, transparent);
 }
 
 .recipe-status-dot.is-running,
 .recipe-status-dot.is-resolving,
 .recipe-status-dot.is-cancelling,
 .recipe-status-dot.is-needs-approval {
-	background: #3ecf8e;
+	background: var(--brand);
 }
 
 .recipe-status-dot.is-complete {
-	background: #58bc7b;
+	background: var(--brand);
 }
 
 .recipe-status-dot.is-failed,
 .recipe-status-dot.is-interrupted {
-	background: #d46969;
+	background: var(--danger);
 }
 
 .recipe-status-dot.is-cancelled {
-	background: #b18a58;
+	background: var(--warning);
 }
 
 .recipe-needs-attention {
 	display: flex;
 	align-items: flex-start;
 	gap: 5px;
-	color: #ae8352;
+	color: var(--warning-text);
 }
 
 .recipe-run-history button {
@@ -4177,15 +4226,15 @@ button:disabled {
 	gap: 6px;
 	padding: 6px 4px;
 	border: 0;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	background: transparent;
 	text-align: left;
-	color: #a1a1a1;
+	color: var(--muted);
 	cursor: pointer;
 }
 
 .recipe-run-history button[aria-current='true'] {
-	background: rgb(62 207 142 / 5%);
+	background: color-mix(in oklab, var(--brand) 5%, transparent);
 }
 
 .recipe-run-history button strong,
@@ -4196,19 +4245,19 @@ button:disabled {
 .recipe-run-history button strong {
 	font-size: var(--font-size-caption);
 	font-weight: 520;
-	color: #999;
+	color: var(--text-4);
 }
 
 .recipe-run-history button small,
 .recipe-run-history button code {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-inspector-footer-actions {
 	margin-top: 14px;
 	padding-top: 13px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .recipe-evidence-view {
@@ -4224,7 +4273,7 @@ button:disabled {
 	justify-content: space-between;
 	gap: 14px;
 	padding-bottom: 13px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .recipe-evidence-header h2 {
@@ -4232,14 +4281,14 @@ button:disabled {
 	font-size: 14px;
 	font-weight: 560;
 	letter-spacing: -0.025em;
-	color: #d0d0d0;
+	color: var(--text-soft);
 }
 
 .recipe-evidence-header p:last-child {
 	margin: 4px 0 0;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-evidence-stats {
@@ -4255,22 +4304,22 @@ button:disabled {
 	align-items: center;
 	gap: 6px;
 	padding: 8px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #070707;
-	color: #6f8398;
+	background: var(--bg-sunken);
+	color: var(--info-text);
 }
 
 .recipe-evidence-stats span {
 	font-size: var(--font-size-caption);
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .recipe-evidence-stats strong {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
 	font-weight: 550;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .recipe-evidence-timeline {
@@ -4279,9 +4328,9 @@ button:disabled {
 	min-height: 220px;
 	grid-template-rows: 32px minmax(0, 1fr);
 	overflow: hidden;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 6px;
-	background: #030303;
+	background: var(--bg-sunken);
 }
 
 .recipe-evidence-timeline > header {
@@ -4290,9 +4339,9 @@ button:disabled {
 	justify-content: space-between;
 	gap: 8px;
 	padding: 0 9px;
-	border-bottom: 1px solid rgb(255 255 255 / 7%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	font-size: var(--font-size-caption);
-	color: #8b8b8b;
+	color: var(--text-3);
 }
 
 .recipe-evidence-timeline > header code {
@@ -4301,7 +4350,7 @@ button:disabled {
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-timeline-sequence {
@@ -4309,27 +4358,27 @@ button:disabled {
 	width: 30px;
 	height: 20px;
 	place-items: center;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-timeline-sequence.is-failed,
 .recipe-timeline-sequence.is-interrupted {
-	border-color: rgb(212 105 105 / 20%);
-	color: #c57c7c;
+	border-color: color-mix(in oklab, var(--danger) 20%, transparent);
+	color: var(--danger-text);
 }
 
 .recipe-timeline-sequence.is-complete {
-	border-color: rgb(88 188 123 / 16%);
-	color: #77a987;
+	border-color: color-mix(in oklab, var(--brand) 16%, transparent);
+	color: var(--brand-text);
 }
 
 .recipe-timeline-time {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-evidence-artifacts {
@@ -4342,9 +4391,9 @@ button:disabled {
 .recipe-evidence-artifacts > section {
 	min-width: 0;
 	padding: 9px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #060606;
+	background: var(--bg-sunken);
 }
 
 .recipe-evidence-artifacts header {
@@ -4353,7 +4402,7 @@ button:disabled {
 	justify-content: space-between;
 	gap: 7px;
 	font-size: var(--font-size-caption);
-	color: #888;
+	color: var(--text-3);
 }
 
 .recipe-evidence-artifacts header span {
@@ -4371,17 +4420,17 @@ button:disabled {
 .recipe-evidence-artifacts li {
 	overflow: hidden;
 	padding: 3px 0;
-	border-top: 1px solid rgb(255 255 255 / 5%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 5%, transparent);
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-evidence-artifacts p {
 	margin: 6px 0 0;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .recipe-evidence-boundary {
@@ -4406,9 +4455,9 @@ button:disabled {
 	gap: 1px;
 	margin-top: 14px;
 	overflow: hidden;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 8%);
+	background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .sim-build-facts > div {
@@ -4417,7 +4466,7 @@ button:disabled {
 	flex-direction: column;
 	gap: 5px;
 	padding: 10px;
-	background: #060606;
+	background: var(--bg-sunken);
 }
 
 .sim-build-facts span,
@@ -4431,21 +4480,21 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-build-facts strong {
 	font-size: var(--font-size-control);
 	font-weight: 540;
-	color: #b8b8b8;
+	color: var(--text-secondary);
 }
 
 .sim-classification-card {
 	margin-top: 10px;
 	padding: 11px;
-	border: 1px solid rgb(62 207 142 / 14%);
+	border: 1px solid color-mix(in oklab, var(--brand) 14%, transparent);
 	border-radius: 6px;
-	background: rgb(62 207 142 / 4%);
+	background: color-mix(in oklab, var(--brand) 4%, transparent);
 }
 
 .sim-classification-card strong {
@@ -4453,7 +4502,7 @@ button:disabled {
 	font-size: var(--font-size-control);
 	font-weight: 560;
 	text-transform: uppercase;
-	color: #9bc4ed;
+	color: var(--info-text);
 }
 
 .sim-classification-card p,
@@ -4462,7 +4511,7 @@ button:disabled {
 	margin: 5px 0 0;
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-build-sources {
@@ -4477,9 +4526,9 @@ button:disabled {
 	align-items: center;
 	gap: 8px;
 	padding: 8px 9px;
-	border: 1px solid rgb(255 255 255 / 7%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 	border-radius: 5px;
-	background: #060606;
+	background: var(--bg-sunken);
 }
 
 .sim-build-sources strong {
@@ -4488,19 +4537,19 @@ button:disabled {
 	font-weight: 540;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #aaa;
+	color: var(--muted);
 }
 
 .sim-build-sources code {
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-build-sources small {
 	grid-column: 2 / -1;
 	font-size: var(--font-size-caption);
 	line-height: 1.4;
-	color: #bf7979;
+	color: var(--danger-text);
 }
 
 .sim-source-status {
@@ -4508,22 +4557,22 @@ button:disabled {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: #676767;
+	background: color-mix(in oklab, var(--foreground) 43%, transparent);
 }
 
 .sim-source-status.is-ready {
-	background: #58bc7b;
-	box-shadow: 0 0 0 3px rgb(88 188 123 / 8%);
+	background: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 8%, transparent);
 }
 
 .sim-source-status.is-scanning {
-	background: #3ecf8e;
-	box-shadow: 0 0 0 3px rgb(62 207 142 / 8%);
+	background: var(--brand);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 8%, transparent);
 }
 
 .sim-source-status.is-error {
-	background: #d46969;
-	box-shadow: 0 0 0 3px rgb(212 105 105 / 8%);
+	background: var(--danger);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 8%, transparent);
 }
 
 .sim-build-activity {
@@ -4543,7 +4592,7 @@ button:disabled {
 .sim-build-activity code {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .sim-build-activity code {
@@ -4555,21 +4604,21 @@ button:disabled {
 	height: 3px;
 	overflow: hidden;
 	border-radius: 3px;
-	background: rgb(255 255 255 / 7%);
+	background: color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .sim-build-activity > div > i > i {
 	display: block;
 	height: 100%;
 	border-radius: inherit;
-	background: #3ecf8e;
+	background: var(--brand);
 }
 
 .sim-build-export-actions {
 	justify-content: flex-end;
 	margin-top: 18px;
 	padding-top: 14px;
-	border-top: 1px solid rgb(255 255 255 / 8%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 
@@ -4579,8 +4628,8 @@ button:disabled {
 .panel-heading-meta { color: var(--text-2); font-size: 12px; }
 .panel-header-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .info-button.button { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; color: var(--text-2); border-radius: 50%; }
-.info-button:hover { color: var(--foreground); background: #202020; }
-.info-popover { max-width: min(360px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); background: #151515; box-shadow: 0 12px 36px #0009; }
+.info-button:hover { color: var(--foreground); background: color-mix(in oklab, var(--foreground) 14%, transparent); }
+.info-popover { max-width: min(360px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); background: light-dark(#fff, #151515); box-shadow: 0 12px 36px light-dark(rgb(0 0 0 / 12%), rgb(0 0 0 / 60%)); }
 .info-popover-copy { margin-top: 8px; color: var(--text-2); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .panel-info-note { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--separator); color: var(--text-2); font-size: 12px; }
 .panel-disclosure { margin-top: 16px; border-top: 1px solid var(--separator); }
@@ -4630,7 +4679,7 @@ button:disabled {
 
 	.zustand-timeline {
 		grid-column: 1 / -1;
-		border-top: 1px solid rgb(255 255 255 / 8%);
+		border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	}
 
 	.workspace-switcher kbd {
@@ -4728,6 +4777,15 @@ button:disabled {
 	}
 }
 
+/* Set while the theme changes, so no control fades between themes. */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+	/* biome-ignore lint/complexity/noImportantStyles: a theme swap must override every component's own colour transition */
+	transition: none !important;
+}
+
 /*
  * Shared renderer primitives (components/ui.tsx). Panels compose these instead
  * of hand-rolling border/tint/spacing utilities, so tone and density stay
@@ -4742,7 +4800,7 @@ button:disabled {
 	padding: 0 7px;
 	border: 1px solid var(--border);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 4%);
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	color: var(--muted);
 	font-size: var(--font-size-caption);
 	font-weight: 500;
@@ -4754,38 +4812,38 @@ button:disabled {
 .ui-badge.is-brand {
 	border-color: var(--brand-border);
 	background: var(--brand-soft);
-	color: var(--brand);
+	color: var(--brand-text);
 }
 
 .ui-badge.is-success {
-	border-color: rgb(62 207 142 / 25%);
+	border-color: color-mix(in oklab, var(--brand) 25%, transparent);
 	background: var(--success-soft);
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .ui-badge.is-warning {
-	border-color: rgb(244 185 66 / 25%);
+	border-color: color-mix(in oklab, var(--warning) 25%, transparent);
 	background: var(--warning-soft);
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .ui-badge.is-danger {
-	border-color: rgb(248 113 113 / 25%);
+	border-color: color-mix(in oklab, var(--danger) 25%, transparent);
 	background: var(--danger-soft);
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .ui-badge.is-info {
-	border-color: rgb(96 165 250 / 25%);
-	background: rgb(96 165 250 / 10%);
-	color: #93c5fd;
+	border-color: color-mix(in oklab, var(--info) 25%, transparent);
+	background: color-mix(in oklab, var(--info) 10%, transparent);
+	color: var(--info-text);
 }
 
 .ui-inline-code {
 	padding: 1px 5px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 4px;
-	background: rgb(255 255 255 / 4%);
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	color: var(--foreground);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
@@ -4848,9 +4906,9 @@ button:disabled {
 	height: 12px;
 	background: linear-gradient(
 		90deg,
-		rgb(255 255 255 / 5%) 25%,
-		rgb(255 255 255 / 9%) 37%,
-		rgb(255 255 255 / 5%) 63%
+		color-mix(in oklab, var(--foreground) 5%, transparent) 25%,
+		color-mix(in oklab, var(--foreground) 9%, transparent) 37%,
+		color-mix(in oklab, var(--foreground) 5%, transparent) 63%
 	);
 	background-size: 400% 100%;
 	animation: ui-skeleton-shimmer 1.4s ease-in-out infinite;
@@ -4908,7 +4966,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	color: #cfcfcf;
+	color: var(--text-soft);
 }
 
 .slim-chip {
@@ -4928,15 +4986,15 @@ button:disabled {
 	place-items: center;
 	border-radius: 5px;
 	color: #000;
-	background: #a1a1a1;
+	background: color-mix(in oklab, var(--foreground) 68%, transparent);
 }
 
 .agent-glyph.is-claude {
-	background: #d97757;
+	background: var(--danger);
 }
 
 .agent-glyph.is-codex {
-	background: #8b9dff;
+	background: var(--info);
 }
 
 .agent-badge {
@@ -4946,9 +5004,9 @@ button:disabled {
 	align-items: center;
 	gap: 6px;
 	padding: 0 7px 0 2px;
-	border: 1px solid rgb(255 255 255 / 10%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 	border-radius: 5px;
-	background: rgb(255 255 255 / 4%);
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	font-size: var(--font-size-caption);
 	font-weight: 500;
 	color: var(--foreground);
@@ -4956,13 +5014,13 @@ button:disabled {
 }
 
 .agent-badge.is-claude {
-	border-color: rgb(217 119 87 / 35%);
-	background: rgb(217 119 87 / 12%);
+	border-color: color-mix(in oklab, var(--danger) 35%, transparent);
+	background: color-mix(in oklab, var(--danger) 12%, transparent);
 }
 
 .agent-badge.is-codex {
-	border-color: rgb(139 157 255 / 35%);
-	background: rgb(139 157 255 / 12%);
+	border-color: color-mix(in oklab, var(--info) 35%, transparent);
+	background: color-mix(in oklab, var(--info) 12%, transparent);
 }
 
 .agent-badge-session {
@@ -4987,7 +5045,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 /* Fleet rows: runtime · memory · branch on one line, chips on the right. */
@@ -5006,7 +5064,7 @@ button:disabled {
 
 .sim-list-memory {
 	font-variant-numeric: tabular-nums;
-	color: #b5b5b5;
+	color: var(--text-secondary);
 }
 
 .sim-list-trailing {
@@ -5055,8 +5113,8 @@ button:disabled {
 	flex-direction: column;
 	gap: 8px;
 	padding: 10px 14px 12px;
-	border-bottom: 1px solid rgb(255 255 255 / 8%);
-	background: #050505;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+	background: var(--bg-sunken);
 }
 
 .lane-start-fields {
@@ -5102,7 +5160,7 @@ button:disabled {
 }
 
 .lane-row:hover {
-	background: rgb(255 255 255 / 3%);
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
 }
 
 .lane-row:focus-visible {
@@ -5111,8 +5169,8 @@ button:disabled {
 }
 
 .lane-row.is-selected {
-	border-color: rgb(62 207 142 / 22%);
-	background: rgb(62 207 142 / 6%);
+	border-color: color-mix(in oklab, var(--brand) 22%, transparent);
+	background: color-mix(in oklab, var(--brand) 6%, transparent);
 }
 
 .lane-row-main,
@@ -5129,7 +5187,7 @@ button:disabled {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: var(--font-size-caption);
-	color: #929292;
+	color: var(--text-4);
 }
 
 .lane-device-request-controls {
@@ -5149,7 +5207,7 @@ button:disabled {
 	gap: 8px;
 	padding: 24px;
 	text-align: center;
-	color: #8a8a8a;
+	color: var(--text-3);
 }
 
 .lane-agent-card {
@@ -5164,15 +5222,15 @@ button:disabled {
 	margin: 0;
 	padding: 10px 12px;
 	overflow: auto;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
-	background: #030303;
+	background: var(--bg-sunken);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-word;
-	color: #b5b5b5;
+	color: var(--text-secondary);
 }
 
 .worktree-list {
@@ -5187,7 +5245,7 @@ button:disabled {
 	justify-content: space-between;
 	gap: 12px;
 	padding: 8px 0;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .worktree-list > li:first-child {
@@ -5292,7 +5350,7 @@ button:disabled {
 }
 
 .device-screen-badge.is-live {
-	color: var(--brand);
+	color: var(--brand-text);
 }
 
 .device-screen.is-stalled .device-screen-frame {
@@ -5306,9 +5364,9 @@ button:disabled {
 	gap: 2px;
 	margin: 0;
 	padding: 2px;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .sim-tile-size {
@@ -5318,7 +5376,7 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-transform: uppercase;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 .sim-tile-size input[type='range'] {
@@ -5344,27 +5402,27 @@ button:disabled {
 	min-width: 0;
 	flex-direction: column;
 	overflow: hidden;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 10px;
-	background: #0a0a0a;
+	background: var(--surface);
 	transition:
 		border-color 120ms ease,
 		box-shadow 120ms ease;
 }
 
 .device-tile:hover {
-	border-color: rgb(255 255 255 / 16%);
+	border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
 .device-tile.is-selected {
-	border-color: rgb(62 207 142 / 45%);
-	box-shadow: 0 0 0 1px rgb(62 207 142 / 25%);
+	border-color: color-mix(in oklab, var(--brand) 45%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 25%, transparent);
 }
 
 .device-tile-screen {
 	aspect-ratio: 9 / 19.5;
 	width: 100%;
-	border-bottom: 1px solid rgb(255 255 255 / 6%);
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 }
 
 .device-tile-body {
@@ -5400,7 +5458,7 @@ button:disabled {
 	white-space: nowrap;
 	font-size: 13px;
 	font-weight: 540;
-	color: #e3e3e3;
+	color: var(--text-1);
 }
 
 .device-tile-dot {
@@ -5408,12 +5466,12 @@ button:disabled {
 	height: 7px;
 	flex: 0 0 7px;
 	border-radius: 50%;
-	background: rgb(255 255 255 / 20%);
+	background: color-mix(in oklab, var(--foreground) 20%, transparent);
 }
 
 .device-tile-dot.is-live {
 	background: var(--brand);
-	box-shadow: 0 0 0 3px rgb(62 207 142 / 18%);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 18%, transparent);
 	animation: device-tile-pulse 2.4s ease-in-out infinite;
 }
 
@@ -5424,10 +5482,10 @@ button:disabled {
 @keyframes device-tile-pulse {
 	0%,
 	100% {
-		box-shadow: 0 0 0 3px rgb(62 207 142 / 18%);
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 18%, transparent);
 	}
 	50% {
-		box-shadow: 0 0 0 5px rgb(62 207 142 / 6%);
+		box-shadow: 0 0 0 5px color-mix(in oklab, var(--brand) 6%, transparent);
 	}
 }
 
@@ -5438,7 +5496,7 @@ button:disabled {
 	gap: 5px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
-	color: #8f8f8f;
+	color: var(--text-4);
 }
 
 .device-tile-chips {
@@ -5457,7 +5515,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
-	color: #b5b5b5;
+	color: var(--text-secondary);
 }
 
 /* Focus view in the detail pane */
@@ -5469,7 +5527,7 @@ button:disabled {
 
 .sim-focus-screen-frame {
 	max-height: min(520px, 55vh);
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 10px;
 }
 
@@ -5494,7 +5552,7 @@ button:disabled {
 	width: 44px;
 	flex: 0 0 44px;
 	aspect-ratio: 9 / 19.5;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 6px;
 }
 
@@ -5541,9 +5599,9 @@ button:disabled {
 	flex-direction: column;
 	gap: 8px;
 	padding: 12px;
-	border: 1px solid rgb(255 255 255 / 8%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 	border-radius: 10px;
-	background: #0a0a0a;
+	background: var(--surface);
 }
 
 .agent-card-head {
@@ -5566,13 +5624,13 @@ button:disabled {
 	white-space: nowrap;
 	font-size: 13px;
 	font-weight: 540;
-	color: #e3e3e3;
+	color: var(--text-1);
 }
 
 .agent-card-meta {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
-	color: #8f8f8f;
+	color: var(--text-4);
 }
 
 .agent-card-cwd {
@@ -5581,7 +5639,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
-	color: #b5b5b5;
+	color: var(--text-secondary);
 }
 
 .agent-devices {
@@ -5590,7 +5648,7 @@ button:disabled {
 	gap: 6px;
 	margin: 0;
 	padding: 8px 0 0;
-	border-top: 1px solid rgb(255 255 255 / 6%);
+	border-top: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
 	list-style: none;
 }
 
@@ -5608,7 +5666,7 @@ button:disabled {
 	background: transparent;
 	text-align: left;
 	font-size: 12px;
-	color: #e3e3e3;
+	color: var(--text-1);
 	cursor: pointer;
 }
 
@@ -5617,7 +5675,7 @@ button:disabled {
 }
 
 .agent-device-state {
-	color: #8f8f8f;
+	color: var(--text-4);
 }
 
 .agent-device-note {
@@ -5627,7 +5685,7 @@ button:disabled {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: 11px;
-	color: #a1a1a1;
+	color: var(--muted);
 }
 
 /* Fleet detail: attached agents */
@@ -5687,7 +5745,7 @@ button:disabled {
 	background: rgb(0 0 0 / 70%);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 10px;
-	color: var(--brand);
+	color: var(--brand-text);
 	backdrop-filter: blur(4px);
 	pointer-events: none;
 }
@@ -5704,9 +5762,9 @@ button:disabled {
 	align-items: center;
 	gap: 2px;
 	padding: 2px;
-	border: 1px solid rgb(255 255 255 / 9%);
+	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
-	background: rgb(255 255 255 / 2%);
+	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -5716,10 +5774,10 @@ button:disabled {
 .sim-inline-code {
 	padding: 1px 4px;
 	border-radius: 4px;
-	background: rgb(134 166 198 / 10%);
+	background: color-mix(in oklab, var(--info) 10%, transparent);
 	font-family: var(--font-mono);
 	font-size: 0.92em;
-	color: #a9c1da;
+	color: var(--info-text);
 }
 
 .sim-settings-outcome {
@@ -5728,12 +5786,12 @@ button:disabled {
 	gap: 3px;
 	margin: 8px 0 0;
 	padding: 8px 10px;
-	border: 1px solid rgb(134 166 198 / 14%);
+	border: 1px solid color-mix(in oklab, var(--info) 14%, transparent);
 	border-radius: 6px;
-	background: rgb(10 16 24 / 55%);
+	background: color-mix(in oklab, var(--background) 55%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
-	color: #8fa6bf;
+	color: var(--info-text);
 	list-style: none;
 }
 
@@ -5834,12 +5892,12 @@ button:disabled {
 
 .request-card.is-warning .request-card-header svg {
 	margin-top: 4px;
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .request-card.is-danger .request-card-header svg {
 	margin-top: 4px;
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .request-card-title {
@@ -5993,12 +6051,12 @@ button:disabled {
 }
 
 .holder-badge.is-success .holder-badge-clock {
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .holder-badge.is-warning {
 	border-color: var(--warning-border);
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .holder-badge.is-info {
@@ -6098,9 +6156,9 @@ button:disabled {
 	border-radius: 999px;
 	background: linear-gradient(
 		90deg,
-		rgb(255 255 255 / 5%) 25%,
-		rgb(255 255 255 / 9%) 37%,
-		rgb(255 255 255 / 5%) 63%
+		color-mix(in oklab, var(--foreground) 5%, transparent) 25%,
+		color-mix(in oklab, var(--foreground) 9%, transparent) 37%,
+		color-mix(in oklab, var(--foreground) 5%, transparent) 63%
 	);
 	background-size: 400% 100%;
 	animation: ui-skeleton-shimmer 1.4s ease-in-out infinite;
@@ -6124,7 +6182,7 @@ button:disabled {
 	background: var(--warning-soft);
 	font-family: var(--font-mono);
 	font-size: 11px;
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 /* A native select can't ellipsize: fit the longest `label (count)` instead. */
@@ -6163,7 +6221,7 @@ button:disabled {
 	gap: 6px;
 	margin: 0;
 	font-size: var(--font-size-caption);
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .supabase-off-note {
@@ -6217,7 +6275,7 @@ button:disabled {
 }
 
 .supabase-row-line .is-success {
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .supabase-row-line .is-info {
@@ -6225,11 +6283,11 @@ button:disabled {
 }
 
 .supabase-row-line .is-warning {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-row-line .is-danger {
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 /* The chain and step lists sit on HeroUI Pro Timeline (timeline.css). */
@@ -6313,7 +6371,7 @@ button:disabled {
 }
 
 .supabase-service-row.is-success .supabase-service-state {
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .supabase-service-row.is-info .supabase-service-state {
@@ -6321,7 +6379,7 @@ button:disabled {
 }
 
 .supabase-service-row.is-danger .supabase-service-state {
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .supabase-service-port {
@@ -6371,7 +6429,7 @@ button:disabled {
 .supabase-log-output mark {
 	border-radius: 2px;
 	background: var(--warning-soft);
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-log-footer {
@@ -6882,13 +6940,13 @@ button:disabled {
 .supabase-migration.is-warning {
 	border-color: var(--warning-border);
 	background: var(--warning-soft);
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-migration.is-danger {
 	border-color: var(--danger-border);
 	background: var(--danger-soft);
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .supabase-section-actions {
@@ -6913,7 +6971,7 @@ button:disabled {
 	gap: 6px;
 	margin: 0;
 	font-size: var(--font-size-caption);
-	color: var(--success);
+	color: var(--success-text);
 }
 
 .supabase-log-controls {
@@ -6960,7 +7018,7 @@ button:disabled {
 	align-items: center;
 	gap: 6px;
 	font-size: var(--font-size-caption);
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-connect-group {
@@ -7171,7 +7229,7 @@ button:disabled {
 	margin: 8px 0 0;
 	padding: 8px 12px;
 	border-left: 2px solid var(--border);
-	background: rgb(255 255 255 / 3%);
+	background: color-mix(in oklab, var(--foreground) 3%, transparent);
 	color: var(--foreground);
 }
 
@@ -7182,7 +7240,7 @@ button:disabled {
 
 .supabase-request-error {
 	margin-top: 6px;
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .supabase-requests .supabase-inline-field {
@@ -7226,7 +7284,7 @@ button.supabase-prune-row {
 }
 
 button.supabase-prune-row:hover {
-	background: rgb(255 255 255 / 2.5%);
+	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 }
 
 .supabase-prune-row.is-selected {
@@ -7347,7 +7405,7 @@ button.supabase-prune-row:hover {
 }
 
 .supabase-field-was {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-switch-row {
@@ -7365,7 +7423,7 @@ button.supabase-prune-row:hover {
 }
 
 .supabase-switch-warning {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .supabase-feature-switch,
@@ -7471,7 +7529,7 @@ button.supabase-prune-row:hover {
 	margin: 12px auto 0;
 	padding: 10px 0;
 	border-top: 1px solid var(--separator);
-	background: #020202;
+	background: var(--bg-sunken);
 }
 
 .supabase-settings-changes {
@@ -7584,15 +7642,15 @@ button.supabase-prune-row:hover {
 
 .lane-backend-status {
 	font-size: var(--font-size-control);
-	color: #cfcfcf;
+	color: var(--text-soft);
 }
 
 .lane-backend-status.is-warning {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .lane-backend-status.is-danger {
-	color: var(--danger);
+	color: var(--danger-text);
 }
 
 .lane-backend-api {
@@ -7621,7 +7679,7 @@ button.supabase-prune-row:hover {
 }
 
 .lane-backend-note {
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .lane-backend .sim-action-row {
@@ -7685,7 +7743,7 @@ button.supabase-prune-row:hover {
 .sim-lane-backend-line {
 	min-width: 0;
 	font-family: var(--font-mono);
-	color: #cfcfcf;
+	color: var(--text-soft);
 }
 
 /* Agents: the backends a session holds, and its requests. */
@@ -7740,7 +7798,7 @@ button.supabase-prune-row:hover {
 .agent-request {
 	flex-wrap: wrap;
 	font-size: 12px;
-	color: var(--warning);
+	color: var(--warning-text);
 }
 
 .agent-request-text {
@@ -7758,7 +7816,7 @@ button.supabase-prune-row:hover {
 .app-traffic-banner.is-danger {
 	border-color: var(--danger-border);
 	background: var(--danger-soft);
-	color: rgb(254 202 202 / 78%);
+	color: var(--danger-text);
 }
 
 .app-traffic-banner-text {

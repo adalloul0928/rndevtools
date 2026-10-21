@@ -67,6 +67,10 @@ import { AgentCliService } from './agent-cli-service';
 import { runAgentCliSetup } from './agent-cli-setup';
 import { createAgentCommandRouter } from './agent-command-router';
 import { AgentService } from './agent-service';
+import {
+	createAppearanceIpcHandlers,
+	windowChromeColors,
+} from './appearance-ipc';
 import { DesktopBroker } from './broker';
 import { createBuildInsightsIpcHandlers } from './build-insights-ipc';
 import { BuildInsightsService } from './build-insights-service';
@@ -795,6 +799,16 @@ function registerIpc(
 			return runAgentCliSetup(cli.executablePath, app.getPath('home'));
 		},
 	});
+	const appearanceHandlers = createAppearanceIpcHandlers({
+		assertTrustedRenderer,
+		readAppearance: () => settings.appearance,
+		saveAppearance: (preference) => settings.setAppearance(preference),
+		applyAppearance: (preference) => {
+			nativeTheme.themeSource = preference;
+		},
+	});
+	ipcMain.handle(IPC_CHANNELS.getAppearance, appearanceHandlers.getAppearance);
+	ipcMain.handle(IPC_CHANNELS.setAppearance, appearanceHandlers.setAppearance);
 	ipcMain.handle(IPC_CHANNELS.getBootstrap, (event): DesktopBootstrap => {
 		assertTrustedRenderer(event);
 		return {
@@ -1253,14 +1267,30 @@ function updateSimulatorPolling(): void {
 	simulatorStreamService?.setPaused(!(visible && focused));
 }
 
+/** Repaints the native window colours when the theme changes. */
+function updateWindowChrome(): void {
+	const chrome = windowChromeColors(nativeTheme.shouldUseDarkColors);
+	for (const window of windows) {
+		if (window.isDestroyed()) continue;
+		window.setBackgroundColor(chrome.background);
+		if (process.platform !== 'darwin') {
+			window.setTitleBarOverlay({
+				color: chrome.titleBar,
+				symbolColor: chrome.titleBarSymbol,
+			});
+		}
+	}
+}
+
 function createWindow(): BrowserWindow {
+	const chrome = windowChromeColors(nativeTheme.shouldUseDarkColors);
 	const window = new BrowserWindow({
 		width: 1480,
 		height: 940,
 		minWidth: 1040,
 		minHeight: 700,
 		show: false,
-		backgroundColor: '#000000',
+		backgroundColor: chrome.background,
 		title: 'RN Devtools',
 		titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
 		// Centers the 12px traffic lights in the 48px titlebar the renderer draws.
@@ -1268,7 +1298,11 @@ function createWindow(): BrowserWindow {
 		titleBarOverlay:
 			process.platform === 'darwin'
 				? false
-				: { color: '#090909', symbolColor: '#a1a1a1', height: 48 },
+				: {
+						color: chrome.titleBar,
+						symbolColor: chrome.titleBarSymbol,
+						height: 48,
+					},
 		webPreferences: {
 			preload: path.join(__dirname, '../preload/index.js'),
 			contextIsolation: true,
@@ -1370,7 +1404,7 @@ if (!app.requestSingleInstanceLock()) {
 	void app
 		.whenReady()
 		.then(async () => {
-			nativeTheme.themeSource = 'dark';
+			nativeTheme.on('updated', updateWindowChrome);
 			if (
 				!trustedDevelopmentRendererUrl(
 					process.env.ELECTRON_RENDERER_URL,
@@ -1384,6 +1418,9 @@ if (!app.requestSingleInstanceLock()) {
 			);
 			try {
 				const storedSettings = await settings.load();
+				// Set before any window exists: the renderer's `color-scheme`
+				// follows it, so the first frame is already in the right theme.
+				nativeTheme.themeSource = settings.appearance;
 				if (storedSettings.xcodeDeveloperDirectory) {
 					try {
 						process.env.DEVELOPER_DIR = await validateXcodeDeveloperDirectory(

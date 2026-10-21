@@ -5,11 +5,11 @@ import type { ReactNode } from 'react';
 type Tone = 'default' | 'success' | 'warning' | 'danger' | 'info';
 
 export const statusToneClassName: Record<Tone, string> = {
-	default: 'border-white/10 bg-white/[0.045] text-(--muted)',
-	success: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
-	warning: 'border-amber-400/25 bg-amber-400/10 text-amber-300',
-	danger: 'border-red-400/25 bg-red-400/10 text-red-300',
-	info: 'border-blue-400/25 bg-blue-400/10 text-blue-300',
+	default: 'border-foreground/10 bg-foreground/[0.045] text-(--muted)',
+	success: 'border-brand/25 bg-brand/10 text-brand-text',
+	warning: 'border-warning/25 bg-warning/10 text-warning-text',
+	danger: 'border-danger/25 bg-danger/10 text-danger-text',
+	info: 'border-info/25 bg-info/10 text-info-text',
 };
 
 export function StatusPill({
@@ -54,7 +54,7 @@ export function ActionNotice({
 		) : kind === 'error' ? (
 			<CircleX className="h-3.5 w-3.5" />
 		) : (
-			<span className="h-2 w-2 animate-pulse rounded-full bg-blue-300" />
+			<span className="h-2 w-2 animate-pulse rounded-full bg-info" />
 		);
 	return (
 		<div

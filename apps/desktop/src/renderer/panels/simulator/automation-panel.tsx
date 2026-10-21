@@ -1458,9 +1458,9 @@ function RecipePendingApprovalControls({
 					<AlertDialog.Trigger className="button button--sm button--primary">
 						<ShieldAlert className="h-3.5 w-3.5" /> Review unknown tuple
 					</AlertDialog.Trigger>
-					<AlertDialog.Backdrop className="bg-black/70 backdrop-blur-sm">
+					<AlertDialog.Backdrop className="bg-black/40 backdrop-blur-sm dark:bg-black/70">
 						<AlertDialog.Container
-							className="border border-white/12 bg-[#0b0b0b] shadow-2xl"
+							className="border border-foreground/12 bg-overlay shadow-2xl"
 							size="lg"
 						>
 							<AlertDialog.Dialog>

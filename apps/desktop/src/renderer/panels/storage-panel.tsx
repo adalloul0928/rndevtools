@@ -295,11 +295,11 @@ export function StoragePanel() {
 								/>
 							</dl>
 							{selected.sensitive ? (
-								<div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
-									<div className="flex items-center gap-2 text-xs font-medium text-amber-200">
+								<div className="rounded-lg border border-warning/20 bg-warning/[0.06] p-4">
+									<div className="flex items-center gap-2 text-xs font-medium text-warning-text">
 										<EyeOff className="h-4 w-4" /> Encrypted value hidden
 									</div>
-									<p className="mb-0 mt-2 text-xs leading-5 text-amber-100/60">
+									<p className="mb-0 mt-2 text-xs leading-5 text-warning-text/60">
 										The key is listed for diagnostics, but its value is never
 										read or transmitted to desktop.
 									</p>
@@ -319,9 +319,9 @@ export function StoragePanel() {
 								>
 									<Label className="mb-2 text-xs text-(--muted)">Value</Label>
 									{selected.valueType === 'json' || draft.length > 80 ? (
-										<TextArea className="min-h-40 w-full rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-white/25" />
+										<TextArea className="min-h-40 w-full rounded-md border border-foreground/10 bg-background/30 p-3 font-mono text-xs leading-5 text-(--foreground) outline-none focus:border-foreground/25" />
 									) : (
-										<Input className="h-9 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-xs text-(--foreground)" />
+										<Input className="h-9 rounded-md border border-foreground/10 bg-background/30 px-3 font-mono text-xs text-(--foreground)" />
 									)}
 									{(() => {
 										const dirty = draft !== (selected.valueText ?? '');
@@ -385,7 +385,7 @@ export function StoragePanel() {
 										<div className="space-y-2">
 											{selectedEvents.map((event) => (
 												<div
-													className="rounded-md border border-(--border) bg-white/[0.025] p-3"
+													className="rounded-md border border-(--border) bg-foreground/[0.025] p-3"
 													key={event.id}
 												>
 													<div className="flex items-center justify-between text-xs">
