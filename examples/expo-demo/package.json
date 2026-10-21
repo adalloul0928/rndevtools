@@ -6,7 +6,7 @@
 	"scripts": {
 		"lint": "biome check src",
 		"typecheck": "tsc --noEmit",
-		"verify:bundle": "APP_VARIANT=production expo export --platform ios --output-dir ./build --no-bytecode && rndevtools-verify-bundle ./build",
+		"verify:bundle": "expo export --platform ios --platform android --output-dir ./build && rndevtools-verify-bundle ./build",
 		"quality": "pnpm lint && pnpm typecheck && pnpm verify:seam && pnpm verify:scene",
 		"verify:scene": "node --test scripts/scene-lifecycle.test.mjs",
 		"verify:seam": "node scripts/verify-prune-seam.mjs"

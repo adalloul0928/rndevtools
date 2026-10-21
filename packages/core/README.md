@@ -358,6 +358,7 @@ pulls in the panels and every adapter they reach.
 `@rndevtools/react-native` ships the mechanism for this. Its
 `withDevtoolsPruning` Metro resolver swaps the devtools modules for typed
 no-op shims at resolution time, so the module graph is cut rather than
-trimmed, and `rndevtools-verify-bundle` asserts over an exported bundle that
-no devtools markers survived. Wire both up before shipping, and keep the shim
-list current when you add a plugin.
+trimmed. It does so for every release bundle by default, and fails the build
+when an import would still reach this package. `rndevtools-verify-bundle`
+asserts over an exported bundle that no devtools markers survived. Wire both
+up before shipping, and keep the shim list current when you add a plugin.

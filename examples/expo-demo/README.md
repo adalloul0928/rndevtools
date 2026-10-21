@@ -14,7 +14,7 @@ same.
 | [`src/devtools/plugins.ts`](src/devtools/plugins.ts) | Host-specific configuration: URL scheme, vendor correlation headers, environment values |
 | [`src/devtools/desktop.ts`](src/devtools/desktop.ts) | Implementing `DesktopClientHost` to connect to the desktop app |
 | [`src/lib/devtools-host-disabled.tsx`](src/lib/devtools-host-disabled.tsx) | The no-op stub a release build resolves to instead |
-| [`metro.config.js`](metro.config.js) | `withDevtoolsPruning` cutting devtools out of the module graph |
+| [`metro.config.js`](metro.config.js) | `withDevtoolsPruning` cutting devtools out of every release bundle's module graph |
 | [`app.config.js`](app.config.js) | The build cache provider that shares native builds between git worktrees (lanes) |
 
 ## Run it
@@ -76,16 +76,21 @@ pnpm --dir examples/expo-demo verify:seam
 
 The rule it enforces is the whole trick: the app imports devtools from exactly
 one module, and Metro replaces that module. A second import anywhere else
-reconnects the graph. The slow check confirms it against a real export:
+would reconnect the graph; in a release build Metro refuses it instead and the
+build fails, naming the import. Release builds are pruned by default, so
+nothing has to be set for this to hold. The slow check confirms it against a
+real export:
 
 ```sh
 pnpm --dir examples/expo-demo verify:bundle
 ```
 
-The command selects the production variant, exports its bundle, and asserts no
-devtools markers survived. This is
-the check worth copying into your own CI; without it, an import added months
-from now silently reconnects the graph.
+The command exports the iOS and Android release bundles the way a store build
+does (production, minified, Hermes bytecode) with no app variable set, and
+asserts no devtools markers survived. CI runs it on every change. It is the
+check worth copying into your own CI: it reads the bundle itself, so it still
+fails if the Metro config stops pruning, for example after
+`keepInReleaseBundles: true` is set or `withDevtoolsPruning` is removed.
 
 ## Notes
 

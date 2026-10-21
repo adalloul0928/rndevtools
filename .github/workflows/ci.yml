@@ -40,6 +40,12 @@ jobs:
         run: pnpm --dir packages/react-native quality
       - name: Example app
         run: pnpm --dir examples/expo-demo quality
+      # Exports the demo's iOS and Android release bundles the way a store
+      # build does (production, minified, Hermes bytecode) with no app
+      # variable set, because a release build must be pruned without being
+      # told to, then fails if any devtools marker survives in the bytecode.
+      - name: Example release bundle
+        run: pnpm --dir examples/expo-demo verify:bundle
 
   native:
     name: Native helpers

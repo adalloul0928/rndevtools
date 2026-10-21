@@ -26,13 +26,21 @@ type Path = {
 	resolve: (...parts: string[]) => string;
 };
 type Os = { tmpdir: () => string };
-type Resolution = { type: 'sourceFile'; filePath: string };
+type Resolution =
+	| { type: 'sourceFile'; filePath: string }
+	| { type: 'assetFiles'; filePaths: readonly string[] };
 type ResolveRequest = (
-	context: { originModulePath: string; resolveRequest: ResolveRequest },
+	context: {
+		originModulePath: string;
+		resolveRequest: ResolveRequest;
+		/** Set by Metro for the bundle being built, as it sets `__DEV__`. */
+		dev?: boolean;
+	},
 	moduleName: string,
 	platform: string | null,
 ) => Resolution;
 type ReplaceEntry = { module: string; path?: string; stub: string };
+type Options = Parameters<typeof withDevtoolsPruning>[1];
 
 const fs = require('node:fs') as Fs;
 const os = require('node:os') as Os;
@@ -78,15 +86,28 @@ const metroLike: ResolveRequest = (context, moduleName) => {
 	return { type: 'sourceFile', filePath };
 };
 
-function pruning(
-	replace: readonly ReplaceEntry[],
+function configure(
+	options: Options,
 	previous?: ResolveRequest,
 ): ResolveRequest {
 	const config = withDevtoolsPruning(
 		{ resolver: previous ? { resolveRequest: previous } : {} },
-		{ enabled: true, projectRoot, replace },
+		options,
 	) as { resolver: { resolveRequest: ResolveRequest } };
 	return config.resolver.resolveRequest;
+}
+
+function pruning(
+	replace: readonly ReplaceEntry[],
+	previous?: ResolveRequest,
+): ResolveRequest {
+	return configure({ enabled: true, projectRoot, replace }, previous);
+}
+
+/** Resolves as Metro does while building a bundle with this `dev` flag. */
+function inBundle(resolve: ResolveRequest, dev: boolean): ResolveRequest {
+	return (context, moduleName, platform) =>
+		resolve({ ...context, dev }, moduleName, platform);
 }
 
 /** Project-relative file that `moduleName` ends up as when imported from `origin`. */
@@ -103,8 +124,25 @@ function resolveWith(
 		moduleName,
 		'ios',
 	);
+	if (resolution.type !== 'sourceFile') {
+		throw new Error(`${moduleName} resolved to ${resolution.type}`);
+	}
 	return path.relative(projectRoot, fs.realpathSync(resolution.filePath));
 }
+
+/** An installed devtools package, laid out the way `metroLike` resolves it. */
+function devtoolsPackage(directory = 'node_modules/@rndevtools/core'): void {
+	write(
+		`${directory}/package.json`,
+		JSON.stringify({ name: '@rndevtools/core', main: 'index.ts' }),
+	);
+	write(`${directory}/index.ts`, 'export const panel = "real";\n');
+	write(`${directory}/src/redact.ts`);
+}
+
+/** How a pruned bundle's refusal of a devtools import begins. */
+const leak = (moduleName: string, importer: string, file: string) =>
+	`withDevtoolsPruning: ${moduleName}, imported by ${importer}, resolves to ${file} in @rndevtools/core. A pruned bundle must not contain @rndevtools/core`;
 
 const host = {
 	module: '@/lib/devtools/host',
@@ -222,12 +260,228 @@ describe('withDevtoolsPruning', () => {
 			/cannot find the file @\/lib\/devtools\/host resolves to\. Set its `path`/,
 		);
 	});
+});
 
-	it('is a no-op when disabled', () => {
+describe('which bundles are pruned', () => {
+	it('prunes a release bundle without being enabled', () => {
+		const resolve = configure({ projectRoot, replace: [host] });
+		expect(resolveWith(inBundle(resolve, false), '@/lib/devtools/host')).toBe(
+			stub,
+		);
+		expect(resolveWith(inBundle(resolve, false), '../lib/devtools/host')).toBe(
+			stub,
+		);
+	});
+
+	it('treats a resolution context without a dev flag as a release', () => {
+		const resolve = configure({ projectRoot, replace: [host] });
+		expect(resolveWith(resolve, '@/lib/devtools/host')).toBe(stub);
+	});
+
+	it('leaves a development bundle untouched, devtools packages included', () => {
+		devtoolsPackage();
+		for (const enabled of [undefined, false]) {
+			const development = inBundle(
+				configure({ enabled, projectRoot, replace: [host] }),
+				true,
+			);
+			expect(resolveWith(development, '@/lib/devtools/host')).toBe(
+				'src/lib/devtools/host.ts',
+			);
+			expect(resolveWith(development, '@rndevtools/core')).toBe(
+				'node_modules/@rndevtools/core/index.ts',
+			);
+		}
+	});
+
+	it('still runs an earlier resolver for a development bundle', () => {
+		const target = path.join(projectRoot, 'src/lib/devtools/host.ts');
+		const previous: ResolveRequest = (context, moduleName, platform) =>
+			moduleName === '~devtools'
+				? { type: 'sourceFile', filePath: target }
+				: context.resolveRequest(context, moduleName, platform);
+		const resolve = configure({ projectRoot, replace: [host] }, previous);
+		expect(resolveWith(inBundle(resolve, true), '~devtools')).toBe(
+			'src/lib/devtools/host.ts',
+		);
+		expect(resolveWith(inBundle(resolve, false), '~devtools')).toBe(stub);
+	});
+
+	it('prunes a development bundle too when enabled', () => {
+		const resolve = configure({ enabled: true, projectRoot, replace: [host] });
+		expect(resolveWith(inBundle(resolve, true), '@/lib/devtools/host')).toBe(
+			stub,
+		);
+	});
+
+	it('turns pruning off only when told to keep devtools in release bundles', () => {
+		const previous: ResolveRequest = (context, moduleName, platform) =>
+			context.resolveRequest(context, moduleName, platform);
+		// Nothing to validate when nothing is pruned, as an empty list shows.
 		const config = withDevtoolsPruning(
-			{ resolver: {} },
-			{ enabled: false, projectRoot, replace: [] },
+			{ resolver: { resolveRequest: previous } },
+			{ keepInReleaseBundles: true, projectRoot, replace: [] },
 		) as { resolver: { resolveRequest?: ResolveRequest } };
-		expect(config.resolver.resolveRequest).toBeUndefined();
+		expect(config.resolver.resolveRequest).toBe(previous);
+	});
+
+	it('refuses switches that are not booleans or that contradict each other', () => {
+		// An environment variable passed straight through is a string.
+		const fromEnvironment = () =>
+			configure({
+				enabled: 'false',
+				projectRoot,
+				replace: [host],
+			} as unknown as Options);
+		expect(fromEnvironment).toThrow(TypeError);
+		expect(fromEnvironment).toThrow(
+			'withDevtoolsPruning: `enabled` must be true or false, not the string "false". Compare an environment variable with the value you mean instead of passing it through.',
+		);
+		expect(() =>
+			configure({
+				keepInReleaseBundles: 1,
+				projectRoot,
+				replace: [host],
+			} as unknown as Options),
+		).toThrow('`keepInReleaseBundles` must be true or false, not number.');
+		expect(() =>
+			configure({
+				enabled: true,
+				keepInReleaseBundles: true,
+				projectRoot,
+				replace: [host],
+			}),
+		).toThrow(
+			'`enabled: true` prunes every bundle and `keepInReleaseBundles: true` prunes none',
+		);
+	});
+
+	it('validates projectRoot and the replace list whenever it may prune', () => {
+		for (const enabled of [undefined, false, true]) {
+			expect(() =>
+				configure({ enabled, replace: [host] } as unknown as Options),
+			).toThrow('withDevtoolsPruning requires projectRoot');
+			expect(() => configure({ enabled, projectRoot, replace: [] })).toThrow(
+				'withDevtoolsPruning requires a non-empty replace list',
+			);
+		}
+		expect(() =>
+			withDevtoolsPruning({ resolver: {} }, undefined as unknown as Options),
+		).toThrow('withDevtoolsPruning requires projectRoot');
+	});
+});
+
+describe('a pruned bundle that reaches a devtools package', () => {
+	const release = (replace: readonly ReplaceEntry[] = [host]) =>
+		inBundle(configure({ projectRoot, replace }), false);
+
+	it('fails the build, naming the import, the importer and the package', () => {
+		devtoolsPackage();
+		const importCore = () => resolveWith(release(), '@rndevtools/core');
+		expect(importCore).toThrow(
+			leak(
+				'@rndevtools/core',
+				'src/app/_layout.tsx',
+				'node_modules/@rndevtools/core/index.ts',
+			),
+		);
+		expect(importCore).toThrow(
+			'Import devtools only through a module listed in `replace`, which Metro swaps for its stub, or pass `keepInReleaseBundles: true` for a build that deliberately ships devtools.',
+		);
+	});
+
+	it('fails however the import reaches the package', () => {
+		devtoolsPackage();
+		expect(() =>
+			resolveWith(release(), '../../node_modules/@rndevtools/core/src/redact'),
+		).toThrow(
+			leak(
+				'../../node_modules/@rndevtools/core/src/redact',
+				'src/app/_layout.tsx',
+				'node_modules/@rndevtools/core/src/redact.ts',
+			),
+		);
+		// A stub must not pull devtools back in either.
+		expect(() => resolveWith(release(), '@rndevtools/core', stub)).toThrow(
+			leak('@rndevtools/core', stub, 'node_modules/@rndevtools/core/index.ts'),
+		);
+	});
+
+	it('recognises a workspace install by its package name, outside node_modules', () => {
+		// Metro reports a linked package by its real path.
+		devtoolsPackage('packages/core');
+		const linked = path.join(projectRoot, 'packages/core/index.ts');
+		const previous: ResolveRequest = (context, moduleName, platform) =>
+			moduleName === '@rndevtools/core'
+				? { type: 'sourceFile', filePath: linked }
+				: context.resolveRequest(context, moduleName, platform);
+		const resolve = inBundle(
+			configure({ projectRoot, replace: [host] }, previous),
+			false,
+		);
+		expect(() => resolveWith(resolve, '@rndevtools/core')).toThrow(
+			leak('@rndevtools/core', 'src/app/_layout.tsx', 'packages/core/index.ts'),
+		);
+	});
+
+	it('refuses a devtools asset like devtools code', () => {
+		devtoolsPackage();
+		const image = path.join(
+			projectRoot,
+			'node_modules/@rndevtools/core/icon.png',
+		);
+		const previous: ResolveRequest = (context, moduleName, platform) =>
+			moduleName.endsWith('.png')
+				? { type: 'assetFiles', filePaths: [image] }
+				: context.resolveRequest(context, moduleName, platform);
+		const resolve = inBundle(
+			configure({ projectRoot, replace: [host] }, previous),
+			false,
+		);
+		expect(() =>
+			resolve(
+				{
+					originModulePath: path.join(projectRoot, 'src/app/_layout.tsx'),
+					resolveRequest: metroLike,
+				},
+				'@rndevtools/core/icon.png',
+				'ios',
+			),
+		).toThrow(
+			leak(
+				'@rndevtools/core/icon.png',
+				'src/app/_layout.tsx',
+				'node_modules/@rndevtools/core/icon.png',
+			),
+		);
+	});
+
+	it('still swaps a devtools module listed in replace for its stub', () => {
+		devtoolsPackage();
+		const resolve = release([host, { module: '@rndevtools/core', stub }]);
+		expect(resolveWith(resolve, '@rndevtools/core')).toBe(stub);
+		expect(
+			resolveWith(resolve, '../../node_modules/@rndevtools/core/index'),
+		).toBe(stub);
+		expect(resolveWith(resolve, '@/lib/devtools/host')).toBe(stub);
+		// Listing one module of a package does not let the rest through.
+		expect(() => resolveWith(resolve, '@rndevtools/core/src/redact')).toThrow(
+			leak(
+				'@rndevtools/core/src/redact',
+				'src/app/_layout.tsx',
+				'node_modules/@rndevtools/core/src/redact.ts',
+			),
+		);
+	});
+
+	it("does not count the app's own package as devtools", () => {
+		write('package.json', JSON.stringify({ name: '@rndevtools/example-app' }));
+		devtoolsPackage();
+		expect(resolveWith(release(), '../lib/devtools/other')).toBe(
+			'src/lib/devtools/other.ts',
+		);
+		expect(() => resolveWith(release(), '@rndevtools/core')).toThrow(
+			'in @rndevtools/core.',
+		);
 	});
 });
