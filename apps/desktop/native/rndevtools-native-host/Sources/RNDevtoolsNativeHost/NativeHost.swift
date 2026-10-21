@@ -1,8 +1,6 @@
 import Foundation
 
 struct NativeHost {
-  static let helperVersion = "0.1.0"
-
   private let permissionReader: any PermissionReading
   private let capabilityReader: any CapabilityReading
   private let imageComposer: any ImageComposing

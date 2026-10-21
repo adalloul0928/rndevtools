@@ -541,6 +541,8 @@ private struct StubMutationBroker: SimulatorMutationBrokering {
   let object = try #require(JSONSerialization.jsonObject(with: response.data) as? [String: Any])
   #expect(object["protocolVersion"] as? Int == 2)
   let result = try #require(object["result"] as? [String: Any])
+  // Electron requires this to equal the manifest's appVersion; it is generated from package.json.
+  #expect(result["helperVersion"] as? String == NativeHost.helperVersion)
   let capabilities = try #require(result["capabilities"] as? [String: Any])
   #expect(
     capabilities["operations"] as? [String]

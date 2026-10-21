@@ -83,16 +83,35 @@ Build both supported macOS architectures:
 pnpm --filter @rndevtools/desktop native:build:all
 ```
 
+The simulator helper and the native host report the desktop version from
+`package.json` in their handshakes, and Electron treats a helper whose handshake
+disagrees with the manifest as untrusted. The Go binaries receive that version
+through `-ldflags`. Swift has no equivalent, so the native host compiles it from
+the generated, committed
+`rndevtools-native-host/Sources/RNDevtoolsNativeHost/HelperVersion.swift`, and a
+plain `swift build` still works. The native build regenerates that file (a
+public release refuses a stale one instead), and `native:verify:capabilities`
+requires the built host's handshakes to report the `package.json` version. After
+changing the desktop version, run:
+
+```bash
+pnpm --filter @rndevtools/desktop native:sync-version
+```
+
+and commit the regenerated file.
+
 Run source checks:
 
 ```bash
 pnpm --filter @rndevtools/desktop native:check
 ```
 
-The Go gate runs formatting, vet, race tests, a hermetic two-module dependency
-check for the Simulator helper, standard-library-only enforcement for the agent
-CLI, exact vendored-file SHA-256 verification, and `govulncheck` with module
-downloads disabled. The Swift gate runs strict formatting and package tests.
+Every check selection first fails when `HelperVersion.swift` does not declare
+the `package.json` version. The Go gate runs formatting, vet, race tests, a
+hermetic two-module dependency check for the Simulator helper,
+standard-library-only enforcement for the agent CLI, exact vendored-file
+SHA-256 verification, and `govulncheck` with module downloads disabled. The
+Swift gate runs strict formatting and package tests.
 
 Generated binaries live under `build/native/mac-{arm64,x64}` and are ignored by
 Git. `electron-builder` copies only the package target's architecture into

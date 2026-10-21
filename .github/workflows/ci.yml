@@ -63,9 +63,10 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
       # These scripts use only Node builtins, so the project's real Go gate
-      # (gofmt, vet, race tests, govulncheck, module allowlist) and the SimSlim
-      # provenance check run with no install and no secrets. Fork contributors
-      # get the same coverage as maintainers.
+      # (gofmt, vet, race tests, govulncheck, module allowlist), the check that
+      # the Swift host's generated HelperVersion.swift matches package.json, and
+      # the SimSlim provenance check run with no install and no secrets. Fork
+      # contributors get the same coverage as maintainers.
       - name: Go helper checks
         working-directory: apps/desktop
         run: node scripts/check-native-helpers.mjs --go

@@ -1,12 +1,44 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import type { VerifiedNativeHelper } from './native-helper-trust';
+import {
+	NativeHelperTrustError,
+	type VerifiedNativeHelper,
+} from './native-helper-trust';
 import {
 	NativeHostClient,
 	NativeHostResponseError,
 } from './native-host-client';
+
+// In production the manifest's appVersion is package.json's version and the
+// host reports the constant generated into HelperVersion.swift. Reading both
+// sources, instead of one literal on each side, keeps these fixtures from
+// hiding drift between them.
+const desktopDirectory = fileURLToPath(new URL('../../', import.meta.url));
+const appVersion = (
+	JSON.parse(
+		readFileSync(path.join(desktopDirectory, 'package.json'), 'utf8')
+	) as { version: string }
+).version;
+const hostVersion = declaredHostVersion();
+
+function declaredHostVersion(): string {
+	const source = readFileSync(
+		path.join(
+			desktopDirectory,
+			'native/rndevtools-native-host/Sources/RNDevtoolsNativeHost/HelperVersion.swift'
+		),
+		'utf8'
+	);
+	const version = /static let helperVersion = "([^"]+)"/.exec(source)?.[1];
+	if (!version) {
+		throw new Error('HelperVersion.swift does not declare helperVersion.');
+	}
+	return version;
+}
 
 const verified: VerifiedNativeHelper = {
 	executablePath: '/signed/rndevtools-native-host',
@@ -15,7 +47,7 @@ const verified: VerifiedNativeHelper = {
 		schemaVersion: 1,
 		platform: 'darwin',
 		architecture: 'arm64',
-		appVersion: '0.1.0',
+		appVersion,
 		buildCommit: 'a'.repeat(40),
 		protocolVersion: 2,
 		compatibilityMatrixVersion: '2026-09-03-v2',
@@ -96,7 +128,7 @@ describe('native host client', () => {
 		});
 		const client = new NativeHostClient({
 			resourceDirectory: '/signed',
-			appVersion: '0.1.0',
+			appVersion,
 			runner,
 			verifier: vi.fn(async () => verified),
 		});
@@ -129,7 +161,7 @@ describe('native host client', () => {
 		});
 		const client = new NativeHostClient({
 			resourceDirectory: '/signed',
-			appVersion: '0.1.0',
+			appVersion,
 			runner,
 			verifier: vi.fn(async () => verified),
 		});
@@ -152,73 +184,24 @@ describe('native host client', () => {
 		});
 	});
 
+	it('expects the bundled native host to report the desktop package version', () => {
+		expect(
+			hostVersion,
+			'HelperVersion.swift is stale: run `pnpm --filter @rndevtools/desktop native:sync-version`'
+		).toBe(appVersion);
+	});
+
 	it('uses bounded one-request processes and returns read-only native capabilities', async () => {
-		const operations: string[] = [];
-		const runner = vi.fn(async (_executable, args, options) => {
-			expect(args).toEqual([]);
-			const request = JSON.parse(options.stdin ?? '') as {
-				requestId: string;
-				operation: string;
-				protocolVersion: number;
-			};
-			operations.push(`${request.protocolVersion}:${request.operation}`);
-			const result =
-				request.operation === 'handshake'
-					? {
-							helperVersion: '0.1.0',
-							protocolVersion: request.protocolVersion,
-							capabilities: {
-								operations:
-									request.protocolVersion === 3
-										? [
-												'handshake',
-												'permission_status',
-												'capability_status',
-												'compose_image',
-											]
-										: ['handshake', 'permission_status', 'capability_status'],
-								permissionInspection: true,
-								permissionPrompting: false,
-								simulatorMutation: false,
-								runtimeDownloads: false,
-								capabilityInspection: true,
-								liveCaptureSessions: false,
-								...(request.protocolVersion === 3
-									? { imageComposition: true }
-									: {}),
-							},
-						}
-					: request.operation === 'permission_status'
-						? {
-								statuses: [
-									{ id: 'accessibility', value: 'granted', canPrompt: false },
-									{
-										id: 'screen_recording',
-										value: 'not_granted',
-										canPrompt: false,
-									},
-								],
-							}
-						: capabilityStatusFixture;
-			return {
-				stdout: JSON.stringify({
-					protocolVersion: request.protocolVersion,
-					requestId: request.requestId,
-					ok: true,
-					result,
-				}),
-				stderr: '',
-				exitCode: 0,
-			};
-		});
+		const { operations, runner } = inspectionHost();
 		const client = new NativeHostClient({
 			resourceDirectory: '/signed',
-			appVersion: '0.1.0',
+			appVersion,
 			runner,
 			verifier: vi.fn(async () => verified),
 		});
 		await expect(client.inspectPermissions()).resolves.toMatchObject({
 			status: 'available',
+			helperVersion: appVersion,
 			permissionInspection: true,
 			permissionPrompting: false,
 			capabilityInspection: true,
@@ -246,6 +229,36 @@ describe('native host client', () => {
 			])
 		);
 	});
+
+	it.each([2, 3])(
+		'marks the native host untrusted when its protocol v%i handshake reports another version',
+		async (staleProtocol) => {
+			// A host built with a version other than package.json's reads as
+			// untrusted, which turns off native permission state and image
+			// composition.
+			const { operations, runner } = inspectionHost((protocolVersion) =>
+				protocolVersion === staleProtocol ? `${appVersion}-stale` : hostVersion
+			);
+			const client = new NativeHostClient({
+				resourceDirectory: '/signed',
+				appVersion,
+				runner,
+				verifier: vi.fn(async () => verified),
+			});
+			const failure = await client.inspectPermissions().then(
+				() => undefined,
+				(error: unknown) => error
+			);
+			expect(failure).toBeInstanceOf(NativeHelperTrustError);
+			expect(failure).toMatchObject({
+				kind: 'untrusted',
+				message: 'Native host handshake does not match its verified manifest.',
+			});
+			expect(new Set(operations)).toEqual(
+				new Set(['2:handshake', '3:handshake'])
+			);
+		}
+	);
 
 	it('stages bounded inputs and commits a protocol-v3 composition without path disclosure', async () => {
 		const temporaryDirectory = await mkdtemp(
@@ -309,7 +322,7 @@ describe('native host client', () => {
 			});
 			const client = new NativeHostClient({
 				resourceDirectory: '/signed',
-				appVersion: '0.1.0',
+				appVersion,
 				compositionWorkspaceDirectory: workspaceDirectory,
 				runner,
 				verifier: vi.fn(async () => verified),
@@ -342,6 +355,75 @@ describe('native host client', () => {
 		}
 	});
 });
+
+/**
+ * A fake native host for the inspection flow: the protocol v2 and v3
+ * handshakes, permission status and capability status. Each handshake reports
+ * `helperVersion(protocolVersion)`, by default the real generated host version.
+ */
+function inspectionHost(
+	helperVersion: (protocolVersion: number) => string = () => hostVersion
+) {
+	const operations: string[] = [];
+	const runner = vi.fn(async (_executable, args, options) => {
+		expect(args).toEqual([]);
+		const request = JSON.parse(options.stdin ?? '') as {
+			requestId: string;
+			operation: string;
+			protocolVersion: number;
+		};
+		operations.push(`${request.protocolVersion}:${request.operation}`);
+		const result =
+			request.operation === 'handshake'
+				? {
+						helperVersion: helperVersion(request.protocolVersion),
+						protocolVersion: request.protocolVersion,
+						capabilities: {
+							operations:
+								request.protocolVersion === 3
+									? [
+											'handshake',
+											'permission_status',
+											'capability_status',
+											'compose_image',
+										]
+									: ['handshake', 'permission_status', 'capability_status'],
+							permissionInspection: true,
+							permissionPrompting: false,
+							simulatorMutation: false,
+							runtimeDownloads: false,
+							capabilityInspection: true,
+							liveCaptureSessions: false,
+							...(request.protocolVersion === 3
+								? { imageComposition: true }
+								: {}),
+						},
+					}
+				: request.operation === 'permission_status'
+					? {
+							statuses: [
+								{ id: 'accessibility', value: 'granted', canPrompt: false },
+								{
+									id: 'screen_recording',
+									value: 'not_granted',
+									canPrompt: false,
+								},
+							],
+						}
+					: capabilityStatusFixture;
+		return {
+			stdout: JSON.stringify({
+				protocolVersion: request.protocolVersion,
+				requestId: request.requestId,
+				ok: true,
+				result,
+			}),
+			stderr: '',
+			exitCode: 0,
+		};
+	});
+	return { operations, runner };
+}
 
 const capabilityStatusFixture = {
 	checkedAtMilliseconds: 1_787_987_200_000,

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nativeHostVersionDrift } from './native-host-version.mjs';
 import { verifyVendoredSimSlim } from './verify-vendored-simslim.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,12 @@ const swiftPackage = resolve(
 	'rndevtools-native-host'
 );
 const selection = parseSelection(process.argv.slice(2));
+
+// Electron trusts the Swift host only when its handshake reports the manifest's
+// appVersion, which comes from package.json. This needs no toolchain, so it
+// runs for every selection, including the `--go` run in CI's secret-free job.
+const versionDrift = nativeHostVersionDrift(desktopDirectory);
+if (versionDrift) fail(versionDrift);
 
 if (selection.go) {
 	verifyVendoredSimSlim(goPackages[0].directory);
