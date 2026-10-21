@@ -140,5 +140,6 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useAppearance(): AppearanceSnapshot {
-	return useSyncExternalStore(subscribe, () => snapshot);
+	const read = () => snapshot;
+	return useSyncExternalStore(subscribe, read, read);
 }

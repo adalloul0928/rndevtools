@@ -16,6 +16,7 @@
 @import '@heroui/styles/components/tooltip.css' layer(components);
 @import '@heroui/styles/components/popover.css' layer(components);
 @import '@heroui/styles/components/alert-dialog.css' layer(components);
+@import '@heroui/styles/components/modal.css' layer(components);
 @import '@heroui/styles/themes/default';
 @import '@heroui/styles/utilities';
 @import '@heroui/styles/variants';
@@ -4763,6 +4764,644 @@ button:disabled {
 		/* biome-ignore lint/complexity/noImportantStyles: reduced motion must prevent repeating component animations */
 		animation-iteration-count: 1 !important;
 	}
+}
+
+/*
+ * First-run setup: one idea per step, with the product as its illustration.
+ * The stage card bleeds off the window's right edge on purpose.
+ */
+.setup-backdrop {
+	background: light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 60%));
+	backdrop-filter: blur(6px);
+}
+
+.setup-dialog {
+	width: min(920px, calc(100vw - 48px));
+	max-width: none;
+	min-height: min(560px, calc(100vh - 48px));
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+	border-radius: 12px;
+	background: var(--background);
+	box-shadow:
+		0 30px 80px light-dark(rgb(0 0 0 / 14%), rgb(0 0 0 / 60%)),
+		0 2px 6px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 40%));
+}
+
+.setup-window {
+	position: relative;
+	display: flex;
+	min-height: inherit;
+	flex: 1;
+	flex-direction: column;
+}
+
+.setup-close {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	z-index: 1;
+}
+
+.setup-body {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+}
+
+.setup-copy {
+	display: flex;
+	flex: 0 0 340px;
+	flex-direction: column;
+	gap: 18px;
+	padding: 44px 36px 24px;
+}
+
+.setup-tile {
+	display: inline-flex;
+	width: 56px;
+	height: 56px;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-radius: 14px;
+	background: var(--chrome-raised);
+	box-shadow: 0 6px 16px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 50%));
+	color: var(--brand-text);
+}
+
+.setup-app-icon {
+	width: 64px;
+	height: 64px;
+}
+
+.setup-text h1 {
+	margin: 0;
+	font-size: 24px;
+	font-weight: 600;
+	line-height: 1.2;
+	letter-spacing: -0.015em;
+}
+
+.setup-text p {
+	max-width: 36ch;
+	margin: 8px 0 0;
+	font-size: 14px;
+	line-height: 1.55;
+	color: var(--muted);
+}
+
+.setup-note {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-3);
+}
+
+.setup-aside-actions {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.setup-stage {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	padding: 40px 0 0 32px;
+	border-left: 1px solid var(--border);
+	background: var(--bg-sunken);
+}
+
+.setup-stage-card {
+	height: 100%;
+	margin-right: -48px;
+	padding-right: 48px;
+	overflow: auto;
+	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-right: 0;
+	border-bottom: 0;
+	border-radius: 10px 0 0;
+	background: var(--background);
+	box-shadow: 0 12px 32px light-dark(rgb(0 0 0 / 8%), rgb(0 0 0 / 50%));
+}
+
+.setup-stage-head {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	gap: 8px;
+	padding: 0 16px;
+	border-bottom: 1px solid var(--border);
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.setup-window .setup-stage-head strong {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.setup-stage-foot {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 0;
+	padding: 12px 16px;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.setup-window .setup-stage-foot code {
+	font-family: var(--font-mono);
+	color: var(--foreground);
+}
+
+.setup-preview-row,
+.setup-check,
+.setup-worktree,
+.setup-extras > li {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 56px;
+	padding: 6px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.setup-preview-row:nth-child(2) {
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.setup-checks,
+.setup-extras,
+.setup-steps,
+.setup-ready-tasks,
+.setup-repository ul,
+.setup-outcome {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.setup-row-copy {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1.35;
+}
+
+.setup-window .setup-row-copy strong {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13.5px;
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.setup-window .setup-row-copy > span {
+	overflow-wrap: anywhere;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.setup-check-icon {
+	width: 18px;
+	height: 18px;
+	flex: 0 0 auto;
+}
+
+.setup-check-state,
+.setup-extra-state,
+.setup-worktree-state {
+	flex: 0 0 auto;
+	font-size: var(--font-size-caption);
+	font-weight: 500;
+	color: var(--muted);
+}
+
+.setup-worktree-state {
+	font-family: var(--font-mono);
+	font-weight: 400;
+}
+
+.setup-check.is-ready :is(.setup-check-icon, .setup-check-state) {
+	color: var(--brand-text);
+}
+
+.setup-check.is-check {
+	background: color-mix(in oklab, var(--warning) 6%, transparent);
+}
+
+.setup-check.is-check :is(.setup-check-icon, .setup-check-state) {
+	color: var(--warning-text);
+}
+
+.setup-check.is-checking :is(.setup-check-icon, .setup-check-state) {
+	color: var(--info-text);
+}
+
+.setup-check.is-optional :is(.setup-check-icon, .setup-check-state) {
+	color: var(--text-3);
+}
+
+.setup-empty {
+	display: grid;
+	place-items: center;
+	gap: 6px;
+	padding: 56px 24px;
+	text-align: center;
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.setup-window .setup-empty strong {
+	font-size: 14px;
+	color: var(--foreground);
+}
+
+.setup-steps {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 16px;
+}
+
+.setup-steps > li {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.setup-window .setup-steps strong {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.setup-waiting {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	color: var(--info);
+}
+
+.setup-extras > li {
+	min-height: 68px;
+}
+
+.setup-outcome {
+	margin-top: 6px;
+	font-family: var(--font-mono);
+	font-size: var(--font-size-caption);
+}
+
+.setup-ready-head {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 14px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.setup-ready-tasks {
+	padding: 6px 8px 8px;
+}
+
+.setup-ready-tasks > li {
+	display: flex;
+	min-height: 42px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 4px 8px;
+	font-size: 13.5px;
+	font-weight: 500;
+}
+
+.setup-ready-tasks > li.is-done {
+	color: var(--muted);
+}
+
+.setup-footer {
+	display: flex;
+	min-height: 52px;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px 8px 16px;
+	border-top: 1px solid var(--border);
+	background: var(--chrome);
+}
+
+.setup-footer-icon {
+	width: 18px;
+	height: 18px;
+}
+
+.setup-footer-label {
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.setup-dots {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-left: 6px;
+}
+
+.setup-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 3px;
+	background: color-mix(in oklab, var(--foreground) 18%, transparent);
+	transition: width 160ms ease;
+}
+
+.setup-dot.is-done {
+	background: var(--muted);
+}
+
+.setup-dot.is-current {
+	width: 18px;
+	background: var(--brand);
+}
+
+.setup-footer-spacer {
+	flex: 1;
+}
+
+.setup-key {
+	display: inline-flex;
+	min-width: 20px;
+	height: 20px;
+	align-items: center;
+	justify-content: center;
+	padding: 0 5px;
+	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-radius: 4px;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.setup-key.is-primary {
+	border-color: color-mix(in oklab, var(--accent-foreground) 30%, transparent);
+	color: inherit;
+}
+
+/*
+ * Get started: the checklist that carries on after setup, read from the
+ * runtimes. Inline it greets an empty Simulators tab; in the sidebar it is a
+ * progress card that opens the same list.
+ */
+.get-started-inline {
+	display: flex;
+	height: 100%;
+	justify-content: center;
+	padding: 40px 24px;
+	background: var(--bg-sunken);
+}
+
+.get-started {
+	width: 100%;
+	max-width: 720px;
+	align-self: flex-start;
+	overflow: hidden;
+	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+	border-radius: 12px;
+	background: var(--background);
+}
+
+.get-started.is-inline {
+	box-shadow: 0 18px 48px light-dark(rgb(0 0 0 / 8%), rgb(0 0 0 / 60%));
+}
+
+.get-started-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 24px;
+	padding: 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.get-started-header > div:first-child {
+	min-width: 240px;
+	flex: 1;
+}
+
+.get-started-header h2 {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+}
+
+.get-started-header p {
+	margin: 2px 0 0;
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.get-started-progress {
+	display: flex;
+	flex: 0 1 220px;
+	flex-direction: column;
+	gap: 7px;
+	font-size: 12.5px;
+	color: var(--muted);
+}
+
+.get-started-count {
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.get-started-bar {
+	display: block;
+	height: 4px;
+	overflow: hidden;
+	border-radius: 2px;
+	background: var(--border);
+}
+
+.get-started-bar-fill {
+	display: block;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--brand);
+}
+
+.get-started-group {
+	padding: 6px 8px 8px;
+}
+
+.get-started-group h3 {
+	display: flex;
+	gap: 8px;
+	margin: 0;
+	padding: 8px 8px 6px;
+	font-size: var(--font-size-caption);
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.get-started-group-count {
+	font-weight: 400;
+	color: var(--muted);
+}
+
+.get-started-group ul {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.get-started-task {
+	display: flex;
+	width: 100%;
+	min-height: 48px;
+	align-items: center;
+	gap: 12px;
+	padding: 6px 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: inherit;
+	text-align: left;
+}
+
+.get-started-task:hover {
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.get-started-task-icon {
+	display: inline-flex;
+	width: 26px;
+	height: 26px;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	border-radius: 7px;
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
+	color: var(--muted);
+}
+
+.get-started-task.is-done .get-started-task-icon {
+	background: var(--brand-soft);
+	color: var(--brand-text);
+}
+
+.get-started-task-copy {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	line-height: 1.3;
+}
+
+.get-started-task-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13.5px;
+	font-weight: 500;
+	color: var(--foreground);
+}
+
+.get-started-task.is-done .get-started-task-title {
+	color: var(--muted);
+}
+
+.get-started-task-detail {
+	overflow: hidden;
+	font-size: 12.5px;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--muted);
+}
+
+.get-started-task-mark {
+	display: inline-flex;
+	width: 18px;
+	height: 18px;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	border: 1.5px solid color-mix(in oklab, var(--foreground) 18%, transparent);
+	border-radius: 50%;
+}
+
+.get-started-task.is-done .get-started-task-mark,
+.setup-ready-tasks > li.is-done .get-started-task-mark {
+	border-color: transparent;
+	background: var(--brand);
+	color: light-dark(#fff, #000);
+}
+
+.get-started-footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding: 10px 12px;
+	border-top: 1px solid var(--border);
+	background: var(--chrome);
+}
+
+.get-started-popover {
+	width: 460px;
+	max-width: calc(100vw - 32px);
+	padding: 0;
+	overflow: hidden;
+}
+
+.get-started-popover .get-started {
+	border: 0;
+	border-radius: 0;
+}
+
+.get-started-card.button {
+	display: flex;
+	width: 100%;
+	height: auto;
+	min-height: 0;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+	padding: 10px 11px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chrome-raised);
+	color: var(--foreground);
+	text-align: left;
+	white-space: normal;
+}
+
+.get-started-card-title {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.get-started-card-count,
+.get-started-card-next {
+	font-size: var(--font-size-caption);
+	font-weight: 400;
+	color: var(--muted);
 }
 
 /* Set while the theme changes, so no control fades between themes. */

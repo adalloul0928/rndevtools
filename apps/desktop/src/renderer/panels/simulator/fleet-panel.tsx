@@ -27,6 +27,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { ControllableScreen } from '@/components/controllable-screen';
 import { DeviceScreen } from '@/components/device-screen';
+import { GetStartedChecklist, useGetStarted } from '@/components/get-started';
 import { AgentBadge, AgentGlyph } from '@/components/lane-ui';
 import {
 	BridgeUnavailableNotice,
@@ -49,6 +50,7 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
+import { useOnboarding } from '@/lib/onboarding';
 import {
 	defaultDiskCleanupCategoryIds,
 	diskInventorySelectionRevision,
@@ -571,11 +573,7 @@ export function FleetPanel() {
 					(isBridgeAvailable && state.capability.status === 'checking') ? (
 						<SimulatorDiscoveryPending />
 					) : (
-						<NoSimulatorTarget
-							onOpenSettings={() => {
-								window.location.hash = 'simulator/settings';
-							}}
-						/>
+						<FleetEmptyState />
 					)}
 				</div>
 			) : (
@@ -742,6 +740,29 @@ export function FleetPanel() {
 				</div>
 			) : null}
 		</section>
+	);
+}
+
+/**
+ * Nothing to list yet: Get started while it has tasks left, otherwise how to
+ * add a target. Only this branch reads the checklist's runtimes.
+ */
+function FleetEmptyState() {
+	const { checklistHidden } = useOnboarding();
+	const { progress } = useGetStarted();
+	if (!checklistHidden && !progress.complete) {
+		return (
+			<div className="get-started-inline panel-scroll">
+				<GetStartedChecklist inline />
+			</div>
+		);
+	}
+	return (
+		<NoSimulatorTarget
+			onOpenSettings={() => {
+				window.location.hash = 'simulator/settings';
+			}}
+		/>
 	);
 }
 
