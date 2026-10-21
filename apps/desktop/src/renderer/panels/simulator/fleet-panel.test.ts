@@ -200,3 +200,52 @@ describe('Simulator Fleet backends', () => {
 		expect(html).toContain('With backend (1)');
 	});
 });
+
+describe('Simulator Fleet first discovery', () => {
+	function renderWithoutTargets(
+		status: 'checking' | 'available',
+		isLoading: boolean
+	) {
+		runtimes.simulator = {
+			isBridgeAvailable: true,
+			isLoading,
+			runtimeError: null,
+			refresh: () => undefined,
+			runAction: () => undefined,
+			cancelJob: () => undefined,
+			selectedDevice: undefined,
+			setSelectedDeviceUdid: () => undefined,
+			state: {
+				capability: { status },
+				devices: [],
+				runtimes: [],
+				metrics: { byDevice: {}, status: 'checking' },
+				jobs: [],
+				deviceTypes: [],
+				appsByDevice: {},
+				diskByDevice: {},
+			},
+		};
+		runtimes.lanes = {
+			state: { lanes: [] },
+			pendingOperation: null,
+			runOperation: () => undefined,
+			focusLane: () => undefined,
+		};
+		runtimes.supabase = { state: createSupabaseDemoState() };
+		return renderToStaticMarkup(createElement(FleetPanel));
+	}
+
+	it('reads as loading, not empty, until the first scan finishes', () => {
+		for (const html of [
+			renderWithoutTargets('checking', false),
+			renderWithoutTargets('available', true),
+		]) {
+			expect(html).toContain('Looking for Simulators');
+			expect(html).not.toContain('No Simulator target discovered');
+		}
+		expect(renderWithoutTargets('available', false)).toContain(
+			'No Simulator target discovered'
+		);
+	});
+});

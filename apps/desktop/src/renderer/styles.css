@@ -62,6 +62,9 @@
 		--foreground: light-dark(#171717, #ededed);
 		/* A hair off the base: panel headers, stat strips and sunken lists. */
 		--bg-sunken: light-dark(#fafafa, #050505);
+		/* Titlebar and sidebar, and the raised cards and current items on them. */
+		--chrome: light-dark(#fafafa, #0a0a0a);
+		--chrome-raised: light-dark(#ffffff, #111111);
 		--surface: light-dark(#fff, #0a0a0a);
 		--surface-foreground: var(--foreground);
 		--surface-secondary: light-dark(#f5f5f5, #111);
@@ -232,7 +235,7 @@ button:disabled {
 	-webkit-app-region: drag;
 	height: var(--titlebar-height);
 	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
-	background: var(--surface);
+	background: var(--chrome);
 	user-select: none;
 }
 
@@ -334,72 +337,6 @@ button:disabled {
 	height: 14px;
 }
 
-.titlebar-live {
-	display: flex;
-	flex: 0 0 auto;
-	align-items: center;
-	gap: 9px;
-	height: 26px;
-	padding: 0 10px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 6px;
-	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
-}
-
-.live-bars {
-	display: flex;
-	align-items: flex-end;
-	gap: 2px;
-	height: 14px;
-}
-
-.live-bars span {
-	display: block;
-	width: 2px;
-	border-radius: 1px;
-	background: color-mix(in oklab, var(--foreground) 9%, transparent);
-}
-
-.live-bars span.is-live {
-	background: var(--brand);
-}
-
-.live-label {
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-control);
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--text-3);
-}
-
-.titlebar-metrics {
-	display: flex;
-	min-width: 0;
-	align-items: center;
-}
-
-.titlebar-metric {
-	display: grid;
-	grid-template-columns: auto auto;
-	align-items: center;
-	gap: 5px;
-	height: 26px;
-	padding: 0 7px;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-control);
-	white-space: nowrap;
-}
-
-.titlebar-metric span {
-	color: var(--text-4);
-	text-transform: uppercase;
-}
-
-.titlebar-metric strong {
-	color: var(--muted);
-	font-weight: 500;
-}
-
 .titlebar-controls {
 	display: flex;
 	flex: 0 1 auto;
@@ -408,29 +345,45 @@ button:disabled {
 	min-width: 0;
 }
 
-.connection-button {
+/* Runtime readouts: a value in mono and a quiet word, such as `3 booted`. */
+.titlebar-readouts {
 	display: flex;
-	flex: 0 0 auto;
+	min-width: 0;
 	align-items: center;
-	gap: 6px;
-	height: 26px;
-	padding: 0 9px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
-	border-radius: 6px;
-	background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
-	color: var(--text-3);
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-control);
+	gap: 14px;
+	overflow: hidden;
+	font-size: var(--font-size-caption);
 	white-space: nowrap;
-}
-
-.connection-button:hover {
-	border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
 	color: var(--muted);
 }
 
-.connection-button[aria-current='page'] {
-	border-color: var(--brand-border);
+.titlebar-readout {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+}
+
+.titlebar-readout strong {
+	font-family: 'Geist Mono Variable', monospace;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	color: var(--foreground);
+}
+
+.titlebar-readout.is-button {
+	height: 26px;
+	margin: 0 -6px;
+	padding: 0 6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+}
+
+.titlebar-readout.is-button:hover,
+.titlebar-readout.is-button[aria-current='page'] {
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
 	color: var(--foreground);
 }
 
@@ -455,25 +408,24 @@ button:disabled {
 }
 
 .device-select {
-	width: clamp(150px, 18vw, 210px);
+	width: clamp(180px, 17vw, 240px);
 	min-width: 0;
 	flex: 0 1 auto;
 }
 
 .device-select [data-slot='native-select-trigger'] {
-	height: 26px;
-	min-height: 26px;
-	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+	height: 30px;
+	min-height: 30px;
+	border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
 	border-radius: 6px;
-	background: var(--field-background);
+	background: var(--background);
 }
 
 .device-select select {
-	height: 26px;
-	padding: 0 26px 0 9px;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-control);
-	color: var(--muted);
+	height: 30px;
+	padding: 0 28px 0 10px;
+	font-size: 13px;
+	color: var(--foreground);
 }
 
 .desktop-sidebar {
@@ -487,7 +439,7 @@ button:disabled {
 	overflow: hidden;
 	border: 0;
 	border-right: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
-	background: var(--surface);
+	background: var(--chrome);
 }
 
 .device-summary {
@@ -495,20 +447,27 @@ button:disabled {
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 10px;
-	height: 62px;
-	padding: 10px 12px;
-	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
+	margin: 10px 8px 2px;
+	padding: 9px 10px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chrome-raised);
 }
 
 .device-icon {
 	display: grid;
-	width: 30px;
-	height: 30px;
+	width: 28px;
+	height: 28px;
+	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 6px;
-	background: color-mix(in oklab, var(--foreground) 4%, transparent);
-	color: var(--text-4);
+	border-radius: 8px;
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
+	color: var(--muted);
+}
+
+.device-icon.is-live {
+	background: var(--brand-soft);
+	color: var(--brand-text);
 }
 
 .device-name,
@@ -520,17 +479,15 @@ button:disabled {
 }
 
 .device-name {
-	font-size: var(--font-size-control);
-	font-weight: 550;
-	color: var(--text-soft);
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--foreground);
 }
 
 .device-meta {
-	margin-top: 3px;
-	font-family: 'Geist Mono Variable', monospace;
+	margin-top: 1px;
 	font-size: var(--font-size-caption);
-	text-transform: capitalize;
-	color: var(--text-3);
+	color: var(--muted);
 }
 
 .desktop-sidebar-content {
@@ -546,15 +503,14 @@ button:disabled {
 }
 
 .tool-group + .tool-group {
-	margin-top: 9px;
+	margin-top: 12px;
 }
 
 .tool-group-label {
-	height: 25px;
 	margin: 0;
-	padding: 7px 8px 5px;
+	padding: 4px 8px;
 	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-caption);
+	font-size: 11px;
 	font-weight: 500;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
@@ -563,64 +519,89 @@ button:disabled {
 
 .tool-nav-item {
 	width: 100%;
-	height: 36px;
-	min-height: 36px;
+	height: 32px;
+	min-height: 32px;
 	justify-content: flex-start;
 	gap: 9px;
 	padding: 0 8px;
 	border: 1px solid transparent;
-	border-radius: 5px;
-	color: var(--text-3);
+	border-radius: 6px;
+	color: var(--muted);
 	font-size: var(--font-size-control);
-	font-weight: 450;
+	font-weight: 400;
 }
 
 .tool-nav-item:hover {
-	background: color-mix(in oklab, var(--foreground) 3%, transparent);
-	color: var(--muted);
+	background: color-mix(in oklab, var(--foreground) 4%, transparent);
+	color: var(--foreground);
 }
 
 .tool-nav-item.is-current {
-	border-color: color-mix(in oklab, var(--foreground) 8%, transparent);
-	background: color-mix(in oklab, var(--foreground) 6%, transparent);
-	color: var(--text-1);
+	border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
+	background: var(--chrome-raised);
+	color: var(--foreground);
+	font-weight: 500;
 }
 
 .tool-nav-item.is-current svg {
-	color: var(--brand-text);
+	color: var(--foreground);
 }
 
 .tool-count {
-	min-width: 19px;
-	padding: 1px 4px;
-	border-radius: 4px;
-	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	text-align: center;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-3);
+}
+
+.tool-dot {
+	width: 6px;
+	height: 6px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--text-3);
+}
+
+.tool-dot.is-warning {
+	background: var(--warning);
+}
+
+.tool-dot.is-danger {
+	background: var(--danger);
+}
+
+.tool-tag {
+	padding: 0 6px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 500;
+	line-height: 16px;
 	color: var(--text-3);
 }
 
 .desktop-sidebar-footer {
+	display: flex;
 	flex: 0 0 auto;
+	flex-direction: column;
+	gap: 8px;
 	padding: 8px;
-	border-top: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
 }
 
 .broker-summary {
 	display: flex;
 	align-items: center;
-	gap: 9px;
+	gap: 10px;
 	width: 100%;
-	padding: 8px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 6px;
-	background: color-mix(in oklab, var(--foreground) 2%, transparent);
+	padding: 9px 11px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--chrome-raised);
 	color: var(--text-3);
 }
 
 .broker-summary:hover {
-	border-color: color-mix(in oklab, var(--foreground) 13%, transparent);
+	border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
 .broker-summary p,
@@ -633,34 +614,21 @@ button:disabled {
 }
 
 .broker-summary p {
-	font-size: var(--font-size-control);
-	text-transform: capitalize;
-	color: var(--muted);
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--foreground);
 }
 
 .broker-summary code {
-	margin-top: 2px;
+	margin-top: 1px;
 	font-size: var(--font-size-caption);
-	color: var(--text-3);
+	color: var(--muted);
 }
 
 .shortcut-hint {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 8px;
-	padding: 9px 3px 1px;
-	font-size: var(--font-size-control);
-	color: var(--text-4);
-}
-
-.shortcut-hint kbd {
-	padding: 2px 5px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	border-radius: 4px;
-	background: color-mix(in oklab, var(--foreground) 4%, transparent);
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: var(--font-size-control);
+	margin: 0;
+	padding: 0 4px;
+	font-size: var(--font-size-caption);
 	color: var(--text-3);
 }
 
@@ -728,31 +696,45 @@ button:disabled {
 
 .panel-header {
 	display: flex;
-	min-height: 72px;
+	min-height: 64px;
 	flex: 0 0 auto;
 	align-items: center;
 	justify-content: space-between;
 	gap: 24px;
-	padding: 16px 22px;
+	padding: 12px 20px;
 	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	background: var(--bg-sunken);
+	background: var(--background);
 }
 
 .panel-toolbar {
 	display: flex;
 	flex-wrap: wrap;
-	min-height: 45px;
+	min-height: 48px;
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 8px;
 	overflow: visible;
-	padding: 6px 12px;
+	padding: 8px 20px;
 	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	background: var(--bg-sunken);
+	background: var(--background);
 }
 
 .panel-toolbar > * {
 	flex-shrink: 0;
+}
+
+/*
+ * Every toolbar control shares the 32px control height. :where() keeps these
+ * defaults below the specific select rules further down.
+ */
+.panel-toolbar :where([data-slot='native-select-trigger']) {
+	height: 32px;
+	min-height: 32px;
+}
+
+.panel-toolbar :where([data-slot='native-select-trigger'] select) {
+	height: 100%;
+	min-height: 0;
 }
 
 .split-panel {
@@ -919,9 +901,9 @@ button:disabled {
 	min-width: 0;
 	margin: 0;
 	padding: 2px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	border-radius: 7px;
-	background: var(--bg-sunken);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--background);
 }
 
 .workspace-switcher button {
@@ -930,49 +912,39 @@ button:disabled {
 	gap: 6px;
 	padding: 0 8px;
 	border: 1px solid transparent;
-	border-radius: 5px;
-	color: var(--text-4);
+	border-radius: 6px;
+	color: var(--muted);
 	font-size: var(--font-size-control);
+	font-weight: 500;
 }
 
 .workspace-switcher button:hover {
-	color: var(--text-secondary);
+	color: var(--foreground);
 }
 
 .workspace-switcher button.is-current {
-	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
-	background: color-mix(in oklab, var(--foreground) 7%, transparent);
-	color: var(--text-1);
+	border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
+	background: var(--chrome-raised);
+	color: var(--foreground);
 }
 
 .workspace-switcher button.is-current svg {
-	color: var(--brand-text);
+	color: var(--foreground);
 }
 
 .workspace-switcher kbd,
 .tool-shortcut {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	font-weight: 450;
+	font-weight: 400;
 	color: var(--text-4);
-}
-
-.simulator-summary {
-	background: color-mix(in oklab, var(--brand) 2.5%, transparent);
-}
-
-.simulator-device-icon {
-	border-color: color-mix(in oklab, var(--brand) 16%, transparent);
-	background: color-mix(in oklab, var(--brand) 7%, transparent);
-	color: var(--brand-text);
 }
 
 .tool-nav-item .tool-shortcut {
 	display: none;
 }
 
-.tool-nav-item:hover .tool-shortcut,
-.tool-nav-item.is-current .tool-shortcut {
+.tool-nav-item:hover .tool-shortcut {
 	display: inline;
 }
 
@@ -1012,7 +984,7 @@ button:disabled {
 
 .simulator-onboarding-banner strong {
 	color: var(--warning-text);
-	font-weight: 550;
+	font-weight: 600;
 }
 
 .simulator-onboarding-banner > span:nth-child(3) {
@@ -1073,16 +1045,16 @@ button:disabled {
 
 .sim-target-select [data-slot='native-select-trigger'],
 .sim-filter-select [data-slot='native-select-trigger'] {
-	height: 30px;
-	min-height: 30px;
+	height: 32px;
+	min-height: 32px;
 	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 }
 
 .sim-target-select select,
 .sim-filter-select select {
-	height: 30px;
+	height: 32px;
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
@@ -1183,7 +1155,7 @@ button:disabled {
 	height: 22px;
 	place-items: center;
 	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 3%, transparent);
 	color: var(--text-4);
 }
@@ -1222,7 +1194,7 @@ button:disabled {
 	overflow: hidden;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 22px;
-	font-weight: 540;
+	font-weight: 500;
 	letter-spacing: -0.04em;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1291,16 +1263,16 @@ button:disabled {
 
 .sim-slimming-profile-select [data-slot='native-select-trigger'],
 .sim-create-select [data-slot='native-select-trigger'] {
-	height: 30px;
-	min-height: 30px;
+	height: 32px;
+	min-height: 32px;
 	border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 }
 
 .sim-slimming-profile-select select,
 .sim-create-select select {
-	height: 30px;
+	height: 32px;
 	padding: 0 28px 0 9px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
@@ -1329,7 +1301,7 @@ button:disabled {
 	margin-top: 14px;
 	padding: 13px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	border-radius: 7px;
+	border-radius: 8px;
 	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
@@ -1340,7 +1312,7 @@ button:disabled {
 
 .sim-slimming-action-copy strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-soft);
 }
 
@@ -1376,7 +1348,7 @@ button:disabled {
 
 .sim-unknown-ack strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 }
 
 .sim-unknown-ack small {
@@ -1481,7 +1453,7 @@ button:disabled {
 
 .sim-disable-choice strong {
 	font-size: var(--font-size-control);
-	font-weight: 560;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -1509,7 +1481,7 @@ button:disabled {
 	gap: 8px;
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 	color: var(--brand-text);
 }
@@ -1522,7 +1494,7 @@ button:disabled {
 
 .sim-profile-categories strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -1549,7 +1521,7 @@ button:disabled {
 .sim-device-metrics > div {
 	padding: 9px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
@@ -1573,7 +1545,7 @@ button:disabled {
 	margin-top: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 12px;
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-soft);
 }
 
@@ -1609,7 +1581,7 @@ button:disabled {
 
 .sim-target-status-table summary strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -1740,7 +1712,7 @@ button:disabled {
 	overflow: auto;
 	margin-top: 8px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 }
 
 .sim-process-list > div {
@@ -1769,7 +1741,7 @@ button:disabled {
 }
 
 .sim-process-list strong {
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--muted);
 }
 
@@ -1788,7 +1760,7 @@ button:disabled {
 .sim-disk-summary > div {
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
@@ -1809,7 +1781,7 @@ button:disabled {
 	margin-top: 4px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-secondary);
 }
 
@@ -1829,7 +1801,7 @@ button:disabled {
 	gap: 8px;
 	padding: 7px 8px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 	color: var(--text-3);
 }
@@ -1867,7 +1839,7 @@ button:disabled {
 .sim-disk-storage strong,
 .sim-disk-categories strong {
 	font-size: var(--font-size-caption);
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--muted);
 }
 
@@ -1905,7 +1877,7 @@ button:disabled {
 	margin-top: 8px;
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--brand) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--brand) 3%, transparent);
 }
 
@@ -1982,7 +1954,7 @@ button:disabled {
 .camera-drop-card h2 {
 	margin: 14px 0 0;
 	font-size: 13px;
-	font-weight: 560;
+	font-weight: 600;
 	color: var(--text-soft);
 }
 
@@ -2005,7 +1977,7 @@ button:disabled {
 	border-radius: 6px;
 	background: var(--surface-tertiary);
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-soft);
 }
 
@@ -2088,7 +2060,7 @@ button:disabled {
 .camera-fixture-aside h2 {
 	margin: 3px 0 0;
 	font-size: 13px;
-	font-weight: 560;
+	font-weight: 600;
 	color: var(--text-soft);
 }
 
@@ -2228,7 +2200,7 @@ button:disabled {
 
 .sim-list-copy strong {
 	font-size: var(--font-size-control);
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--text-soft);
 }
 
@@ -2291,7 +2263,7 @@ button:disabled {
 
 .sim-list-empty strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--muted);
 }
 
@@ -2305,7 +2277,7 @@ button:disabled {
 .sim-toolbar-field [data-slot='input'],
 .sim-field [data-slot='input'] {
 	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 	box-shadow: none;
 	color: var(--text-soft);
@@ -2378,7 +2350,7 @@ button:disabled {
 .sim-section-heading h3 {
 	margin: 0;
 	font-size: var(--font-size-control);
-	font-weight: 560;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -2428,7 +2400,7 @@ button:disabled {
 	border-radius: 6px;
 	background: #e8e8e8;
 	font-size: var(--font-size-control);
-	font-weight: 650;
+	font-weight: 600;
 	color: #111;
 }
 
@@ -2454,7 +2426,7 @@ button:disabled {
 
 .sim-installed-apps strong {
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-secondary);
 }
 
@@ -2478,7 +2450,7 @@ button:disabled {
 	margin-top: 18px;
 	padding: 12px;
 	border: 1px solid color-mix(in oklab, var(--danger) 13%, transparent);
-	border-radius: 7px;
+	border-radius: 8px;
 	background: color-mix(in oklab, var(--danger) 4%, transparent);
 }
 
@@ -2530,7 +2502,7 @@ button:disabled {
 
 .sim-switch-copy strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -2608,7 +2580,7 @@ button:disabled {
 
 .sim-run-footer strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -2746,7 +2718,7 @@ button:disabled {
 	height: 24px;
 	place-items: center;
 	border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	color: var(--text-3);
 }
 
@@ -2801,7 +2773,7 @@ button:disabled {
 	max-height: 100%;
 	overflow: hidden;
 	place-items: stretch;
-	border-radius: 7px;
+	border-radius: 8px;
 }
 
 .sim-composition-content {
@@ -2861,7 +2833,7 @@ button:disabled {
 	padding: 2.5% 3%;
 	background: rgb(0 0 0 / 62%);
 	font-size: clamp(7px, 1.6vw, 15px);
-	font-weight: 560;
+	font-weight: 600;
 	line-height: 1.3;
 	color: #fff;
 }
@@ -2951,7 +2923,7 @@ button:disabled {
 
 .sim-preview-placeholder strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--muted);
 }
 
@@ -2994,7 +2966,7 @@ button:disabled {
 
 .sim-empty-preview strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-4);
 }
 
@@ -3014,7 +2986,7 @@ button:disabled {
 
 .sim-preview-meta strong {
 	font-size: var(--font-size-control);
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--muted);
 }
 
@@ -3090,7 +3062,7 @@ button:disabled {
 .sim-retention-fields [data-slot='input'] {
 	height: 30px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
@@ -3127,7 +3099,7 @@ button:disabled {
 	align-items: center;
 	gap: 6px;
 	font-size: var(--font-size-caption);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-3);
 }
 
@@ -3234,7 +3206,7 @@ button:disabled {
 
 .sim-capability-copy strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-secondary);
 }
 
@@ -3324,7 +3296,7 @@ button:disabled {
 
 .sim-security-boundary strong {
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 }
 
 .sim-security-boundary p {
@@ -3426,7 +3398,7 @@ button:disabled {
 .recipe-field select {
 	width: 100%;
 	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 	color: var(--text-soft);
 	outline: none;
@@ -3437,7 +3409,7 @@ button:disabled {
 	height: 32px;
 	padding: 0 9px;
 	font-size: 13px;
-	font-weight: 560;
+	font-weight: 600;
 	letter-spacing: -0.02em;
 }
 
@@ -3654,7 +3626,7 @@ button:disabled {
 .recipe-rail-copy strong {
 	overflow: hidden;
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: var(--text-secondary);
@@ -3699,7 +3671,7 @@ button:disabled {
 .recipe-editor-section-heading h3 {
 	margin: 3px 0 0;
 	font-size: 12px;
-	font-weight: 560;
+	font-weight: 600;
 	letter-spacing: -0.02em;
 	color: var(--text-secondary);
 }
@@ -3740,7 +3712,7 @@ button:disabled {
 
 .recipe-field > span {
 	font-size: var(--font-size-caption);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-4);
 }
 
@@ -3779,7 +3751,7 @@ button:disabled {
 	gap: 10px;
 	padding: 9px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 }
 
@@ -3792,7 +3764,7 @@ button:disabled {
 	margin: 2px 0 0;
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--brand) 12%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--brand) 3%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
@@ -3839,7 +3811,7 @@ button:disabled {
 	gap: 4px;
 	padding: 5px 7px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
@@ -3857,7 +3829,7 @@ button:disabled {
 	margin-top: 10px;
 	padding: 9px;
 	border: 1px solid color-mix(in oklab, var(--danger) 18%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--danger) 4%, transparent);
 	font-size: var(--font-size-caption);
 	line-height: 1.5;
@@ -3912,7 +3884,7 @@ button:disabled {
 	gap: 8px;
 	margin-bottom: 7px;
 	font-size: var(--font-size-caption);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-4);
 }
 
@@ -3929,7 +3901,7 @@ button:disabled {
 	margin: 0;
 	padding: 0;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 }
 
@@ -3988,7 +3960,7 @@ button:disabled {
 
 .recipe-target-list strong {
 	font-size: var(--font-size-caption);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--muted);
 }
 
@@ -4040,7 +4012,7 @@ button:disabled {
 .recipe-approval-preview header strong {
 	margin-top: 2px;
 	font-size: var(--font-size-control);
-	font-weight: 560;
+	font-weight: 600;
 }
 
 .recipe-approval-counts {
@@ -4064,7 +4036,7 @@ button:disabled {
 	margin-bottom: 1px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--muted);
 }
 
@@ -4114,7 +4086,7 @@ button:disabled {
 	margin: 8px 0;
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--brand) 16%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--brand) 4%, transparent);
 }
 
@@ -4244,7 +4216,7 @@ button:disabled {
 
 .recipe-run-history button strong {
 	font-size: var(--font-size-caption);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--text-4);
 }
 
@@ -4279,7 +4251,7 @@ button:disabled {
 .recipe-evidence-header h2 {
 	margin: 3px 0 0;
 	font-size: 14px;
-	font-weight: 560;
+	font-weight: 600;
 	letter-spacing: -0.025em;
 	color: var(--text-soft);
 }
@@ -4305,7 +4277,7 @@ button:disabled {
 	gap: 6px;
 	padding: 8px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 	color: var(--info-text);
 }
@@ -4318,7 +4290,7 @@ button:disabled {
 .recipe-evidence-stats strong {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--muted);
 }
 
@@ -4392,7 +4364,7 @@ button:disabled {
 	min-width: 0;
 	padding: 9px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 }
 
@@ -4485,7 +4457,7 @@ button:disabled {
 
 .sim-build-facts strong {
 	font-size: var(--font-size-control);
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--text-secondary);
 }
 
@@ -4500,7 +4472,7 @@ button:disabled {
 .sim-classification-card strong {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-control);
-	font-weight: 560;
+	font-weight: 600;
 	text-transform: uppercase;
 	color: var(--info-text);
 }
@@ -4527,14 +4499,14 @@ button:disabled {
 	gap: 8px;
 	padding: 8px 9px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--bg-sunken);
 }
 
 .sim-build-sources strong {
 	overflow: hidden;
 	font-size: var(--font-size-caption);
-	font-weight: 540;
+	font-weight: 500;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: var(--muted);
@@ -4633,7 +4605,7 @@ button:disabled {
 .info-popover-copy { margin-top: 8px; color: var(--text-2); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .panel-info-note { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--separator); color: var(--text-2); font-size: 12px; }
 .panel-disclosure { margin-top: 16px; border-top: 1px solid var(--separator); }
-.panel-disclosure > summary { display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none; color: var(--foreground); font-size: 14px; font-weight: 550; }
+.panel-disclosure > summary { display: flex; align-items: center; gap: 8px; padding: 14px 0; cursor: pointer; list-style: none; color: var(--foreground); font-size: 14px; font-weight: 600; }
 .panel-disclosure > summary::-webkit-details-marker { display: none; }
 .panel-disclosure[open] > summary > svg { transform: rotate(90deg); }
 .panel-disclosure-content { padding-bottom: 12px; }
@@ -4668,7 +4640,7 @@ button:disabled {
 		--sidebar-width: 225px;
 	}
 
-	.titlebar-metric:nth-of-type(3) {
+	.titlebar-readout.is-optional {
 		display: none;
 	}
 
@@ -4722,9 +4694,7 @@ button:disabled {
 }
 
 @media (max-width: 1080px) {
-	.titlebar-live,
-	.titlebar-metrics,
-	.titlebar-trail > .titlebar-rule {
+	.titlebar-readouts > :not(:first-child) {
 		display: none;
 	}
 
@@ -4799,7 +4769,7 @@ button:disabled {
 	height: 20px;
 	padding: 0 7px;
 	border: 1px solid var(--border);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	color: var(--muted);
 	font-size: var(--font-size-caption);
@@ -4874,7 +4844,7 @@ button:disabled {
 	gap: 8px;
 	min-width: 0;
 	font-size: 13px;
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--foreground);
 }
 
@@ -4984,7 +4954,7 @@ button:disabled {
 	height: 16px;
 	flex: 0 0 16px;
 	place-items: center;
-	border-radius: 5px;
+	border-radius: 6px;
 	color: #000;
 	background: color-mix(in oklab, var(--foreground) 68%, transparent);
 }
@@ -5005,7 +4975,7 @@ button:disabled {
 	gap: 6px;
 	padding: 0 7px 0 2px;
 	border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: color-mix(in oklab, var(--foreground) 4%, transparent);
 	font-size: var(--font-size-caption);
 	font-weight: 500;
@@ -5457,7 +5427,7 @@ button:disabled {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: 13px;
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--text-1);
 }
 
@@ -5623,7 +5593,7 @@ button:disabled {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: 13px;
-	font-weight: 540;
+	font-weight: 500;
 	color: var(--text-1);
 }
 
@@ -5903,7 +5873,7 @@ button:disabled {
 .request-card-title {
 	min-width: 0;
 	flex: 1 1 auto;
-	font-weight: 550;
+	font-weight: 600;
 	overflow-wrap: anywhere;
 }
 
@@ -5981,7 +5951,7 @@ button:disabled {
 	margin-top: 6px;
 	padding: 6px 8px;
 	border: 1px solid var(--separator);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--background);
 }
 
@@ -6040,7 +6010,7 @@ button:disabled {
 	gap: 5px;
 	padding: 0 7px 0 3px;
 	border: 1px solid var(--border);
-	border-radius: 5px;
+	border-radius: 6px;
 	font-size: var(--font-size-caption);
 	white-space: nowrap;
 	color: var(--foreground);
@@ -6260,7 +6230,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: var(--font-mono);
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--foreground);
 }
 
@@ -6481,7 +6451,7 @@ button:disabled {
 	min-width: 0;
 	padding: 8px 9px;
 	border: 1px solid var(--separator);
-	border-radius: 5px;
+	border-radius: 6px;
 }
 
 .supabase-stat-label,
@@ -6501,7 +6471,7 @@ button:disabled {
 .supabase-stat-value {
 	margin-top: 3px;
 	font-size: var(--font-size-caption);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--foreground);
 }
 
@@ -6600,7 +6570,7 @@ button:disabled {
 
 .supabase-selection-title {
 	font-family: var(--font-mono);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--foreground);
 }
 
@@ -6668,7 +6638,7 @@ button:disabled {
 	white-space: nowrap;
 	font-family: var(--font-mono);
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--foreground);
 }
 
@@ -7307,7 +7277,7 @@ button.supabase-prune-row:hover {
 
 .supabase-prune-title {
 	font-size: var(--font-size-control);
-	font-weight: 520;
+	font-weight: 500;
 	color: var(--foreground);
 }
 
@@ -7389,7 +7359,7 @@ button.supabase-prune-row:hover {
 .supabase-app-env-name[data-slot='input'] {
 	height: 30px;
 	border: 1px solid var(--field-border);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--field-background);
 	font-family: var(--font-mono);
 	font-size: var(--font-size-control);
@@ -7736,7 +7706,7 @@ button.supabase-prune-row:hover {
 }
 
 .sim-lane-backend-label {
-	font-weight: 550;
+	font-weight: 600;
 	color: var(--text-3);
 }
 
@@ -7762,7 +7732,7 @@ button.supabase-prune-row:hover {
 .agent-backends-label {
 	margin: 0;
 	font-size: 11px;
-	font-weight: 550;
+	font-weight: 600;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 	color: var(--text-3);
@@ -7822,7 +7792,7 @@ button.supabase-prune-row:hover {
 .app-traffic-banner-text {
 	min-width: 0;
 	flex: 1 1 360px;
-	font-weight: 520;
+	font-weight: 500;
 }
 
 .app-traffic-banner-actions {

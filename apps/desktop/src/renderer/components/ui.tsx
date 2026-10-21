@@ -114,7 +114,7 @@ export function PanelHeader({
 	return (
 		<header className="panel-header">
 			<div className="panel-heading">
-				<h1 className="m-0 text-xl font-semibold tracking-[-0.025em] text-(--foreground)">
+				<h1 className="m-0 text-lg font-semibold tracking-[-0.01em] text-(--foreground)">
 					{title}
 				</h1>
 				<InfoPopover label={title}>{description}</InfoPopover>

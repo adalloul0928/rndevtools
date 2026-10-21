@@ -38,6 +38,7 @@ import {
 	formatBytes,
 	NoSimulatorTarget,
 	RefreshSimulatorsButton,
+	SimulatorDiscoveryPending,
 	SimulatorMetric,
 	TargetStatePill,
 } from '@/components/simulator-ui';
@@ -181,6 +182,7 @@ export function FleetPanel() {
 	const desktop = useDesktopRuntime();
 	const {
 		isBridgeAvailable,
+		isLoading,
 		runAction,
 		cancelJob,
 		selectedDevice,
@@ -556,11 +558,16 @@ export function FleetPanel() {
 			) : null}
 			{state.devices.length === 0 ? (
 				<div className="min-h-0 flex-1">
-					<NoSimulatorTarget
-						onOpenSettings={() => {
-							window.location.hash = 'simulator/settings';
-						}}
-					/>
+					{isLoading ||
+					(isBridgeAvailable && state.capability.status === 'checking') ? (
+						<SimulatorDiscoveryPending />
+					) : (
+						<NoSimulatorTarget
+							onOpenSettings={() => {
+								window.location.hash = 'simulator/settings';
+							}}
+						/>
+					)}
 				</div>
 			) : (
 				<div className="sim-fleet-layout">

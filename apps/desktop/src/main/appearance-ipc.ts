@@ -7,7 +7,7 @@ import {
 /**
  * The native colours around the renderer: the window background matches its
  * `--background` so a resize never flashes the other theme, and the Windows
- * and Linux caption buttons sit on its titlebar `--surface`.
+ * and Linux caption buttons sit on its titlebar `--chrome`.
  */
 export function windowChromeColors(dark: boolean): {
 	background: string;
@@ -16,7 +16,7 @@ export function windowChromeColors(dark: boolean): {
 } {
 	return dark
 		? { background: '#000000', titleBar: '#0a0a0a', titleBarSymbol: '#a1a1a1' }
-		: { background: '#ffffff', titleBar: '#ffffff', titleBarSymbol: '#575757' };
+		: { background: '#ffffff', titleBar: '#fafafa', titleBarSymbol: '#575757' };
 }
 
 type AppearanceIpcDependencies = {

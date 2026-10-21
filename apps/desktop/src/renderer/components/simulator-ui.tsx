@@ -7,6 +7,7 @@ import {
 	ArrowRight,
 	ChevronDown,
 	CircleAlert,
+	LoaderCircle,
 	RefreshCw,
 	Smartphone,
 } from 'lucide-react';
@@ -247,6 +248,17 @@ export function NoSimulatorTarget({
 			description="Install an iOS runtime in Xcode, then refresh discovery. A mobile app connection is not required."
 			icon={<Smartphone className="h-5 w-5" />}
 			title="No Simulator target discovered"
+		/>
+	);
+}
+
+/** Shown while the first discovery runs, so an empty list never reads as none found. */
+export function SimulatorDiscoveryPending() {
+	return (
+		<EmptyPanel
+			description="Checking Xcode and listing Simulators. The first scan takes a few seconds."
+			icon={<LoaderCircle className="h-5 w-5 animate-spin" />}
+			title="Looking for Simulators"
 		/>
 	);
 }
