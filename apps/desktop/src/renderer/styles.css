@@ -100,7 +100,7 @@
 		--warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
 		--warning-border: color-mix(in oklab, var(--warning) 25%, transparent);
 		--danger: light-dark(#d93636, #f87171);
-		--danger-text: light-dark(#c42b2b, #f87171);
+		--danger-text: light-dark(#b42323, #f87171);
 		--danger-foreground: light-dark(#fff, #000);
 		--danger-soft: color-mix(in oklab, var(--danger) 14%, transparent);
 		--danger-border: color-mix(in oklab, var(--danger) 25%, transparent);
@@ -2160,16 +2160,16 @@ button:disabled {
 
 .sim-list-item.is-selected,
 .sim-list-item[aria-current='true'] {
-	box-shadow: inset 2px 0 var(--brand);
-	background: color-mix(in oklab, var(--brand) 7%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 12%, transparent);
+	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 }
 
 .sim-list-leading,
 .sim-capture-thumb {
 	display: grid;
-	width: 28px;
-	height: 28px;
-	flex: 0 0 28px;
+	width: 32px;
+	height: 32px;
+	flex: 0 0 32px;
 	place-items: center;
 	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
 	border-radius: 6px;
@@ -2178,9 +2178,9 @@ button:disabled {
 }
 
 .sim-list-item.is-selected .sim-list-leading {
-	border-color: color-mix(in oklab, var(--brand) 18%, transparent);
-	background: color-mix(in oklab, var(--brand) 8%, transparent);
-	color: var(--info-text);
+	border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
+	background: var(--background);
+	color: var(--foreground);
 }
 
 .sim-list-copy {
@@ -2200,8 +2200,8 @@ button:disabled {
 
 .sim-list-copy strong {
 	font-size: var(--font-size-control);
-	font-weight: 500;
-	color: var(--text-soft);
+	font-weight: 600;
+	color: var(--foreground);
 }
 
 .sim-list-copy span {
@@ -2212,42 +2212,61 @@ button:disabled {
 
 .sim-state-pill {
 	display: inline-flex;
-	height: 20px;
+	height: 22px;
 	flex: 0 0 auto;
 	align-items: center;
-	padding: 0 6px;
-	border: 1px solid color-mix(in oklab, var(--foreground) 9%, transparent);
-	border-radius: 4px;
-	background: color-mix(in oklab, var(--foreground) 3%, transparent);
-	font-family: 'Geist Mono Variable', monospace;
+	gap: 6px;
+	padding: 0 8px;
+	border-radius: 999px;
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
 	font-size: var(--font-size-caption);
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
+	font-weight: 500;
+	white-space: nowrap;
 	color: var(--muted);
 }
 
 .sim-state-pill.is-success {
-	border-color: color-mix(in oklab, var(--brand) 20%, transparent);
-	background: color-mix(in oklab, var(--brand) 8%, transparent);
+	background: var(--brand-soft);
 	color: var(--brand-text);
 }
 
 .sim-state-pill.is-info {
-	border-color: var(--info-border);
 	background: var(--info-soft);
-	color: var(--info);
+	color: var(--info-text);
 }
 
 .sim-state-pill.is-warning {
-	border-color: color-mix(in oklab, var(--warning) 20%, transparent);
-	background: color-mix(in oklab, var(--warning) 8%, transparent);
+	background: var(--warning-soft);
 	color: var(--warning-text);
 }
 
 .sim-state-pill.is-danger {
-	border-color: color-mix(in oklab, var(--danger) 20%, transparent);
-	background: color-mix(in oklab, var(--danger) 8%, transparent);
+	background: var(--danger-soft);
 	color: var(--danger-text);
+}
+
+.sim-state-dot {
+	width: 6px;
+	height: 6px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--text-3);
+}
+
+.sim-state-pill.is-success .sim-state-dot {
+	background: var(--brand);
+}
+
+.sim-state-pill.is-info .sim-state-dot {
+	background: var(--info);
+}
+
+.sim-state-pill.is-warning .sim-state-dot {
+	background: var(--warning);
+}
+
+.sim-state-pill.is-danger .sim-state-dot {
+	background: var(--danger);
 }
 
 .sim-list-empty {
@@ -4625,7 +4644,6 @@ button:disabled {
 .sim-settings-layout { grid-template-columns: minmax(0, 1fr); max-width: 960px; }
 .sim-settings-layout > .sim-surface > .panel-disclosure > summary { padding-left: 16px; }
 .sim-composition-editor > .switch { flex-direction: row; align-items: center; gap: 8px; }
-.sim-state-pill { text-transform: none; letter-spacing: normal; }
 .sim-eyebrow { text-transform: none; letter-spacing: normal; }
 .sim-toolbar-field { text-transform: none; letter-spacing: normal; }
 .sim-profile-categories .info-button { display: inline-flex; vertical-align: middle; margin-left: 6px; }
@@ -4939,10 +4957,6 @@ button:disabled {
 	color: var(--text-soft);
 }
 
-.slim-chip {
-	text-transform: none;
-}
-
 /*
  * Agent attribution is the headline signal on a busy wall, so it carries the
  * only saturated non-brand colour in the Simulator workspace: one hue per
@@ -5018,13 +5032,7 @@ button:disabled {
 	color: var(--text-3);
 }
 
-/* Fleet rows: runtime · memory · branch on one line, chips on the right. */
-.sim-list-subtitle {
-	display: inline-flex;
-	min-width: 0;
-	align-items: center;
-	gap: 6px;
-}
+/* Wall tile meta: runtime and memory. */
 
 .sim-list-subtitle-item {
 	overflow: hidden;
@@ -5035,19 +5043,6 @@ button:disabled {
 .sim-list-memory {
 	font-variant-numeric: tabular-nums;
 	color: var(--text-secondary);
-}
-
-.sim-list-trailing {
-	display: flex;
-	flex: 0 0 auto;
-	align-items: center;
-	gap: 6px;
-}
-
-.sim-list-trailing .lane-chip-port {
-	max-width: 150px;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
 .sim-detail-heading-pills {
@@ -5385,8 +5380,8 @@ button:disabled {
 }
 
 .device-tile.is-selected {
-	border-color: color-mix(in oklab, var(--brand) 45%, transparent);
-	box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 25%, transparent);
+	border-color: color-mix(in oklab, var(--foreground) 32%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 
 .device-tile-screen {
@@ -5467,25 +5462,6 @@ button:disabled {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: 11px;
 	color: var(--text-4);
-}
-
-.device-tile-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 5px;
-}
-
-.device-tile-chips:empty {
-	display: none;
-}
-
-.device-tile-branch {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-family: 'Geist Mono Variable', monospace;
-	font-size: 11px;
-	color: var(--text-secondary);
 }
 
 /* Focus view in the detail pane */
@@ -7659,9 +7635,8 @@ button.supabase-prune-row:hover {
 }
 
 /*
- * Fleet list rows with a db chip: at 1080 px and below the trailing cluster
- * no longer fits, so the chips move to line 2 and the state pill joins the
- * name on line 1. Rows without a backend keep their layout.
+ * Fleet rows and tiles: the name with its runtime and memory, then branch,
+ * Metro and backend as one muted mono line. Only Metro gets a dot.
  */
 .fleet-row-line {
 	display: flex;
@@ -7672,49 +7647,143 @@ button.supabase-prune-row:hover {
 
 .fleet-row-name {
 	min-width: 0;
-	flex: 1 1 auto;
+	flex: 0 1 auto;
 }
 
-.fleet-row-narrow {
-	display: none;
+.sim-list-copy .fleet-row-line {
+	font-family: var(--font-sans);
 }
 
-.fleet-row-chips {
+.sim-list-copy .fleet-row-meta {
 	min-width: 0;
-	align-items: center;
-	gap: 5px;
+	font-family: var(--font-sans);
+	font-size: 13px;
+	color: var(--muted);
 }
 
-@media (max-width: 1080px) {
-	.fleet-row-copy .fleet-row-narrow {
-		display: flex;
-	}
-
-	.fleet-row-copy .fleet-row-wide,
-	.sim-list-trailing.fleet-row-wide {
-		display: none;
-	}
-}
-
-.sim-lane-backend {
+.fleet-row-facts {
 	display: flex;
+	min-width: 0;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 8px;
+	gap: 2px 12px;
+	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	color: var(--muted);
 }
 
-.sim-lane-backend-label {
-	font-weight: 600;
-	color: var(--text-3);
+.fleet-row-branch {
+	font: inherit;
+	color: inherit;
 }
 
-.sim-lane-backend-line {
-	min-width: 0;
-	font-family: var(--font-mono);
-	color: var(--text-soft);
+.fleet-row-metro,
+.sim-lane-health {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
 }
+
+.fleet-row-dot {
+	width: 6px;
+	height: 6px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: var(--text-3);
+}
+
+.fleet-row-metro.is-ready .fleet-row-dot,
+.sim-lane-health.is-success .fleet-row-dot {
+	background: var(--brand);
+}
+
+.fleet-row-metro.is-starting .fleet-row-dot,
+.sim-lane-health.is-warning .fleet-row-dot {
+	border: 1.5px dashed var(--info);
+	background: transparent;
+}
+
+.fleet-row-metro.is-stopped .fleet-row-dot,
+.sim-lane-health.is-danger .fleet-row-dot {
+	background: var(--danger);
+}
+
+.fleet-row-backend.is-warning,
+.fleet-row-backend.is-danger {
+	color: var(--warning-text);
+}
+
+.device-tile-body .fleet-row-facts {
+	margin-top: 2px;
+}
+
+.sim-lane-health {
+	font-size: var(--font-size-caption);
+	color: var(--muted);
+}
+
+.sim-lane-health.is-success {
+	color: var(--brand-text);
+}
+
+.sim-lane-health.is-warning {
+	color: var(--info-text);
+}
+
+.sim-lane-health.is-danger {
+	color: var(--danger-text);
+}
+
+/* The Lane section's facts: label, value. */
+.sim-lane-facts {
+	display: grid;
+	grid-template-columns: 84px minmax(0, 1fr);
+	gap: 7px 12px;
+	margin: 0;
+	font-size: 13px;
+}
+
+.sim-lane-facts dt {
+	color: var(--muted);
+}
+
+.sim-lane-facts dd {
+	min-width: 0;
+	margin: 0;
+	overflow-wrap: anywhere;
+	color: var(--foreground);
+}
+
+/* Below the actions and the Lane, the rest of a target folds into rows. */
+.sim-detail-rows {
+	margin-top: 4px;
+}
+
+.sim-target-detail .sim-detail-rows > .panel-disclosure {
+	margin-top: 0;
+	border-top: 0;
+	border-bottom: 1px solid var(--separator);
+}
+
+.sim-target-detail .sim-detail-rows > .panel-disclosure > summary {
+	padding: 11px 0;
+	font-weight: 500;
+}
+
+.sim-row-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 16px;
+	margin-bottom: 12px;
+}
+
+.sim-row-actions .sim-inline-note {
+	margin: 0;
+	flex: 1 1 260px;
+}
+
 
 /* Agents: the backends a session holds, and its requests. */
 .agent-card.is-focused {
@@ -7800,6 +7869,219 @@ button.supabase-prune-row:hover {
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 4px;
+}
+
+/*
+ * Network: neutral method chips, status codes as soft pills, and durations as
+ * bars on one shared scale. Colour marks outcomes, never verbs.
+ */
+.network-live {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--brand-text);
+}
+
+.network-live-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--brand);
+}
+
+.network-live.is-paused {
+	color: var(--muted);
+}
+
+.network-live.is-paused .network-live-dot {
+	background: var(--text-3);
+}
+
+.network-segments .button {
+	height: 26px;
+	min-height: 26px;
+	gap: 6px;
+	padding: 0 9px;
+	font-size: 13px;
+}
+
+.network-segment-count {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--text-3);
+}
+
+.network-profile {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+}
+
+.network-method {
+	padding: 1px 6px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--muted);
+}
+
+.network-status {
+	padding: 1px 7px;
+	border-radius: 999px;
+	font-family: var(--font-mono);
+	font-size: var(--font-size-caption);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.network-status.is-success {
+	background: var(--brand-soft);
+	color: var(--brand-text);
+}
+
+.network-status.is-warning {
+	background: var(--warning-soft);
+	color: var(--warning-text);
+}
+
+.network-status.is-danger {
+	background: var(--danger-soft);
+	color: var(--danger-text);
+}
+
+.network-status.is-info {
+	background: var(--info-soft);
+	color: var(--info-text);
+}
+
+.network-duration {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 10px;
+}
+
+.network-duration-value {
+	width: 56px;
+	flex: 0 0 auto;
+	font-family: var(--font-mono);
+	font-size: var(--font-size-caption);
+	font-variant-numeric: tabular-nums;
+	color: var(--foreground);
+}
+
+.network-duration-value.is-danger {
+	color: var(--danger-text);
+}
+
+.network-duration-track {
+	height: 4px;
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	border-radius: 2px;
+	background: var(--border);
+}
+
+.network-duration-bar {
+	display: block;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--brand);
+}
+
+.network-duration-bar.is-warning {
+	background: var(--warning);
+}
+
+.network-duration-bar.is-danger {
+	background: var(--danger);
+}
+
+.network-duration-bar.is-info {
+	background: var(--info);
+}
+
+.network-detail-head {
+	padding: 16px 18px;
+	border-bottom: 1px solid var(--border);
+}
+
+.network-detail-badges {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.network-detail-time {
+	margin-left: auto;
+	font-family: var(--font-mono);
+	font-size: var(--font-size-caption);
+	color: var(--text-3);
+}
+
+.network-detail-url {
+	margin: 0;
+	font-family: var(--font-mono);
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 1.5;
+	word-break: break-all;
+	color: var(--foreground);
+}
+
+.network-detail-meta {
+	margin: 6px 0 0;
+	font-size: var(--font-size-caption);
+	color: var(--muted);
+}
+
+.network-tabs {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: flex-end;
+	gap: 18px;
+	padding: 0 18px;
+	border-bottom: 1px solid var(--border);
+}
+
+.network-tab {
+	height: 36px;
+	margin-bottom: -1px;
+	padding: 0 1px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--muted);
+}
+
+.network-tab:hover {
+	color: var(--foreground);
+}
+
+.network-tab[aria-selected='true'] {
+	border-bottom-color: var(--foreground);
+	color: var(--foreground);
+}
+
+.network-body-format .button {
+	height: 22px;
+	min-height: 22px;
+	padding: 0 8px;
+	font-size: var(--font-size-caption);
+}
+
+.network-redaction-note {
+	margin: 0;
+	font-size: var(--font-size-caption);
+	color: var(--muted);
 }
 
 /* Network: which backend a Supabase-shaped request went to. */

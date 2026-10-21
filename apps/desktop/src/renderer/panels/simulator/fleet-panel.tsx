@@ -15,6 +15,7 @@ import {
 	Play,
 	Plus,
 	Power,
+	Rocket,
 	RotateCcw,
 	ScrollText,
 	Smartphone,
@@ -26,12 +27,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { ControllableScreen } from '@/components/controllable-screen';
 import { DeviceScreen } from '@/components/device-screen';
-import {
-	AgentBadge,
-	AgentGlyph,
-	LaneChip,
-	SlimChip,
-} from '@/components/lane-ui';
+import { AgentBadge, AgentGlyph } from '@/components/lane-ui';
 import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
@@ -42,7 +38,6 @@ import {
 	SimulatorMetric,
 	TargetStatePill,
 } from '@/components/simulator-ui';
-import { SupabaseChip } from '@/components/supabase-ui';
 import {
 	ConfirmAction,
 	Disclosure,
@@ -83,7 +78,11 @@ import {
 	useSupabaseNavigation,
 	useSupabaseState,
 } from '@/state/supabase-runtime';
-import type { Lane, LaneView } from '../../../shared/lane-protocol';
+import {
+	type Lane,
+	type LaneView,
+	laneHealth,
+} from '../../../shared/lane-protocol';
 import type { DeviceSession } from '../../../shared/protocol';
 import type {
 	SimulatorApp,
@@ -145,6 +144,7 @@ export function simulatorOpenPresentation(
 
 type FleetLayout = 'wall' | 'list';
 const FLEET_LAYOUT_KEY = 'rndevtools.desktop.fleet.layout';
+const LIVE_SCREEN_OPEN_KEY = 'rndevtools.desktop.fleet.live-screen-open';
 const FLEET_TILE_KEY = 'rndevtools.desktop.fleet.tile';
 export const FLEET_TILE_RANGE = { min: 140, max: 320, step: 20, default: 200 };
 
@@ -168,6 +168,15 @@ export function clampFleetTile(value: number): number {
 		FLEET_TILE_RANGE.max,
 		Math.max(FLEET_TILE_RANGE.min, stepped)
 	);
+}
+
+/** The detail pane's live screen stays as the person last left it. */
+function readStoredLiveScreenOpen(): boolean {
+	try {
+		return window.localStorage.getItem(LIVE_SCREEN_OPEN_KEY) === 'true';
+	} catch {
+		return false;
+	}
 }
 
 function readStoredTile(): number {
@@ -617,7 +626,7 @@ export function FleetPanel() {
 												</div>
 											) : null}
 											<FleetRowText row={row} target={target} />
-											<FleetRowTrailing row={row} target={target} />
+											<TargetStatePill state={target.state} />
 										</>
 									);
 								}}
@@ -811,23 +820,7 @@ function DeviceWall({
 									</>
 								) : null}
 							</span>
-							<span className="device-tile-chips">
-								{row.lane ? <LaneChip lane={row.lane} compact /> : null}
-								{row.backend ? (
-									<SupabaseChip summary={row.lane?.backend} />
-								) : null}
-								{row.live && row.slim.level !== 'unknown' ? (
-									<SlimChip slim={row.slim} />
-								) : null}
-							</span>
-							{row.lane ? (
-								<code
-									className="device-tile-branch"
-									title={row.lane.worktreePath}
-								>
-									{row.lane.branch}
-								</code>
-							) : null}
+							<FleetRowFacts row={row} />
 						</button>
 					</li>
 				);
@@ -837,9 +830,8 @@ function DeviceWall({
 }
 
 /**
- * A row's two lines. With a backend chip the trailing cluster no longer fits
- * at 1080 px and below, so there the chips move to line 2 and the state pill
- * joins the name on line 1 (styles.css, Supabase in other panels).
+ * A row's two lines: the name with its runtime and memory, then the lane,
+ * Metro and backend as quiet mono text. The only pill is the state.
  */
 function FleetRowText({
 	row,
@@ -848,77 +840,54 @@ function FleetRowText({
 	row: FleetRow | undefined;
 	target: SimulatorDevice;
 }) {
-	const backend = row?.backend;
 	return (
-		<div className={`sim-list-copy ${backend ? 'fleet-row-copy' : ''}`}>
-			{backend ? (
-				<span className="fleet-row-line">
-					<strong className="fleet-row-name">{target.name}</strong>
-					<span className="fleet-row-narrow">
-						<TargetStatePill state={target.state} />
-					</span>
-				</span>
-			) : (
-				<strong>{target.name}</strong>
-			)}
-			{backend && row ? (
-				<span className="fleet-row-chips fleet-row-narrow">
-					{row.lane ? <LaneChip lane={row.lane} compact /> : null}
-					<SupabaseChip summary={row.lane?.backend} />
-					{row.live && row.slim.level !== 'unknown' ? (
-						<SlimChip slim={row.slim} />
-					) : null}
-				</span>
-			) : null}
-			<span className={`sim-list-subtitle ${backend ? 'fleet-row-wide' : ''}`}>
-				<span className="sim-list-subtitle-item">
+		<div className="sim-list-copy">
+			<span className="fleet-row-line">
+				<strong className="fleet-row-name">{target.name}</strong>
+				<span
+					className="fleet-row-meta"
+					title={
+						row?.memoryBytes === undefined
+							? undefined
+							: `${row.processCount ?? '?'} processes · physical footprint of the Simulator process tree`
+					}
+				>
 					{row?.runtimeName ?? target.runtimeIdentifier}
+					{row?.memoryBytes === undefined
+						? ''
+						: ` · ${formatBytes(row.memoryBytes)}`}
 				</span>
-				{row?.memoryBytes !== undefined ? (
-					<>
-						<span aria-hidden="true">·</span>
-						<span
-							className="sim-list-subtitle-item sim-list-memory"
-							title={`${row.processCount ?? '?'} processes · physical footprint of the Simulator process tree`}
-						>
-							{formatBytes(row.memoryBytes)}
-						</span>
-					</>
-				) : null}
-				{row?.lane ? (
-					<>
-						<span aria-hidden="true">·</span>
-						<code
-							className="sim-list-subtitle-item sim-list-branch"
-							title={row.lane.worktreePath}
-						>
-							{row.lane.branch}
-						</code>
-					</>
-				) : null}
 			</span>
+			{row ? <FleetRowFacts row={row} /> : null}
 		</div>
 	);
 }
 
-function FleetRowTrailing({
-	row,
-	target,
-}: {
-	row: FleetRow | undefined;
-	target: SimulatorDevice;
-}) {
+/** Branch, Metro and backend in one muted line; a dot carries Metro's state. */
+function FleetRowFacts({ row }: { row: FleetRow }) {
+	const { lane, backend } = row;
+	const slim = row.live && row.slim.level !== 'unknown' ? row.slim : undefined;
+	if (!lane && !backend && !slim) return null;
 	return (
-		<div
-			className={`sim-list-trailing ${row?.backend ? 'fleet-row-wide' : ''}`}
-		>
-			{row?.lane ? <LaneChip lane={row.lane} compact /> : null}
-			{row?.backend ? <SupabaseChip summary={row.lane?.backend} /> : null}
-			{row?.live && row.slim.level !== 'unknown' ? (
-				<SlimChip slim={row.slim} />
+		<span className="fleet-row-facts">
+			{lane ? (
+				<>
+					<code className="fleet-row-branch" title={lane.worktreePath}>
+						{lane.branch}
+					</code>
+					<span className={`fleet-row-metro is-${lane.metro}`}>
+						<span aria-hidden="true" className="fleet-row-dot" />:{lane.port}{' '}
+						{row.laneHealth?.label ?? lane.metro}
+					</span>
+				</>
 			) : null}
-			<TargetStatePill state={target.state} />
-		</div>
+			{backend ? (
+				<span className={`fleet-row-backend is-${backend.chip.tone}`}>
+					{backend.chip.label}
+				</span>
+			) : null}
+			{slim ? <span title={slim.detail}>{slim.label}</span> : null}
+		</span>
 	);
 }
 
@@ -1157,35 +1126,40 @@ function TargetDetail({
 		? apps.find((app) => app.bundleIdentifier === activeApp.bundleIdentifier)
 				?.displayName
 		: undefined;
+	const shownSlim =
+		slim && target.state === 'booted' && slim.level !== 'unknown'
+			? slim
+			: undefined;
+	const health = lane ? laneHealth(lane) : undefined;
+	const [liveOpen, setLiveOpen] = useState(readStoredLiveScreenOpen);
+	const toggleLive = (open: boolean) => {
+		setLiveOpen(open);
+		try {
+			window.localStorage.setItem(LIVE_SCREEN_OPEN_KEY, String(open));
+		} catch {
+			// Preferences are best-effort.
+		}
+	};
 	return (
 		<div className="sim-target-detail">
 			<div className="sim-detail-heading">
 				<div>
-					<p className="sim-eyebrow">Selected target</p>
 					<h2>{target.name}</h2>
-					<span>{deviceTypeName ?? 'iOS Simulator'}</span>
+					<span>
+						{[
+							deviceTypeName ?? 'iOS Simulator',
+							runtime?.name,
+							metrics ? formatBytes(metrics.memoryBytes) : undefined,
+						]
+							.filter(Boolean)
+							.join(' · ')}
+						{shownSlim ? (
+							<span title={shownSlim.detail}> · {shownSlim.label}</span>
+						) : null}
+					</span>
 				</div>
-				<div className="sim-detail-heading-pills">
-					{slim && target.state === 'booted' && slim.level !== 'unknown' ? (
-						<SlimChip slim={slim} />
-					) : null}
-					<TargetStatePill state={target.state} />
-				</div>
+				<TargetStatePill state={target.state} />
 			</div>
-			<Disclosure defaultOpen title="Live screen">
-				<div className="sim-focus-screen">
-					<ControllableScreen
-						live={target.state === 'booted'}
-						name={target.name}
-						udid={target.udid}
-					/>
-					<p className="sim-inline-note">
-						Frames come from bounded <code>simctl io screenshot</code> polling,
-						about four a second for this view and one a second per wall tile.
-						Nothing is recorded; the view pauses when the window is unfocused.
-					</p>
-				</div>
-			</Disclosure>
 			<div className="sim-action-row">
 				<Button
 					isDisabled={!openPresentation.allowed}
@@ -1202,19 +1176,16 @@ function TargetDetail({
 				>
 					<Play className="h-3.5 w-3.5" /> {openPresentation.label}
 				</Button>
-				<Button
-					isDisabled={!isBridgeAvailable || target.state !== 'booted'}
-					size="sm"
-					variant="secondary"
-					onPress={() =>
-						onRunAction(
-							{ kind: 'app.list', udid: target.udid },
-							'Installed apps refreshed.'
-						)
-					}
-				>
-					<RotateCcw className="h-3.5 w-3.5" /> Refresh apps
-				</Button>
+				{lane ? (
+					<Button
+						isDisabled={laneBusy || lane.metro === 'stopped' || !lane.scheme}
+						size="sm"
+						variant="secondary"
+						onPress={() => onLaneLaunch(lane)}
+					>
+						<Rocket className="h-3.5 w-3.5" /> Launch app
+					</Button>
+				) : null}
 				<Button
 					isDisabled={!canStop}
 					size="sm"
@@ -1229,37 +1200,6 @@ function TargetDetail({
 					<Power className="h-3.5 w-3.5" /> Shut down
 				</Button>
 			</div>
-			<Disclosure title="Target information">
-				<dl>
-					<KeyValue label="UDID" mono value={target.udid} />
-					<KeyValue
-						label="Runtime"
-						value={runtime?.name ?? target.runtimeIdentifier}
-					/>
-					<KeyValue label="OS" value={runtime?.version ?? 'Unknown'} />
-					<KeyValue label="Device type" value={deviceTypeName ?? 'Unknown'} />
-					<KeyValue label="Installed apps" value={apps.length} />
-					<KeyValue
-						label="Largest app process"
-						mono={Boolean(activeApp)}
-						value={
-							activeApp
-								? `${activeAppName ? `${activeAppName} · ` : ''}${activeApp.bundleIdentifier} · PID ${activeApp.processId}`
-								: target.state === 'booted'
-									? 'No app process sampled'
-									: 'Simulator is shut down'
-						}
-					/>
-					<KeyValue
-						label="Resource sample"
-						value={
-							metrics
-								? new Date(metrics.sampledAt).toLocaleTimeString()
-								: 'Unavailable'
-						}
-					/>
-				</dl>
-			</Disclosure>
 			<section className="sim-detail-section">
 				<div className="sim-section-heading">
 					<div>
@@ -1269,7 +1209,14 @@ function TargetDetail({
 							port, so several branches and agents can work in parallel.
 						</InfoPopover>
 					</div>
-					<Waypoints className="h-3.5 w-3.5" />
+					{health ? (
+						<span className={`sim-lane-health is-${health.tone}`}>
+							<span aria-hidden="true" className="fleet-row-dot" />
+							Metro {health.label}
+						</span>
+					) : (
+						<Waypoints className="h-3.5 w-3.5" />
+					)}
 				</div>
 				{attachedAgents.length > 0 ? (
 					<ul className="sim-agent-list">
@@ -1292,41 +1239,45 @@ function TargetDetail({
 				) : null}
 				{lane ? (
 					<div className="sim-lane-section">
-						<div className="sim-lane-summary">
-							<LaneChip lane={lane} />
-							{lane.agent ? <AgentBadge agent={lane.agent} /> : null}
-						</div>
-						<p className="sim-inline-note" title={lane.worktreePath}>
-							{shortPath(lane.worktreePath)} · Metro http://127.0.0.1:
-							{lane.port}
-							{lane.metroPid ? ` · pid ${lane.metroPid}` : ''}
-						</p>
-						{backend ? (
-							<div className="sim-lane-backend">
-								<span className="sim-lane-backend-label">Backend</span>
-								<SupabaseChip summary={lane.backend} />
-								<span className="sim-lane-backend-line">{backend.line}</span>
-								<Button
-									aria-label={`Open the backend of ${lane.branch} in Supabase`}
-									size="sm"
-									variant="ghost"
-									onPress={() => onOpenInSupabase(backend.stackId)}
-								>
-									<DatabaseZap className="h-3.5 w-3.5" /> Open in Supabase
-								</Button>
-							</div>
-						) : null}
+						<dl className="sim-lane-facts">
+							<dt>Worktree</dt>
+							<dd>
+								<code>{lane.branch}</code> · {lane.environment}
+							</dd>
+							<dt>Metro</dt>
+							<dd>
+								<code>http://127.0.0.1:{lane.port}</code>
+								{lane.metroPid ? ` · pid ${lane.metroPid}` : ''}
+							</dd>
+							<dt>Path</dt>
+							<dd>
+								<code title={lane.worktreePath}>
+									{shortPath(lane.worktreePath)}
+								</code>
+							</dd>
+							{backend ? (
+								<>
+									<dt>Backend</dt>
+									<dd>
+										<span
+											className={`fleet-row-backend is-${backend.chip.tone}`}
+										>
+											{backend.chip.label}
+										</span>{' '}
+										· {backend.line}
+									</dd>
+								</>
+							) : null}
+							{lane.agent ? (
+								<>
+									<dt>Agent</dt>
+									<dd>
+										<AgentBadge agent={lane.agent} />
+									</dd>
+								</>
+							) : null}
+						</dl>
 						<div className="sim-action-row">
-							<Button
-								isDisabled={
-									laneBusy || lane.metro === 'stopped' || !lane.scheme
-								}
-								size="sm"
-								variant="primary"
-								onPress={() => onLaneLaunch(lane)}
-							>
-								<Play className="h-3.5 w-3.5" /> Launch app
-							</Button>
 							<Button
 								size="sm"
 								variant="secondary"
@@ -1334,6 +1285,16 @@ function TargetDetail({
 							>
 								<ScrollText className="h-3.5 w-3.5" /> Open in Lanes
 							</Button>
+							{backend ? (
+								<Button
+									aria-label={`Open the backend of ${lane.branch} in Supabase`}
+									size="sm"
+									variant="secondary"
+									onPress={() => onOpenInSupabase(backend.stackId)}
+								>
+									<DatabaseZap className="h-3.5 w-3.5" /> Open in Supabase
+								</Button>
+							) : null}
 							<ConfirmAction
 								confirmLabel="Stop lane"
 								description={`Metro on port ${lane.port} stops and ${target.name} is released for another worktree.`}
@@ -1405,188 +1366,262 @@ function TargetDetail({
 					</p>
 				)}
 			</section>
-			<DiskInventorySection
-				disk={disk}
-				isBridgeAvailable={isBridgeAvailable}
-				target={target}
-				onRunAction={onRunAction}
-			/>
-			<section className="sim-detail-section">
-				<div className="sim-section-heading">
-					<div>
-						<h3>Resource monitoring</h3>
-						<InfoPopover label="Resource monitoring">
-							Live process footprint, sampled every five seconds while the
-							desktop is visible. Shared memory can affect totals; compare the
-							same workload.
-						</InfoPopover>
+			<div className="sim-detail-rows">
+				<Disclosure
+					meta={
+						target.state !== 'booted'
+							? 'Shut down'
+							: liveOpen
+								? undefined
+								: 'Paused'
+					}
+					open={liveOpen}
+					title="Live screen"
+					onToggle={toggleLive}
+				>
+					<div className="sim-focus-screen">
+						<ControllableScreen
+							live={target.state === 'booted'}
+							name={target.name}
+							udid={target.udid}
+						/>
+						<p className="sim-inline-note">
+							Frames come from bounded <code>simctl io screenshot</code>{' '}
+							polling, about four a second for this view and one a second per
+							wall tile. Nothing is recorded; the view pauses when the window is
+							unfocused or this row is closed.
+						</p>
 					</div>
-					<Cpu className="h-3.5 w-3.5" />
-				</div>
-				{metrics ? (
-					<>
-						<div className="sim-device-metrics">
-							<div>
-								<span>CPU</span>
-								<strong>{metrics.cpuPercent.toFixed(1)}%</strong>
-							</div>
-							<div>
-								<span>Memory</span>
-								<strong>{formatBytes(metrics.memoryBytes)}</strong>
-							</div>
-							<div>
-								<span>Processes</span>
-								<strong>{metrics.processCount}</strong>
-							</div>
-							<div>
-								<span>Disk allocated</span>
-								<strong>
-									{metrics.diskAllocatedBytes === undefined
-										? '—'
-										: formatBytes(metrics.diskAllocatedBytes)}
-								</strong>
-							</div>
-						</div>
-						<Disclosure title="Processes using the most memory">
-							<div className="sim-process-list">
-								{[...metrics.processes]
-									.sort((left, right) => right.memoryBytes - left.memoryBytes)
-									.slice(0, 20)
-									.map((processMetric) => (
-										<div key={processMetric.processId}>
-											<span>
-												<strong title={processMetric.name}>
-													{apps.find(
-														(app) =>
-															app.bundleIdentifier ===
-															processMetric.bundleIdentifier
-													)?.displayName ?? processMetric.name}
-												</strong>
-												<code>PID {processMetric.processId}</code>
-											</span>
-											<span>
-												<code>{processMetric.cpuPercent.toFixed(1)}% CPU</code>
-												<code>{formatBytes(processMetric.memoryBytes)}</code>
-											</span>
-										</div>
-									))}
-							</div>
-						</Disclosure>
-					</>
-				) : (
-					<p className="sim-section-empty">
-						No native resource sample is available for this target.
+				</Disclosure>
+				<Disclosure title="Target information">
+					<dl>
+						<KeyValue label="UDID" mono value={target.udid} />
+						<KeyValue
+							label="Runtime"
+							value={runtime?.name ?? target.runtimeIdentifier}
+						/>
+						<KeyValue label="OS" value={runtime?.version ?? 'Unknown'} />
+						<KeyValue label="Device type" value={deviceTypeName ?? 'Unknown'} />
+						<KeyValue label="Installed apps" value={apps.length} />
+						<KeyValue
+							label="Largest app process"
+							mono={Boolean(activeApp)}
+							value={
+								activeApp
+									? `${activeAppName ? `${activeAppName} · ` : ''}${activeApp.bundleIdentifier} · PID ${activeApp.processId}`
+									: target.state === 'booted'
+										? 'No app process sampled'
+										: 'Simulator is shut down'
+							}
+						/>
+						<KeyValue
+							label="Resource sample"
+							value={
+								metrics
+									? new Date(metrics.sampledAt).toLocaleTimeString()
+									: 'Unavailable'
+							}
+						/>
+					</dl>
+				</Disclosure>
+				<DiskInventorySection
+					disk={disk}
+					isBridgeAvailable={isBridgeAvailable}
+					target={target}
+					onRunAction={onRunAction}
+				/>
+				<Disclosure
+					meta={
+						metrics
+							? `${metrics.cpuPercent.toFixed(0)}% CPU · ${formatBytes(metrics.memoryBytes)}`
+							: undefined
+					}
+					title="Resource monitoring"
+				>
+					<p className="sim-inline-note">
+						Live process footprint, sampled every five seconds while the desktop
+						is visible. Shared memory can affect totals; compare the same
+						workload.
 					</p>
-				)}
-			</section>
-			<Disclosure title="Manage target">
-				<div className="sim-section-heading">
-					<div>
-						<p>Rename or create a repairable clone</p>
-					</div>
-					<Pencil className="h-3.5 w-3.5" />
-				</div>
-				<div className="sim-manage-target-row">
-					<Input
-						aria-label="New Simulator name"
-						value={renameName}
-						onChange={(event) => setRenameName(event.currentTarget.value)}
-					/>
-					<Button
-						isDisabled={
-							!isBridgeAvailable ||
-							renameName.trim().length === 0 ||
-							renameName.trim() === target.name
-						}
-						size="sm"
-						variant="secondary"
-						onPress={() =>
-							onRunAction(
-								{
-									kind: 'device.rename',
-									udid: target.udid,
-									name: renameName.trim(),
-								},
-								`${target.name} was renamed.`
-							)
-						}
-					>
-						<Pencil className="h-3.5 w-3.5" /> Rename
-					</Button>
-				</div>
-				<div className="sim-manage-target-row">
-					<Input
-						aria-label="Cloned Simulator name"
-						value={cloneName}
-						onChange={(event) => setCloneName(event.currentTarget.value)}
-					/>
-					<Button
-						isDisabled={!isBridgeAvailable || cloneName.trim().length === 0}
-						size="sm"
-						variant="secondary"
-						onPress={() =>
-							onRunAction(
-								{
-									kind: 'device.clone',
-									udid: target.udid,
-									name: cloneName.trim(),
-								},
-								`${target.name} clone queued.`
-							)
-						}
-					>
-						<Copy className="h-3.5 w-3.5" /> Clone
-					</Button>
-				</div>
-				<p className="sim-inline-note">
-					A clone is the supported repair path today. If cloning fails, the
-					backend reports the exact simctl error without mutating the source.
-				</p>
-			</Disclosure>
-			<Disclosure title="Installed apps">
-				<div className="sim-section-heading">
-					<span>{apps.length}</span>
-				</div>
-				{apps.length > 0 ? (
-					<div className="sim-installed-apps">
-						{apps.slice(0, 20).map((app) => (
-							<div key={app.bundleIdentifier}>
-								<span className="sim-app-icon">
-									{app.displayName.slice(0, 1).toUpperCase()}
-								</span>
+					{metrics ? (
+						<>
+							<div className="sim-device-metrics">
 								<div>
-									<strong>{app.displayName}</strong>
-									<code>{app.bundleIdentifier}</code>
+									<span>CPU</span>
+									<strong>{metrics.cpuPercent.toFixed(1)}%</strong>
 								</div>
-								{!app.isSystem ? (
-									<ConfirmAction
-										confirmLabel="Uninstall app"
-										description={`Remove ${app.displayName} and its app data from ${target.name}. Native confirmation is required.`}
-										isDisabled={!isBridgeAvailable}
-										title={`Uninstall ${app.displayName}?`}
-										triggerIcon={<Trash2 className="h-3 w-3" />}
-										triggerLabel="Uninstall"
-										onConfirm={() =>
-											onRunAction(
-												{
-													kind: 'app.uninstall',
-													udid: target.udid,
-													bundleIdentifier: app.bundleIdentifier,
-												},
-												`${app.displayName} uninstall queued.`
-											)
-										}
-									/>
-								) : null}
+								<div>
+									<span>Memory</span>
+									<strong>{formatBytes(metrics.memoryBytes)}</strong>
+								</div>
+								<div>
+									<span>Processes</span>
+									<strong>{metrics.processCount}</strong>
+								</div>
+								<div>
+									<span>Disk allocated</span>
+									<strong>
+										{metrics.diskAllocatedBytes === undefined
+											? '—'
+											: formatBytes(metrics.diskAllocatedBytes)}
+									</strong>
+								</div>
 							</div>
-						))}
+							<Disclosure title="Processes using the most memory">
+								<div className="sim-process-list">
+									{[...metrics.processes]
+										.sort((left, right) => right.memoryBytes - left.memoryBytes)
+										.slice(0, 20)
+										.map((processMetric) => (
+											<div key={processMetric.processId}>
+												<span>
+													<strong title={processMetric.name}>
+														{apps.find(
+															(app) =>
+																app.bundleIdentifier ===
+																processMetric.bundleIdentifier
+														)?.displayName ?? processMetric.name}
+													</strong>
+													<code>PID {processMetric.processId}</code>
+												</span>
+												<span>
+													<code>
+														{processMetric.cpuPercent.toFixed(1)}% CPU
+													</code>
+													<code>{formatBytes(processMetric.memoryBytes)}</code>
+												</span>
+											</div>
+										))}
+								</div>
+							</Disclosure>
+						</>
+					) : (
+						<p className="sim-section-empty">
+							No native resource sample is available for this target.
+						</p>
+					)}
+				</Disclosure>
+				<Disclosure meta={String(apps.length)} title="Installed apps">
+					<div className="sim-row-actions">
+						<Button
+							isDisabled={!isBridgeAvailable || target.state !== 'booted'}
+							size="sm"
+							variant="secondary"
+							onPress={() =>
+								onRunAction(
+									{ kind: 'app.list', udid: target.udid },
+									'Installed apps refreshed.'
+								)
+							}
+						>
+							<RotateCcw className="h-3.5 w-3.5" /> Refresh apps
+						</Button>
 					</div>
-				) : (
-					<p className="sim-section-empty">
-						No user-installed apps were reported.
+					{apps.length > 0 ? (
+						<div className="sim-installed-apps">
+							{apps.slice(0, 20).map((app) => (
+								<div key={app.bundleIdentifier}>
+									<span className="sim-app-icon">
+										{app.displayName.slice(0, 1).toUpperCase()}
+									</span>
+									<div>
+										<strong>{app.displayName}</strong>
+										<code>{app.bundleIdentifier}</code>
+									</div>
+									{!app.isSystem ? (
+										<ConfirmAction
+											confirmLabel="Uninstall app"
+											description={`Remove ${app.displayName} and its app data from ${target.name}. Native confirmation is required.`}
+											isDisabled={!isBridgeAvailable}
+											title={`Uninstall ${app.displayName}?`}
+											triggerIcon={<Trash2 className="h-3 w-3" />}
+											triggerLabel="Uninstall"
+											onConfirm={() =>
+												onRunAction(
+													{
+														kind: 'app.uninstall',
+														udid: target.udid,
+														bundleIdentifier: app.bundleIdentifier,
+													},
+													`${app.displayName} uninstall queued.`
+												)
+											}
+										/>
+									) : null}
+								</div>
+							))}
+						</div>
+					) : (
+						<p className="sim-section-empty">
+							No user-installed apps were reported.
+						</p>
+					)}
+				</Disclosure>
+				<Disclosure title="Manage target">
+					<div className="sim-section-heading">
+						<div>
+							<p>Rename or create a repairable clone</p>
+						</div>
+						<Pencil className="h-3.5 w-3.5" />
+					</div>
+					<div className="sim-manage-target-row">
+						<Input
+							aria-label="New Simulator name"
+							value={renameName}
+							onChange={(event) => setRenameName(event.currentTarget.value)}
+						/>
+						<Button
+							isDisabled={
+								!isBridgeAvailable ||
+								renameName.trim().length === 0 ||
+								renameName.trim() === target.name
+							}
+							size="sm"
+							variant="secondary"
+							onPress={() =>
+								onRunAction(
+									{
+										kind: 'device.rename',
+										udid: target.udid,
+										name: renameName.trim(),
+									},
+									`${target.name} was renamed.`
+								)
+							}
+						>
+							<Pencil className="h-3.5 w-3.5" /> Rename
+						</Button>
+					</div>
+					<div className="sim-manage-target-row">
+						<Input
+							aria-label="Cloned Simulator name"
+							value={cloneName}
+							onChange={(event) => setCloneName(event.currentTarget.value)}
+						/>
+						<Button
+							isDisabled={!isBridgeAvailable || cloneName.trim().length === 0}
+							size="sm"
+							variant="secondary"
+							onPress={() =>
+								onRunAction(
+									{
+										kind: 'device.clone',
+										udid: target.udid,
+										name: cloneName.trim(),
+									},
+									`${target.name} clone queued.`
+								)
+							}
+						>
+							<Copy className="h-3.5 w-3.5" /> Clone
+						</Button>
+					</div>
+					<p className="sim-inline-note">
+						A clone is the supported repair path today. If cloning fails, the
+						backend reports the exact simctl error without mutating the source.
 					</p>
-				)}
-			</Disclosure>
+				</Disclosure>
+			</div>
 			<section className="sim-danger-zone">
 				<div>
 					<strong>Erase content and settings</strong>
@@ -1662,151 +1697,154 @@ function DiskInventorySection({
 		: 0;
 
 	return (
-		<section className="sim-detail-section sim-disk-inventory">
-			<div className="sim-section-heading">
-				<div>
-					<h3>Disk inventory</h3>
-					<InfoPopover label="Disk inventory">
+		<Disclosure
+			meta={disk ? formatBytes(disk.totalBytes) : undefined}
+			title="Disk inventory"
+		>
+			<div className="sim-disk-inventory">
+				<div className="sim-row-actions">
+					<p className="sim-inline-note">
 						Inspect storage to find disposable caches and logs. App data and
 						user files are protected.
-					</InfoPopover>
-				</div>
-				<Button
-					isDisabled={!isBridgeAvailable || !target.isAvailable}
-					size="sm"
-					variant="ghost"
-					onPress={() =>
-						onRunAction(
-							{ kind: 'disk.inspect', udid: target.udid },
-							`${target.name} disk inventory refresh queued.`
-						)
-					}
-				>
-					<HardDrive className="h-3.5 w-3.5" /> {disk ? 'Refresh' : 'Inspect'}
-				</Button>
-			</div>
-			{disk ? (
-				<>
-					<div className="sim-disk-summary">
-						<div>
-							<span>Simulator data</span>
-							<strong>{formatBytes(disk.totalBytes)}</strong>
-						</div>
-						<div>
-							<span>Known cleanable</span>
-							<strong>{formatBytes(disk.cleanableBytes)}</strong>
-						</div>
-						<div>
-							<span>Selected</span>
-							<strong>{formatBytes(selectedBytes)}</strong>
-						</div>
-					</div>
-					<section
-						className="sim-disk-storage"
-						aria-label="Protected disk storage"
-					>
-						{disk.storage.map((item) => (
-							<div key={item.id}>
-								<span>
-									<strong>{item.name}</strong>
-									<small>{item.description}</small>
-								</span>
-								<code>{formatBytes(item.bytes)}</code>
-							</div>
-						))}
-					</section>
-					<fieldset className="sim-disk-categories">
-						<legend>Allowlisted cleanup categories</legend>
-						{disk.categories.map((category) => {
-							const categoryId = category.id as SimulatorDiskCleanupCategoryId;
-							const isSelected = selected.includes(categoryId);
-							return (
-								<button
-									aria-pressed={category.canClean ? isSelected : undefined}
-									className={`${isSelected ? 'is-selected' : ''} ${category.canClean ? '' : 'is-protected'}`}
-									disabled={!category.canClean}
-									key={category.id}
-									type="button"
-									onClick={() => {
-										if (!disk || !category.canClean) return;
-										const next = isSelected
-											? selected.filter((id) => id !== categoryId)
-											: [...selected, categoryId];
-										setSelection({
-											revision: inventoryRevision,
-											categoryIds: sanitizeDiskCleanupCategoryIds(disk, next),
-										});
-									}}
-								>
-									<span className="sim-disk-category-check">
-										{isSelected ? (
-											<SquareCheckBig className="h-3.5 w-3.5" />
-										) : (
-											<Square className="h-3.5 w-3.5" />
-										)}
-									</span>
-									<span>
-										<strong>{category.name}</strong>
-										<small>{category.description}</small>
-										<em>
-											{category.canClean
-												? `Risk ${category.risk} · ${category.downside} Recovery: ${category.recovery}`
-												: `Protected · ${category.downside}`}
-										</em>
-									</span>
-									<code>{formatBytes(category.bytes)}</code>
-								</button>
-							);
-						})}
-					</fieldset>
-					<div className="sim-disk-cleanup-action">
-						<div>
-							<strong>{selected.length} categories selected</strong>
-							<span>
-								Cleanup is scoped to known Simulator paths and requires exact
-								native confirmation.
-							</span>
-						</div>
-						<ConfirmAction
-							confirmLabel="Clean selected data"
-							description={`Remove ${formatBytes(selectedBytes)} of allowlisted caches and generated data from ${target.name}. The backend preserves and verifies the prior boot state.`}
-							isDisabled={!isBridgeAvailable || selected.length === 0}
-							title={`Clean disk data from ${target.name}?`}
-							triggerIcon={<Trash2 className="h-3 w-3" />}
-							triggerLabel="Clean selected"
-							onConfirm={() =>
-								onRunAction(
-									{
-										kind: 'disk.cleanup',
-										udid: target.udid,
-										categoryIds: selected,
-									},
-									`${target.name} cleanup queued.`
-								)
-							}
-						/>
-					</div>
-					{disk.lastCleanup ? (
-						<p className="sim-disk-last-cleanup" role="status">
-							Last cleanup reclaimed{' '}
-							{formatBytes(disk.lastCleanup.reclaimedBytes)} ·{' '}
-							{disk.lastCleanup.bootStateRestored
-								? 'original boot state restored'
-								: 'boot state needs attention'}{' '}
-							· {new Date(disk.lastCleanup.cleanedAt).toLocaleString()}
-						</p>
-					) : null}
-					<p className="sim-inline-note">
-						Inspected {new Date(disk.inspectedAt).toLocaleString()}. Installed
-						apps, Documents, app data, user media, and required Siri assets are
-						never cleanup targets.
 					</p>
-				</>
-			) : (
-				<p className="sim-section-empty">
-					Inspect storage to see what can be cleaned.
-				</p>
-			)}
-		</section>
+					<Button
+						isDisabled={!isBridgeAvailable || !target.isAvailable}
+						size="sm"
+						variant="ghost"
+						onPress={() =>
+							onRunAction(
+								{ kind: 'disk.inspect', udid: target.udid },
+								`${target.name} disk inventory refresh queued.`
+							)
+						}
+					>
+						<HardDrive className="h-3.5 w-3.5" /> {disk ? 'Refresh' : 'Inspect'}
+					</Button>
+				</div>
+				{disk ? (
+					<>
+						<div className="sim-disk-summary">
+							<div>
+								<span>Simulator data</span>
+								<strong>{formatBytes(disk.totalBytes)}</strong>
+							</div>
+							<div>
+								<span>Known cleanable</span>
+								<strong>{formatBytes(disk.cleanableBytes)}</strong>
+							</div>
+							<div>
+								<span>Selected</span>
+								<strong>{formatBytes(selectedBytes)}</strong>
+							</div>
+						</div>
+						<section
+							className="sim-disk-storage"
+							aria-label="Protected disk storage"
+						>
+							{disk.storage.map((item) => (
+								<div key={item.id}>
+									<span>
+										<strong>{item.name}</strong>
+										<small>{item.description}</small>
+									</span>
+									<code>{formatBytes(item.bytes)}</code>
+								</div>
+							))}
+						</section>
+						<fieldset className="sim-disk-categories">
+							<legend>Allowlisted cleanup categories</legend>
+							{disk.categories.map((category) => {
+								const categoryId =
+									category.id as SimulatorDiskCleanupCategoryId;
+								const isSelected = selected.includes(categoryId);
+								return (
+									<button
+										aria-pressed={category.canClean ? isSelected : undefined}
+										className={`${isSelected ? 'is-selected' : ''} ${category.canClean ? '' : 'is-protected'}`}
+										disabled={!category.canClean}
+										key={category.id}
+										type="button"
+										onClick={() => {
+											if (!disk || !category.canClean) return;
+											const next = isSelected
+												? selected.filter((id) => id !== categoryId)
+												: [...selected, categoryId];
+											setSelection({
+												revision: inventoryRevision,
+												categoryIds: sanitizeDiskCleanupCategoryIds(disk, next),
+											});
+										}}
+									>
+										<span className="sim-disk-category-check">
+											{isSelected ? (
+												<SquareCheckBig className="h-3.5 w-3.5" />
+											) : (
+												<Square className="h-3.5 w-3.5" />
+											)}
+										</span>
+										<span>
+											<strong>{category.name}</strong>
+											<small>{category.description}</small>
+											<em>
+												{category.canClean
+													? `Risk ${category.risk} · ${category.downside} Recovery: ${category.recovery}`
+													: `Protected · ${category.downside}`}
+											</em>
+										</span>
+										<code>{formatBytes(category.bytes)}</code>
+									</button>
+								);
+							})}
+						</fieldset>
+						<div className="sim-disk-cleanup-action">
+							<div>
+								<strong>{selected.length} categories selected</strong>
+								<span>
+									Cleanup is scoped to known Simulator paths and requires exact
+									native confirmation.
+								</span>
+							</div>
+							<ConfirmAction
+								confirmLabel="Clean selected data"
+								description={`Remove ${formatBytes(selectedBytes)} of allowlisted caches and generated data from ${target.name}. The backend preserves and verifies the prior boot state.`}
+								isDisabled={!isBridgeAvailable || selected.length === 0}
+								title={`Clean disk data from ${target.name}?`}
+								triggerIcon={<Trash2 className="h-3 w-3" />}
+								triggerLabel="Clean selected"
+								onConfirm={() =>
+									onRunAction(
+										{
+											kind: 'disk.cleanup',
+											udid: target.udid,
+											categoryIds: selected,
+										},
+										`${target.name} cleanup queued.`
+									)
+								}
+							/>
+						</div>
+						{disk.lastCleanup ? (
+							<p className="sim-disk-last-cleanup" role="status">
+								Last cleanup reclaimed{' '}
+								{formatBytes(disk.lastCleanup.reclaimedBytes)} ·{' '}
+								{disk.lastCleanup.bootStateRestored
+									? 'original boot state restored'
+									: 'boot state needs attention'}{' '}
+								· {new Date(disk.lastCleanup.cleanedAt).toLocaleString()}
+							</p>
+						) : null}
+						<p className="sim-inline-note">
+							Inspected {new Date(disk.inspectedAt).toLocaleString()}. Installed
+							apps, Documents, app data, user media, and required Siri assets
+							are never cleanup targets.
+						</p>
+					</>
+				) : (
+					<p className="sim-section-empty">
+						Inspect storage to see what can be cleaned.
+					</p>
+				)}
+			</div>
+		</Disclosure>
 	);
 }

@@ -1,19 +1,91 @@
 import { describe, expect, it } from 'vitest';
+import type { NetworkEntry } from '../../shared/protocol';
 import {
+	durationBarPercent,
+	durationTone,
 	headersText,
 	matchesNetworkTarget,
-	methodBadgeTone,
+	networkSegmentCounts,
+	prettyBody,
+	redactedCount,
+	statusLabel,
 	statusTone,
 } from './network-panel';
 
-describe('methodBadgeTone', () => {
-	it('maps HTTP verbs to semantic badge tones', () => {
-		expect(methodBadgeTone('GET')).toBe('info');
-		expect(methodBadgeTone('head')).toBe('info');
-		expect(methodBadgeTone('POST')).toBe('success');
-		expect(methodBadgeTone('DELETE')).toBe('danger');
-		expect(methodBadgeTone('PUT')).toBe('warning');
-		expect(methodBadgeTone('PATCH')).toBe('warning');
+function request(overrides: Partial<NetworkEntry>): NetworkEntry {
+	return {
+		id: 'request-1',
+		at: 1,
+		method: 'GET',
+		url: 'https://api.example.com/rest/v1/projects',
+		host: 'api.example.com',
+		path: '/rest/v1/projects',
+		state: 'success',
+		status: 200,
+		durationMs: 120,
+		...overrides,
+	};
+}
+
+describe('duration bars', () => {
+	it('share one 0 to 2 s scale with a visible minimum', () => {
+		expect(durationBarPercent(undefined)).toBe(0);
+		expect(durationBarPercent(10)).toBe(3);
+		expect(durationBarPercent(1_000)).toBe(50);
+		expect(durationBarPercent(9_000)).toBe(100);
+	});
+
+	it('are red for failures, amber when slow and green otherwise', () => {
+		expect(durationTone(request({ durationMs: 80 }))).toBe('success');
+		expect(durationTone(request({ durationMs: 1_000 }))).toBe('warning');
+		expect(durationTone(request({ status: 503, durationMs: 80 }))).toBe(
+			'danger'
+		);
+		expect(durationTone(request({ state: 'pending' }))).toBe('info');
+	});
+});
+
+describe('statusLabel', () => {
+	it('adds the reason phrase for common codes only', () => {
+		expect(statusLabel({ state: 'success', status: 200 })).toBe('200 OK');
+		expect(statusLabel({ state: 'success', status: 503 })).toBe(
+			'503 Service Unavailable'
+		);
+		expect(statusLabel({ state: 'success', status: 299 })).toBe('299');
+		expect(statusLabel({ state: 'pending' })).toBe('Pending');
+		expect(statusLabel({ state: 'aborted' })).toBe('aborted');
+	});
+});
+
+describe('request bodies', () => {
+	it('indents JSON and leaves anything else as captured', () => {
+		expect(prettyBody('{"a":1,"b":[true]}')).toBe(
+			'{\n  "a": 1,\n  "b": [\n    true\n  ]\n}'
+		);
+		expect(prettyBody('{"cut": "off')).toBe('{"cut": "off');
+		expect(prettyBody('plain text')).toBe('plain text');
+	});
+
+	it('counts the values the device redacted', () => {
+		expect(redactedCount(undefined)).toBe(0);
+		expect(
+			redactedCount(
+				'{"id":"[REDACTED_ID]","email":"[REDACTED_EMAIL]","note":"[REDACTED]"}'
+			)
+		).toBe(3);
+	});
+});
+
+describe('networkSegmentCounts', () => {
+	it('counts each view filter over every captured request', () => {
+		const counts = networkSegmentCounts([
+			request({ id: 'ok' }),
+			request({ id: 'slow', durationMs: 1_500 }),
+			request({ id: 'failed', status: 500 }),
+		]);
+		expect(counts.all).toBe(3);
+		expect(counts.slow).toBe(1);
+		expect(counts.errors).toBe(1);
 	});
 });
 

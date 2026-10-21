@@ -8,6 +8,7 @@ import { NativeSelect } from '@heroui-pro/react/native-select';
 import {
 	matchesNetworkSegment,
 	type NetworkSegment,
+	SLOW_REQUEST_MS,
 } from '@rndevtools/core/plugins/network-presentation';
 import {
 	ChevronDown,
@@ -32,7 +33,6 @@ import {
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import {
@@ -65,6 +65,13 @@ import type { SupabaseTrafficTarget } from '../../shared/supabase-traffic';
 type NetworkFilter = NetworkSegment;
 type DetailTab = 'overview' | 'headers' | 'request' | 'response';
 
+const DETAIL_TABS: readonly { id: DetailTab; label: string }[] = [
+	{ id: 'overview', label: 'Overview' },
+	{ id: 'headers', label: 'Headers' },
+	{ id: 'request', label: 'Request' },
+	{ id: 'response', label: 'Response' },
+];
+
 const NETWORK_PROFILES = [
 	{ id: 'offline', name: 'Offline' },
 	{ id: 'edge', name: 'Edge' },
@@ -86,21 +93,85 @@ const NETWORK_FILTERS: {
 	{ id: 'supabase', label: 'Backend' },
 ];
 
-/**
- * Method → `Badge` tone. HTTP verbs read as semantic categories, not status:
- * GET is neutral information (blue), the mutating verbs escalate — POST creates
- * (positive/green), DELETE removes (danger/red), PUT/PATCH/other change
- * (warning/amber). Kept pure so the mapping is unit-tested rather than
- * eyeballed.
- */
-export function methodBadgeTone(
-	method: string
-): 'info' | 'success' | 'danger' | 'warning' {
-	const verb = method.toUpperCase();
-	if (verb === 'GET' || verb === 'HEAD') return 'info';
-	if (verb === 'POST') return 'success';
-	if (verb === 'DELETE') return 'danger';
-	return 'warning';
+/** Durations share one 0 to 2 s scale, so bars compare across requests. */
+const DURATION_SCALE_MS = 2_000;
+
+export function durationBarPercent(durationMs: number | undefined): number {
+	if (durationMs === undefined) return 0;
+	return Math.max(
+		3,
+		Math.min(100, Math.round((durationMs / DURATION_SCALE_MS) * 100))
+	);
+}
+
+const STATUS_REASONS: Readonly<Record<number, string>> = {
+	200: 'OK',
+	201: 'Created',
+	202: 'Accepted',
+	204: 'No Content',
+	301: 'Moved Permanently',
+	302: 'Found',
+	304: 'Not Modified',
+	400: 'Bad Request',
+	401: 'Unauthorized',
+	403: 'Forbidden',
+	404: 'Not Found',
+	409: 'Conflict',
+	422: 'Unprocessable Content',
+	429: 'Too Many Requests',
+	500: 'Internal Server Error',
+	502: 'Bad Gateway',
+	503: 'Service Unavailable',
+	504: 'Gateway Timeout',
+};
+
+/** `200 OK`, or the code alone when its reason phrase is not a common one. */
+export function statusLabel(
+	entry: Pick<NetworkEntry, 'state' | 'status'>
+): string {
+	if (entry.state === 'pending') return 'Pending';
+	if (entry.status === undefined) return entry.state;
+	const reason = STATUS_REASONS[entry.status];
+	return reason ? `${entry.status} ${reason}` : String(entry.status);
+}
+
+/** A failure is red at any speed; otherwise slow requests are amber. */
+export function durationTone(
+	entry: Pick<NetworkEntry, 'state' | 'status' | 'durationMs'>
+): 'success' | 'warning' | 'danger' | 'info' {
+	if (entry.state === 'pending') return 'info';
+	if (statusTone(entry) === 'danger') return 'danger';
+	return (entry.durationMs ?? 0) >= SLOW_REQUEST_MS ? 'warning' : 'success';
+}
+
+/** JSON bodies indented two spaces; anything else, or cut short, as captured. */
+export function prettyBody(value: string): string {
+	try {
+		return JSON.stringify(JSON.parse(value), null, 2);
+	} catch {
+		return value;
+	}
+}
+
+/** How many values the device redacted before the body reached the desktop. */
+export function redactedCount(value: string | undefined): number {
+	return value?.match(/\[REDACTED(?:_[A-Z]+)?\]/g)?.length ?? 0;
+}
+
+/** Each view filter's count, before search and the backend filter. */
+export function networkSegmentCounts(
+	entries: readonly NetworkEntry[]
+): Record<NetworkFilter, number> {
+	return {
+		all: entries.length,
+		errors: entries.filter((entry) => matchesNetworkSegment(entry, 'errors'))
+			.length,
+		slow: entries.filter((entry) => matchesNetworkSegment(entry, 'slow'))
+			.length,
+		supabase: entries.filter((entry) =>
+			matchesNetworkSegment(entry, 'supabase')
+		).length,
+	};
 }
 
 export function statusTone(
@@ -143,11 +214,20 @@ export function matchesNetworkTarget(
 	);
 }
 
-function MethodBadge({ method }: { method: string }) {
+/** Methods are neutral: colour is kept for outcomes, not verbs. */
+function MethodChip({ method }: { method: string }) {
+	return <span className="network-method">{method}</span>;
+}
+
+function StatusCode({
+	entry,
+	label,
+}: {
+	entry: Pick<NetworkEntry, 'state' | 'status'>;
+	label: string;
+}) {
 	return (
-		<Badge className="font-mono font-semibold" tone={methodBadgeTone(method)}>
-			{method}
-		</Badge>
+		<span className={`network-status is-${statusTone(entry)}`}>{label}</span>
 	);
 }
 
@@ -231,6 +311,7 @@ export function NetworkPanel() {
 			.sort((left, right) => right.at - left.at);
 	}, [entries, filter, query, targetFilter, targetFor]);
 
+	const segmentCounts = useMemo(() => networkSegmentCounts(entries), [entries]);
 	const selected =
 		filtered.find((entry) => entry.id === selectedId) ?? filtered[0] ?? null;
 	const columns = useMemo<DataGridColumn<NetworkEntry>[]>(
@@ -238,9 +319,9 @@ export function NetworkPanel() {
 			{
 				id: 'method',
 				header: 'Method',
-				width: 88,
+				width: 76,
 				isRowHeader: true,
-				cell: (entry) => <MethodBadge method={entry.method} />,
+				cell: (entry) => <MethodChip method={entry.method} />,
 			},
 			{
 				id: 'request',
@@ -266,30 +347,43 @@ export function NetworkPanel() {
 			{
 				id: 'status',
 				header: 'Status',
-				width: 92,
+				width: 76,
 				cell: (entry) => (
-					<StatusPill tone={statusTone(entry)}>
-						{entry.state === 'pending'
-							? 'Pending'
-							: (entry.status ?? entry.state)}
-					</StatusPill>
+					<StatusCode
+						entry={entry}
+						label={
+							entry.state === 'pending'
+								? 'Pending'
+								: String(entry.status ?? entry.state)
+						}
+					/>
 				),
 			},
 			{
 				id: 'duration',
-				header: 'Time',
-				width: 90,
-				align: 'end',
-				cell: (entry) => (
-					<span className="font-mono text-xs text-(--muted)">
-						{formatDuration(entry.durationMs)}
-					</span>
-				),
+				header: 'Duration',
+				width: 150,
+				cell: (entry) => {
+					const tone = durationTone(entry);
+					return (
+						<span className="network-duration">
+							<span className={`network-duration-value is-${tone}`}>
+								{formatDuration(entry.durationMs)}
+							</span>
+							<span aria-hidden="true" className="network-duration-track">
+								<span
+									className={`network-duration-bar is-${tone}`}
+									style={{ width: `${durationBarPercent(entry.durationMs)}%` }}
+								/>
+							</span>
+						</span>
+					);
+				},
 			},
 			{
 				id: 'size',
 				header: 'Size',
-				width: 88,
+				width: 92,
 				align: 'end',
 				cell: (entry) => (
 					<span className="font-mono text-xs text-(--muted)">
@@ -300,7 +394,7 @@ export function NetworkPanel() {
 			{
 				id: 'at',
 				header: 'Started',
-				width: 92,
+				width: 88,
 				align: 'end',
 				cell: (entry) => (
 					<span className="font-mono text-xs text-(--text-3)">
@@ -347,10 +441,14 @@ export function NetworkPanel() {
 		<section className="panel-root">
 			<PanelHeader
 				title="Network"
-				description="Every instrumented request, with privacy-safe headers, bodies, timing, and failure context."
+				description="Every instrumented request, with privacy-safe headers, bodies, timing, and failure context. Duration bars share one 0 to 2 s scale."
 				meta={
-					<span className="flex items-center gap-1.5 text-(--brand-text)">
-						<Radio className="h-3 w-3" /> {paused ? 'View paused' : 'Live view'}
+					<span className={`network-live ${paused ? 'is-paused' : ''}`}>
+						<span aria-hidden="true" className="network-live-dot" />
+						{paused ? 'View paused' : 'Live view'} ·{' '}
+						{filtered.length === entries.length
+							? `${entries.length} requests`
+							: `${filtered.length} of ${entries.length} requests`}
 					</span>
 				}
 				actions={
@@ -407,20 +505,23 @@ export function NetworkPanel() {
 					widthClassName="w-[260px] max-[1080px]:w-[200px]"
 					onChange={setQuery}
 				/>
-				<div className="flex items-center gap-1">
+				<fieldset className="sim-layout-toggle network-segments">
+					<legend className="sr-only">Show requests</legend>
 					{NETWORK_FILTERS.map(({ id, label }) => (
 						<Button
 							aria-pressed={filter === id}
-							className="h-7 rounded-md px-2.5 text-xs"
 							key={id}
 							size="sm"
 							variant={filter === id ? 'secondary' : 'ghost'}
 							onPress={() => setFilter(id)}
 						>
 							{label}
+							<span aria-hidden="true" className="network-segment-count">
+								{segmentCounts[id]}
+							</span>
 						</Button>
 					))}
-				</div>
+				</fieldset>
 				{targetFilter ? (
 					<span className="network-target-filter">
 						<Badge className="network-target-filter-label">
@@ -438,93 +539,89 @@ export function NetworkPanel() {
 						</Button>
 					</span>
 				) : null}
-				<span className="sim-toolbar-separator" />
-				<div className="sim-toolbar-field">
-					<span>Fetch profile</span>
-					<NativeSelect className="sim-filter-select" fullWidth={false}>
-						<NativeSelect.Trigger
-							aria-label="Instrumented fetch network profile"
-							value={profileId}
-							onChange={(event) =>
-								setProfileId(event.currentTarget.value as NetworkProfileId)
-							}
-						>
-							{NETWORK_PROFILES.map((profile) => (
-								<NativeSelect.Option key={profile.id} value={profile.id}>
-									{profile.name}
-								</NativeSelect.Option>
-							))}
-							<NativeSelect.Indicator>
-								<ChevronDown className="h-3 w-3" />
-							</NativeSelect.Indicator>
-						</NativeSelect.Trigger>
-					</NativeSelect>
+				<div className="network-profile">
+					<div className="sim-toolbar-field">
+						<span>Fetch profile</span>
+						<NativeSelect className="sim-filter-select" fullWidth={false}>
+							<NativeSelect.Trigger
+								aria-label="Instrumented fetch network profile"
+								value={profileId}
+								onChange={(event) =>
+									setProfileId(event.currentTarget.value as NetworkProfileId)
+								}
+							>
+								{NETWORK_PROFILES.map((profile) => (
+									<NativeSelect.Option key={profile.id} value={profile.id}>
+										{profile.name}
+									</NativeSelect.Option>
+								))}
+								<NativeSelect.Indicator>
+									<ChevronDown className="h-3 w-3" />
+								</NativeSelect.Indicator>
+							</NativeSelect.Trigger>
+						</NativeSelect>
+					</div>
+					<Button
+						{...(setProfileReason
+							? { 'aria-describedby': 'network-set-reason' }
+							: {})}
+						isDisabled={!canRunAction('network', 'setProfile')}
+						size="sm"
+						variant="secondary"
+						onPress={() =>
+							void runAction(
+								'network',
+								'setProfile',
+								{ profileId },
+								`${NETWORK_PROFILES.find((profile) => profile.id === profileId)?.name ?? profileId} fetch profile applied.`
+							)
+						}
+					>
+						<Wifi className="h-3.5 w-3.5" /> Set
+					</Button>
+					<Button
+						{...(currentProfile?.active
+							? {}
+							: { 'aria-describedby': 'network-clear-reason' })}
+						isDisabled={
+							!canRunAction('network', 'clearProfile') ||
+							!currentProfile?.active
+						}
+						size="sm"
+						variant="ghost"
+						onPress={() =>
+							void runAction(
+								'network',
+								'clearProfile',
+								{},
+								'Instrumented fetch profile cleared.'
+							)
+						}
+					>
+						<WifiOff className="h-3.5 w-3.5" /> Clear
+					</Button>
+					{setProfileReason ? (
+						<span className="sr-only" id="network-set-reason">
+							{setProfileReason}
+						</span>
+					) : !currentProfile?.active ? (
+						<span className="sr-only" id="network-clear-reason">
+							No profile active
+						</span>
+					) : null}
 				</div>
-				<Button
-					{...(setProfileReason
-						? { 'aria-describedby': 'network-set-reason' }
-						: {})}
-					isDisabled={!canRunAction('network', 'setProfile')}
-					size="sm"
-					variant="secondary"
-					onPress={() =>
-						void runAction(
-							'network',
-							'setProfile',
-							{ profileId },
-							`${NETWORK_PROFILES.find((profile) => profile.id === profileId)?.name ?? profileId} fetch profile applied.`
-						)
-					}
-				>
-					<Wifi className="h-3.5 w-3.5" /> Set
-				</Button>
-				<Button
-					{...(currentProfile?.active
-						? {}
-						: { 'aria-describedby': 'network-clear-reason' })}
-					isDisabled={
-						!canRunAction('network', 'clearProfile') || !currentProfile?.active
-					}
-					size="sm"
-					variant="ghost"
-					onPress={() =>
-						void runAction(
-							'network',
-							'clearProfile',
-							{},
-							'Instrumented fetch profile cleared.'
-						)
-					}
-				>
-					<WifiOff className="h-3.5 w-3.5" /> Clear
-				</Button>
-				{setProfileReason ? (
-					<span
-						className="shrink-0 text-xs text-(--warning-text)"
-						id="network-set-reason"
-					>
-						{setProfileReason}
-					</span>
-				) : !currentProfile?.active ? (
-					<span
-						className="shrink-0 text-xs text-(--text-3)"
-						id="network-clear-reason"
-					>
-						No profile active
-					</span>
-				) : null}
-				<span className="ml-auto shrink-0 font-mono text-xs text-(--text-3)">
-					{filtered.length} of {entries.length} requests
-				</span>
 			</Toolbar>
 			<PanelNotice
 				title={
-					currentProfile?.active
-						? `${currentProfile.name} is active · instrumented requests only`
-						: 'Network simulation is off'
+					setProfileReason
+						? 'Fetch profiles are not available for this app'
+						: currentProfile?.active
+							? `${currentProfile.name} is active · instrumented requests only`
+							: 'Network simulation is off'
 				}
 				tone="info"
 			>
+				{setProfileReason ? `${setProfileReason} ` : null}
 				{currentProfile?.active
 					? `${currentProfile.name} is active for instrumented fetch only. `
 					: 'No network profile is currently active. '}
@@ -603,37 +700,65 @@ function NetworkDetail({
 }) {
 	return (
 		<div className="flex h-full flex-col">
-			<div className="border-b border-foreground/8 p-4">
-				<div className="mb-3 flex items-center gap-2">
-					<MethodBadge method={entry.method} />
-					<StatusPill tone={statusTone(entry)}>
-						{entry.status ?? entry.state}
-					</StatusPill>
+			<div className="network-detail-head">
+				<div className="network-detail-badges">
+					<MethodChip method={entry.method} />
+					<StatusCode entry={entry} label={statusLabel(entry)} />
+					<span className="network-detail-time">{formatClock(entry.at)}</span>
 				</div>
-				<h2 className="m-0 break-all font-mono text-xs font-medium leading-5 text-(--foreground)">
-					{truncateMiddle(entry.url, 160)}
-				</h2>
-				<p className="mb-0 mt-2 text-xs text-(--text-3)">
-					{formatClock(entry.at)} · {formatDuration(entry.durationMs)} ·{' '}
+				<h2 className="network-detail-url">{truncateMiddle(entry.url, 160)}</h2>
+				<p className="network-detail-meta">
+					{formatDuration(entry.durationMs)} ·{' '}
 					{formatBytes(entry.responseBytes)}
+					{entry.source ? ` · ${entry.source}` : ''}
 				</p>
 			</div>
-			<div className="flex h-9 shrink-0 items-end gap-4 border-b border-foreground/8 px-4">
-				{(['overview', 'headers', 'request', 'response'] as const).map(
-					(value) => (
-						<button
-							aria-pressed={tab === value}
-							className={`h-9 border-b text-xs capitalize transition-colors ${tab === value ? 'border-foreground text-foreground' : 'border-transparent text-(--text-3) hover:text-(--muted)'}`}
-							key={value}
-							type="button"
-							onClick={() => onTabChange(value)}
-						>
-							{value}
-						</button>
-					)
-				)}
+			<div
+				aria-label="Request detail"
+				className="network-tabs"
+				role="tablist"
+				onKeyDown={(event) => {
+					const index = DETAIL_TABS.findIndex(({ id }) => id === tab);
+					const next =
+						event.key === 'ArrowRight'
+							? DETAIL_TABS[(index + 1) % DETAIL_TABS.length]
+							: event.key === 'ArrowLeft'
+								? DETAIL_TABS[
+										(index + DETAIL_TABS.length - 1) % DETAIL_TABS.length
+									]
+								: event.key === 'Home'
+									? DETAIL_TABS[0]
+									: event.key === 'End'
+										? DETAIL_TABS.at(-1)
+										: undefined;
+					if (!next) return;
+					event.preventDefault();
+					onTabChange(next.id);
+					document.getElementById(`network-tab-${next.id}`)?.focus();
+				}}
+			>
+				{DETAIL_TABS.map(({ id, label }) => (
+					<button
+						aria-controls="network-tab-panel"
+						aria-selected={tab === id}
+						className="network-tab"
+						id={`network-tab-${id}`}
+						key={id}
+						role="tab"
+						tabIndex={tab === id ? 0 : -1}
+						type="button"
+						onClick={() => onTabChange(id)}
+					>
+						{label}
+					</button>
+				))}
 			</div>
-			<div className="min-h-0 flex-1 overflow-auto p-4">
+			<div
+				aria-labelledby={`network-tab-${tab}`}
+				className="min-h-0 flex-1 overflow-auto p-4"
+				id="network-tab-panel"
+				role="tabpanel"
+			>
 				{tab === 'overview' ? (
 					<dl className="m-0">
 						<KeyValue label="Host" value={entry.host} mono />
@@ -712,20 +837,62 @@ function NetworkDetail({
 					</div>
 				) : null}
 				{tab === 'request' ? (
-					<CodePreview
-						label="Request body"
-						value={entry.requestBody}
-						maxHeight={520}
-					/>
+					<BodyPreview label="Request body" value={entry.requestBody} />
 				) : null}
 				{tab === 'response' ? (
-					<CodePreview
-						label="Response body"
-						value={entry.responseBody}
-						maxHeight={520}
-					/>
+					<BodyPreview label="Response body" value={entry.responseBody} />
 				) : null}
 			</div>
+		</div>
+	);
+}
+
+/**
+ * A captured body, indented when it is JSON. Raw shows it as captured, and a
+ * note counts the values the device redacted before they reached the desktop.
+ */
+function BodyPreview({
+	label,
+	value,
+}: {
+	label: string;
+	value: string | undefined;
+}) {
+	const [format, setFormat] = useState<'pretty' | 'raw'>('pretty');
+	const pretty = value === undefined ? undefined : prettyBody(value);
+	const canFormat = pretty !== undefined && pretty !== value;
+	const redacted = redactedCount(value);
+	return (
+		<div className="space-y-2">
+			<CodePreview
+				actions={
+					canFormat ? (
+						<fieldset className="sim-layout-toggle network-body-format">
+							<legend className="sr-only">{label} format</legend>
+							{(['pretty', 'raw'] as const).map((option) => (
+								<Button
+									aria-pressed={format === option}
+									key={option}
+									size="sm"
+									variant={format === option ? 'secondary' : 'ghost'}
+									onPress={() => setFormat(option)}
+								>
+									{option === 'pretty' ? 'Pretty' : 'Raw'}
+								</Button>
+							))}
+						</fieldset>
+					) : null
+				}
+				label={label}
+				maxHeight={520}
+				value={canFormat && format === 'pretty' ? pretty : value}
+			/>
+			{redacted > 0 ? (
+				<p className="network-redaction-note">
+					{redacted === 1 ? '1 value was' : `${redacted} values were`} redacted
+					on the device before reaching RN Devtools.
+				</p>
+			) : null}
 		</div>
 	);
 }
