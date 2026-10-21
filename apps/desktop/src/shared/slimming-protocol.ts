@@ -37,6 +37,7 @@ export const SLIMMING_CONFIRMATIONS = {
 	apply: 'APPLY_EXPERIMENTAL_PROFILE',
 	restore: 'RESTORE_ALL_MANAGED_SERVICES',
 	undo: 'UNDO_EXPERIMENTAL_MUTATION',
+	forget: 'FORGET_EMERGENCY_RESTORE_POINT',
 } as const;
 
 const slimmingConditionSchema = z.enum([
@@ -352,6 +353,20 @@ export const slimmingActionSchema = z.union([
 		confirmation: z.literal(SLIMMING_CONFIRMATIONS.restore),
 	}),
 	z.strictObject({ ...profileActionBase, kind: z.literal('profile.verify') }),
+	/**
+	 * Forgets the emergency restore point an interrupted mutation left behind
+	 * (its pending reconciliation record), for when Undo can no longer use it,
+	 * as after an Xcode, runtime or helper update. Never the last completed
+	 * change's checkpoint. Operator only: it has no requester, so no agent
+	 * request can express it, and main asks before every one.
+	 */
+	z.strictObject({
+		actionId: identifierSchema,
+		kind: z.literal('pending.forget'),
+		simulatorUdids: simulatorUdidsSchema,
+		confirmation: z.literal(SLIMMING_CONFIRMATIONS.forget),
+		confirmationToken: confirmationTokenSchema.optional(),
+	}),
 	z.strictObject({
 		...actionBase,
 		kind: z.literal('doctor.run'),

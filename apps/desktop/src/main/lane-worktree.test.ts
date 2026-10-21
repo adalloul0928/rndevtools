@@ -195,6 +195,32 @@ describe('readExpoIdentity', () => {
 		expect((await readExpoIdentity(root)).scheme).toBe('one');
 	});
 
+	it('derives the dev client scheme from the slug the way Expo does', async () => {
+		const scheme = async (expo: Record<string, unknown>) => {
+			await writeFile(path.join(root, 'app.json'), JSON.stringify({ expo }));
+			return (await readExpoIdentity(root)).scheme;
+		};
+		// expo-dev-client's getDefaultScheme: drop what a URI scheme cannot
+		// hold, lowercase, prefix exp+. That is the scheme the dev client has.
+		expect(await scheme({ slug: 'my_app' })).toBe('exp+myapp');
+		expect(await scheme({ slug: 'My App (Beta)' })).toBe('exp+myappbeta');
+		expect(await scheme({ slug: 'example.app-2' })).toBe('exp+example.app-2');
+		// Nothing URL-friendly left: Expo registers no default scheme either.
+		expect(await scheme({ slug: '___' })).toBeUndefined();
+		// A declared scheme the lane record cannot hold yields to a valid one.
+		expect(await scheme({ slug: 'my_app', scheme: 'my_app' })).toBe(
+			'exp+myapp'
+		);
+		expect(
+			await scheme({ slug: 'demo', scheme: ['bad_one', 'good-one'] })
+		).toBe('good-one');
+		// Too long for a lane scheme: left out instead of failing the start.
+		expect(await scheme({ slug: 'a'.repeat(60) })).toBe(
+			`exp+${'a'.repeat(60)}`
+		);
+		expect(await scheme({ slug: 'a'.repeat(61) })).toBeUndefined();
+	});
+
 	it('returns nothing for a worktree without static Expo config', async () => {
 		expect(await readExpoIdentity(root)).toEqual({});
 		await writeFile(path.join(root, 'app.json'), '{ not json');

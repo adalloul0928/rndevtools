@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { laneSchemeSchema } from '../shared/lane-protocol';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
@@ -134,10 +135,22 @@ function stringAt(value: unknown, keys: readonly string[]): string | undefined {
 }
 
 /**
+ * The scheme expo-dev-client registers for a slug (its `getDefaultScheme`):
+ * every character a URI scheme cannot hold dropped, lowercased, `exp+` in
+ * front. `my_app` becomes `exp+myapp`. A slug with nothing left gets none.
+ */
+function devClientDefaultScheme(slug: string): string | undefined {
+	const scheme = slug.replace(/[^A-Za-z0-9+\-.]/g, '').toLowerCase();
+	return scheme.length > 0 ? `exp+${scheme}` : undefined;
+}
+
+/**
  * Reads the URL scheme and iOS bundle identifier from the worktree's static
  * Expo config. Dynamic `app.config.js` files are not evaluated: running
  * arbitrary project code inside the desktop app is not worth a launch URL.
  * Callers fall back to a user-supplied scheme when the static file is absent.
+ * The scheme is the first declared one a lane can hold, else the dev
+ * client's default; one a lane record would refuse is never returned.
  */
 export async function readExpoIdentity(
 	worktreePath: string
@@ -153,17 +166,15 @@ export async function readExpoIdentity(
 				stringAt(parsed, ['expo', 'slug']) !== undefined
 					? (parsed as { expo: unknown }).expo
 					: parsed;
-			const scheme = stringAt(expo, ['scheme']);
-			const schemes = Array.isArray(
-				(expo as { scheme?: unknown } | undefined)?.scheme
-			)
-				? ((expo as { scheme: unknown[] }).scheme.find(
-						(entry) => typeof entry === 'string'
-					) as string | undefined)
-				: undefined;
+			const declared = (expo as { scheme?: unknown } | undefined)?.scheme;
 			const slug = stringAt(expo, ['slug']);
-			const resolvedScheme =
-				scheme ?? schemes ?? (slug ? `exp+${slug}` : undefined);
+			const resolvedScheme = [
+				...(Array.isArray(declared) ? declared : [declared]),
+				slug === undefined ? undefined : devClientDefaultScheme(slug),
+			].find(
+				(candidate): candidate is string =>
+					laneSchemeSchema.safeParse(candidate).success
+			);
 			const bundleIdentifier = stringAt(expo, ['ios', 'bundleIdentifier']);
 			return {
 				...(resolvedScheme ? { scheme: resolvedScheme } : {}),

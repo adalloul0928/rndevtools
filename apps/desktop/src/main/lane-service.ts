@@ -492,6 +492,53 @@ export class LaneService {
 	}
 
 	/**
+	 * Every lane that holds a Simulator, for the agent service: each stored
+	 * lane, then each start that has reserved its device but not stored its
+	 * lane yet (`starting`). Counting the starts is what keeps a claim off a
+	 * device during its boot, rather than the lane overriding the claim once
+	 * it is stored.
+	 */
+	holdingLanes(): {
+		id: string;
+		simulatorUdid: string;
+		worktreePath: string;
+		agent?: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined;
+		metro: Lane['metro'];
+		startedAt: number;
+		starting?: true;
+	}[] {
+		return [
+			...this.#store.lanes().map((lane) => ({
+				id: lane.id,
+				simulatorUdid: lane.simulatorUdid,
+				worktreePath: lane.worktreePath,
+				agent: lane.agent,
+				metro: lane.metro,
+				startedAt: lane.startedAt,
+			})),
+			...[...this.#reservations].flatMap(
+				({ laneId, simulatorUdid, worktreePath, agent, startedAt }) =>
+					laneId !== undefined &&
+					simulatorUdid !== undefined &&
+					worktreePath !== undefined &&
+					startedAt !== undefined
+						? [
+								{
+									id: laneId,
+									simulatorUdid,
+									worktreePath,
+									agent,
+									metro: 'starting' as const,
+									startedAt,
+									starting: true as const,
+								},
+							]
+						: []
+			),
+		];
+	}
+
+	/**
 	 * The backend's view of the worktrees changed: publish again, but only
 	 * when what the start form shows actually moved.
 	 */
@@ -807,7 +854,22 @@ export class LaneService {
 				'The Simulator is not available in the current inventory.'
 			);
 		}
+		// The router checked a named device before this start began, and a
+		// claim may have landed since. Checked again here, with nothing awaited
+		// before the reservation, which from then on holds the device for this
+		// start in the agent service's eyes (holdingLanes).
+		this.#assertDeviceAccess(device.udid, input.agent);
+		const id = this.#store.newLaneId();
 		reservation.simulatorUdid = device.udid;
+		reservation.laneId = id;
+		reservation.worktreePath = worktreePath;
+		reservation.startedAt = this.#now();
+		if (input.agent) {
+			reservation.agent = {
+				kind: input.agent.kind,
+				sessionId: input.agent.sessionId,
+			};
+		}
 
 		const port = await allocateLanePort({
 			environment,
@@ -828,7 +890,6 @@ export class LaneService {
 			: undefined;
 		// Likewise a backend this lane cannot have.
 		const backendPolicy = this.#backendPolicy(input.backend, environment);
-		const id = this.#store.newLaneId();
 		const logPath = this.#store.logPathFor(id);
 		const startedAt = this.#now();
 		const agent = this.#agentWithTimestamp(input.agent);
@@ -847,6 +908,7 @@ export class LaneService {
 		const pending = this.#beginBackend(target, backendPolicy, input.agent);
 		let lane: Lane;
 		let decision: BackendDecision | undefined;
+		let metroPid: number | undefined;
 		try {
 			// Boot first: a lane whose device cannot boot should not leave a
 			// Metro running for nothing.
@@ -879,7 +941,7 @@ export class LaneService {
 			decision = pending
 				? await this.#decideBackend(pending, environment, signal)
 				: undefined;
-			const metroPid = await this.#spawnMetro(
+			metroPid = await this.#spawnMetro(
 				{ ...target, logPath },
 				environment,
 				decision?.env
@@ -906,12 +968,22 @@ export class LaneService {
 				record.env = decision.env;
 				record.deferredLaunch = input.launch && decision.late !== undefined;
 			}
+			// The reservation held the device for this start, but a claim that
+			// got in anyway (as one can once an abandoned start's grace period
+			// runs out) is never overridden: the start fails instead. Nothing is
+			// awaited between this check and the store taking the lane.
+			this.#assertDeviceAccess(device.udid, input.agent);
 			await this.#store.upsert(lane);
 		} catch (error) {
 			// The lane never came to exist, so the backend lets go of it: now,
 			// and again once the ensure settles in case it took the hold late.
 			this.#releaseBackend(id);
 			void pending?.answer.then(() => this.#releaseBackend(id));
+			// Nor does its Metro have anyone to serve; left running it would
+			// keep the port, and every retry would leave another.
+			if (metroPid !== undefined) {
+				await this.#discardMetro(id, metroPid, target);
+			}
 			throw error;
 		}
 		// The stored lane holds the app, the device, and the port from here.
@@ -929,6 +1001,34 @@ export class LaneService {
 			lane = await this.launchLane(id, undefined, input.agent, signal);
 		}
 		return { lane: this.#view(lane) };
+	}
+
+	/** Refuses a device someone other than `agent` holds (see LaneDeviceAccessPort). */
+	#assertDeviceAccess(
+		simulatorUdid: string,
+		agent: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined
+	): void {
+		const access = this.#deviceAccess?.(simulatorUdid, agent);
+		if (access && !access.allowed) throw new Error(access.reason);
+	}
+
+	/**
+	 * Stops the Metro a start spawned for a lane that never came to be. The
+	 * stop proves the PID is that Metro first and otherwise leaves it alone.
+	 * A store write that failed after taking the lane leaves it in memory, so
+	 * it goes too.
+	 */
+	async #discardMetro(
+		laneId: string,
+		metroPid: number,
+		lane: Pick<Lane, 'worktreePath' | 'appPath' | 'port'>
+	): Promise<void> {
+		if (this.#store.get(laneId)) {
+			await this.#store.remove(laneId).catch(() => undefined);
+		}
+		await this.#metro
+			.stop(metroPid, lane.port, laneAppDirectory(lane))
+			.catch(() => undefined);
 	}
 
 	/**
@@ -1339,15 +1439,29 @@ export class LaneService {
 		await this.#store.upsert(lane);
 		if (!metroAlive) {
 			const metroPid = await this.#spawnMetro(lane, environment, decision?.env);
-			lane = {
-				...lane,
-				metroPid,
-				metro: 'starting',
-				backendEnvHash: envFingerprint(decision?.env),
-				startedAt: this.#now(),
-			};
-			if (record) record.env = decision?.env;
-			await this.#store.upsert(lane);
+			try {
+				// A lane stopped while its Metro spawned stays stopped, and that
+				// Metro, which no lane would ever stop, goes.
+				if (!this.#store.get(lane.id)) {
+					throw new Error(
+						`Lane ${lane.id} was stopped while its Metro started.`
+					);
+				}
+				lane = {
+					...lane,
+					metroPid,
+					metro: 'starting',
+					backendEnvHash: envFingerprint(decision?.env),
+					startedAt: this.#now(),
+				};
+				if (record) record.env = decision?.env;
+				await this.#store.upsert(lane);
+			} catch (error) {
+				await this.#metro
+					.stop(metroPid, lane.port, laneAppDirectory(lane))
+					.catch(() => undefined);
+				throw error;
+			}
 			this.#reservations.delete(reservation);
 			this.#touch();
 		} else if (record && decision?.env) {

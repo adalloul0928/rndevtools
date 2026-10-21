@@ -13,6 +13,7 @@ import type {
 	SlimmingOperationMetadata,
 	SlimmingSettingReceipt,
 	SlimmingSettingRequest,
+	SlimmingSimulator,
 	SlimmingSimulatorStatus,
 	SlimmingState,
 } from '../shared/slimming-protocol';
@@ -41,6 +42,7 @@ import {
 	type SimulatorMutationLease,
 } from './simulator-mutation-coordinator';
 import {
+	type PendingSlimmingMutation,
 	type PersistedSlimmingSetting,
 	SlimmingPersistence,
 } from './slimming-persistence';
@@ -52,6 +54,8 @@ export type DeviceAccessPort = (
 ) => DeviceAccessDecision;
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
+/** The longest a record that stays ambiguous waits between inspections. */
+const MAX_RECONCILE_BACKOFF_MS = 10 * 60_000;
 const MAX_JOBS = 100;
 const ACTIVE_JOB_STATUSES = new Set([
 	'queued',
@@ -65,6 +69,28 @@ const MUTATION_KINDS = new Set([
 	'profile.restore',
 	'profile.undo',
 ]);
+/**
+ * Jobs that run under the shared per-Simulator lease: the mutations, and
+ * forgetting a pending record, which must not interleave with them or with
+ * reconciliation of that record.
+ */
+const LEASED_KINDS = new Set([...MUTATION_KINDS, 'pending.forget']);
+const PENDING_RECORD_MESSAGE =
+	'An interrupted mutation left a durable emergency restore point. Use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, for example after an Xcode, runtime, or helper update, forget the restore point.';
+const PENDING_RECORD_SHUTDOWN_MESSAGE =
+	'An interrupted mutation left a durable emergency restore point. Boot this Simulator so RN Devtools can reconcile it, or use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, forget the restore point.';
+
+/**
+ * When a pending record is next inspected. `key` names what was inspected:
+ * the record, its recovery attempt, and the Simulator's state; a new key
+ * starts the schedule over.
+ */
+type ReconcileSchedule = {
+	key: string;
+	attempts: number;
+	nextAt: number;
+	message?: string | undefined;
+};
 const NO_MUTATION_ERROR_CODES = new Set([
 	'checkpoint_required',
 	'invalid_checkpoint',
@@ -297,6 +323,14 @@ export class SlimmingService {
 	#pollingActive = true;
 	#pollTimer: NodeJS.Timeout | undefined;
 	#stopped = false;
+	/** Aborted by stop(), so background reconciliation takes no new lease. */
+	#lifecycle = new AbortController();
+	/**
+	 * The first reconciliation pass after start() is restart reconciliation:
+	 * the one pass that may boot a shut-down Simulator to inspect it.
+	 */
+	#restartReconciliationDue = false;
+	readonly #reconcileSchedule = new Map<string, ReconcileSchedule>();
 	#persistenceHealthy = true;
 	#handshake: SimHelperHandshake | undefined;
 	#state: SlimmingState;
@@ -374,6 +408,8 @@ export class SlimmingService {
 
 	async start(): Promise<void> {
 		this.#stopped = false;
+		this.#lifecycle = new AbortController();
+		this.#restartReconciliationDue = true;
 		try {
 			const persisted = await this.#persistence.load();
 			this.#state.setting = persisted.setting;
@@ -390,13 +426,10 @@ export class SlimmingService {
 		await this.refresh();
 		if (this.#stopped || this.#pollTimer) return;
 		this.#pollTimer = setInterval(() => {
-			// Recovery remains supervised even with every window hidden. Running jobs
-			// own their verification; idle discovery does not need to wake simulators.
-			if (
-				!this.#pollingActive &&
-				Object.keys(this.#persistence.pendingMutations()).length === 0
-			)
-				return;
+			// Recovery remains supervised even with every window hidden, at the
+			// pace reconciliation backs off to. Running jobs own their
+			// verification; idle discovery does not need to wake simulators.
+			if (!this.#pollingActive && !this.#reconciliationDue()) return;
 			void this.refresh().catch(() => undefined);
 		}, this.#pollIntervalMs);
 		this.#pollTimer.unref();
@@ -404,6 +437,7 @@ export class SlimmingService {
 
 	async stop(): Promise<void> {
 		this.#stopped = true;
+		this.#lifecycle.abort();
 		if (this.#pollTimer) clearInterval(this.#pollTimer);
 		this.#pollTimer = undefined;
 		for (const job of this.#jobs) {
@@ -784,10 +818,29 @@ export class SlimmingService {
 				// Slimming reboots the device. A device another session holds (its
 				// lane or claim) is refused whoever asks, so one agent's slim can
 				// never restart another agent's Simulator.
-				const access = this.#deviceAccess?.(udid, action.requester);
+				const access = this.#deviceAccess?.(
+					udid,
+					'requester' in action ? action.requester : undefined
+				);
 				if (access && !access.allowed) {
 					return this.#reject(action, access.reason);
 				}
+			}
+		}
+		if (action.kind === 'pending.forget') {
+			// Forgetting touches no Simulator, so neither the experimental
+			// setting nor the compatibility gates apply, only the safety store.
+			if (!this.#persistenceHealthy) {
+				return this.#reject(action, 'Safety persistence is unavailable.');
+			}
+			const missing = action.simulatorUdids.find(
+				(udid) => !this.#persistence.pendingMutation(udid)
+			);
+			if (missing) {
+				return this.#reject(
+					action,
+					`${missing} has no emergency restore point to forget.`
+				);
 			}
 		}
 		if (this.#jobs.some((job) => job.public.actionId === action.actionId)) {
@@ -850,10 +903,10 @@ export class SlimmingService {
 		};
 		this.#jobs.push(job);
 		this.#touch();
-		const task = MUTATION_KINDS.has(action.kind)
+		const task = LEASED_KINDS.has(action.kind)
 			? this.#runJob(job)
 			: this.#queue.catch(() => undefined).then(() => this.#runJob(job));
-		if (!MUTATION_KINDS.has(action.kind)) this.#queue = task;
+		if (!LEASED_KINDS.has(action.kind)) this.#queue = task;
 		this.#tasks.add(task);
 		void task.finally(() => this.#tasks.delete(task));
 		return { actionId: action.actionId, accepted: true, jobId };
@@ -893,7 +946,7 @@ export class SlimmingService {
 							job.controller.signal
 						)
 					);
-				const result = MUTATION_KINDS.has(job.action.kind)
+				const result = LEASED_KINDS.has(job.action.kind)
 					? await this.#mutationCoordinator.runExclusive(
 							target.simulatorUdid,
 							job.controller.signal,
@@ -925,15 +978,18 @@ export class SlimmingService {
 				const recoveringEmergencyCheckpoint = job.emergencyRecoveryTargets.has(
 					target.simulatorUdid
 				);
+				// A forget that failed touched no Simulator and left its record as
+				// it was: a plain failure, not a mutation outcome to reconcile.
 				const needsAttention =
-					recoveringEmergencyCheckpoint ||
-					(pendingAtFailure !== undefined &&
-						(!provenSafe || pendingAtFailure.recovery !== undefined)) ||
-					(error instanceof SimHelperError &&
-						[
-							'mutation_failed_needs_attention',
-							'simulator_needs_attention',
-						].includes(error.code));
+					job.action.kind !== 'pending.forget' &&
+					(recoveringEmergencyCheckpoint ||
+						(pendingAtFailure !== undefined &&
+							(!provenSafe || pendingAtFailure.recovery !== undefined)) ||
+						(error instanceof SimHelperError &&
+							[
+								'mutation_failed_needs_attention',
+								'simulator_needs_attention',
+							].includes(error.code)));
 				const terminal = needsAttention
 					? 'needs-attention'
 					: cancelled
@@ -1120,6 +1176,9 @@ export class SlimmingService {
 					? 'Capability checks passed.'
 					: 'Capability conflicts found.',
 			};
+		}
+		if (action.kind === 'pending.forget') {
+			return this.#forgetPendingMutation(action, simulatorUdid);
 		}
 
 		const publicCompatibility = this.#compatibilityForDevice(simulatorUdid);
@@ -1331,6 +1390,60 @@ export class SlimmingService {
 				: 'Simulator already matched.',
 			condition,
 			changed: mutation.changed,
+		};
+	}
+
+	/**
+	 * Drops the Simulator's pending record through the persistence `clear`
+	 * path, recording who forgot it, so nothing reconciles the interrupted
+	 * mutation or undoes it through its emergency restore point any more. Runs
+	 * under the job's lease, never beside a reconciliation of that record or a
+	 * mutation of that Simulator. The last completed change's checkpoint stays.
+	 */
+	async #forgetPendingMutation(
+		action: Extract<SlimmingAction, { kind: 'pending.forget' }>,
+		simulatorUdid: string
+	): Promise<{
+		message: string;
+		condition: SlimmingCondition;
+		changed: false;
+	}> {
+		const pending = this.#persistence.pendingMutation(simulatorUdid);
+		if (!pending) {
+			throw new Error(
+				'No emergency restore point is pending for this Simulator.'
+			);
+		}
+		await this.#persistence.resolvePendingMutation(simulatorUdid, pending.id, {
+			kind: 'clear',
+			operation: this.#operationMetadata(
+				action,
+				`operation-${randomUUID()}`,
+				'complete',
+				'unknown',
+				false,
+				`The operator forgot the emergency restore point of an interrupted ${actionKindForMutation(pending.operation)}; nothing reconciled its outcome.`
+			),
+		});
+		this.#reconcileSchedule.delete(simulatorUdid);
+		this.#syncPersistenceState();
+		const status = this.#state.statusBySimulator[simulatorUdid];
+		if (status) {
+			this.#state.statusBySimulator[simulatorUdid] = {
+				...status,
+				condition: 'unknown',
+				checkpointAvailable:
+					this.#state.checkpointBySimulator[simulatorUdid] !== undefined,
+				checkedAt: this.#now(),
+				message:
+					'The emergency restore point was forgotten. Restore services, or preview and apply a profile, to return this Simulator to a known state.',
+			};
+		}
+		this.#touch();
+		return {
+			message: 'Emergency restore point forgotten.',
+			condition: 'unknown',
+			changed: false,
 		};
 	}
 
@@ -1701,220 +1814,364 @@ export class SlimmingService {
 		return this.getState();
 	}
 
+	/** One pass over every pending record; #reconcileWhenFree has the rules. */
 	async #reconcilePendingMutations(): Promise<void> {
-		const persisted = this.#persistence.snapshot();
-		for (const [simulatorUdid, pending] of Object.entries(
+		const restartPass = this.#restartReconciliationDue;
+		this.#restartReconciliationDue = false;
+		for (const simulatorUdid of Object.keys(
 			this.#persistence.pendingMutations()
 		)) {
-			let status = this.#state.statusBySimulator[simulatorUdid];
-			const recoveryOperationId = `recovery-${pending.id}`;
-			const recoveryOperation = (
-				operationStatus:
-					| 'complete'
-					| 'failed'
-					| 'needs-attention'
-					| 'cancelled',
-				condition: SlimmingCondition,
-				message: string
-			): SlimmingOperationMetadata => ({
-				id: recoveryOperationId,
-				actionId: pending.actionId,
-				kind: actionKindForMutation(pending.operation),
-				status: operationStatus,
-				startedAt: pending.startedAt,
-				finishedAt: this.#now(),
-				...(pending.profileId ? { profileId: pending.profileId } : {}),
-				changed: operationStatus === 'complete',
-				condition,
-				message,
-			});
-			const normalUndoTarget =
-				pending.operation === 'undo_last'
-					? this.#persistence.checkpointToken(simulatorUdid)
-					: undefined;
-			const inspection = await this.#helper
-				.prepareMutation(
-					simulatorUdid,
-					'undo_last',
-					undefined,
-					pending.checkpointToken
-				)
-				.catch(() => undefined);
-			const currentServiceIds = inspection?.before.managedDisabledServiceIds;
-			if (inspection) {
-				const compatibility = this.#publicCompatibility(
-					inspection.compatibility
-				);
-				const reconciledStatus: SlimmingSimulatorStatus = {
-					...(status ?? {
-						simulatorUdid,
-						managedServiceCount: Math.max(
-							inspection.before.count,
-							inspection.desired.count
-						),
-						matchingProfileIds: [],
-						checkedAt: this.#now(),
-					}),
-					managedDisabledServiceIds:
-						inspection.before.managedDisabledServiceIds,
-					managedDisabledCount: inspection.before.count,
-					checkpointAvailable: true,
-					compatibility,
-					condition: conditionForStatus({
-						managedDisabledCount: inspection.before.count,
-						matchingProfileIds: status?.matchingProfileIds ?? [],
-						checkpointAvailable: true,
-					}),
-				};
-				status = reconciledStatus;
-				this.#state.statusBySimulator[simulatorUdid] = reconciledStatus;
+			if (this.#stopped) break;
+			await this.#reconcileWhenFree(simulatorUdid, restartPass);
+		}
+		for (const simulatorUdid of [...this.#reconcileSchedule.keys()]) {
+			if (!this.#persistence.pendingMutation(simulatorUdid)) {
+				this.#reconcileSchedule.delete(simulatorUdid);
 			}
+		}
+		this.#syncPersistenceState();
+	}
 
-			if (
-				currentServiceIds &&
-				sameManagedServiceSet(currentServiceIds, pending.beforeServiceIds) &&
-				inspection?.verification.verified
-			) {
-				await this.#persistence.resolvePendingMutation(
+	/**
+	 * Reconciles one pending record when nothing else owns its Simulator. A
+	 * job on the Simulator owns the record until the job ends, including the
+	 * failure bookkeeping it does after its lease. Anyone else holding the
+	 * lease (a Fleet action, a lane or recipe, which also refresh SimSlim from
+	 * inside their own lease) is never waited for: the record is retried on a
+	 * later pass. The restart pass inspects every record once, booting a
+	 * shut-down Simulator for it. After that, inspection waits until the
+	 * Simulator is booted, and a record that stays ambiguous is inspected less
+	 * often each time.
+	 */
+	async #reconcileWhenFree(
+		simulatorUdid: string,
+		restartPass: boolean
+	): Promise<void> {
+		if (this.#hasActiveJob(simulatorUdid)) return;
+		const pending = this.#persistence.pendingMutation(simulatorUdid);
+		if (!pending) return;
+		const deviceState = this.#deviceState(simulatorUdid);
+		const key = `${pending.id}|${pending.recovery?.id ?? ''}|${deviceState}`;
+		let schedule = this.#reconcileSchedule.get(simulatorUdid);
+		if (schedule?.key !== key) {
+			schedule = { key, attempts: 0, nextAt: 0 };
+			this.#reconcileSchedule.set(simulatorUdid, schedule);
+		}
+		if (!restartPass && deviceState !== 'booted') {
+			// Inspecting a Simulator that is not booted boots it.
+			this.#markPendingNeedsAttention(
+				simulatorUdid,
+				PENDING_RECORD_SHUTDOWN_MESSAGE
+			);
+			this.#backOff(schedule);
+			return;
+		}
+		if (!restartPass && this.#now() < schedule.nextAt) {
+			this.#markPendingNeedsAttention(simulatorUdid, schedule.message);
+			return;
+		}
+		const inspected = await this.#mutationCoordinator.tryRunExclusive(
+			simulatorUdid,
+			this.#lifecycle.signal,
+			async () => {
+				// A job may have started, or settled the record, before the lease.
+				const current = this.#persistence.pendingMutation(simulatorUdid);
+				if (
+					this.#hasActiveJob(simulatorUdid) ||
+					!current ||
+					current.id !== pending.id ||
+					current.recovery?.id !== pending.recovery?.id
+				) {
+					return false;
+				}
+				await this.#reconcilePendingMutation(simulatorUdid, current);
+				return true;
+			}
+		);
+		if (!inspected.acquired) {
+			this.#markPendingNeedsAttention(simulatorUdid, schedule.message);
+			return;
+		}
+		if (!inspected.value) return;
+		if (this.#persistence.pendingMutation(simulatorUdid)) {
+			schedule.message = this.#state.statusBySimulator[simulatorUdid]?.message;
+			this.#backOff(schedule);
+		} else {
+			this.#reconcileSchedule.delete(simulatorUdid);
+		}
+	}
+
+	/** Shows a pending record that was not inspected this pass as what it is. */
+	#markPendingNeedsAttention(
+		simulatorUdid: string,
+		message = PENDING_RECORD_MESSAGE
+	): void {
+		const status = this.#state.statusBySimulator[simulatorUdid];
+		this.#state.statusBySimulator[simulatorUdid] = {
+			...(status ?? {
+				simulatorUdid,
+				managedDisabledServiceIds: [],
+				managedDisabledCount: 0,
+				managedServiceCount: 0,
+				matchingProfileIds: [],
+				checkedAt: this.#now(),
+			}),
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+			message,
+		};
+	}
+
+	/** Two polls after the first attempt, then twice as long each time. */
+	#backOff(schedule: ReconcileSchedule): void {
+		schedule.attempts += 1;
+		schedule.nextAt =
+			this.#now() +
+			Math.min(
+				this.#pollIntervalMs * 2 ** schedule.attempts,
+				MAX_RECONCILE_BACKOFF_MS
+			);
+	}
+
+	/** Whether a pending record is due another look; drives hidden polling. */
+	#reconciliationDue(): boolean {
+		const now = this.#now();
+		return Object.keys(this.#persistence.pendingMutations()).some(
+			(simulatorUdid) =>
+				now >= (this.#reconcileSchedule.get(simulatorUdid)?.nextAt ?? 0)
+		);
+	}
+
+	#hasActiveJob(simulatorUdid: string): boolean {
+		const udid = simulatorUdid.toUpperCase();
+		return this.#jobs.some(
+			(job) =>
+				ACTIVE_JOB_STATUSES.has(job.public.status) &&
+				job.action.simulatorUdids.some(
+					(target) => target.toUpperCase() === udid
+				)
+		);
+	}
+
+	#deviceState(simulatorUdid: string): SlimmingSimulator['state'] {
+		const udid = simulatorUdid.toUpperCase();
+		return (
+			this.#state.simulators.find(
+				(simulator) => simulator.udid.toUpperCase() === udid
+			)?.state ?? 'unknown'
+		);
+	}
+
+	/**
+	 * Inspects one pending record and settles it when the inspection proves the
+	 * mutation's outcome. Called only under the Simulator's lease, with no job
+	 * on it (see #reconcileWhenFree).
+	 */
+	async #reconcilePendingMutation(
+		simulatorUdid: string,
+		pending: PendingSlimmingMutation
+	): Promise<void> {
+		const persisted = this.#persistence.snapshot();
+		let status = this.#state.statusBySimulator[simulatorUdid];
+		const recoveryOperationId = `recovery-${pending.id}`;
+		const recoveryOperation = (
+			operationStatus: 'complete' | 'failed' | 'needs-attention' | 'cancelled',
+			condition: SlimmingCondition,
+			message: string
+		): SlimmingOperationMetadata => ({
+			id: recoveryOperationId,
+			actionId: pending.actionId,
+			kind: actionKindForMutation(pending.operation),
+			status: operationStatus,
+			startedAt: pending.startedAt,
+			finishedAt: this.#now(),
+			...(pending.profileId ? { profileId: pending.profileId } : {}),
+			changed: operationStatus === 'complete',
+			condition,
+			message,
+		});
+		const normalUndoTarget =
+			pending.operation === 'undo_last'
+				? this.#persistence.checkpointToken(simulatorUdid)
+				: undefined;
+		const inspection = await this.#helper
+			.prepareMutation(
+				simulatorUdid,
+				'undo_last',
+				undefined,
+				pending.checkpointToken
+			)
+			.catch(() => undefined);
+		const currentServiceIds = inspection?.before.managedDisabledServiceIds;
+		if (inspection) {
+			const compatibility = this.#publicCompatibility(inspection.compatibility);
+			const reconciledStatus: SlimmingSimulatorStatus = {
+				...(status ?? {
 					simulatorUdid,
-					pending.id,
-					{
-						kind: 'complete',
-						operation: recoveryOperation(
-							'cancelled',
-							status?.condition ?? 'unknown',
-							'Restart reconciliation proved the pre-mutation state; the prior restore point was preserved.'
-						),
-					}
-				);
-				const checkpointAvailable =
-					this.#persistence.snapshot().checkpointBySimulator[simulatorUdid] !==
-					undefined;
-				const reconciled = this.#state.statusBySimulator[simulatorUdid];
-				if (reconciled) {
-					this.#state.statusBySimulator[simulatorUdid] = {
+					managedServiceCount: Math.max(
+						inspection.before.count,
+						inspection.desired.count
+					),
+					matchingProfileIds: [],
+					checkedAt: this.#now(),
+				}),
+				managedDisabledServiceIds: inspection.before.managedDisabledServiceIds,
+				managedDisabledCount: inspection.before.count,
+				checkpointAvailable: true,
+				compatibility,
+				condition: conditionForStatus({
+					managedDisabledCount: inspection.before.count,
+					matchingProfileIds: status?.matchingProfileIds ?? [],
+					checkpointAvailable: true,
+				}),
+			};
+			status = reconciledStatus;
+			this.#state.statusBySimulator[simulatorUdid] = reconciledStatus;
+		}
+
+		if (
+			currentServiceIds &&
+			sameManagedServiceSet(currentServiceIds, pending.beforeServiceIds) &&
+			inspection?.verification.verified
+		) {
+			await this.#persistence.resolvePendingMutation(
+				simulatorUdid,
+				pending.id,
+				{
+					kind: 'complete',
+					operation: recoveryOperation(
+						'cancelled',
+						status?.condition ?? 'unknown',
+						'Restart reconciliation proved the pre-mutation state; the prior restore point was preserved.'
+					),
+				}
+			);
+			const checkpointAvailable =
+				this.#persistence.snapshot().checkpointBySimulator[simulatorUdid] !==
+				undefined;
+			const reconciled = this.#state.statusBySimulator[simulatorUdid];
+			if (reconciled) {
+				this.#state.statusBySimulator[simulatorUdid] = {
+					...reconciled,
+					checkpointAvailable,
+					condition: conditionForStatus({
 						...reconciled,
 						checkpointAvailable,
-						condition: conditionForStatus({
-							...reconciled,
-							checkpointAvailable,
-						}),
-					};
-				}
-				continue;
-			}
-			if (
-				pending.recovery &&
-				currentServiceIds &&
-				sameManagedServiceSet(
-					currentServiceIds,
-					pending.recovery.beforeServiceIds
-				) &&
-				inspection?.verification.verified
-			) {
-				await this.#persistence.recordPendingRecoveryFailure(
-					simulatorUdid,
-					pending.id,
-					recoveryOperation(
-						'needs-attention',
-						'needs-attention',
-						'Restart reconciliation proved the recovery attempt did not start or rolled back, so the original emergency restore point was retained.'
-					)
-				);
-				this.#state.statusBySimulator[simulatorUdid] = {
-					...(status ?? {
-						simulatorUdid,
-						managedDisabledServiceIds: currentServiceIds,
-						managedDisabledCount: currentServiceIds.length,
-						managedServiceCount: currentServiceIds.length,
-						matchingProfileIds: [],
-						checkedAt: this.#now(),
 					}),
-					condition: 'needs-attention',
-					checkpointAvailable: true,
-					message:
-						'The interrupted mutation still has a durable emergency restore point. Use Undo to retry recovery.',
 				};
-				continue;
 			}
-
-			let targetVerification:
-				| Awaited<ReturnType<SlimmingHelperProvider['prepareMutation']>>
-				| undefined;
-			if (
-				currentServiceIds &&
-				sameManagedServiceSet(currentServiceIds, pending.desiredServiceIds)
-			) {
-				targetVerification = await this.#helper
-					.prepareMutation(
-						simulatorUdid,
-						pending.operation,
-						pending.profileId,
-						normalUndoTarget
-					)
-					.catch(() => undefined);
-			}
-			const desiredVerified =
-				targetVerification?.changed === false &&
-				targetVerification.verification.verified;
-			const targetCompatibility = targetVerification
-				? this.#publicCompatibility(targetVerification.compatibility)
-				: undefined;
-			const tupleStillMatches =
-				targetCompatibility?.key === pending.compatibilityKey;
-			if (desiredVerified && tupleStillMatches) {
-				await this.#persistence.resolvePendingMutation(
-					simulatorUdid,
-					pending.id,
-					{
-						kind: 'complete',
-						checkpointMetadata: this.#checkpointMetadata(
-							recoveryOperationId,
-							pending.profileId
-						),
-						operation: recoveryOperation(
-							'complete',
-							status?.condition ?? 'unknown',
-							'Restart reconciliation verified the exact intended state and promoted the durable pre-mutation restore point.'
-						),
-					}
-				);
-				continue;
-			}
-
-			const existingRecovery = persisted.operationsBySimulator[
-				simulatorUdid
-			]?.some((operation) => operation.id === recoveryOperationId);
-			if (!existingRecovery) {
-				await this.#persistence.resolvePendingMutation(
-					simulatorUdid,
-					pending.id,
-					{
-						kind: 'needs-attention',
-						operation: recoveryOperation(
-							'needs-attention',
-							'needs-attention',
-							'Restart reconciliation could not prove either the exact before state or the exact verified target state.'
-						),
-					}
-				);
-			}
+			return;
+		}
+		if (
+			pending.recovery &&
+			currentServiceIds &&
+			sameManagedServiceSet(
+				currentServiceIds,
+				pending.recovery.beforeServiceIds
+			) &&
+			inspection?.verification.verified
+		) {
+			await this.#persistence.recordPendingRecoveryFailure(
+				simulatorUdid,
+				pending.id,
+				recoveryOperation(
+					'needs-attention',
+					'needs-attention',
+					'Restart reconciliation proved the recovery attempt did not start or rolled back, so the original emergency restore point was retained.'
+				)
+			);
 			this.#state.statusBySimulator[simulatorUdid] = {
 				...(status ?? {
 					simulatorUdid,
-					managedDisabledServiceIds: [],
-					managedDisabledCount: 0,
-					managedServiceCount: 0,
+					managedDisabledServiceIds: currentServiceIds,
+					managedDisabledCount: currentServiceIds.length,
+					managedServiceCount: currentServiceIds.length,
 					matchingProfileIds: [],
 					checkedAt: this.#now(),
 				}),
 				condition: 'needs-attention',
 				checkpointAvailable: true,
 				message:
-					'A durable emergency restore point is retained because the interrupted mutation outcome is ambiguous. Use Undo to restore it; other mutations are blocked.',
+					'The interrupted mutation still has a durable emergency restore point. Use Undo to retry recovery.',
 			};
+			return;
 		}
-		this.#syncPersistenceState();
+
+		let targetVerification:
+			| Awaited<ReturnType<SlimmingHelperProvider['prepareMutation']>>
+			| undefined;
+		if (
+			currentServiceIds &&
+			sameManagedServiceSet(currentServiceIds, pending.desiredServiceIds)
+		) {
+			targetVerification = await this.#helper
+				.prepareMutation(
+					simulatorUdid,
+					pending.operation,
+					pending.profileId,
+					normalUndoTarget
+				)
+				.catch(() => undefined);
+		}
+		const desiredVerified =
+			targetVerification?.changed === false &&
+			targetVerification.verification.verified;
+		const targetCompatibility = targetVerification
+			? this.#publicCompatibility(targetVerification.compatibility)
+			: undefined;
+		const tupleStillMatches =
+			targetCompatibility?.key === pending.compatibilityKey;
+		if (desiredVerified && tupleStillMatches) {
+			await this.#persistence.resolvePendingMutation(
+				simulatorUdid,
+				pending.id,
+				{
+					kind: 'complete',
+					checkpointMetadata: this.#checkpointMetadata(
+						recoveryOperationId,
+						pending.profileId
+					),
+					operation: recoveryOperation(
+						'complete',
+						status?.condition ?? 'unknown',
+						'Restart reconciliation verified the exact intended state and promoted the durable pre-mutation restore point.'
+					),
+				}
+			);
+			return;
+		}
+
+		const existingRecovery = persisted.operationsBySimulator[
+			simulatorUdid
+		]?.some((operation) => operation.id === recoveryOperationId);
+		if (!existingRecovery) {
+			await this.#persistence.resolvePendingMutation(
+				simulatorUdid,
+				pending.id,
+				{
+					kind: 'needs-attention',
+					operation: recoveryOperation(
+						'needs-attention',
+						'needs-attention',
+						'Restart reconciliation could not prove either the exact before state or the exact verified target state.'
+					),
+				}
+			);
+		}
+		this.#state.statusBySimulator[simulatorUdid] = {
+			...(status ?? {
+				simulatorUdid,
+				managedDisabledServiceIds: [],
+				managedDisabledCount: 0,
+				managedServiceCount: 0,
+				matchingProfileIds: [],
+				checkedAt: this.#now(),
+			}),
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+			message:
+				'A durable emergency restore point is retained because the interrupted mutation outcome is ambiguous. Use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, for example after an Xcode, runtime, or helper update, forget the restore point.',
+		};
 	}
 
 	async #refreshStatuses(devices: SimHelperDevice[]): Promise<void> {

@@ -374,7 +374,12 @@ older undo point. Exact verified intended state promotes the prepared pre-state
 token to the last-successful-change restore point. Any partial, ambiguous, or
 unverified state retains a private emergency token, blocks other mutations,
 and exposes checkpoint-bound Undo recovery. No-op and proven-rolled-back
-attempts never replace the prior successful restore point.
+attempts never replace the prior successful restore point. After startup,
+reconciliation inspects a retained record only while its target is booted and
+no other mutation holds the target, less often each time the state stays
+ambiguous. When Undo can no longer use the emergency token, for example after
+the tuple changed, the operator may forget it after a main-owned confirmation,
+which clears that pending record and nothing else.
 
 Closing the FD 4 control channel requests graceful cancellation; the helper
 installs no signal handler, so a signal ends it without cleanup. A mutation failure

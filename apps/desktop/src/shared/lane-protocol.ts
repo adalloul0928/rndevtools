@@ -119,6 +119,15 @@ export const laneAgentSchema = z.strictObject({
 });
 export type LaneAgent = z.infer<typeof laneAgentSchema>;
 
+/**
+ * A URI scheme the dev client can be deep-linked through, as RFC 3986 spells
+ * one, at most 64 characters. Main reads a worktree's scheme against this
+ * before it starts anything, since a lane record refuses any other.
+ */
+export const laneSchemeSchema = z
+	.string()
+	.regex(/^[A-Za-z][A-Za-z0-9+.-]{0,63}$/);
+
 const laneMetroStatusSchema = z.enum(['starting', 'ready', 'stopped']);
 
 /**
@@ -174,10 +183,7 @@ export const laneSchema = z.strictObject({
 		.string()
 		.regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/)
 		.optional(),
-	scheme: z
-		.string()
-		.regex(/^[A-Za-z][A-Za-z0-9+.-]{0,63}$/)
-		.optional(),
+	scheme: laneSchemeSchema.optional(),
 	startedAt: timestampSchema,
 	lastLaunchedAt: timestampSchema.optional(),
 	agent: laneAgentSchema.optional(),
@@ -467,11 +473,17 @@ export function laneHealth(lane: Pick<Lane, 'metro'>): LaneHealth {
  * the first moment, then its Simulator and its port as each is chosen. Main
  * keeps these in memory only, and concurrent starts check them alongside the
  * stored lanes, so two starts cannot both choose one device or one port.
+ * Once a start has its Simulator it also names its lane-to-be (id, checkout,
+ * agent, start time), so the agent service counts the device as held by it.
  */
 export type LaneReservation = {
 	appDirectory: string;
 	simulatorUdid?: string;
 	port?: number;
+	laneId?: string;
+	worktreePath?: string;
+	agent?: Pick<LaneAgent, 'kind' | 'sessionId'>;
+	startedAt?: number;
 };
 
 /**

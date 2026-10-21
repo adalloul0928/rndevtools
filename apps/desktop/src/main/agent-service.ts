@@ -126,6 +126,11 @@ export type AgentLaneSource = () => readonly {
 	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string } | undefined;
 	metro: 'starting' | 'ready' | 'stopped';
 	startedAt: number;
+	/**
+	 * A start that has reserved its device but not stored its lane: it holds
+	 * the device against newcomers and yields to an existing claim.
+	 */
+	starting?: boolean | undefined;
 }[];
 
 /**

@@ -43,6 +43,7 @@ import {
 } from '@/components/ui';
 import {
 	allSelectedCheckpointsAvailable,
+	allSelectedNeedAttention,
 	managedOverrideUdids,
 	restoreAndDisableInput,
 	type UnknownTupleAcknowledgement,
@@ -573,6 +574,10 @@ function ProfileWorkspace({
 		mutationAvailable &&
 		allSelectedCheckpointsAvailable(selectedUdids, state.statusBySimulator) &&
 		unknownTupleReady;
+	// Offered where the needs-attention state shows; main asks before it runs.
+	const canForget =
+		state.helper.status === 'available' &&
+		allSelectedNeedAttention(selectedUdids, state.statusBySimulator);
 
 	return (
 		<div className="sim-slimming-workspace">
@@ -678,6 +683,24 @@ function ProfileWorkspace({
 							)
 						}
 					/>
+					{canForget ? (
+						<Button
+							size="sm"
+							variant="ghost"
+							onPress={() =>
+								onRun(
+									{
+										kind: 'pending.forget',
+										simulatorUdids: selectedUdids,
+										confirmation: SLIMMING_CONFIRMATIONS.forget,
+									},
+									'Emergency restore point forgotten.'
+								)
+							}
+						>
+							<Ban className="h-3.5 w-3.5" /> Forget restore point
+						</Button>
+					) : null}
 					<Button
 						isDisabled={
 							!state.helper.readOnlyAvailable || selectedUdids.length === 0
@@ -1211,6 +1234,7 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 								'profile.restore': 'Restore services',
 								'profile.undo': 'Undo last change',
 								'doctor.run': 'Check app features',
+								'pending.forget': 'Forget restore point',
 							}[job.kind]
 						}
 					</strong>
