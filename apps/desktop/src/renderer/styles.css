@@ -780,6 +780,22 @@ button:disabled {
 	top: 0;
 }
 
+/* HeroUI marks a selected row with bg-surface/10 over a surface that equals
+   the background here (about 1.04:1), so the selection could not be seen.
+   Same neutral treatment as `.sim-list-item`: a quiet hover, a firmer fill. */
+.desktop-grid .table__row[data-selected='true'] .table__cell {
+	background: color-mix(in oklab, var(--foreground) 6%, var(--surface));
+}
+
+@media (hover: hover) {
+	.desktop-grid .table__row:not([data-selected='true']):hover .table__cell,
+	.desktop-grid
+		.table__row:not([data-selected='true'])[data-hovered='true']
+		.table__cell {
+		background: color-mix(in oklab, var(--foreground) 2.5%, var(--surface));
+	}
+}
+
 .panel-scroll {
 	min-height: 0;
 	overflow: auto;
