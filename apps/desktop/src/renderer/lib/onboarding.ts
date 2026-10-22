@@ -96,6 +96,26 @@ export function shouldOpenSetup(input: {
 	return !input.setupDone && input.repositories === 0 && input.lanes === 0;
 }
 
+/**
+ * The line a setup step shows after one of its actions ran: nothing when it
+ * completed or the person cancelled a picker, the error otherwise. Setup is a
+ * modal, so a result left to the app's toast would not be seen or announced.
+ */
+export function setupActionError(
+	receipt:
+		| Readonly<{
+				completed: boolean;
+				cancelled?: boolean | undefined;
+				error?: string | undefined;
+		  }>
+		| undefined,
+	fallback: string
+): string | null {
+	if (receipt === undefined) return fallback;
+	if (receipt.completed || receipt.cancelled) return null;
+	return receipt.error ?? fallback;
+}
+
 /** The step before or after, or the same step at either end. */
 export function adjacentSetupStep(step: SetupStep, offset: -1 | 1): SetupStep {
 	const index = SETUP_STEPS.indexOf(step) + offset;

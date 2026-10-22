@@ -24,6 +24,7 @@ import {
 	SETUP_STEPS,
 	type SetupStep,
 	setSetupStep,
+	setupActionError,
 	shouldOpenSetup,
 	useOnboarding,
 } from '@/lib/onboarding';
@@ -258,6 +259,7 @@ function SetupWindow({ step }: { step: SetupStep }) {
 function SetupAside({ step }: { step: SetupStep }) {
 	const lanes = useLaneRuntime();
 	const simulator = useSimulatorRuntime();
+	const [repositoryError, setRepositoryError] = useState<string | null>(null);
 	if (step === 'welcome') {
 		return (
 			<p className="setup-note">
@@ -281,15 +283,29 @@ function SetupAside({ step }: { step: SetupStep }) {
 					}
 					size="sm"
 					variant="secondary"
-					onPress={() =>
-						void lanes.runOperation({ kind: 'lane.add-repository' })
-					}
+					onPress={async () => {
+						setRepositoryError(null);
+						const receipt = await lanes.runOperation({
+							kind: 'lane.add-repository',
+						});
+						setRepositoryError(
+							setupActionError(
+								receipt,
+								'The repository could not be added. Try again, or add it from Lanes.'
+							)
+						);
+					}}
 				>
 					<FolderGit2 className="h-3.5 w-3.5" />
 					{lanes.state.repositories.length > 0
 						? 'Add another repository…'
 						: 'Choose a repository…'}
 				</Button>
+				{repositoryError ? (
+					<p className="setup-error" role="alert">
+						{repositoryError}
+					</p>
+				) : null}
 				<p className="setup-note">
 					RN Devtools reads each worktree's app.json and never starts a native
 					build.
@@ -385,43 +401,58 @@ const CHECK_LABELS: Record<MacCheck['state'], string> = {
 function MacStage() {
 	const { state, isBridgeAvailable, runOnboardingOperation } =
 		useSimulatorRuntime();
+	const [xcodeError, setXcodeError] = useState<string | null>(null);
 	const checks = macChecks({
 		capability: state.capability,
 		runtimes: state.runtimes,
 		native: state.native,
 	});
 	return (
-		<ul className="setup-checks">
-			{checks.map((check) => {
-				const Icon = CHECK_ICONS[check.state];
-				return (
-					<li className={`setup-check is-${check.state}`} key={check.id}>
-						<Icon aria-hidden="true" className="setup-check-icon" />
-						<span className="setup-row-copy">
-							<strong>{check.name}</strong>
-							<span>{check.detail}</span>
-						</span>
-						<span className="setup-check-state">
-							{CHECK_LABELS[check.state]}
-						</span>
-						{check.fix === 'select-xcode' ? (
-							<Button
-								isDisabled={!isBridgeAvailable}
-								size="sm"
-								variant="secondary"
-								onPress={() =>
-									void runOnboardingOperation({
-										kind: 'toolchain.selectXcode',
-									})
-								}
-							>
-								Select Xcode…
-							</Button>
-						) : null}
-					</li>
-				);
-			})}
-		</ul>
+		<>
+			<ul className="setup-checks">
+				{checks.map((check) => {
+					const Icon = CHECK_ICONS[check.state];
+					return (
+						<li className={`setup-check is-${check.state}`} key={check.id}>
+							<Icon aria-hidden="true" className="setup-check-icon" />
+							<span className="setup-row-copy">
+								<strong>{check.name}</strong>
+								<span>{check.detail}</span>
+							</span>
+							<span className="setup-check-state">
+								{CHECK_LABELS[check.state]}
+							</span>
+							{check.fix === 'select-xcode' ? (
+								<Button
+									isDisabled={!isBridgeAvailable}
+									size="sm"
+									variant="secondary"
+									onPress={async () => {
+										setXcodeError(null);
+										const receipt = await runOnboardingOperation({
+											kind: 'toolchain.selectXcode',
+										});
+										setXcodeError(
+											setupActionError(
+												receipt,
+												'Xcode could not be selected. Try again from Settings.'
+											)
+										);
+									}}
+								>
+									Select Xcode…
+								</Button>
+							) : null}
+						</li>
+					);
+				})}
+			</ul>
+			{xcodeError ? (
+				<p className="setup-error" role="alert">
+					{xcodeError}
+				</p>
+			) : null}
+		</>
 	);
 }
 
