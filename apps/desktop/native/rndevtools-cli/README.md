@@ -31,6 +31,26 @@ cancels it. JSON allows that leading whitespace, and it counts toward the
 {"protocol":"rndevtools/1","id":"cli-0123456789abcdef0123456789abcdef","command":{"kind":"doctor"}}
 ```
 
+Two optional fields say who is calling:
+
+```json
+{"protocol":"rndevtools/1","id":"cli-0123456789abcdef0123456789abcdef","command":{"kind":"doctor"},"agent":{"kind":"claude","sessionId":"0f8c2a4e"},"peer":{"pid":48213}}
+```
+
+`agent` is the coding-agent session the process says it runs inside, read from
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, or `RNDEVTOOLS_AGENT_SESSION_ID`.
+It is a claim, since anyone can set a variable, so it never appears inside a
+command. `peer.pid` is the sending process's own pid. The desktop checks that
+this process holds the other end of the connection the request arrived on,
+follows its parent processes to the agent session that spawned it, and acts for
+the session only when that agrees with the claim. A request that names another
+live session is refused with `agent_identity_mismatch`. A claim the desktop
+cannot verify, from a CLI that sends no pid or a pid that does not own the
+socket, is refused with `agent_identity_unverified` wherever the command needs
+to know who is asking. A request that claims nothing is unprivileged, not the
+person at the desktop: it may use free Simulators and cannot claim, release, or
+take over a hold.
+
 The response is either:
 
 ```json
@@ -105,14 +125,16 @@ so the model can look at the device. Read-only resources:
 `rndevtools://screen/{udid}` (a fresh JPEG). The `supabase` tool is listed
 right after `lane`; its description says when a worktree's local Supabase
 applies, what `up` returns, and the self-start fallback, and the `initialize`
-instructions repeat the rules against hand-run stack commands. Attribution comes
-from the session variables the MCP server inherits. Claude Code passes
-`CLAUDE_CODE_SESSION_ID` to the servers it spawns. Codex does not pass
+instructions repeat the rules against hand-run stack commands. The session an
+MCP server claims comes from the session variables it inherits. Claude Code
+passes `CLAUDE_CODE_SESSION_ID` to the servers it spawns. Codex does not pass
 `CODEX_THREAD_ID`, so Codex calls over MCP fall back to an identity built from
 the MCP client's name (`mcp-<client>`), which every Codex session shares. The
 desktop treats that identity as synthetic: such a session's lanes and claims
 are matched by its working directory instead, and its session-end hook sends
-that directory (`release.sessionCwd`) so they are released at once.
+that directory (`release.sessionCwd`) so they are released at once. Every call
+names the MCP server's own pid, and the desktop follows that process's parents
+to the agent that spawned it before it believes the claim.
 
 ## Setup for coding agents
 
@@ -355,10 +377,14 @@ rndevtools lane --operation down --worktree "$PWD"
 (nobody's lane, nobody's claim), booted ones first; when none is free it parks
 a device request for the user and `lane ls` reports how it was settled.
 `down`, `launch`, and `log` take exactly one of `--lane-id` or `--worktree`. Lane creation fails rather than
-stealing a worktree, Simulator, or port another lane owns. The CLI attaches
+stealing a worktree, Simulator, or port another lane owns. The CLI sends
 `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` (or `RNDEVTOOLS_AGENT_SESSION_ID`)
-to `up` and `launch` so the desktop can show which agent holds a lane. The
-agent skill in [`internal/setup/skills/rndevtools-lanes`](internal/setup/skills/rndevtools-lanes/SKILL.md)
+on the envelope of every request, with its own pid, so the desktop can verify
+which agent is calling and show which one holds a lane. A lane command carries
+no agent field, and one that names an agent is rejected. Run the CLI from the
+agent's own shell or MCP server: a request that names no session may use free
+Simulators only, and one whose session the desktop cannot verify is refused.
+The agent skill in [`internal/setup/skills/rndevtools-lanes`](internal/setup/skills/rndevtools-lanes/SKILL.md)
 teaches Claude Code and Codex the workflow; copy it into `.claude/skills` or
 `.codex/skills`. On the command line a relative `--worktree` (for example
 `--worktree .`) resolves against the current directory, for `lane`,
@@ -424,10 +450,11 @@ rndevtools supabase --operation down --worktree "$PWD"
 or `--stack-id`, and each option belongs only to the operation listed. The
 CLI validates all of this before connecting (exit 2), and the desktop
 validates it again. The agent's identity rides on the request envelope only:
-the command carries no agent field, and the desktop records the hold from the
-envelope. Results are JSON: `up` returns the stack (ports, never URLs), the
-app variable names Metro gets, whether Metro restarted, the CLI to run from
-the worktree (`cli.run`, `cli.workdir`), `next`, warnings, and a `jobId` when
+no command carries an agent field, and the desktop records the hold for the
+session it has verified from the envelope. Results are JSON: `up` returns the
+stack (ports, never URLs), the app variable names Metro gets, whether Metro
+restarted, the CLI to run from the worktree (`cli.run`, `cli.workdir`), `next`,
+warnings, and a `jobId` when
 the stack is still starting (follow it with `wait --condition job`; a start
 queued behind RN Devtools' own automatic one has none, and `up` again picks it
 up a few seconds later); only `env`
