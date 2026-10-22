@@ -41,7 +41,11 @@ test('adding a step and switching the step type updates the editor', async () =>
 	await harness.openPanel('simulator/automation');
 	await harness.window.getByRole('button', { name: 'New recipe' }).click();
 	await harness.window.getByLabel('Step type').selectOption('wait');
-	await harness.window.getByRole('button', { name: 'Add' }).click();
+	// Exact: the sidebar's Get started card is also a button whose name
+	// contains "Add".
+	await harness.window
+		.getByRole('button', { name: 'Add', exact: true })
+		.click();
 	// The wait step editor exposes its duration field.
 	await expect(harness.window.getByLabel('Duration (ms)')).toBeVisible();
 });

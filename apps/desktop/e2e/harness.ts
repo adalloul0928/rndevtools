@@ -145,6 +145,11 @@ export class DesktopHarness {
 		const userDataDir = mkdtempSync(join(tmpdir(), 'rndevtools-e2e-'));
 		const brokerPort = await freeLoopbackPort();
 		const app = await electron.launch({
+			// Playwright otherwise emulates `prefers-color-scheme: light`, which
+			// pinned every screenshot to the light theme. Null lets the window
+			// follow the appearance preference main sets on `nativeTheme`, as
+			// the real app does.
+			colorScheme: null,
 			args: [
 				mainEntry,
 				'--no-sandbox',
