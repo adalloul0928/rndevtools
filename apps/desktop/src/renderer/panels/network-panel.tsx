@@ -125,12 +125,26 @@ const STATUS_REASONS: Readonly<Record<number, string>> = {
 	504: 'Gateway Timeout',
 };
 
+/**
+ * The bare code for the grid: `200`, `Pending`, the failure state, or a dash
+ * for a completed request whose response the device never read (the default
+ * capture mode records no status), so it is not mistaken for a success.
+ */
+export function statusCodeLabel(
+	entry: Pick<NetworkEntry, 'state' | 'status'>
+): string {
+	if (entry.state === 'pending') return 'Pending';
+	if (entry.status !== undefined) return String(entry.status);
+	return entry.state === 'success' ? '—' : entry.state;
+}
+
 /** `200 OK`, or the code alone when its reason phrase is not a common one. */
 export function statusLabel(
 	entry: Pick<NetworkEntry, 'state' | 'status'>
 ): string {
-	if (entry.state === 'pending') return 'Pending';
-	if (entry.status === undefined) return entry.state;
+	if (entry.state === 'pending' || entry.status === undefined) {
+		return statusCodeLabel(entry);
+	}
 	const reason = STATUS_REASONS[entry.status];
 	return reason ? `${entry.status} ${reason}` : String(entry.status);
 }
@@ -176,7 +190,7 @@ export function networkSegmentCounts(
 
 export function statusTone(
 	entry: Pick<NetworkEntry, 'state' | 'status'>
-): 'success' | 'warning' | 'danger' | 'info' {
+): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
 	if (entry.state === 'pending') return 'info';
 	if (
 		entry.state === 'error' ||
@@ -184,7 +198,9 @@ export function statusTone(
 		(entry.status ?? 0) >= 400
 	)
 		return 'danger';
-	if ((entry.status ?? 0) >= 300) return 'warning';
+	// No status means the response was never read, not that it succeeded.
+	if (entry.status === undefined) return 'neutral';
+	if (entry.status >= 300) return 'warning';
 	return 'success';
 }
 
@@ -226,8 +242,20 @@ function StatusCode({
 	entry: Pick<NetworkEntry, 'state' | 'status'>;
 	label: string;
 }) {
+	const uncaptured = label === '—';
 	return (
-		<span className={`network-status is-${statusTone(entry)}`}>{label}</span>
+		<span
+			{...(uncaptured
+				? {
+						'aria-label': 'Status not captured',
+						title:
+							'The device did not read the response, so no status was captured.',
+					}
+				: {})}
+			className={`network-status is-${statusTone(entry)}`}
+		>
+			{label}
+		</span>
 	);
 }
 
@@ -349,14 +377,7 @@ export function NetworkPanel() {
 				header: 'Status',
 				width: 76,
 				cell: (entry) => (
-					<StatusCode
-						entry={entry}
-						label={
-							entry.state === 'pending'
-								? 'Pending'
-								: String(entry.status ?? entry.state)
-						}
-					/>
+					<StatusCode entry={entry} label={statusCodeLabel(entry)} />
 				),
 			},
 			{
