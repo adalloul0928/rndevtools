@@ -490,7 +490,8 @@ function ProjectStage() {
 
 function ConnectStage() {
 	const { state } = useDesktopRuntime();
-	const app = state?.devices.find((device) => device.status !== 'simulated');
+	// The broker keeps offline sessions for a day; only a live one is connected.
+	const app = state?.devices.find((device) => device.status === 'online');
 	const broker = state?.broker;
 	return (
 		<div>
