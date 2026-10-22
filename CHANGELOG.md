@@ -82,6 +82,16 @@
   `node_modules/.bin` symlink, including under `--preserve-symlinks-main`.
   Previously the main-module guard never matched and the command exited 0
   without scanning.
+- `rndevtools-verify-bundle` reads Hermes bytecode (`.hbc`, `.bundle` and
+  `.jsbundle`) as bytes and searches a marker as UTF-8 and as UTF-16LE, and
+  decodes the file as UTF-8 and as UTF-16LE from either byte alignment for
+  `--forbid-loopback-urls` and `--preset supabase-local`. Hermes stores a
+  string literal with any non-ASCII character as UTF-16, so a non-ASCII
+  `--marker`, or an ASCII one inside such a literal, passed as clean before.
+  The preset also finds a service-role token that Hermes stores right after
+  another token; it read the first token's signature into the second token's
+  header and missed it. The example app's `verify:bundle` also exports an
+  unpruned bundle and fails unless the verifier fails on it.
 - The storage plugin redacts a value stored under a key whose name marks it
   sensitive (`refreshToken`, `session`, `email`…) as `[REDACTED]`; set
   `revealValues: true` on the adapter to show such values.
