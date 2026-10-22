@@ -200,3 +200,10 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- Background SimSlim status checks now take a Simulator's lease and skip one
+  with a running job, never boot a shut-down Simulator (it shows as not
+  inspected, not as clean), and update each Simulator's status on its own. A
+  check could previously restart a Simulator that an apply, an erase or a lane
+  had just shut down, and one that finished after an apply replaced the status
+  the apply recorded, so disabling slimming soon afterwards could skip the
+  restore.

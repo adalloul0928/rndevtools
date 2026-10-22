@@ -90,7 +90,8 @@ export type RecipeSimulatorPort = {
 
 export type RecipeSlimmingPort = {
 	getState: () => SlimmingState;
-	refresh: () => Promise<SlimmingState>;
+	/** Under a lease the run holds, its Simulator is probed; see SlimmingService. */
+	refresh: (mutationLease?: SimulatorMutationLease) => Promise<SlimmingState>;
 	runAction: (
 		action: SlimmingAction,
 		mutationLease?: SimulatorMutationLease
@@ -1151,7 +1152,10 @@ export class RecipeService {
 		try {
 			if (signal.aborted)
 				throw signal.reason ?? new Error('Recipe run cancelled.');
-			await this.#slimming.refresh();
+			// A status check never probes a Simulator whose lease is held, so the
+			// run's own lease carries the probe that gives the target its fresh
+			// inventory entry and compatibility tuple.
+			await this.#slimming.refresh(mutationLease);
 			const action = slimmingActionSchema.parse({
 				actionId: actionId(),
 				kind:

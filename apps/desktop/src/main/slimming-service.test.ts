@@ -562,6 +562,29 @@ async function readPersistedState(directory: string) {
 	};
 }
 
+/**
+ * Holds the next refresh right after its inventory snapshot, before it probes
+ * any Simulator: a background poll that has seen the fleet as it was.
+ */
+function holdNextSnapshot(helper: FakeHelper) {
+	const entered = deferred();
+	const release = deferred();
+	const list = helper.listSimulators.getMockImplementation();
+	if (!list) throw new Error('Fake inventory implementation is unavailable.');
+	helper.listSimulators.mockImplementationOnce(async () => {
+		const devices = await list();
+		entered.resolve();
+		await release.promise;
+		return devices;
+	});
+	return { entered: entered.promise, release: release.resolve };
+}
+
+/** The Simulators the fake helper was asked to read, in order. */
+function probedSimulators(helper: FakeHelper) {
+	return helper.simulatorStatus.mock.calls.map(([simulatorId]) => simulatorId);
+}
+
 afterEach(async () => {
 	await Promise.all(
 		temporaryDirectories
@@ -1561,13 +1584,17 @@ describe('slimming service', () => {
 		);
 		await enableAndAcknowledge(service, 'overlap');
 		// A background poll is inside its status pass when the apply arrives.
+		// The pass is held in the other Simulator's probe: a probe runs under
+		// its Simulator's lease, which the apply is about to take.
 		const refreshEntered = deferred();
 		const releaseRefresh = deferred();
 		const status = helper.simulatorStatus.getMockImplementation();
 		if (!status) throw new Error('Fake status implementation is unavailable.');
-		helper.simulatorStatus.mockImplementationOnce(async (...arguments_) => {
-			refreshEntered.resolve();
-			await releaseRefresh.promise;
+		helper.simulatorStatus.mockImplementation(async (...arguments_) => {
+			if (arguments_[0] === SECOND_UDID) {
+				refreshEntered.resolve();
+				await releaseRefresh.promise;
+			}
 			return status(...arguments_);
 		});
 		const refreshing = service.refresh();
@@ -1616,6 +1643,355 @@ describe('slimming service', () => {
 		expect(
 			helper.prepareMutation.mock.calls.map(([, operation]) => operation)
 		).toEqual(['apply_profile']);
+		await service.stop();
+	});
+
+	it('never probes a Simulator while a mutation reboots it, and keeps the status the mutation wrote', async () => {
+		const helper = new FakeHelper();
+		const { service } = await createService(helper);
+		await enableAndAcknowledge(service, 'reboot');
+		// A background poll has taken its snapshot, both Simulators booted, when
+		// the apply arrives.
+		const poll = holdNextSnapshot(helper);
+		// A probe records the Simulator state it found when it was called, and
+		// answers with the managed set it read then, but only once the apply has
+		// finished: the late result of a probe that began before the apply.
+		const applyFinished = deferred();
+		const secondProbed = deferred();
+		const probes: Array<{ udid: string; state: string }> = [];
+		const status = helper.simulatorStatus.getMockImplementation();
+		if (!status) throw new Error('Fake status implementation is unavailable.');
+		helper.simulatorStatus.mockImplementation(async (simulatorId) => {
+			probes.push({ udid: simulatorId, state: helper.deviceState });
+			if (simulatorId === SECOND_UDID) secondProbed.resolve();
+			const probe = status(simulatorId);
+			if (simulatorId === UDID) await applyFinished.promise;
+			return probe;
+		});
+		const refreshing = service.refresh();
+		await poll.entered;
+
+		// The apply shuts the Simulator down for its reboot and waits there.
+		const commitEntered = deferred();
+		const releaseCommit = deferred();
+		const apply = helper.applyProfile.getMockImplementation();
+		if (!apply) throw new Error('Fake apply implementation is unavailable.');
+		helper.applyProfile.mockImplementationOnce(async (...arguments_) => {
+			helper.deviceState = 'Shutdown';
+			commitEntered.resolve();
+			await releaseCommit.promise;
+			helper.deviceState = 'Booted';
+			return apply(...arguments_);
+		});
+		const receipt = service.runAction(
+			action({
+				actionId: 'reboot-apply',
+				kind: 'profile.apply',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+				confirmation: SLIMMING_CONFIRMATIONS.apply,
+			})
+		);
+		expect(receipt.accepted).toBe(true);
+		await commitEntered.promise;
+
+		// The poll's status pass runs while the Simulator is down for the reboot.
+		poll.release();
+		await secondProbed.promise;
+		expect(probes.filter((probe) => probe.udid === UDID)).toEqual([]);
+
+		releaseCommit.resolve();
+		expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		applyFinished.resolve();
+		await refreshing;
+		expect(probes.filter((probe) => probe.udid === UDID)).toEqual([]);
+		expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+			condition: 'profile-match',
+			managedDisabledServiceIds: ['com.apple.feedbackd'],
+			managedDisabledCount: 1,
+			matchingProfileIds: [PROFILE],
+		});
+		await service.stop();
+	});
+
+	it('leaves a Simulator with a running job to that job', async () => {
+		const helper = new FakeHelper();
+		const { service } = await createService(helper);
+		// A background poll has taken its snapshot when a verify arrives. A
+		// read-only job holds no lease, so the poll has to see the job itself.
+		const poll = holdNextSnapshot(helper);
+		const refreshing = service.refresh();
+		await poll.entered;
+		const verifyEntered = deferred();
+		const releaseVerify = deferred();
+		const verify = helper.verifyProfile.getMockImplementation();
+		if (!verify) throw new Error('Fake verify implementation is unavailable.');
+		helper.verifyProfile.mockImplementationOnce(async (...arguments_) => {
+			verifyEntered.resolve();
+			await releaseVerify.promise;
+			return verify(...arguments_);
+		});
+		const receipt = service.runAction(
+			action({
+				actionId: 'verify-overlap',
+				kind: 'profile.verify',
+				simulatorUdids: [UDID],
+				profileId: PROFILE,
+			})
+		);
+		expect(receipt.accepted).toBe(true);
+		await verifyEntered.promise;
+
+		helper.simulatorStatus.mockClear();
+		poll.release();
+		await refreshing;
+		expect(probedSimulators(helper)).toEqual([SECOND_UDID]);
+
+		releaseVerify.resolve();
+		expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe(
+			'complete'
+		);
+		await service.stop();
+	});
+
+	it('marks a Simulator that shut down between the snapshot and the probe unknown instead of clean', async () => {
+		const helper = new FakeHelper();
+		const status = helper.simulatorStatus.getMockImplementation();
+		if (!status) throw new Error('Fake status implementation is unavailable.');
+		// The inventory lists the Simulator as booted; by the time its probe
+		// runs it has shut down, so the helper read no managed services.
+		helper.simulatorStatus.mockImplementation(async (simulatorId) => {
+			const probe = await status(simulatorId);
+			return {
+				...probe,
+				device: { ...probe.device, state: 'Shutdown' },
+				managedDisabledServiceIds: [],
+				managedDisabledCount: 0,
+				matchingProfileIds: [],
+			};
+		});
+		const { service } = await createService(helper);
+		expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+			condition: 'unknown',
+			managedDisabledCount: 0,
+			managedServiceCount: 1,
+			message: expect.stringContaining('Shutdown Simulator'),
+		});
+		// A preview boots a shut-down Simulator, so none was requested either.
+		expect(helper.previewProfile).not.toHaveBeenCalled();
+		await service.stop();
+	});
+
+	it('keeps the status of a deleted Simulator only while its restore point is pending', async () => {
+		const helper = new FakeHelper();
+		const { directory, service } = await createService(helper);
+		await enableAndAcknowledge(service, 'deleted');
+		helper.applyError = new Error('Injected exit after prepare.');
+		expect((await runApply(service, 'deleted-apply')).status).toBe(
+			'needs-attention'
+		);
+		expect(
+			(await readPersistedState(directory)).pendingMutations[UDID]
+		).toBeDefined();
+		const list = helper.listSimulators.getMockImplementation();
+		if (!list) throw new Error('Fake inventory implementation is unavailable.');
+
+		// Both Simulators are deleted. The one with the record keeps the status
+		// the interrupted apply left, tuple included; the other is forgotten.
+		helper.listSimulators.mockImplementation(async () => []);
+		await service.refresh();
+		expect(service.getState().statusBySimulator[SECOND_UDID]).toBeUndefined();
+		expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+			managedServiceCount: 1,
+			compatibility: { status: 'unknown', acknowledged: true },
+		});
+
+		// Once the Simulator is back and its record reconciled, nothing refers
+		// to it any more, so the next deletion drops its status too.
+		helper.listSimulators.mockImplementation(list);
+		await service.refresh();
+		expect(
+			(await readPersistedState(directory)).pendingMutations[UDID]
+		).toBeUndefined();
+		helper.listSimulators.mockImplementation(async () => []);
+		await service.refresh();
+		expect(service.getState().statusBySimulator[UDID]).toBeUndefined();
+		await service.stop();
+	});
+
+	it('probes a Simulator whose lease is held only for the holder that passes its lease', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const helper = new FakeHelper();
+		const { service } = await createService(helper, undefined, coordinator);
+		helper.simulatorStatus.mockClear();
+		helper.managedByDevice.set(UDID, ['com.apple.feedbackd']);
+		await coordinator.runExclusive(
+			UDID,
+			new AbortController().signal,
+			async (lease) => {
+				// Without its lease, a holder's refresh leaves its Simulator alone.
+				await service.refresh();
+				expect(probedSimulators(helper)).toEqual([SECOND_UDID]);
+				expect(
+					service.getState().statusBySimulator[UDID]?.managedDisabledCount
+				).toBe(0);
+				// With it, the Simulator is probed under the lease it holds, as a
+				// lane does before it slims the Simulator it just booted.
+				await service.refresh(lease);
+				expect(
+					probedSimulators(helper).filter((simulatorId) => simulatorId === UDID)
+				).toHaveLength(1);
+				expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+					condition: 'profile-match',
+					managedDisabledCount: 1,
+				});
+			}
+		);
+		await service.stop();
+	});
+
+	it("runs a lease holder's refresh after the poll under way instead of sharing its result", async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const helper = new FakeHelper();
+		const { service } = await createService(helper, undefined, coordinator);
+		helper.simulatorStatus.mockClear();
+		helper.managedByDevice.set(UDID, ['com.apple.feedbackd']);
+		// A poll has both Simulators in its snapshot when a lane takes the lease
+		// on one of them and refreshes.
+		const poll = holdNextSnapshot(helper);
+		const polling = service.refresh();
+		await poll.entered;
+		await coordinator.runExclusive(
+			UDID,
+			new AbortController().signal,
+			async (lease) => {
+				const holding = service.refresh(lease);
+				poll.release();
+				await polling;
+				await holding;
+				// The poll skipped the Simulator the lane holds, so only the lane's
+				// own refresh, which waited for the poll, probed it.
+				expect(
+					probedSimulators(helper).filter((simulatorId) => simulatorId === UDID)
+				).toHaveLength(1);
+				expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+					condition: 'profile-match',
+					managedDisabledCount: 1,
+				});
+			}
+		);
+		await service.stop();
+	});
+
+	it('serves every lease holder that arrives during a poll with one refresh after it', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const helper = new FakeHelper();
+		const { service } = await createService(helper, undefined, coordinator);
+		helper.managedByDevice.set(UDID, ['com.apple.feedbackd']);
+		helper.managedByDevice.set(SECOND_UDID, ['com.apple.feedbackd']);
+		helper.handshake.mockClear();
+		helper.simulatorStatus.mockClear();
+		// A poll has both Simulators in its snapshot when two lanes, each holding
+		// one of them, refresh.
+		const poll = holdNextSnapshot(helper);
+		const polling = service.refresh();
+		await poll.entered;
+		const { signal } = new AbortController();
+		await coordinator.runExclusive(UDID, signal, (first) =>
+			coordinator.runExclusive(SECOND_UDID, signal, async (second) => {
+				const holding = [service.refresh(first), service.refresh(second)];
+				poll.release();
+				await Promise.all([polling, ...holding]);
+				// The poll skipped both Simulators, and one refresh after it probed
+				// each under the lease its lane holds, where a refresh per lane would
+				// make the last lane wait for all the others.
+				expect(helper.handshake).toHaveBeenCalledTimes(2);
+				expect(probedSimulators(helper).sort()).toEqual(
+					[SECOND_UDID, UDID].sort()
+				);
+				for (const simulatorUdid of [UDID, SECOND_UDID]) {
+					expect(
+						service.getState().statusBySimulator[simulatorUdid]
+					).toMatchObject({
+						condition: 'profile-match',
+						managedDisabledCount: 1,
+					});
+				}
+			})
+		);
+		await service.stop();
+	});
+
+	it('does not start the refresh a lease holder waits for once the service has stopped', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const helper = new FakeHelper();
+		const { service } = await createService(helper, undefined, coordinator);
+		helper.handshake.mockClear();
+		const poll = holdNextSnapshot(helper);
+		const polling = service.refresh();
+		await poll.entered;
+		await coordinator.runExclusive(
+			UDID,
+			new AbortController().signal,
+			async (lease) => {
+				const holding = service.refresh(lease);
+				await service.stop();
+				poll.release();
+				await Promise.all([polling, holding]);
+			}
+		);
+		// Only the poll ran; the helper is not asked again after shutdown.
+		expect(helper.handshake).toHaveBeenCalledTimes(1);
+	});
+
+	it('lets a lane that just booted its Simulator refresh and apply under the lease it holds', async () => {
+		const coordinator = new SimulatorMutationCoordinator();
+		const helper = new FakeHelper();
+		// The lane's Simulator is not in the inventory yet: it is about to boot.
+		const list = helper.listSimulators.getMockImplementation();
+		if (!list) throw new Error('Fake inventory implementation is unavailable.');
+		helper.listSimulators.mockImplementation(async () =>
+			(await list()).filter((device) => device.id !== UDID)
+		);
+		const { service } = await createService(helper, undefined, coordinator);
+		await service.setEnabled({ actionId: 'lane-enable', enabled: true });
+		// Another Simulator on the same tuple carries the acknowledgement.
+		const acknowledgement = await service.acknowledgeCompatibility({
+			actionId: 'lane-ack',
+			simulatorUdids: [SECOND_UDID],
+			acknowledgement: 'EXPERIMENTAL',
+		});
+		expect(acknowledgement.accepted).toBe(true);
+
+		// The lane boots its Simulator, takes its lease, and refreshes before it
+		// slims. Only a probe under that lease gives the Simulator the inventory
+		// entry and compatibility tuple the apply is gated on.
+		helper.listSimulators.mockImplementation(list);
+		await coordinator.runExclusive(
+			UDID,
+			new AbortController().signal,
+			async (lease) => {
+				await service.refresh(lease);
+				const receipt = service.runAction(
+					action({
+						actionId: 'lane-slim',
+						kind: 'profile.apply',
+						simulatorUdids: [UDID],
+						profileId: PROFILE,
+						confirmation: SLIMMING_CONFIRMATIONS.apply,
+					}),
+					lease
+				);
+				expect(receipt).toMatchObject({ accepted: true });
+				expect((await waitForJob(service, receipt.jobId ?? '')).status).toBe(
+					'complete'
+				);
+			}
+		);
 		await service.stop();
 	});
 
