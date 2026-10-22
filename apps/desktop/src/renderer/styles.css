@@ -5992,6 +5992,10 @@ button:disabled {
 .device-wall {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(var(--tile, 200px), 1fr));
+	/* Rows size to their tiles. With `auto` rows the tiles' `overflow: hidden`
+	   makes their minimum 0, so the grid's fixed height was shared out equally
+	   and 30 Simulators became 2px slivers instead of a scrolling wall. */
+	grid-auto-rows: max-content;
 	gap: 10px;
 	height: 100%;
 	margin: 0;
