@@ -304,6 +304,17 @@ function isEditableTarget(target: EventTarget | null): boolean {
 	);
 }
 
+/**
+ * Whether a dialog, alert or popover is open. The window shortcuts switch
+ * tools and workspaces underneath an open overlay otherwise, so first-run
+ * setup could end up over a panel it never meant to show.
+ */
+function hasOpenOverlay(): boolean {
+	return (
+		document.querySelector('[role="dialog"], [role="alertdialog"]') !== null
+	);
+}
+
 export function App() {
 	const desktop = useDesktopRuntime();
 	const recipe = useRecipeRuntime();
@@ -354,7 +365,8 @@ export function App() {
 				event.defaultPrevented ||
 				event.repeat ||
 				event.altKey ||
-				isEditableTarget(event.target)
+				isEditableTarget(event.target) ||
+				hasOpenOverlay()
 			) {
 				return;
 			}

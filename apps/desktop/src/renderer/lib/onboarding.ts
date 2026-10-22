@@ -82,6 +82,20 @@ export function useOnboarding(): OnboardingSnapshot {
 	return useSyncExternalStore(subscribe, read, read);
 }
 
+/**
+ * Whether first-run setup should open by itself: for someone who has no
+ * repository or lane yet and never closed setup. Callers decide only once the
+ * lane state has really been read; a failed read leaves an empty state that
+ * must not pass for an empty workspace.
+ */
+export function shouldOpenSetup(input: {
+	setupDone: boolean;
+	repositories: number;
+	lanes: number;
+}): boolean {
+	return !input.setupDone && input.repositories === 0 && input.lanes === 0;
+}
+
 /** The step before or after, or the same step at either end. */
 export function adjacentSetupStep(step: SetupStep, offset: -1 | 1): SetupStep {
 	const index = SETUP_STEPS.indexOf(step) + offset;

@@ -24,6 +24,7 @@ import {
 	SETUP_STEPS,
 	type SetupStep,
 	setSetupStep,
+	shouldOpenSetup,
 	useOnboarding,
 } from '@/lib/onboarding';
 import { shortPath } from '@/simulator/fleet-model';
@@ -109,17 +110,21 @@ export function SetupFlow() {
 	const lanes = useLaneRuntime();
 	const decided = useRef(false);
 	useEffect(() => {
-		if (decided.current || lanes.isLoading) return;
+		// A failed read leaves `hasLoaded` false, so an existing user whose
+		// lane state could not be read is not shown first-run setup.
+		if (decided.current || !lanes.hasLoaded) return;
 		decided.current = true;
 		if (
-			!setupDone &&
-			lanes.state.repositories.length === 0 &&
-			lanes.state.lanes.length === 0
+			shouldOpenSetup({
+				setupDone,
+				repositories: lanes.state.repositories.length,
+				lanes: lanes.state.lanes.length,
+			})
 		) {
 			openSetup();
 		}
 	}, [
-		lanes.isLoading,
+		lanes.hasLoaded,
 		lanes.state.lanes.length,
 		lanes.state.repositories.length,
 		setupDone,
