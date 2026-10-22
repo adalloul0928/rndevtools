@@ -183,7 +183,9 @@ export function EnvironmentPanel() {
 								? 'No validation rules were evaluated'
 								: failures === 0
 									? 'Runtime configuration is healthy'
-									: `${failures} value${failures === 1 ? '' : 's'} need review`}
+									: failures === 1
+										? '1 value needs review'
+										: `${failures} values need review`}
 						</h2>
 						<p className="mb-0 mt-2 max-w-xl text-xs leading-5 text-(--muted)">
 							Validation is performed against declared requirements. Secrets are

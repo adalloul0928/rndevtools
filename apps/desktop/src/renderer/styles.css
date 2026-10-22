@@ -216,6 +216,14 @@ button:disabled {
 	background: transparent;
 }
 
+/* Styling the scrollbar opts out of the native dark one, so the corner and
+   the resize grip (a textarea's bottom-right square) must be painted too or
+   they stay white in the dark theme. */
+::-webkit-scrollbar-corner,
+::-webkit-resizer {
+	background: transparent;
+}
+
 ::-webkit-scrollbar-thumb {
 	border: 3px solid transparent;
 	border-radius: 999px;
