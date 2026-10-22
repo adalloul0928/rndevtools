@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	adjacentSetupStep,
+	parseCompletedTasks,
 	setupActionError,
 	shouldOpenSetup,
 } from './onboarding';
@@ -22,6 +23,24 @@ describe('setupActionError', () => {
 		).toBe('Not a git repository.');
 		expect(setupActionError({ completed: false }, fallback)).toBe(fallback);
 		expect(setupActionError(undefined, fallback)).toBe(fallback);
+	});
+});
+
+describe('parseCompletedTasks', () => {
+	it('reads the stored task ids once each', () => {
+		expect(
+			parseCompletedTasks('["check-mac","boot-simulator","check-mac"]')
+		).toEqual(['check-mac', 'boot-simulator']);
+	});
+
+	it('ignores anything that is not a list of task ids', () => {
+		expect(parseCompletedTasks(null)).toEqual([]);
+		expect(parseCompletedTasks('not json')).toEqual([]);
+		expect(parseCompletedTasks('{"check-mac":true}')).toEqual([]);
+		expect(
+			parseCompletedTasks('["Check Mac", 3, null, "add-project"]')
+		).toEqual(['add-project']);
+		expect(parseCompletedTasks(`["${'a'.repeat(5_000)}"]`)).toEqual([]);
 	});
 });
 

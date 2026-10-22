@@ -1058,12 +1058,15 @@ function SimulatorContent({
 	const { state } = useSimulatorRuntime();
 	const { checklistHidden } = useOnboarding();
 	const { progress } = useGetStarted();
-	// While Get started shows in the sidebar it already says what is left.
-	const checklistShown = !checklistHidden && !progress.complete;
+	// The banner stays quiet while the first scan runs, and while the Get
+	// started card is already pointing at the Mac check. A remembered tick
+	// elsewhere in the checklist must not hide a Mac that stopped working.
+	const checklistCoversMac =
+		!checklistHidden && !progress.complete && progress.next?.id === 'check-mac';
 	return (
 		<>
-			{state.capability.status !== 'available' &&
-			!checklistShown &&
+			{state.capability.status === 'unavailable' &&
+			!checklistCoversMac &&
 			!TOOLS_WITHOUT_SETUP_BANNER.has(activeTool) ? (
 				<button
 					aria-label="Simulator setup needs attention · open Settings"
