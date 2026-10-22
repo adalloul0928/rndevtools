@@ -8,6 +8,7 @@ import {
 	networkSegmentCounts,
 	prettyBody,
 	redactedCount,
+	statusCodeLabel,
 	statusLabel,
 	statusTone,
 } from './network-panel';
@@ -102,6 +103,13 @@ describe('statusTone', () => {
 	it('treats 3xx as warning and 2xx as success', () => {
 		expect(statusTone({ state: 'success', status: 301 })).toBe('warning');
 		expect(statusTone({ state: 'success', status: 200 })).toBe('success');
+	});
+	it('is neutral, not green, when the response was never read', () => {
+		expect(statusTone({ state: 'success' })).toBe('neutral');
+		expect(statusCodeLabel({ state: 'success' })).toBe('—');
+		expect(statusLabel({ state: 'success' })).toBe('—');
+		expect(statusCodeLabel({ state: 'success', status: 204 })).toBe('204');
+		expect(statusCodeLabel({ state: 'error' })).toBe('error');
 	});
 });
 
