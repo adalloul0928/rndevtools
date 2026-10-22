@@ -85,10 +85,12 @@ export function useGetStarted() {
 				bootedCount: simulator.state.devices.filter(
 					(device) => device.state === 'booted'
 				).length,
-				// The browser preview's in-memory device is not an app of yours.
+				// Live sessions only, as the titlebar counts them: the browser
+				// preview's in-memory device is not an app of yours, and the broker
+				// keeps offline sessions around for a day.
 				appSessionCount:
 					desktop.state?.devices.filter(
-						(device) => device.status !== 'simulated'
+						(device) => device.status === 'online'
 					).length ?? 0,
 				laneCount: lanes.state.lanes.length,
 				supabase: supabase.availability.platform.supported
