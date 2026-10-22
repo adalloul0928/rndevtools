@@ -4812,6 +4812,9 @@ select {
 .setup-dialog {
 	width: min(920px, calc(100vw - 48px));
 	max-width: none;
+	/* One height for every step: Connect your app is the tallest, and a
+	   min-height alone let the dialog jump each time it came and went. */
+	height: min(620px, calc(100vh - 48px));
 	min-height: min(560px, calc(100vh - 48px));
 	padding: 0;
 	overflow: hidden;
@@ -5404,8 +5407,13 @@ select {
 .get-started-popover {
 	width: 460px;
 	max-width: calc(100vw - 32px);
+	/* Bounded below the titlebar (see GetStartedCard), which moves it clear of
+	   the workspace switch. React Aria still writes an inline max-height from
+	   the whole viewport, which let it run past the bottom of the window. */
+	/* biome-ignore lint/complexity/noImportantStyles: overrides React Aria's inline viewport-based max-height, which ignores the boundary */
+	max-height: calc(100vh - var(--titlebar-height) - 24px) !important;
 	padding: 0;
-	overflow: hidden;
+	overflow: auto;
 }
 
 .get-started-popover .get-started {

@@ -207,7 +207,9 @@ function SetupWindow({ step }: { step: SetupStep }) {
 					) : (
 						<img alt="" className="setup-app-icon" src={appIcon} />
 					)}
-					<div className="setup-text">
+					{/* Focus stays on the same primary button from step to step, so
+					    nothing would announce a new step without a live region. */}
+					<div aria-atomic="true" aria-live="polite" className="setup-text">
 						<h1 id="setup-title">{copy.title}</h1>
 						<p>{copy.body}</p>
 					</div>
