@@ -50,13 +50,14 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
-import { useOnboarding } from '@/lib/onboarding';
+import { clearFleetRequest, useOnboarding } from '@/lib/onboarding';
 import {
 	defaultDiskCleanupCategoryIds,
 	diskInventorySelectionRevision,
 	sanitizeDiskCleanupCategoryIds,
 } from '@/simulator/disk-inventory-model';
 import {
+	bootTarget,
 	buildFleetRows,
 	connectedSessionsForSimulator,
 	type FleetRow,
@@ -214,6 +215,45 @@ export function FleetPanel() {
 	const [showCreate, setShowCreate] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
 	const [createdJobId, setCreatedJobId] = useState<string | null>(null);
+	const { fleetRequest } = useOnboarding();
+	const [focusOpenFor, setFocusOpenFor] = useState<string | null>(null);
+	// Get started's "Boot a Simulator": once discovery has listed the
+	// Simulators, select one to boot and focus its button, or open the
+	// create form when there is nothing to boot.
+	useEffect(() => {
+		if (fleetRequest !== 'boot-simulator') return;
+		const discovering =
+			isLoading ||
+			(isBridgeAvailable && state.capability.status === 'checking');
+		if (discovering) return;
+		clearFleetRequest();
+		const udid = bootTarget(state.devices, selectedDevice?.udid);
+		if (!udid) {
+			setShowCreate(true);
+			return;
+		}
+		setSelectedDeviceUdid(udid);
+		setFocusOpenFor(udid);
+	}, [
+		fleetRequest,
+		isLoading,
+		isBridgeAvailable,
+		state.capability,
+		state.devices,
+		selectedDevice?.udid,
+		setSelectedDeviceUdid,
+	]);
+	useEffect(() => {
+		if (!focusOpenFor || selectedDevice?.udid !== focusOpenFor) return;
+		setFocusOpenFor(null);
+		const focusOpenAction = () =>
+			document.querySelector<HTMLElement>('[data-fleet-open-action]')?.focus();
+		focusOpenAction();
+		// The Get started popover hands focus back to its trigger in a frame
+		// callback as it closes; take it again after that. Not cancelled on
+		// cleanup, since clearing `focusOpenFor` re-runs this effect at once.
+		requestAnimationFrame(focusOpenAction);
+	}, [focusOpenFor, selectedDevice?.udid]);
 	const recentJobs = state.jobs
 		.filter((job) => job.kind.startsWith('device.'))
 		.toReversed();
@@ -1183,6 +1223,7 @@ function TargetDetail({
 			</div>
 			<div className="sim-action-row">
 				<Button
+					data-fleet-open-action
 					isDisabled={!openPresentation.allowed}
 					size="sm"
 					variant="primary"

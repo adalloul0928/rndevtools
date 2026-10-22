@@ -15,6 +15,7 @@ import { type ComponentType, useEffect, useMemo, useState } from 'react';
 import {
 	openSetup,
 	rememberCompletedTasks,
+	requestBootSimulator,
 	setChecklistHidden,
 	useOnboarding,
 } from '@/lib/onboarding';
@@ -58,6 +59,9 @@ function runTask(id: GetStartedTaskId): void {
 			openSetup('app');
 			return;
 		case 'boot-simulator':
+			// Setting the hash alone did nothing when Simulators was already open;
+			// the panel now selects one to boot, or opens the create form.
+			requestBootSimulator();
 			window.location.hash = 'simulator/fleet';
 			return;
 		case 'start-lane':

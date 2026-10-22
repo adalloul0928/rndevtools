@@ -12,6 +12,7 @@ import {
 } from '../../shared/supabase-demo-data';
 import {
 	agentLabel,
+	bootTarget,
 	buildFleetRows,
 	connectedSessionsForSimulator,
 	type FleetRow,
@@ -449,5 +450,27 @@ describe('lane backends on rows', () => {
 		});
 		expect(rows[0]?.backend).toBeUndefined();
 		expect(fleetFilterCounts(rows)['with-backend']).toBe(0);
+	});
+});
+
+describe('bootTarget', () => {
+	const shutA = device('AAAA-1', 'iPhone A', 'shutdown');
+	const shutB = device('BBBB-2', 'iPhone B', 'shutdown');
+	const booted = device('CCCC-3', 'iPhone C', 'booted');
+
+	it('prefers the selected Simulator when it can boot', () => {
+		expect(bootTarget([shutA, shutB], 'BBBB-2')).toBe('BBBB-2');
+	});
+
+	it('falls back to the first that can boot, then to one already booted', () => {
+		expect(bootTarget([booted, shutA], 'CCCC-3')).toBe('AAAA-1');
+		expect(bootTarget([booted], undefined)).toBe('CCCC-3');
+	});
+
+	it('finds nothing to boot without an available Simulator', () => {
+		expect(bootTarget([], undefined)).toBeUndefined();
+		expect(
+			bootTarget([{ ...shutA, isAvailable: false }], undefined)
+		).toBeUndefined();
 	});
 });
