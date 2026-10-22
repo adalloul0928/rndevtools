@@ -404,8 +404,10 @@ export function ConfirmAction({
 				{triggerLabel}
 			</AlertDialog.Trigger>
 			<AlertDialog.Backdrop className="bg-black/40 backdrop-blur-sm dark:bg-black/70">
-				<AlertDialog.Container className="border border-foreground/12 bg-overlay shadow-2xl">
-					<AlertDialog.Dialog>
+				{/* The container is HeroUI's full-viewport wrapper; the visible box is
+				    the dialog, which already carries the overlay background and shadow. */}
+				<AlertDialog.Container>
+					<AlertDialog.Dialog className="border border-foreground/12">
 						<AlertDialog.Header>
 							<AlertDialog.Icon status={tone}>
 								<Icon className="h-5 w-5" />

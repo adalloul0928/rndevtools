@@ -964,11 +964,8 @@ function UnknownTupleAcknowledgementDialog({
 				</span>
 			</AlertDialog.Trigger>
 			<AlertDialog.Backdrop className="bg-black/40 backdrop-blur-sm dark:bg-black/70">
-				<AlertDialog.Container
-					className="border border-foreground/12 bg-overlay shadow-2xl"
-					size="lg"
-				>
-					<AlertDialog.Dialog>
+				<AlertDialog.Container size="lg">
+					<AlertDialog.Dialog className="border border-foreground/12">
 						<AlertDialog.Header>
 							<AlertDialog.Icon status="warning">
 								<ShieldAlert className="h-5 w-5" />
@@ -1068,11 +1065,8 @@ function SlimmingDisableDialog({
 			}}
 		>
 			<AlertDialog.Backdrop className="bg-black/40 backdrop-blur-sm dark:bg-black/70">
-				<AlertDialog.Container
-					className="border border-foreground/12 bg-overlay shadow-2xl"
-					size="lg"
-				>
-					<AlertDialog.Dialog>
+				<AlertDialog.Container size="lg">
+					<AlertDialog.Dialog className="border border-foreground/12">
 						<AlertDialog.Header>
 							<AlertDialog.Icon status="warning">
 								<ListRestart className="h-5 w-5" />
