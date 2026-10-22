@@ -30,6 +30,11 @@ export type OnboardingSnapshot = Readonly<{
 	 * tick after a relaunch.
 	 */
 	completedTasks: readonly string[];
+	/**
+	 * A Get started task the Simulators panel acts on once it is showing:
+	 * "Boot a Simulator" selects one to boot, or opens the create form.
+	 */
+	fleetRequest: 'boot-simulator' | null;
 }>;
 
 function read(key: string): string | null {
@@ -69,6 +74,7 @@ let snapshot: OnboardingSnapshot = {
 	setupDone: read(SETUP_KEY) === 'done',
 	checklistHidden: read(CHECKLIST_KEY) === 'hidden',
 	completedTasks: parseCompletedTasks(read(COMPLETED_KEY)),
+	fleetRequest: null,
 };
 const listeners = new Set<() => void>();
 
@@ -107,6 +113,19 @@ export function rememberCompletedTasks(ids: readonly string[]): void {
 	);
 	write(COMPLETED_KEY, JSON.stringify(completedTasks));
 	publish({ completedTasks });
+}
+
+/**
+ * Asks the Simulators panel to act on "Boot a Simulator". A request survives
+ * until the panel has mounted and read the device list, so it also works when
+ * the panel was not showing yet.
+ */
+export function requestBootSimulator(): void {
+	publish({ fleetRequest: 'boot-simulator' });
+}
+
+export function clearFleetRequest(): void {
+	if (snapshot.fleetRequest !== null) publish({ fleetRequest: null });
 }
 
 function subscribe(listener: () => void): () => void {
