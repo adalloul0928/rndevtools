@@ -129,9 +129,10 @@ jobs:
       - name: Test main, preload and shared
         run: pnpm --filter @rndevtools/desktop test:run:node
       # Plain `node --test` suites for the bundled-notice generator, the macOS
-      # release preflight, the native host version drift check and the SimSlim
-      # provenance check. The Native helpers job runs the last two against the
-      # real checkout and toolchain; this is their unit coverage.
+      # release preflight, the native host version and the SimSlim provenance
+      # check. The first three had never run in CI. The Native helpers job
+      # also runs the provenance suite and the real version drift check; the
+      # suite is cheap, so native:check:packaging is kept whole.
       - name: Script tests
         run: |
           pnpm --filter @rndevtools/desktop licenses:check
@@ -166,7 +167,7 @@ jobs:
             exit 1
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Desktop renderer gate skipped::HEROUI_AUTH_TOKEN is not available to a pull request from a fork, so the Electron renderer was not typechecked or built. A maintainer must run this job for changes under apps/desktop/src/renderer."
+            echo "::notice title=Desktop renderer gate skipped::HEROUI_AUTH_TOKEN is not available to a pull request from a fork, so the renderer typecheck and tests, the unused-devDependency check and the Electron build did not run. A maintainer must run this job for changes under apps/desktop."
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.license.outputs.available == 'true'

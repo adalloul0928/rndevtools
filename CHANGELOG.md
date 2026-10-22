@@ -202,7 +202,9 @@
 - Playwright end-to-end harness and per-panel specs against the demo device.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
-  typecheck and tests, knip and the script tests. The job that typechecks and
-  builds the renderer with HeroUI Pro now fails, instead of silently
-  skipping, when `HEROUI_AUTH_TOKEN` is missing from the repository's own
-  runs; it still skips with a notice on pull requests from forks.
+  typecheck and tests, knip without its unused-devDependency check, and the
+  script tests. The job that runs the full `quality` gate with HeroUI Pro
+  (renderer typecheck and tests, the unused-devDependency check and the build)
+  now fails, instead of skipping and reporting success, when
+  `HEROUI_AUTH_TOKEN` is missing from the repository's own runs; it still
+  skips with a notice on pull requests from forks.
