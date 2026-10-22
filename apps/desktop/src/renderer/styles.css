@@ -5401,8 +5401,12 @@ button:disabled {
 .get-started-popover {
 	width: 460px;
 	max-width: calc(100vw - 32px);
+	/* Bounded below the titlebar (see GetStartedCard), which moves it clear of
+	   the workspace switch; React Aria does not cap a side-placed popover's
+	   height, so this keeps it inside the window and lets the checklist
+	   scroll instead of pushing its footer off screen. */
+	max-height: calc(100vh - var(--titlebar-height) - 24px);
 	padding: 0;
-	/* Bounded below the titlebar (see GetStartedCard); scrolls when short. */
 	overflow: auto;
 }
 
