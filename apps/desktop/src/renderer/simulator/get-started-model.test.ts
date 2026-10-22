@@ -4,6 +4,7 @@ import {
 	getStartedProgress,
 	getStartedTasks,
 	macChecks,
+	withRememberedCompletion,
 } from './get-started-model';
 
 const fresh: GetStartedInput = {
@@ -95,6 +96,37 @@ describe('Get started tasks', () => {
 			next: undefined,
 		});
 		expect(tasks[0]?.detail).toBe('Xcode and 2 iOS runtimes found');
+	});
+
+	it('keeps tasks finished before ticked when their live state is gone', () => {
+		// After a relaunch nothing is booted and no app is connected yet.
+		const tasks = withRememberedCompletion(getStartedTasks(fresh), [
+			'boot-simulator',
+			'connect-app',
+		]);
+		const byId = new Map(tasks.map((task) => [task.id, task]));
+		expect(byId.get('boot-simulator')).toMatchObject({
+			done: true,
+			detail: 'Done',
+		});
+		expect(byId.get('connect-app')?.done).toBe(true);
+		expect(byId.get('check-mac')?.done).toBe(false);
+		expect(getStartedProgress(tasks).next?.id).toBe('check-mac');
+	});
+
+	it('keeps the live detail of a task that is done right now', () => {
+		const [check] = withRememberedCompletion(
+			getStartedTasks({
+				...fresh,
+				capability: {
+					status: 'available',
+					xcodeVersion: '27.0',
+					runtimeAvailability: { available: 1 },
+				},
+			}),
+			['check-mac']
+		);
+		expect(check?.detail).toBe('Xcode 27.0 and 1 iOS runtime found');
 	});
 });
 

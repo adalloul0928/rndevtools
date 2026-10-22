@@ -11,13 +11,19 @@ import {
 	TerminalSquare,
 	Waypoints,
 } from 'lucide-react';
-import { type ComponentType, useMemo, useState } from 'react';
-import { openSetup, setChecklistHidden, useOnboarding } from '@/lib/onboarding';
+import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import {
+	openSetup,
+	rememberCompletedTasks,
+	setChecklistHidden,
+	useOnboarding,
+} from '@/lib/onboarding';
 import {
 	type GetStartedTask,
 	type GetStartedTaskId,
 	getStartedProgress,
 	getStartedTasks,
+	withRememberedCompletion,
 } from '@/simulator/get-started-model';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import { useLaneRuntime } from '@/state/lane-runtime';
@@ -69,14 +75,18 @@ function runTask(id: GetStartedTaskId): void {
 	}
 }
 
-/** The checklist, read from the runtimes: nothing is ticked by hand. */
+/**
+ * The checklist, read from the runtimes: nothing is ticked by hand. A task
+ * done once stays ticked, so it does not go backwards after a relaunch.
+ */
 export function useGetStarted() {
 	const simulator = useSimulatorRuntime();
 	const lanes = useLaneRuntime();
 	const desktop = useDesktopRuntime();
 	const { state: supabase } = useSupabaseState();
 	const recipe = useRecipeRuntime();
-	const tasks = useMemo(
+	const { completedTasks } = useOnboarding();
+	const live = useMemo(
 		() =>
 			getStartedTasks({
 				capability: simulator.state.capability,
@@ -89,9 +99,8 @@ export function useGetStarted() {
 				// preview's in-memory device is not an app of yours, and the broker
 				// keeps offline sessions around for a day.
 				appSessionCount:
-					desktop.state?.devices.filter(
-						(device) => device.status === 'online'
-					).length ?? 0,
+					desktop.state?.devices.filter((device) => device.status === 'online')
+						.length ?? 0,
 				laneCount: lanes.state.lanes.length,
 				supabase: supabase.availability.platform.supported
 					? { running: supabase.capacity.running }
@@ -111,6 +120,15 @@ export function useGetStarted() {
 			supabase.capacity.running,
 			recipe.state.recipes.length,
 		]
+	);
+	useEffect(() => {
+		rememberCompletedTasks(
+			live.filter((task) => task.done).map((task) => task.id)
+		);
+	}, [live]);
+	const tasks = useMemo(
+		() => withRememberedCompletion(live, completedTasks),
+		[live, completedTasks]
 	);
 	return { tasks, progress: getStartedProgress(tasks) };
 }
