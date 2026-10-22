@@ -5402,10 +5402,10 @@ button:disabled {
 	width: 460px;
 	max-width: calc(100vw - 32px);
 	/* Bounded below the titlebar (see GetStartedCard), which moves it clear of
-	   the workspace switch; React Aria does not cap a side-placed popover's
-	   height, so this keeps it inside the window and lets the checklist
-	   scroll instead of pushing its footer off screen. */
-	max-height: calc(100vh - var(--titlebar-height) - 24px);
+	   the workspace switch. React Aria still writes an inline max-height from
+	   the whole viewport, which let it run past the bottom of the window. */
+	/* biome-ignore lint/complexity/noImportantStyles: overrides React Aria's inline viewport-based max-height, which ignores the boundary */
+	max-height: calc(100vh - var(--titlebar-height) - 24px) !important;
 	padding: 0;
 	overflow: auto;
 }
