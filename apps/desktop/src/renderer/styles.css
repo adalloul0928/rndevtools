@@ -1362,6 +1362,46 @@ select {
 	margin-top: 12px;
 }
 
+/*
+ * Restore points the selection-based Forget cannot reach: a deleted
+ * Simulator's, or any while the helper is away. One row each.
+ */
+.sim-slimming-orphans {
+	flex: 0 0 auto;
+	padding: 12px 16px;
+	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.sim-slimming-orphan-list {
+	display: grid;
+	max-height: 164px;
+	overflow: auto;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.sim-slimming-orphan {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 6px 6px 6px 10px;
+	border: 1px solid color-mix(in oklab, var(--warning) 16%, transparent);
+	border-radius: 6px;
+	background: color-mix(in oklab, var(--warning) 5%, transparent);
+}
+
+.sim-slimming-orphan code {
+	min-width: 0;
+	overflow: hidden;
+	font-family: 'Geist Mono Variable', monospace;
+	font-size: var(--font-size-caption);
+	text-overflow: ellipsis;
+	color: var(--text-secondary);
+}
+
 .sim-unknown-ack {
 	display: flex;
 	width: 100%;

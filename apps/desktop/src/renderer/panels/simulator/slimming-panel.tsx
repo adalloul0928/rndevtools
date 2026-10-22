@@ -45,6 +45,7 @@ import {
 	allSelectedCheckpointsAvailable,
 	allSelectedNeedAttention,
 	managedOverrideUdids,
+	orphanedRestorePoints,
 	restoreAndDisableInput,
 	type UnknownTupleAcknowledgement,
 	unknownCompatibilityBinding,
@@ -202,6 +203,8 @@ export function SlimmingPanel() {
 	const needsAttention = selectedStatuses.filter(
 		(status) => status.condition === 'needs-attention'
 	).length;
+	// The action row's Forget works from the selection, which these are not in.
+	const orphanedRecords = orphanedRestorePoints(state);
 
 	const submit = (action: SlimmingActionInput, successMessage: string) =>
 		void runAction(action, { successMessage });
@@ -414,6 +417,46 @@ export function SlimmingPanel() {
 					value={String(needsAttention)}
 				/>
 			</div>
+			{orphanedRecords.length > 0 ? (
+				<section className="sim-slimming-orphans">
+					<div className="sim-section-heading">
+						<div>
+							<h3>Restore points that can only be forgotten</h3>
+							<p>
+								{state.helper.status === 'available'
+									? 'The helper inventory no longer lists these Simulators, so nothing can reconcile or undo their interrupted mutations.'
+									: 'The native helper is unavailable, so nothing can reconcile or undo these interrupted mutations until it is back.'}
+							</p>
+						</div>
+						<span>{orphanedRecords.length}</span>
+					</div>
+					<ul className="sim-slimming-orphan-list">
+						{orphanedRecords.map((status) => (
+							<li className="sim-slimming-orphan" key={status.simulatorUdid}>
+								<code>{status.simulatorUdid}</code>
+								<Button
+									aria-label={`Forget restore point ${status.simulatorUdid}`}
+									isDisabled={!isBridgeAvailable}
+									size="sm"
+									variant="ghost"
+									onPress={() =>
+										submit(
+											{
+												kind: 'pending.forget',
+												simulatorUdids: [status.simulatorUdid],
+												confirmation: SLIMMING_CONFIRMATIONS.forget,
+											},
+											'Emergency restore point forgotten.'
+										)
+									}
+								>
+									<Ban className="h-3.5 w-3.5" /> Forget restore point
+								</Button>
+							</li>
+						))}
+					</ul>
+				</section>
+			) : null}
 			{state.simulators.length === 0 ? (
 				<div className="sim-slimming-empty panel-scroll min-h-0 flex-1">
 					<EmptyPanel

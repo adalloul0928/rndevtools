@@ -200,3 +200,12 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- Forget restore point now works for a restore point whose Simulator has been
+  deleted or whose helper is unavailable, so an interrupted SimSlim mutation
+  can no longer leave a Simulator permanently marked "Check required". The
+  SimSlim panel lists such restore points, each with its own Forget restore
+  point button, and the app no longer requires the helper or the Simulator
+  inventory for that one action; it still asks before running. Before, the
+  action was refused as long as the helper was unavailable or the Simulator
+  was missing from the inventory, and a restore point behind an unavailable
+  helper was not shown at all.

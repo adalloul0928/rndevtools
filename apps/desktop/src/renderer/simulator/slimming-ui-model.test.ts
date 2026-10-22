@@ -1,16 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import type { SlimmingSimulatorStatus } from '../../shared/slimming-protocol';
+import type {
+	SlimmingSimulator,
+	SlimmingSimulatorStatus,
+	SlimmingState,
+} from '../../shared/slimming-protocol';
 import {
 	allSelectedCheckpointsAvailable,
 	allSelectedNeedAttention,
 	isExactExperimentalAcknowledgement,
 	managedOverrideUdids,
+	orphanedRestorePoints,
 	restoreAndDisableInput,
 	unknownCompatibilityBinding,
 } from './slimming-ui-model';
 
 const FIRST_UDID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
 const SECOND_UDID = '11111111-2222-4333-8444-555555555555';
+const THIRD_UDID = '99999999-2222-4333-8444-555555555555';
+const AVAILABLE_HELPER: SlimmingState['helper'] = {
+	status: 'available',
+	readOnlyAvailable: true,
+};
+const UNAVAILABLE_HELPER: SlimmingState['helper'] = {
+	status: 'unavailable',
+	readOnlyAvailable: false,
+	error: 'The native helper is not installed.',
+};
+
+function simulator(udid: string): SlimmingSimulator {
+	return {
+		udid,
+		name: 'ExampleApp test device',
+		state: 'booted',
+		runtimeIdentifier: 'com.apple.CoreSimulator.SimRuntime.iOS-18-0',
+		isAvailable: true,
+	};
+}
 
 function status(
 	udid: string,
@@ -106,6 +131,64 @@ describe('Slimming renderer safety model', () => {
 			})
 		).toBe(false);
 		expect(allSelectedNeedAttention([], {})).toBe(false);
+	});
+
+	it('lists the restore points only forgetting can clear', () => {
+		const deleted = status(FIRST_UDID, {
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+			message: 'The restore point can only be forgotten.',
+		});
+		const listed = status(SECOND_UDID, {
+			condition: 'needs-attention',
+			checkpointAvailable: true,
+		});
+		const statusBySimulator = {
+			[FIRST_UDID]: deleted,
+			[SECOND_UDID]: listed,
+			// Needs attention without a restore point, or the reverse: neither
+			// is an interrupted mutation's record, so neither is offered.
+			[THIRD_UDID]: status(THIRD_UDID, { condition: 'needs-attention' }),
+			'88888888-2222-4333-8444-555555555555': status(
+				'88888888-2222-4333-8444-555555555555',
+				{ condition: 'drifted', checkpointAvailable: true }
+			),
+		};
+		// With the helper available, the selection reaches every listed
+		// Simulator, so only a deleted one's record is left to this list.
+		expect(
+			orphanedRestorePoints({
+				helper: AVAILABLE_HELPER,
+				simulators: [simulator(SECOND_UDID), simulator(THIRD_UDID)],
+				statusBySimulator,
+			})
+		).toEqual([deleted]);
+		// Without it, nothing can reconcile or undo any of them.
+		expect(
+			orphanedRestorePoints({
+				helper: UNAVAILABLE_HELPER,
+				simulators: [simulator(SECOND_UDID), simulator(THIRD_UDID)],
+				statusBySimulator,
+			})
+		).toEqual([listed, deleted]);
+		expect(
+			orphanedRestorePoints({
+				helper: AVAILABLE_HELPER,
+				simulators: [simulator(FIRST_UDID), simulator(SECOND_UDID)],
+				statusBySimulator,
+			})
+		).toEqual([]);
+		// Main matches a UDID without regard to case, and so does this.
+		expect(
+			orphanedRestorePoints({
+				helper: AVAILABLE_HELPER,
+				simulators: [
+					simulator(FIRST_UDID.toLowerCase()),
+					simulator(SECOND_UDID),
+				],
+				statusBySimulator,
+			})
+		).toEqual([]);
 	});
 
 	it('binds acknowledgement to the exact sorted set of current unknown tuples', () => {
