@@ -63,7 +63,7 @@ export function ActionNotice({
 		<div
 			aria-live={kind === 'error' ? 'assertive' : 'polite'}
 			data-react-aria-top-layer="true"
-			className={`fixed bottom-5 right-5 z-(--z-index-toast) flex min-w-[280px] max-w-[min(560px,calc(100vw-40px))] items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-2xl ${statusToneClassName[kind === 'success' ? 'success' : kind === 'error' ? 'danger' : 'info']}`}
+			className={`fixed bottom-5 right-5 z-(--z-index-toast) flex min-w-[280px] max-w-[min(560px,calc(100vw-40px))] items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-2xl status-toast is-${kind === 'success' ? 'success' : kind === 'error' ? 'danger' : 'info'}`}
 			role={kind === 'error' ? 'alert' : 'status'}
 		>
 			{icon}

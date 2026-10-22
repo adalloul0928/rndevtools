@@ -216,9 +216,14 @@ function SetupWindow({ step }: { step: SetupStep }) {
 					<SetupAside step={step} />
 				</div>
 				<div className="setup-stage">
-					<div className="setup-stage-card">
+					<section
+						aria-label={`${copy.title}: details`}
+						className="setup-stage-card"
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: the step's details scroll when they overflow (many worktrees, long snippets), and a scrolling region must be reachable from the keyboard
+						tabIndex={0}
+					>
 						<SetupStage step={step} />
-					</div>
+					</section>
 				</div>
 			</div>
 			<footer className="setup-footer">
