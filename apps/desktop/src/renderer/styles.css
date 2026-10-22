@@ -4896,6 +4896,31 @@ select {
 	color: var(--text-3);
 }
 
+/* The toast floats over panels, so its tint sits on an opaque surface; a
+   10% tint alone let the panel text underneath show through. */
+.status-toast {
+	background-color: var(--overlay);
+	background-image: linear-gradient(var(--toast-tint), var(--toast-tint));
+}
+
+.status-toast.is-success {
+	--toast-tint: var(--brand-soft);
+	border-color: color-mix(in oklab, var(--brand) 25%, transparent);
+	color: var(--brand-text);
+}
+
+.status-toast.is-danger {
+	--toast-tint: var(--danger-soft);
+	border-color: var(--danger-border);
+	color: var(--danger-text);
+}
+
+.status-toast.is-info {
+	--toast-tint: var(--info-soft);
+	border-color: var(--info-border);
+	color: var(--info-text);
+}
+
 .setup-error {
 	margin: 8px 0 0;
 	font-size: 13px;
@@ -4930,6 +4955,12 @@ select {
 	border-radius: 10px 0 0;
 	background: var(--background);
 	box-shadow: 0 12px 32px light-dark(rgb(0 0 0 / 8%), rgb(0 0 0 / 50%));
+}
+
+/* The card bleeds past the right edge, so its focus ring is drawn inside. */
+.setup-stage-card:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
 }
 
 .setup-stage-head {
