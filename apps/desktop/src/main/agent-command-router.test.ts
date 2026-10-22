@@ -2,9 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import type { AgentCliCommand } from '../shared/agent-cli-protocol';
 import type { AgentOperation, AgentState } from '../shared/agent-protocol';
 import { createDemoDevice } from '../shared/demo-data';
-import { decideDeviceAccess, resolveDeviceHolds } from '../shared/device-hold';
+import {
+	type DeviceRequester,
+	decideDeviceAccess,
+	resolveDeviceHolds,
+} from '../shared/device-hold';
 import {
 	DEFAULT_LANE_ENVIRONMENTS,
 	type Lane,
@@ -40,8 +45,12 @@ import {
 	type SupabaseState,
 	supabaseAgentRecovery,
 } from '../shared/supabase-protocol';
-import { AgentCliError } from './agent-cli-service';
 import {
+	AgentCliError,
+	type AgentCliHandlerContext,
+} from './agent-cli-service';
+import {
+	type AgentCommandRouterDependencies,
 	type AgentSupabasePort,
 	createAgentCommandRouter,
 } from './agent-command-router';
@@ -212,10 +221,36 @@ function fixture() {
 	};
 }
 
-const context = {
+/** A request that claims no session: anonymous, which is not the operator. */
+const context: AgentCliHandlerContext = {
 	requestId: 'cli-0123456789abcdef0123456789abcdef',
 	signal: new AbortController().signal,
+	identity: { status: 'anonymous' },
 };
+
+/** A request the desktop verified as coming from `agent`'s own process. */
+function from(
+	agent: { kind: 'claude' | 'codex' | 'other'; sessionId: string },
+	overrides: Partial<AgentCliHandlerContext> = {}
+): AgentCliHandlerContext {
+	return {
+		...context,
+		agent,
+		identity: { status: 'verified', agent, basis: 'process' },
+		...overrides,
+	};
+}
+
+/** A request that names a session the desktop could not verify. */
+function unverified(
+	overrides: Partial<AgentCliHandlerContext> = {}
+): AgentCliHandlerContext {
+	return {
+		...context,
+		identity: { status: 'unverified', reason: 'The sender was not proven.' },
+		...overrides,
+	};
+}
 
 /** The demo session, advertising the connected-app waits or not. */
 function desktopStateWithWaits(advertised = true): DesktopState {
@@ -245,11 +280,16 @@ function desktopStateWithWaits(advertised = true): DesktopState {
 
 type Holder = { kind: 'claude' | 'codex' | 'other'; sessionId: string };
 
-/** Whom `owner`'s lane lets onto every device: itself and the operator. */
+/**
+ * Whom `owner`'s lane lets onto every device: itself and the operator. An
+ * anonymous request is neither.
+ */
 function heldBy(owner: Holder) {
-	return (udid: string, requester?: { kind: string; sessionId: string }) =>
-		!requester ||
-		(requester.kind === owner.kind && requester.sessionId === owner.sessionId)
+	return (udid: string, requester: DeviceRequester) =>
+		requester === 'operator' ||
+		(typeof requester !== 'string' &&
+			requester.kind === owner.kind &&
+			requester.sessionId === owner.sessionId)
 			? ({ allowed: true } as const)
 			: ({
 					allowed: false,
@@ -812,10 +852,7 @@ describe('agent command router', () => {
 			...dependencies,
 			agents: holdsOnlyAgents(owner),
 		});
-		const asStranger = {
-			...context,
-			agent: { kind: 'codex' as const, sessionId: 'stranger' },
-		};
+		const asStranger = from({ kind: 'codex', sessionId: 'stranger' });
 		for (const jobId of ['simulator-lane-boot', 'slimming-lane-apply']) {
 			await expect(
 				handler({ kind: 'jobs', operation: 'cancel', jobId }, asStranger)
@@ -830,25 +867,48 @@ describe('agent command router', () => {
 		await expect(handler(stopRecording, asStranger)).rejects.toMatchObject({
 			code: 'device_held',
 		});
+		// A request that claims no session is nobody's, and one that names a
+		// session the desktop could not verify gets nothing at all.
+		for (const jobId of ['simulator-lane-boot', 'slimming-lane-apply']) {
+			const cancel = {
+				kind: 'jobs' as const,
+				operation: 'cancel' as const,
+				jobId,
+			};
+			await expect(handler(cancel, context)).rejects.toMatchObject({
+				code: 'device_held',
+			});
+			await expect(handler(cancel, unverified())).rejects.toMatchObject({
+				code: 'agent_identity_unverified',
+			});
+		}
+		await expect(handler(stopRecording, context)).rejects.toMatchObject({
+			code: 'device_held',
+		});
+		await expect(handler(stopRecording, unverified())).rejects.toMatchObject({
+			code: 'agent_identity_unverified',
+		});
 		expect(cancelledSimulatorJobs).toEqual([]);
 		// Listing and reading jobs stay open to everyone.
-		await expect(
-			handler(
-				{ kind: 'jobs', operation: 'get', jobId: 'simulator-lane-boot' },
-				asStranger
-			)
-		).resolves.toMatchObject({ id: 'simulator-lane-boot' });
+		for (const caller of [asStranger, context, unverified()]) {
+			await expect(
+				handler(
+					{ kind: 'jobs', operation: 'get', jobId: 'simulator-lane-boot' },
+					caller
+				)
+			).resolves.toMatchObject({ id: 'simulator-lane-boot' });
+		}
 
 		await expect(
 			handler(
 				{ kind: 'jobs', operation: 'cancel', jobId: 'simulator-lane-boot' },
-				{ ...context, agent: owner }
+				from(owner)
 			)
 		).resolves.toEqual({ cancelled: false });
 		// The fixture's cancel reports the recording already gone.
-		await expect(
-			handler(stopRecording, { ...context, agent: owner })
-		).rejects.toMatchObject({ code: 'invalid_command' });
+		await expect(handler(stopRecording, from(owner))).rejects.toMatchObject({
+			code: 'invalid_command',
+		});
 		expect(cancelledSimulatorJobs).toEqual([
 			'simulator-lane-boot',
 			'simulator-recording',
@@ -886,7 +946,7 @@ describe('agent command router', () => {
 				simulator,
 				agents,
 			});
-			const by = (agent: Holder) => ({ ...context, agent });
+			const by = (agent: Holder) => from(agent);
 			const start = {
 				kind: 'record' as const,
 				operation: 'start' as const,
@@ -946,7 +1006,7 @@ describe('agent command router', () => {
 			simulator,
 			agents: holdsOnlyAgents(owner),
 		});
-		const by = (agent: Holder) => ({ ...context, agent });
+		const by = (agent: Holder) => from(agent);
 		const record = {
 			kind: 'record' as const,
 			udid: UDID,
@@ -1204,7 +1264,7 @@ describe('agent command router', () => {
 							? { profileId: 'rndevtools-development' }
 							: {}),
 					},
-					{ ...context, agent: me }
+					from(me)
 				)
 			).rejects.toMatchObject({ code: 'action_rejected' });
 			expect(slimmingActions.at(-1)).toMatchObject({
@@ -1217,8 +1277,8 @@ describe('agent command router', () => {
 					: {}),
 			});
 		}
-		// Without a session, no requester rides along: the service treats the
-		// request as the operator's.
+		// Without a verified session, no requester rides along. The router has
+		// already held such a request to free devices, which is all it reaches.
 		await expect(
 			handler({ kind: 'slimming', operation: 'undo', udids: [UDID] }, context)
 		).rejects.toMatchObject({ code: 'action_rejected' });
@@ -1241,8 +1301,9 @@ describe('agent command router', () => {
 				},
 				touch: () => undefined,
 				access: (udid, requester) =>
-					requester
-						? {
+					requester === 'operator'
+						? { allowed: true }
+						: {
 								allowed: false,
 								reason: `Simulator ${udid} is held by claude session owner through lane lane-1.`,
 								hold: {
@@ -1252,8 +1313,7 @@ describe('agent command router', () => {
 									holder: { kind: 'claude', sessionId: 'owner' },
 									holderLive: true,
 								},
-							}
-						: { allowed: true },
+							},
 			},
 		});
 		await expect(
@@ -1264,9 +1324,23 @@ describe('agent command router', () => {
 					udids: [UDID],
 					profileId: 'rndevtools-development',
 				},
-				{ ...context, agent: { kind: 'codex', sessionId: 'stranger' } }
+				from({ kind: 'codex', sessionId: 'stranger' })
 			)
 		).rejects.toMatchObject({ code: 'device_held' });
+		// A request that claims no session is nobody's, and one that names a
+		// session the desktop could not verify gets nothing at all.
+		const apply = {
+			kind: 'slimming' as const,
+			operation: 'apply' as const,
+			udids: [UDID],
+			profileId: 'rndevtools-development',
+		};
+		await expect(handler(apply, context)).rejects.toMatchObject({
+			code: 'device_held',
+		});
+		await expect(handler(apply, unverified())).rejects.toMatchObject({
+			code: 'agent_identity_unverified',
+		});
 		expect(slimmingActions).toEqual([]);
 		// Read-only operations are never gated on ownership.
 		await expect(
@@ -1277,7 +1351,7 @@ describe('agent command router', () => {
 					udids: [UDID],
 					profileId: 'rndevtools-development',
 				},
-				{ ...context, agent: { kind: 'codex', sessionId: 'stranger' } }
+				from({ kind: 'codex', sessionId: 'stranger' })
 			)
 		).rejects.toMatchObject({ code: 'action_rejected' });
 		expect(slimmingActions).toHaveLength(1);
@@ -1361,18 +1435,23 @@ describe('agent command router', () => {
 			udids: [UDID.toLowerCase()],
 		};
 		await expect(
-			handler(run, {
-				...context,
-				agent: { kind: 'codex', sessionId: 'stranger' },
-			})
+			handler(run, from({ kind: 'codex', sessionId: 'stranger' }))
 		).rejects.toMatchObject({
 			code: 'device_held',
 			message: expect.stringContaining('owner'),
 		});
 		expect(runs).toEqual([]);
-		await handler(run, { ...context, agent: owner });
-		await handler(run, context);
-		expect(runs).toEqual([[UDID], [UDID]]);
+		await handler(run, from(owner));
+		// A request that claims no session is nobody's, not the operator's, and
+		// one that names a session the desktop could not verify gets nothing.
+		await expect(handler(run, context)).rejects.toMatchObject({
+			code: 'device_held',
+			message: expect.stringContaining('owner'),
+		});
+		await expect(handler(run, unverified())).rejects.toMatchObject({
+			code: 'agent_identity_unverified',
+		});
+		expect(runs).toEqual([[UDID]]);
 	});
 
 	describe('native plan and install', () => {
@@ -1684,17 +1763,22 @@ describe('agent command router', () => {
 				udid: UDID,
 			};
 			await expect(
-				handler(install, {
-					...context,
-					agent: { kind: 'codex', sessionId: 'stranger' },
-				})
+				handler(install, from({ kind: 'codex', sessionId: 'stranger' }))
 			).rejects.toMatchObject({ code: 'device_held' });
+			// A request that claims no session is nobody's, and one that names a
+			// session the desktop could not verify gets nothing at all.
+			await expect(handler(install, context)).rejects.toMatchObject({
+				code: 'device_held',
+			});
+			await expect(handler(install, unverified())).rejects.toMatchObject({
+				code: 'agent_identity_unverified',
+			});
 			expect(actions.some(({ action }) => action.kind === 'app.install')).toBe(
 				false
 			);
-			await expect(
-				handler(install, { ...context, agent: owner })
-			).resolves.toMatchObject({ action: 'installed-from-cache' });
+			await expect(handler(install, from(owner))).resolves.toMatchObject({
+				action: 'installed-from-cache',
+			});
 		});
 	});
 
@@ -1777,10 +1861,7 @@ describe('agent command router', () => {
 			const result = (await createAgentCommandRouter({
 				...dependencies,
 				agents: port,
-			})({ kind: 'agents' }, { ...context, agent: session })) as Record<
-				string,
-				unknown
-			>;
+			})({ kind: 'agents' }, from(session))) as Record<string, unknown>;
 			expect(result).toMatchObject({
 				sessions: [expect.objectContaining({ sessionId: 'claude-1' })],
 				devices: [],
@@ -1805,7 +1886,7 @@ describe('agent command router', () => {
 			);
 			const claimed = (await handler(
 				{ kind: 'claim', udid: UDID.toLowerCase(), note: 'checkout flow' },
-				{ ...context, agent: session }
+				from(session)
 			)) as Record<string, unknown>;
 			expect(operations[0]).toEqual({
 				kind: 'agent.claim',
@@ -1815,10 +1896,7 @@ describe('agent command router', () => {
 			});
 			expect(claimed).toMatchObject({ udid: UDID, you: session });
 			expect((claimed.agents as unknown[]).length).toBe(1);
-			await handler(
-				{ kind: 'release', udid: UDID },
-				{ ...context, agent: session }
-			);
+			await handler({ kind: 'release', udid: UDID }, from(session));
 			expect(operations[1]).toEqual({
 				kind: 'agent.release',
 				simulatorUdid: UDID,
@@ -1835,16 +1913,13 @@ describe('agent command router', () => {
 				agents: { ...port, access: heldBy(owner) },
 			});
 			await expect(
-				handler({ kind: 'claim', udid: UDID }, { ...context, agent: session })
+				handler({ kind: 'claim', udid: UDID }, from(session))
 			).rejects.toMatchObject({
 				code: 'device_held',
 				message: expect.stringContaining('owner'),
 			});
 			expect(operations).toEqual([]);
-			await handler(
-				{ kind: 'claim', udid: UDID },
-				{ ...context, agent: owner }
-			);
+			await handler({ kind: 'claim', udid: UDID }, from(owner));
 			expect(operations).toEqual([
 				{ kind: 'agent.claim', simulatorUdid: UDID, agent: owner },
 			]);
@@ -1866,13 +1941,10 @@ describe('agent command router', () => {
 				const { dependencies } = fixture();
 				const handler = createAgentCommandRouter({ ...dependencies, agents });
 				const results = await Promise.allSettled([
+					handler({ kind: 'claim', udid: UDID }, from(session)),
 					handler(
 						{ kind: 'claim', udid: UDID },
-						{ ...context, agent: session }
-					),
-					handler(
-						{ kind: 'claim', udid: UDID },
-						{ ...context, agent: { kind: 'codex', sessionId: 'codex-2' } }
+						from({ kind: 'codex', sessionId: 'codex-2' })
 					),
 				]);
 				expect(results.map((result) => result.status)).toEqual([
@@ -1956,7 +2028,7 @@ describe('agent command router', () => {
 			});
 			const result = (await handler(
 				{ kind: 'release', all: true },
-				{ ...context, agent: me }
+				from(me)
 			)) as {
 				stoppedLanes: string[];
 				releasedClaims: string[];
@@ -2084,7 +2156,7 @@ describe('agent command router', () => {
 				let result: unknown;
 				const released = handler(
 					{ kind: 'release', all: true },
-					{ ...context, signal: request.signal, agent: me }
+					from(me, { signal: request.signal })
 				).then((value) => {
 					result = value;
 				});
@@ -2169,7 +2241,7 @@ describe('agent command router', () => {
 						all: true,
 						sessionCwd: '/Users/dev/app-a/src/../src/',
 					},
-					{ ...context, agent: thread }
+					from(thread)
 				)
 			).resolves.toEqual({
 				you: thread,
@@ -2190,7 +2262,7 @@ describe('agent command router', () => {
 			// Over MCP the id itself says nothing about which session is asking.
 			const unscoped = (await handler(
 				{ kind: 'release', all: true },
-				{ ...context, agent: shared }
+				from(shared)
 			)) as Record<string, unknown>;
 			expect(unscoped).toMatchObject({
 				stoppedLanes: [],
@@ -2204,7 +2276,7 @@ describe('agent command router', () => {
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app-b' },
-					{ ...context, agent: shared }
+					from(shared)
 				)
 			).resolves.toMatchObject({ stoppedLanes: [elsewhere.id] });
 			expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([
@@ -2241,7 +2313,7 @@ describe('agent command router', () => {
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/repo' },
-					{ ...context, agent: shared }
+					from(shared)
 				)
 			).resolves.toMatchObject({
 				stoppedLanes: [app.id],
@@ -2279,10 +2351,7 @@ describe('agent command router', () => {
 				lanes,
 			});
 			const endIn = (sessionCwd: string) =>
-				handler(
-					{ kind: 'release', all: true, sessionCwd },
-					{ ...context, agent: thread }
-				);
+				handler({ kind: 'release', all: true, sessionCwd }, from(thread));
 
 			// The mobile session's end leaves the admin session's lane alone.
 			await expect(endIn('/Users/dev/mono/apps/mobile/src')).resolves.toEqual({
@@ -2325,19 +2394,16 @@ describe('agent command router', () => {
 				agents: port,
 			});
 			// Simulator-targeted by UDID.
-			await handler(
-				{ kind: 'screen', target: { udid: UDID } },
-				{ ...context, agent: session }
-			);
+			await handler({ kind: 'screen', target: { udid: UDID } }, from(session));
 			// Connected-app target resolves to the Simulator the session reported.
 			await handler(
 				{ kind: 'screen', target: { deviceId: 'rndevtools-demo-ios' } },
-				{ ...context, agent: session }
+				from(session)
 			);
 			// Fleet-wide commands and failed commands do not touch.
 			await handler(
 				{ kind: 'simulators', includeUnavailable: false },
-				{ ...context, agent: session }
+				from(session)
 			);
 			await expect(
 				handler(
@@ -2345,14 +2411,85 @@ describe('agent command router', () => {
 						kind: 'screen',
 						target: { udid: '00000000-0000-4000-8000-000000000000' },
 					},
-					{ ...context, agent: session }
+					from(session)
 				)
 			).rejects.toBeTruthy();
-			// No session, no touch.
+			// No session, or one that was not verified, no touch.
 			await handler({ kind: 'screen', target: { udid: UDID } }, context);
+			await handler({ kind: 'screen', target: { udid: UDID } }, unverified());
 			expect(touches).toEqual([
 				{ agent: session, udid: UDID },
 				{ agent: session, udid: UDID },
+			]);
+		});
+
+		it('lists agents for every caller, and names you only for a verified session', async () => {
+			const { dependencies } = fixture();
+			const { port } = agentsPort();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			});
+			for (const caller of [context, unverified()]) {
+				const listed = await handler({ kind: 'agents' }, caller);
+				expect(listed).toMatchObject({
+					sessions: [expect.objectContaining({ sessionId: 'claude-1' })],
+				});
+				expect(listed).not.toHaveProperty('you');
+			}
+			await expect(
+				handler({ kind: 'agents' }, from(session))
+			).resolves.toMatchObject({ you: session });
+		});
+
+		it('gives a claim the desktop could not verify no claim, release, or release --all, and a request that claims nothing the same no_agent_session as ever', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			});
+			for (const command of [
+				{ kind: 'claim', udid: UDID },
+				{ kind: 'release', udid: UDID },
+				{ kind: 'release', all: true },
+			] as const) {
+				await expect(handler(command, unverified())).rejects.toMatchObject({
+					code: 'agent_identity_unverified',
+					retryable: false,
+					recovery: expect.stringContaining('Update the rndevtools CLI'),
+				});
+				await expect(handler(command, context)).rejects.toMatchObject({
+					code: 'no_agent_session',
+				});
+			}
+			expect(operations).toEqual([]);
+		});
+
+		it('releases everything a session holds for the session-end hook, which is verified by its claim alone once its registry file is gone', async () => {
+			const { dependencies } = fixture();
+			const { port, operations } = agentsPort();
+			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
+			port
+				.getState()
+				.claims.push({ simulatorUdid: UDID, ...me, claimedAt: now });
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				agents: port,
+			});
+			const byClaim = {
+				...context,
+				agent: me,
+				identity: { status: 'verified', agent: me, basis: 'claim' },
+			} satisfies AgentCliHandlerContext;
+			await expect(
+				handler(
+					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app' },
+					byClaim
+				)
+			).resolves.toMatchObject({ you: me, releasedClaims: [UDID], errors: [] });
+			expect(operations).toEqual([
+				{ kind: 'agent.release', simulatorUdid: UDID, agent: me },
 			]);
 		});
 	});
@@ -2411,7 +2548,7 @@ describe('agent command router', () => {
 						holdMilliseconds: 40,
 					},
 				},
-				{ ...context, agent: { kind: 'claude', sessionId: 'claude-1' } }
+				from({ kind: 'claude', sessionId: 'claude-1' })
 			);
 			expect(result).toMatchObject({ kind: 'tap', messages: 2 });
 			// The UDID is canonicalised from the inventory before it reaches the host.
@@ -2533,7 +2670,7 @@ describe('agent command router', () => {
 		);
 	});
 
-	it('refuses lane up, lane down, and input on a device another agent holds', async () => {
+	it('refuses lane up, lane down, lane launch, and input on a device another agent holds, to a request that claims no session too', async () => {
 		const { dependencies } = fixture();
 		const owner = { kind: 'claude' as const, sessionId: 'owner-session' };
 		const stranger = { kind: 'codex' as const, sessionId: 'stranger-thread' };
@@ -2560,11 +2697,9 @@ describe('agent command router', () => {
 		};
 		const operations: LaneOperation[] = [];
 		const inputs: unknown[] = [];
-		const access = (
-			udid: string,
-			requester?: { kind: string; sessionId: string }
-		) =>
-			!requester || requester.sessionId === owner.sessionId
+		const access = (udid: string, requester: DeviceRequester) =>
+			requester === 'operator' ||
+			(typeof requester !== 'string' && requester.sessionId === owner.sessionId)
 				? ({ allowed: true } as const)
 				: ({
 						allowed: false,
@@ -2616,8 +2751,8 @@ describe('agent command router', () => {
 				access,
 			},
 		});
-		const asStranger = { ...context, agent: stranger };
-		const asOwner = { ...context, agent: owner };
+		const asStranger = from(stranger);
+		const asOwner = from(owner);
 
 		await expect(
 			handler(
@@ -2656,7 +2791,30 @@ describe('agent command router', () => {
 		expect(operations).toEqual([]);
 		expect(inputs).toEqual([]);
 
-		// The holder, and the operator (no agent on the request), get through.
+		// A request that claims no session is nobody's, not the operator's: it
+		// is refused on the held device whatever it asks, a lane up that names
+		// the device included.
+		for (const command of [
+			{
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app-other',
+				udid: UDID.toLowerCase(),
+			},
+			{ kind: 'lane', operation: 'down', laneId: lane.id },
+			{ kind: 'lane', operation: 'launch', laneId: lane.id },
+			{ kind: 'input', input: { kind: 'button', udid: UDID, button: 'home' } },
+		] as const) {
+			await expect(handler(command, context)).rejects.toMatchObject({
+				code: 'device_held',
+				retryable: true,
+				message: expect.stringContaining('owner-session'),
+			});
+		}
+		expect(operations).toEqual([]);
+		expect(inputs).toEqual([]);
+
+		// The holder gets through.
 		await handler(
 			{ kind: 'lane', operation: 'launch', laneId: lane.id },
 			asOwner
@@ -2666,23 +2824,18 @@ describe('agent command router', () => {
 			asOwner
 		);
 		await handler(
-			{ kind: 'lane', operation: 'down', laneId: lane.id },
-			context
-		);
-		await handler(
 			{ kind: 'input', input: { kind: 'button', udid: UDID, button: 'home' } },
 			asOwner
 		);
 		expect(operations.map((operation) => operation.kind)).toEqual([
 			'lane.launch',
 			'lane.stop',
-			'lane.stop',
 		]);
 		expect(operations[0]).toMatchObject({ agent: owner });
 		expect(inputs).toHaveLength(1);
 	});
 
-	it('records the envelope agent on lane up and launch, so a Codex MCP caller holds its own lane', async () => {
+	it('records the verified agent on lane up and launch, so a Codex MCP caller holds its own lane', async () => {
 		const { dependencies } = fixture();
 		const shared = {
 			kind: 'codex' as const,
@@ -2763,7 +2916,7 @@ describe('agent command router', () => {
 				elapsedMilliseconds: 1,
 			}),
 		});
-		const asCodex = { ...context, agent: shared };
+		const asCodex = from(shared);
 
 		await handler(
 			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
@@ -2785,20 +2938,17 @@ describe('agent command router', () => {
 		await expect(
 			handler(
 				{ kind: 'lane', operation: 'launch', laneId },
-				{ ...context, agent: { kind: 'claude', sessionId: 'claude-1' } }
+				from({ kind: 'claude', sessionId: 'claude-1' })
 			)
 		).rejects.toMatchObject({ code: 'device_held' });
 		await handler({ kind: 'lane', operation: 'down', laneId }, asCodex);
 
-		// The command's own agent, filled from the session variables, still wins.
+		// The lane's holder is the connection's verified identity, whoever the
+		// request says it is: a lane command takes no agent of its own.
+		const thread = from({ kind: 'codex', sessionId: 'thread-1' });
 		await handler(
-			{
-				kind: 'lane',
-				operation: 'up',
-				worktreePath: '/Users/dev/app',
-				agent: { kind: 'codex', sessionId: 'thread-1' },
-			},
-			asCodex
+			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
+			thread
 		);
 		expect(operations.map((operation) => operation.kind)).toEqual([
 			'lane.start',
@@ -2874,7 +3024,7 @@ describe('agent command router', () => {
 
 		const result = (await handler(
 			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app-feature' },
-			{ ...context, agent: stranger }
+			from(stranger)
 		)) as { completed: boolean; deviceRequest?: unknown; next?: string };
 		// No device named and no lane for the app yet, so nothing to check
 		// ownership against.
@@ -2958,10 +3108,7 @@ describe('agent command router', () => {
 		// so the stranger gets the typed refusal and its recovery rather than a
 		// failed lane. The path matches however the lane service resolves it.
 		await expect(
-			handler(up('/Users/dev/mono/apps/mobile/'), {
-				...context,
-				agent: stranger,
-			})
+			handler(up('/Users/dev/mono/apps/mobile/'), from(stranger))
 		).rejects.toMatchObject({
 			code: 'device_held',
 			retryable: true,
@@ -2971,21 +3118,31 @@ describe('agent command router', () => {
 		expect(checked).toEqual([UDID]);
 		expect(operations).toEqual([]);
 
-		// The holder and the operator resume it. Another app in the worktree has
-		// no lane of its own, so there is no device to check: the lane service
-		// picks a free one.
-		await handler(up('/Users/dev/mono/apps/mobile'), {
-			...context,
-			agent: owner,
-		});
-		await handler(up('/Users/dev/mono/apps/mobile'), context);
-		await handler(up('/Users/dev/mono'), { ...context, agent: stranger });
-		expect(checked).toEqual([UDID, UDID]);
+		// The holder resumes it. A request that claims no session is nobody's, so
+		// the lane is not its to resume either.
+		await handler(up('/Users/dev/mono/apps/mobile'), from(owner));
+		await expect(
+			handler(up('/Users/dev/mono/apps/mobile'), context)
+		).rejects.toMatchObject({ code: 'device_held' });
+		expect(checked).toEqual([UDID, UDID, UDID]);
+
+		// Another app in the worktree has no lane of its own, so there is no
+		// device to check, for a session or for a request with no identity: the
+		// lane service picks a free one.
+		await handler(up('/Users/dev/mono'), from(stranger));
+		await handler(up('/Users/dev/mono'), context);
+		expect(checked).toEqual([UDID, UDID, UDID]);
 		expect(operations).toMatchObject([
-			{ kind: 'lane.start', worktreePath: '/Users/dev/mono/apps/mobile' },
-			{ kind: 'lane.start', worktreePath: '/Users/dev/mono/apps/mobile' },
+			{
+				kind: 'lane.start',
+				worktreePath: '/Users/dev/mono/apps/mobile',
+				agent: owner,
+			},
 			{ kind: 'lane.start', worktreePath: '/Users/dev/mono', agent: stranger },
+			{ kind: 'lane.start', worktreePath: '/Users/dev/mono' },
 		]);
+		// An anonymous start has no holder to record: its lane is the operator's.
+		expect(operations[2]).not.toHaveProperty('agent');
 		// The router never names the device; the lane service resumes the lane
 		// wherever it runs.
 		for (const operation of operations) {
@@ -3075,9 +3232,8 @@ describe('agent command router', () => {
 				worktreePath: '/Users/dev/app-feature',
 				udid: UDID,
 				slimProfileId: 'rndevtools-development',
-				agent: { kind: 'claude', sessionId: 'session-1' },
 			},
-			context
+			from({ kind: 'claude', sessionId: 'session-1' })
 		)) as { lane: Lane; completed: boolean };
 		expect(up.completed).toBe(true);
 		expect(up.lane.port).toBe(8_100);
@@ -3413,7 +3569,7 @@ describe('agent command router', () => {
 			await expect(
 				handler(
 					{ kind: 'supabase', operation: 'up', worktreePath: WORKTREE },
-					{ ...context, signal, agent: claude }
+					from(claude, { signal })
 				)
 			).resolves.toEqual(resultFor(up));
 			expect(calls[0]).toEqual({
@@ -3436,7 +3592,7 @@ describe('agent command router', () => {
 					stackId: STACK_ID.slice(0, 8),
 					note: 'Start over.',
 				},
-				{ ...context, agent: claude }
+				from(claude)
 			);
 			await handler(
 				{
@@ -3446,7 +3602,7 @@ describe('agent command router', () => {
 					services: ['gateway'],
 					since: '10m',
 				},
-				{ ...context, agent: claude }
+				from(claude)
 			);
 			expect(calls.slice(1).map((call) => call.operation)).toEqual([
 				{
@@ -3469,18 +3625,68 @@ describe('agent command router', () => {
 			// session directory even while one of its sessions is discovered.
 			await handler(
 				{ kind: 'supabase', operation: 'down', worktreePath: WORKTREE },
-				{ ...context, agent: sharedCodex }
+				from(sharedCodex)
 			);
 			expect(calls[3]?.context).toEqual({
 				requestId: context.requestId,
 				synthetic: true,
 				holder: sharedCodex,
 			});
-			// No session on the envelope: the operator's own CLI.
+			// No session on the request: an anonymous caller, which has no holder.
 			await expect(
 				handler({ kind: 'supabase', operation: 'ls' }, context)
 			).resolves.toEqual({ operation: 'ls', stacks: [STACK] });
 			expect(calls[4]?.context).toEqual({
+				requestId: context.requestId,
+				synthetic: false,
+			});
+		});
+
+		it('refuses up, down, reset, and destroy to a claim the desktop could not verify, and runs the reads as an anonymous caller', async () => {
+			const { dependencies } = fixture();
+			const { port, calls } = supabaseFake();
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				supabase: port,
+			});
+			// These act for a holder, and a claim that is not proven is nobody's.
+			for (const operation of ['up', 'down', 'reset', 'destroy'] as const) {
+				await expect(
+					handler(
+						{ kind: 'supabase', operation, worktreePath: WORKTREE },
+						unverified()
+					)
+				).rejects.toMatchObject({
+					code: 'agent_identity_unverified',
+					retryable: false,
+					recovery: expect.stringContaining('Update the rndevtools CLI'),
+				});
+			}
+			expect(calls).toEqual([]);
+
+			// The reads name no holder, so they run for it as for any request that
+			// claims nothing.
+			for (const fields of [
+				{ operation: 'ls' },
+				{ operation: 'status', worktreePath: WORKTREE },
+				{ operation: 'env', worktreePath: WORKTREE },
+				{ operation: 'log', worktreePath: WORKTREE },
+			] as const) {
+				await handler({ kind: 'supabase', ...fields }, unverified());
+			}
+			expect(calls.map((call) => call.context)).toEqual(
+				Array.from({ length: 4 }, () => ({
+					requestId: context.requestId,
+					synthetic: false,
+				}))
+			);
+
+			// A request that claims nothing runs them all, as no one.
+			await handler(
+				{ kind: 'supabase', operation: 'up', worktreePath: WORKTREE },
+				context
+			);
+			expect(calls.at(-1)?.context).toEqual({
 				requestId: context.requestId,
 				synthetic: false,
 			});
@@ -3500,7 +3706,7 @@ describe('agent command router', () => {
 				operation: 'up',
 				worktreePath: WORKTREE,
 			} as const;
-			const off = await handler(up, { ...context, agent: claude }).catch(
+			const off = await handler(up, from(claude)).catch(
 				(error: unknown) => error as AgentCliError
 			);
 			expect(off).toMatchObject({
@@ -3546,7 +3752,7 @@ describe('agent command router', () => {
 				};
 				return await handler(
 					{ kind: 'supabase', operation: 'up', worktreePath: WORKTREE },
-					{ ...context, signal, agent: claude }
+					from(claude, { signal })
 				).then(
 					() => {
 						throw new Error('Expected the operation to fail.');
@@ -3753,7 +3959,7 @@ describe('agent command router', () => {
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: `${WORKTREE}/src/../src/` },
-					{ ...context, agent: claude }
+					from(claude)
 				)
 			).resolves.toEqual({
 				you: claude,
@@ -3774,7 +3980,7 @@ describe('agent command router', () => {
 			};
 			const failed = (await handler(
 				{ kind: 'release', all: true },
-				{ ...context, agent: claude }
+				from(claude)
 			)) as { releasedStacks: string[]; errors: string[] };
 			expect(failed.releasedStacks).toEqual([]);
 			expect(failed.errors).toEqual([
@@ -3786,7 +3992,7 @@ describe('agent command router', () => {
 			// A shared MCP identity without its directory releases nothing.
 			const unscoped = (await handler(
 				{ kind: 'release', all: true },
-				{ ...context, agent: sharedCodex }
+				from(sharedCodex)
 			)) as { releasedStacks: string[]; next?: string };
 			expect(unscoped.releasedStacks).toEqual([]);
 			expect(unscoped.next).toMatch(/sessionCwd/);
@@ -3794,7 +4000,7 @@ describe('agent command router', () => {
 			expect(releases).toHaveLength(2);
 			await handler(
 				{ kind: 'release', all: true, sessionCwd: WORKTREE },
-				{ ...context, agent: sharedCodex }
+				from(sharedCodex)
 			);
 			expect(releases[2]).toEqual({
 				holder: sharedCodex,
@@ -3821,7 +4027,7 @@ describe('agent command router', () => {
 				let result: unknown;
 				const released = handler(
 					{ kind: 'release', all: true },
-					{ ...context, agent: claude }
+					from(claude)
 				).then((value) => {
 					result = value;
 				});
@@ -4068,6 +4274,268 @@ describe('agent command router', () => {
 				recovery: expect.stringContaining('backend auto'),
 			});
 			expect(operations[2]).toMatchObject({ backend: 'required' });
+		});
+	});
+
+	describe('request identity', () => {
+		const holder = { kind: 'claude' as const, sessionId: 'holder-session' };
+		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
+		const heldLane: Lane = {
+			id: laneId,
+			worktreePath: '/Users/dev/app',
+			branch: 'feature',
+			simulatorUdid: UDID,
+			environment: 'development',
+			port: 8_100,
+			metro: 'ready',
+			logPath: '/Users/dev/lane.log',
+			startedAt: now,
+			agent: { ...holder, lastSeenAt: now },
+		};
+
+		/** A lane service, a native input port and an agents port that record what they are asked. */
+		function services(lanesInState: Lane[]) {
+			const operations: LaneOperation[] = [];
+			const inputs: unknown[] = [];
+			const agentOperations: AgentOperation[] = [];
+			const state: LaneState = {
+				revision: 1,
+				updatedAt: now,
+				environments: [...DEFAULT_LANE_ENVIRONMENTS],
+				lanes: lanesInState,
+				worktrees: [],
+				repositories: [],
+				deviceRequests: [],
+			};
+			const lanes = {
+				getState: () => state,
+				refresh: async () => state,
+				runOperation: async (operation: LaneOperation) => {
+					operations.push(operation);
+					return {
+						actionId: operation.actionId,
+						kind: operation.kind,
+						completed: true,
+						state,
+					};
+				},
+			};
+			const simulatorInput: NonNullable<
+				AgentCommandRouterDependencies['simulatorInput']
+			> = async (input) => {
+				inputs.push(input);
+				return {
+					udid: input.udid,
+					kind: input.kind,
+					messages: 1,
+					elapsedMilliseconds: 1,
+				};
+			};
+			const agents = {
+				...holdsOnlyAgents(holder),
+				runOperation: async (
+					operation: AgentOperation
+				): Promise<AgentState> => {
+					agentOperations.push(operation);
+					throw new Error('unreachable: the router must refuse first');
+				},
+			};
+			return {
+				lanes,
+				simulatorInput,
+				agents,
+				operations,
+				inputs,
+				agentOperations,
+			};
+		}
+
+		it('refuses every command that holds or drives a device to a claim the desktop could not verify, before any service is reached', async () => {
+			const { dependencies } = fixture();
+			const world = services([heldLane]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				lanes: world.lanes,
+				simulatorInput: world.simulatorInput,
+				agents: world.agents,
+			});
+			for (const command of [
+				// The named device, a device found through the app's own lane, and no
+				// device at all (a lane up with nothing to check still starts a hold).
+				{
+					kind: 'lane',
+					operation: 'up',
+					worktreePath: '/Users/dev/other',
+					udid: UDID,
+				},
+				{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
+				{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/other' },
+				{ kind: 'lane', operation: 'launch', laneId },
+				{ kind: 'lane', operation: 'down', laneId },
+				{
+					kind: 'input',
+					input: { kind: 'button', udid: UDID, button: 'home' },
+				},
+				{ kind: 'claim', udid: UDID },
+				{ kind: 'release', udid: UDID },
+				{ kind: 'release', all: true },
+			] as const) {
+				await expect(handler(command, unverified())).rejects.toMatchObject({
+					code: 'agent_identity_unverified',
+					retryable: false,
+					message: 'The sender was not proven.',
+					recovery: expect.stringContaining('Update the rndevtools CLI'),
+				});
+			}
+			expect(world.operations).toEqual([]);
+			expect(world.inputs).toEqual([]);
+			expect(world.agentOperations).toEqual([]);
+
+			// Reads work for every identity.
+			for (const caller of [unverified(), context]) {
+				await expect(
+					handler({ kind: 'lane', operation: 'ls' }, caller)
+				).resolves.toMatchObject({ lanes: [heldLane] });
+				await expect(
+					handler({ kind: 'lane', operation: 'log', laneId }, caller)
+				).resolves.toBeTruthy();
+			}
+		});
+
+		it('refuses a lane up on a claimed device to a request that claims no session, and leaves the claim with its holder', async () => {
+			const root = await mkdtemp(
+				path.join(os.tmpdir(), 'rndevtools-router-identity-')
+			);
+			const agents = new AgentService({
+				directory: root,
+				lanes: () => [],
+				discover: async () => ({
+					sessions: [{ ...holder, title: 'holder', cwd: '/Users/dev/app' }],
+					claude: 'ok',
+					codex: 'ok',
+				}),
+				pollIntervalMs: 60_000,
+				now: () => now,
+			});
+			try {
+				await agents.start();
+				const { dependencies } = fixture();
+				const world = services([]);
+				const handler = createAgentCommandRouter({
+					...dependencies,
+					agents,
+					lanes: world.lanes,
+				});
+				await handler({ kind: 'claim', udid: UDID }, from(holder));
+
+				// What a CLI with no session variables sends: the device is not
+				// its to take, whoever's claim is on it.
+				await expect(
+					handler(
+						{
+							kind: 'lane',
+							operation: 'up',
+							worktreePath: '/Users/dev/app',
+							udid: UDID.toLowerCase(),
+						},
+						context
+					)
+				).rejects.toMatchObject({
+					code: 'device_held',
+					retryable: true,
+					message: expect.stringMatching(
+						/claude session holder-session.*free Simulators only\.$/
+					),
+				});
+				expect(world.operations).toEqual([]);
+				expect(agents.holds().get(UDID)).toMatchObject({
+					via: 'claim',
+					holder,
+				});
+
+				// It may still use a free device, and then holds nothing.
+				await handler(
+					{
+						kind: 'lane',
+						operation: 'up',
+						worktreePath: '/Users/dev/app',
+						udid: OTHER_UDID,
+					},
+					context
+				);
+				expect(world.operations).toHaveLength(1);
+				expect(world.operations[0]).not.toHaveProperty('agent');
+			} finally {
+				await agents.stop();
+				await rm(root, { recursive: true, force: true });
+			}
+		});
+
+		it('tells the lane service when a start comes from a request that claims no session, so it checks the device as nobody in its turn', async () => {
+			const { dependencies } = fixture();
+			const world = services([]);
+			const seen: unknown[] = [];
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				lanes: {
+					...world.lanes,
+					runOperation: async (operation, _signal, options) => {
+						seen.push(options);
+						return world.lanes.runOperation(operation);
+					},
+				},
+			});
+			const up = {
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app',
+			} as const;
+			await handler(up, context);
+			// A verified session carries its own agent on the operation instead.
+			await handler(up, from(holder));
+			expect(seen).toEqual([{ requester: 'anonymous' }, undefined]);
+			expect(world.operations[0]).not.toHaveProperty('agent');
+			expect(world.operations[1]).toMatchObject({ agent: holder });
+		});
+
+		it('takes the lane holder from the connection, whatever a lane command says', async () => {
+			const { dependencies } = fixture();
+			const world = services([]);
+			const handler = createAgentCommandRouter({
+				...dependencies,
+				lanes: world.lanes,
+				agents: world.agents,
+			});
+			// The protocol schema refuses an agent on a lane command, and so does
+			// the type. A command that carries one anyway, as an old CLI wrote it,
+			// is not read: this one names the holder to take the holder's device.
+			const smuggled: Extract<AgentCliCommand, { kind: 'lane' }> = {
+				kind: 'lane',
+				operation: 'up',
+				worktreePath: '/Users/dev/app',
+				udid: UDID,
+				// @ts-expect-error A lane command takes no agent; who is asking comes from the connection.
+				agent: holder,
+			};
+			await expect(handler(smuggled, context)).rejects.toMatchObject({
+				code: 'device_held',
+			});
+			await expect(
+				handler(smuggled, from({ kind: 'codex', sessionId: 'stranger' }))
+			).rejects.toMatchObject({ code: 'device_held' });
+			expect(world.operations).toEqual([]);
+
+			// The device is free for a session that is not the holder, and the lane
+			// is then that session's, not the command's.
+			const free = createAgentCommandRouter({
+				...dependencies,
+				lanes: world.lanes,
+			});
+			await free(smuggled, from({ kind: 'codex', sessionId: 'stranger' }));
+			expect(world.operations[0]).toMatchObject({
+				kind: 'lane.start',
+				agent: { kind: 'codex', sessionId: 'stranger' },
+			});
 		});
 	});
 });
