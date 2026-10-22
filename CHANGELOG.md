@@ -200,3 +200,9 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- CI checks the desktop app on every pull request, forks included. A job that
+  needs no HeroUI Pro license runs Biome, the main, preload and shared
+  typecheck and tests, knip and the script tests. The job that typechecks and
+  builds the renderer with HeroUI Pro now fails, instead of silently
+  skipping, when `HEROUI_AUTH_TOKEN` is missing from the repository's own
+  runs; it still skips with a notice on pull requests from forks.
