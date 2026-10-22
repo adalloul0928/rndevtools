@@ -168,8 +168,17 @@ export function prettyBody(value: string): string {
 }
 
 /** How many values the device redacted before the body reached the desktop. */
+/**
+ * Markers the device writes in place of a value: `[REDACTED]`, labelled ones
+ * such as `[REDACTED EMAIL]` or `[REDACTED SECRET KEY]`, and one cut short by
+ * a size bound (`[REDACTED…`). Mirrors `REDACTION_MARKER` in
+ * `@rndevtools/core`'s bounded redaction, plus the underscore form the demo
+ * data uses.
+ */
+const REDACTION_MARKER = /\[REDACTED[A-Z_ ]*[\]…]/g;
+
 export function redactedCount(value: string | undefined): number {
-	return value?.match(/\[REDACTED(?:_[A-Z]+)?\]/g)?.length ?? 0;
+	return value?.match(REDACTION_MARKER)?.length ?? 0;
 }
 
 /** Each view filter's count, before search and the backend filter. */

@@ -95,7 +95,10 @@ export function useGetStarted() {
 			getStartedTasks({
 				capability: simulator.state.capability,
 				repositories: lanes.state.repositories,
-				worktreeCount: lanes.state.worktrees.length,
+				// The task names the first repository, so count only its worktrees.
+				worktreeCount: lanes.state.worktrees.filter(
+					(worktree) => worktree.repositoryRoot === lanes.state.repositories[0]
+				).length,
 				bootedCount: simulator.state.devices.filter(
 					(device) => device.state === 'booted'
 				).length,
@@ -117,7 +120,7 @@ export function useGetStarted() {
 			simulator.state.devices,
 			simulator.state.captures.length,
 			lanes.state.repositories,
-			lanes.state.worktrees.length,
+			lanes.state.worktrees,
 			lanes.state.lanes.length,
 			desktop.state?.devices,
 			supabase.availability.platform.supported,
