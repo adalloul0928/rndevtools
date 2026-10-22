@@ -207,6 +207,12 @@ button:disabled {
 	background: color-mix(in oklab, var(--brand) 30%, transparent);
 }
 
+/* A value wider than its select ends in an ellipsis rather than being cut
+   mid-word, as in the titlebar target picker at the minimum window size. */
+select {
+	text-overflow: ellipsis;
+}
+
 ::-webkit-scrollbar {
 	width: 9px;
 	height: 9px;
