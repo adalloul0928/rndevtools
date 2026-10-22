@@ -4806,6 +4806,9 @@ button:disabled {
 .setup-dialog {
 	width: min(920px, calc(100vw - 48px));
 	max-width: none;
+	/* One height for every step: Connect your app is the tallest, and a
+	   min-height alone let the dialog jump each time it came and went. */
+	height: min(620px, calc(100vh - 48px));
 	min-height: min(560px, calc(100vh - 48px));
 	padding: 0;
 	overflow: hidden;
@@ -5399,7 +5402,8 @@ button:disabled {
 	width: 460px;
 	max-width: calc(100vw - 32px);
 	padding: 0;
-	overflow: hidden;
+	/* Bounded below the titlebar (see GetStartedCard); scrolls when short. */
+	overflow: auto;
 }
 
 .get-started-popover .get-started {
