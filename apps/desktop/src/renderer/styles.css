@@ -123,6 +123,10 @@
 		--surface-shadow: none;
 		--field-shadow: none;
 		--overlay-shadow: 0 24px 80px light-dark(rgb(0 0 0 / 14%), rgb(0 0 0 / 70%));
+		/* HeroUI's radius scale (`rounded-*`, cards, buttons, popovers) multiplies
+		   this base. Its own default is 0.5rem, which turns every button into a
+		   pill and doubles every card corner; the app's scale is built on 4px. */
+		--radius: 4px;
 		--signal: var(--brand);
 		/* Secondary performance series, kept apart from the brand green. */
 		--chart-cpu: light-dark(#16a34a, #4ade80);
