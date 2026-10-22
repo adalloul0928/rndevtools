@@ -358,7 +358,9 @@ export const slimmingActionSchema = z.union([
 	 * (its pending reconciliation record), for when Undo can no longer use it,
 	 * as after an Xcode, runtime or helper update. Never the last completed
 	 * change's checkpoint. Operator only: it has no requester, so no agent
-	 * request can express it, and main asks before every one.
+	 * request can express it, and main asks before every one. It needs neither
+	 * the native helper nor a listed Simulator: the record of a deleted
+	 * Simulator is among those it exists to clear.
 	 */
 	z.strictObject({
 		actionId: identifierSchema,

@@ -79,6 +79,15 @@ const PENDING_RECORD_MESSAGE =
 	'An interrupted mutation left a durable emergency restore point. Use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, for example after an Xcode, runtime, or helper update, forget the restore point.';
 const PENDING_RECORD_SHUTDOWN_MESSAGE =
 	'An interrupted mutation left a durable emergency restore point. Boot this Simulator so RN Devtools can reconcile it, or use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, forget the restore point.';
+/**
+ * Shown for a record that nothing can reconcile or undo: the inventory no
+ * longer lists its Simulator, or the helper is away. Forgetting is the one
+ * action that needs neither, so it is what these point the operator to.
+ */
+const PENDING_RECORD_ORPHAN_MESSAGE =
+	'An interrupted mutation left a durable emergency restore point, but the helper inventory no longer lists this Simulator, so nothing can reconcile or undo it. The restore point can only be forgotten.';
+const PENDING_RECORD_HELPER_UNAVAILABLE_MESSAGE =
+	'An interrupted mutation left a durable emergency restore point, and the native helper is unavailable, so nothing can reconcile or undo it now. If Undo can no longer succeed, forget the restore point.';
 
 /**
  * When a pending record is next inspected. `key` names what was inspected:
@@ -762,13 +771,30 @@ export class SlimmingService {
 	): SlimmingActionReceipt {
 		if (this.#stopped)
 			return this.#reject(action, 'Slimming controls are shutting down.');
-		if (this.#state.helper.status !== 'available') {
+		if (action.kind === 'pending.forget') {
+			// Forgetting touches no Simulator and asks the helper for nothing, so
+			// only the safety store gates it, never the helper or the inventory:
+			// a record whose Simulator was deleted, or that sits behind a helper
+			// that is away, is exactly the one nothing else can clear. Neither
+			// the experimental setting nor the compatibility gates apply.
+			if (!this.#persistenceHealthy) {
+				return this.#reject(action, 'Safety persistence is unavailable.');
+			}
+			const missing = action.simulatorUdids.find(
+				(udid) => !this.#persistence.pendingMutation(udid)
+			);
+			if (missing) {
+				return this.#reject(
+					action,
+					`${missing} has no emergency restore point to forget.`
+				);
+			}
+		} else if (this.#state.helper.status !== 'available') {
 			return this.#reject(
 				action,
 				this.#state.helper.error ?? 'Native helper is unavailable.'
 			);
-		}
-		if (!this.#state.helper.readOnlyAvailable) {
+		} else if (!this.#state.helper.readOnlyAvailable) {
 			return this.#reject(
 				action,
 				'Native helper read-only capabilities are unavailable.'
@@ -827,22 +853,6 @@ export class SlimmingService {
 				}
 			}
 		}
-		if (action.kind === 'pending.forget') {
-			// Forgetting touches no Simulator, so neither the experimental
-			// setting nor the compatibility gates apply, only the safety store.
-			if (!this.#persistenceHealthy) {
-				return this.#reject(action, 'Safety persistence is unavailable.');
-			}
-			const missing = action.simulatorUdids.find(
-				(udid) => !this.#persistence.pendingMutation(udid)
-			);
-			if (missing) {
-				return this.#reject(
-					action,
-					`${missing} has no emergency restore point to forget.`
-				);
-			}
-		}
 		if (this.#jobs.some((job) => job.public.actionId === action.actionId)) {
 			return this.#reject(
 				action,
@@ -868,7 +878,10 @@ export class SlimmingService {
 		const knownDevices = new Set(
 			this.#state.simulators.map((simulator) => simulator.udid)
 		);
-		if (action.simulatorUdids.some((udid) => !knownDevices.has(udid))) {
+		if (
+			action.kind !== 'pending.forget' &&
+			action.simulatorUdids.some((udid) => !knownDevices.has(udid))
+		) {
 			return this.#reject(
 				action,
 				'Every target must exist in the signed helper inventory.'
@@ -1428,7 +1441,11 @@ export class SlimmingService {
 		this.#reconcileSchedule.delete(simulatorUdid);
 		this.#syncPersistenceState();
 		const status = this.#state.statusBySimulator[simulatorUdid];
-		if (status) {
+		if (status && !this.#inventoryDevice(simulatorUdid)) {
+			// The record was all there was to show of a Simulator the inventory
+			// no longer lists.
+			delete this.#state.statusBySimulator[simulatorUdid];
+		} else if (status) {
 			this.#state.statusBySimulator[simulatorUdid] = {
 				...status,
 				condition: 'unknown',
@@ -1809,6 +1826,21 @@ export class SlimmingService {
 		} catch (error) {
 			this.#handshake = undefined;
 			this.#state.helper = helperStateFromError(error);
+			// Nothing was inspected, so each pending record is shown for what it
+			// is. Reconciliation used to be the only thing that projected one,
+			// which left a record from an earlier session invisible while the
+			// helper was away, with nowhere to offer forgetting it, the one
+			// action that works without the helper. A job still owns its own
+			// Simulator's record, as in #reconcileWhenFree.
+			for (const simulatorUdid of Object.keys(
+				this.#persistence.pendingMutations()
+			)) {
+				if (this.#hasActiveJob(simulatorUdid)) continue;
+				this.#markPendingNeedsAttention(
+					simulatorUdid,
+					PENDING_RECORD_HELPER_UNAVAILABLE_MESSAGE
+				);
+			}
 		}
 		this.#touch();
 		return this.getState();
@@ -1841,7 +1873,8 @@ export class SlimmingService {
 	 * later pass. The restart pass inspects every record once, booting a
 	 * shut-down Simulator for it. After that, inspection waits until the
 	 * Simulator is booted, and a record that stays ambiguous is inspected less
-	 * often each time.
+	 * often each time. A record whose Simulator the inventory no longer lists
+	 * is never inspected: it is shown as one only forgetting can clear.
 	 */
 	async #reconcileWhenFree(
 		simulatorUdid: string,
@@ -1856,6 +1889,17 @@ export class SlimmingService {
 		if (schedule?.key !== key) {
 			schedule = { key, attempts: 0, nextAt: 0 };
 			this.#reconcileSchedule.set(simulatorUdid, schedule);
+		}
+		if (!this.#inventoryDevice(simulatorUdid)) {
+			// There is nothing to inspect, let alone boot. The record stays as it
+			// is until the operator forgets it or the Simulator is listed again,
+			// and hidden polling backs off from it as from any ambiguous record.
+			this.#markPendingNeedsAttention(
+				simulatorUdid,
+				PENDING_RECORD_ORPHAN_MESSAGE
+			);
+			this.#backOff(schedule);
+			return;
 		}
 		if (!restartPass && deviceState !== 'booted') {
 			// Inspecting a Simulator that is not booted boots it.
@@ -1953,13 +1997,16 @@ export class SlimmingService {
 		);
 	}
 
-	#deviceState(simulatorUdid: string): SlimmingSimulator['state'] {
+	/** The Simulator as the last signed inventory listed it, if it did. */
+	#inventoryDevice(simulatorUdid: string): SlimmingSimulator | undefined {
 		const udid = simulatorUdid.toUpperCase();
-		return (
-			this.#state.simulators.find(
-				(simulator) => simulator.udid.toUpperCase() === udid
-			)?.state ?? 'unknown'
+		return this.#state.simulators.find(
+			(simulator) => simulator.udid.toUpperCase() === udid
 		);
+	}
+
+	#deviceState(simulatorUdid: string): SlimmingSimulator['state'] {
+		return this.#inventoryDevice(simulatorUdid)?.state ?? 'unknown';
 	}
 
 	/**
