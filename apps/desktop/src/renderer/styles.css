@@ -4887,6 +4887,13 @@ button:disabled {
 	color: var(--text-3);
 }
 
+.setup-error {
+	margin: 8px 0 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--danger-text);
+}
+
 .setup-aside-actions {
 	display: flex;
 	flex-direction: column;

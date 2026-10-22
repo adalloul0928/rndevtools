@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { adjacentSetupStep, shouldOpenSetup } from './onboarding';
+import {
+	adjacentSetupStep,
+	setupActionError,
+	shouldOpenSetup,
+} from './onboarding';
+
+describe('setupActionError', () => {
+	const fallback = 'Could not do that.';
+	it('says nothing when the action completed or was cancelled', () => {
+		expect(setupActionError({ completed: true }, fallback)).toBeNull();
+		expect(
+			setupActionError({ completed: false, cancelled: true }, fallback)
+		).toBeNull();
+	});
+	it('shows the error, or the fallback when there is none or no receipt', () => {
+		expect(
+			setupActionError(
+				{ completed: false, error: 'Not a git repository.' },
+				fallback
+			)
+		).toBe('Not a git repository.');
+		expect(setupActionError({ completed: false }, fallback)).toBe(fallback);
+		expect(setupActionError(undefined, fallback)).toBe(fallback);
+	});
+});
 
 describe('shouldOpenSetup', () => {
 	it('opens for a workspace with no repository and no lane', () => {
