@@ -200,3 +200,10 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- A local Supabase stack whose first start is still running when RN Devtools
+  quits is now recorded before the CLI is spawned. When the restarted app
+  adopts that start, it checks that the stack listens on 127.0.0.1 only and
+  stops it if not, and stops it after the usual linger once nothing holds it,
+  as for any other stack; a first start that failed meanwhile is marked
+  interrupted, like a cancelled one. Before, the stack ran with no record, no
+  loopback check and no automatic stop.

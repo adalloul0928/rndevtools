@@ -250,6 +250,8 @@ const PODMAN_SOCKETS = [
 	'.local/share/containers/podman/machine/podman.sock',
 ] as const;
 const LAN_EXPOSED_TITLE = 'Stack listened on your network';
+/** The verify step's detail once lsof saw loopback listeners only. */
+const LOOPBACK_ONLY_DETAIL = '127.0.0.1 only';
 const NO_ROOM_TITLE = 'Not enough room';
 const OFF_MESSAGE = 'Local Supabase is off in RN Devtools.';
 /** Main's refusal of a CLI read that got its turn once the feature was off. */
@@ -258,6 +260,20 @@ const OFF_ERROR: ClassifiedSupabaseError = Object.freeze({
 	title: 'Local Supabase is off',
 	message: OFF_MESSAGE,
 	recovery: 'Turn on local Supabase in the Supabase tab first.',
+	retry: 'none',
+	details: Object.freeze({}),
+});
+/**
+ * What a create that a previous desktop spawned notes on its record when it
+ * failed, or its child was lost, while no desktop watched: like a cancelled
+ * create, the stack can't be resumed.
+ */
+const ADOPTED_START_LOST_ERROR: SupabaseErrorView = Object.freeze({
+	code: 'failed',
+	title: 'First start ended while RN Devtools was not running',
+	message:
+		'The stack was still being created when RN Devtools quit, and the start did not finish cleanly while RN Devtools was away.',
+	recovery: 'Destroy the stack and start it again.',
 	retry: 'none',
 	details: Object.freeze({}),
 });
@@ -273,6 +289,12 @@ const STARTING_JOB_KINDS: ReadonlySet<SupabaseJobKind> = new Set([
 	'studio',
 	'restart',
 ]);
+
+/** What a create's provisional record was: made new, or a flag on an older one. */
+type ProvisionalRecord = Readonly<{
+	stackId: string;
+	written: 'created' | 'updated';
+}>;
 
 type MemoryPressure = SupabaseState['capacity']['memoryPressure'];
 type JobRequester = SupabaseJob['requestedBy'];
@@ -490,6 +512,37 @@ function startedUnread(error: ClassifiedSupabaseError): boolean {
 	return (
 		error.details.unexpectedOutput === true && error.details.exitCode === 0
 	);
+}
+
+/**
+ * A record as a start that took leaves it: what an earlier failure, a branch
+ * follow or the start's own provisional record noted is cleared, as are the
+ * key fingerprints older versions wrote.
+ */
+function startedRecord(record: SupabaseStackRecord): SupabaseStackRecord {
+	const {
+		failedStart: _failedStart,
+		interrupted: _interrupted,
+		needsRecreate: _needsRecreate,
+		prepared: _prepared,
+		starting: _starting,
+		supersededBy: _supersededBy,
+		supersededAt: _supersededAt,
+		...flags
+	} = record.flags;
+	const {
+		lastError: _lastError,
+		recreateError: _recreateError,
+		keyFingerprints: _keyFingerprints,
+		...rest
+	} = record;
+	return { ...rest, flags };
+}
+
+/** A record that no longer waits for its create to report back. */
+function withoutStarting(record: SupabaseStackRecord): SupabaseStackRecord {
+	const { starting: _starting, ...flags } = record.flags;
+	return { ...record, flags };
 }
 
 function sameHead(left: GitHead, right: GitHead | undefined): boolean {
@@ -978,6 +1031,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 					),
 				})
 			);
+			await this.#clearStaleStarting();
 		} catch (error) {
 			this.log(`Supabase state could not be loaded: ${errorName(error)}`);
 		}
@@ -2205,7 +2259,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	 * Verifies a stack listens only on loopback; a listener elsewhere, or a
 	 * check that fails, stops it and fails the operation (fail closed). A
 	 * stack expected to run whose owner is missing counts as unverified,
-	 * unless the caller only sweeps (`notRunning: 'pass'`).
+	 * unless the caller only sweeps, or settles a start it did not see take
+	 * (`notRunning: 'pass'`).
 	 */
 	async enforceExposure(
 		stackId: string,
@@ -3396,6 +3451,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	}
 
 	async #followAdopted(child: SupabaseDetachedChild): Promise<void> {
+		const kind = this.jobStore.job(child.jobId)?.kind;
 		const deadline = child.startedAt + ADOPTED_CHILD_MAX_MS;
 		while (
 			this.#processAlive(child.pid) &&
@@ -3421,13 +3477,203 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		} catch {
 			status = 'lost';
 		}
-		await this.jobStore.finish(child.jobId, { status });
 		await this.jobStore.releaseChild(child.jobId);
 		await removeSupabaseProgressFile(
 			this.progressDirectory,
 			child.progressFile
 		);
-		if (this.#active) await this.refreshList();
+		let outcome: Readonly<{
+			status: 'complete' | 'failed' | 'lost';
+			error?: SupabaseErrorView;
+		}> = { status };
+		if (this.#active) {
+			try {
+				await this.refreshList();
+				// A stop's or a destroy's child only needs the list read again. A
+				// start's leaves a stack that nothing in this desktop saw come up:
+				// it is settled as one this desktop started would be once its CLI
+				// returned, and the job ends as that start's would have.
+				if (kind !== undefined && STARTING_JOB_KINDS.has(kind)) {
+					for (const stackId of child.stackIds) {
+						const settled = await this.#settleAdopted(
+							child.jobId,
+							stackId,
+							status
+						);
+						if (settled?.ok === false && outcome.status === 'complete') {
+							outcome = { status: 'failed', error: settled.error };
+						}
+					}
+				}
+			} catch (error) {
+				// A job that never ended would hold a turn-off up for good.
+				this.log(
+					`Supabase could not settle an adopted job: ${errorName(error)}`
+				);
+			}
+		}
+		await this.jobStore.finish(child.jobId, outcome);
+		// Settled or not, off or failed meanwhile, the create has ended.
+		await this.#clearStaleStarting();
+		// Nothing holds a stack that came up this way: its linger starts now.
+		if (this.#active) await this.reconcileHolds();
+	}
+
+	/**
+	 * What a start's own job does once its CLI returns, for one a previous
+	 * desktop spawned: the record is settled, the stack is verified to listen
+	 * on loopback only (fail closed, as after any start: one that listens
+	 * elsewhere, or can't be checked, is stopped) and its status is read
+	 * again. A start that failed or was lost may still have left the stack
+	 * running, so it is verified too; one that isn't running has nothing to
+	 * verify. Undefined once the feature is off; else the verdict, which
+	 * fails the job of a start that took.
+	 */
+	async #settleAdopted(
+		jobId: string,
+		stackId: string,
+		status: 'complete' | 'failed' | 'lost'
+	): Promise<SupabaseStepResult | undefined> {
+		return this.lockStack(stackId, async () => {
+			// Turned off while this waited for the lock: nothing is probed.
+			if (!this.#active) return undefined;
+			if (status === 'complete') {
+				this.jobStore.markStep(jobId, 'verify', 'current');
+			}
+			// Whether the stack came up decides what is noted about it.
+			await this.#readOwners();
+			await this.#recordAdopted(stackId, status);
+			const exposed = await this.enforceExposure(stackId, undefined, {
+				notRunning: 'pass',
+			});
+			if (status === 'complete') {
+				this.jobStore.markStep(
+					jobId,
+					'verify',
+					exposed.ok ? 'done' : 'failed',
+					exposed.ok ? LOOPBACK_ONLY_DETAIL : exposed.error.title
+				);
+			}
+			if (exposed.ok && this.entry(stackId)) await this.#rereadStatus(stackId);
+			return exposed;
+		});
+	}
+
+	/**
+	 * The record of a stack whose start a previous desktop spawned, once its
+	 * child ended; it stops being provisional. A stack seen running is noted
+	 * as started, as #recordStart notes one, and a child that an older
+	 * version left has no record yet and gets one from what is observed. A
+	 * create that failed, or whose child was lost, is marked interrupted as a
+	 * cancelled create is: the stack can't be resumed, so the next start
+	 * destroys it and creates it again.
+	 */
+	async #recordAdopted(
+		stackId: string,
+		status: 'complete' | 'failed' | 'lost'
+	): Promise<void> {
+		const now = this.now();
+		const running = this.ownerOf(stackId) !== undefined;
+		if (status === 'complete') {
+			const noted = (record: SupabaseStackRecord): SupabaseStackRecord =>
+				running
+					? { ...startedRecord(record), lastStartedAt: now, lastUsedAt: now }
+					: withoutStarting(record);
+			if (this.stackStore.record(stackId)) {
+				await this.stackStore.updateRecord(stackId, noted);
+				return;
+			}
+			const observed = running ? this.#observedRecord(stackId, now) : undefined;
+			if (observed) await this.stackStore.upsertRecord(noted(observed));
+			return;
+		}
+		// Only a create leaves a provisional record to mark: another kind of
+		// child that failed says nothing about the stack's first start.
+		if (!this.stackStore.record(stackId)?.flags.starting) return;
+		// Nothing to destroy if the CLI never registered the stack.
+		const exists = running || this.entry(stackId) !== undefined;
+		await this.stackStore.updateRecord(stackId, (record) => {
+			const settled = withoutStarting(record);
+			return exists
+				? {
+						...settled,
+						lastError: ADOPTED_START_LOST_ERROR,
+						flags: { ...settled.flags, interrupted: true },
+					}
+				: settled;
+		});
+	}
+
+	/**
+	 * A record for a running stack that a start of an older version left, from
+	 * its worktree's facts when they are known, else from its list entry
+	 * alone, as an attach builds one for a stack started outside.
+	 */
+	#observedRecord(
+		stackId: string,
+		now: number
+	): SupabaseStackRecord | undefined {
+		const entry = this.entry(stackId);
+		const facts = this.factsForStack(stackId, undefined, entry);
+		const detection = facts?.detection;
+		if (facts && detection?.status === 'found' && facts.head?.status === 'ok') {
+			return {
+				id: stackId,
+				origin: 'managed',
+				name: entry?.name || 'default',
+				projectRoot: detection.projectRoot,
+				worktreePath: facts.worktreePath,
+				appPaths: [facts.appPath],
+				repositoryId: facts.repositoryId,
+				branchContext: entry?.branchContext ?? facts.head.branchContext,
+				createdBy: { via: 'desktop' },
+				createdAt: now,
+				runtime: 'native',
+				pinned: false,
+				holds: [],
+				clocks: {},
+				exclusions: [],
+				studioEnabled: false,
+				flags: {},
+			};
+		}
+		if (!entry) return undefined;
+		return {
+			id: stackId,
+			origin: 'adopted',
+			name: entry.name || 'default',
+			projectRoot: entry.projectRoot,
+			...(facts
+				? { worktreePath: facts.worktreePath, repositoryId: facts.repositoryId }
+				: {}),
+			appPaths: [],
+			branchContext: entry.branchContext,
+			createdBy: { via: 'external' },
+			createdAt: now,
+			runtime: entry.runtime,
+			pinned: false,
+			holds: [],
+			clocks: {},
+			exclusions: [],
+			studioEnabled: false,
+			flags: {},
+		};
+	}
+
+	/**
+	 * Drops the provisional flag of a record no active job covers. A create
+	 * that no child is left to follow has ended or never ran, while the
+	 * desktop that spawned it was not watching; the stack it made, if any, is
+	 * judged by what is observed, like any other record's.
+	 */
+	async #clearStaleStarting(): Promise<void> {
+		const covered = new Set(
+			this.jobStore.activeJobs().flatMap((job) => job.stackIds)
+		);
+		for (const record of this.stackStore.records()) {
+			if (!record.flags.starting || covered.has(record.id)) continue;
+			await this.stackStore.updateRecord(record.id, withoutStarting);
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -3563,9 +3809,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	 * `stack start` natively: create from the project root, or resume by id
 	 * with the exclusions passed again (a resume drops them otherwise). Busy
 	 * errors retry with backoff, a partial lifecycle gets one stop and start,
-	 * a port collision one more try. Records the start, its binary and
-	 * exclusions, the endpoints and the main-only credentials, and restarts
-	 * other attached lanes' Metro when the API port moved.
+	 * a port collision one more try. A create's record is written before its
+	 * CLI is spawned, so that a desktop that quits meanwhile can adopt the
+	 * stack. Records the start, its binary and exclusions, the endpoints and
+	 * the main-only credentials, and restarts other attached lanes' Metro
+	 * when the API port moved.
 	 */
 	async startStep(
 		input: Readonly<{
@@ -3619,13 +3867,27 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		let portRetried = false;
 		const check = input.precondition;
 		const refused = { value: false };
-		const precondition = check
-			? async () => {
-					const error = await check();
-					if (error) refused.value = true;
-					return error;
-				}
-			: undefined;
+		// A first create takes longer than a quit waits for it, and the CLI
+		// only reports back at its end. The record is written once a CLI slot
+		// is free and the check passed, right before the spawn, so that a
+		// refusal leaves nothing behind.
+		const provisional: { record: ProvisionalRecord | undefined } = {
+			record: undefined,
+		};
+		const precondition =
+			check || input.mode === 'create'
+				? async () => {
+						const error = await check?.();
+						if (error) {
+							refused.value = true;
+							return error;
+						}
+						if (input.mode === 'create' && provisional.record === undefined) {
+							provisional.record = await this.#recordProvisional(input, cli);
+						}
+						return undefined;
+					}
+				: undefined;
 		let outcome = await this.#runLifecycle(
 			cli,
 			operation,
@@ -3674,6 +3936,10 @@ export class SupabaseEngine implements SupabaseServiceApi {
 					outcome.error,
 					job?.signal.aborted === true
 				);
+			} else if (provisional.record) {
+				// A retry's precondition refused after an earlier attempt ran:
+				// that records nothing, so the provisional record goes too.
+				await this.#forgetProvisional(provisional.record);
 			}
 			job?.step('database', 'failed', view.title);
 			return { ok: false, error: view };
@@ -3681,6 +3947,11 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		const start = outcome.value;
 		job?.details({ cancellable: false });
 		this.#rememberCredentials(start.id, start.credentials, true);
+		if (provisional.record && provisional.record.stackId !== start.id) {
+			// HEAD moved after the check and before the CLI read it: the stack
+			// came up under another id, and none exists under the one written.
+			await this.#forgetProvisional(provisional.record);
+		}
 		await this.#recordStart(start.id, input, cli);
 		if (start.publicEndpoints) {
 			this.#endpoints.set(start.id, start.publicEndpoints);
@@ -3691,6 +3962,72 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 		this.markDirty();
 		return { ok: true, stackId: start.id };
+	}
+
+	/**
+	 * The record of a stack whose create is about to be spawned, flagged
+	 * `starting` until the CLI reports back (#recordStart and
+	 * #recordStartFailure clear it, and so does the adoption of the child
+	 * when this desktop quits first). One that exists already, from a failed
+	 * or prepared first start, only gains the flag. Says what was written, so
+	 * that a create that turns out not to run can undo it.
+	 */
+	async #recordProvisional(
+		input: Readonly<{
+			facts: SupabaseWorktreeFacts;
+			exclusions: readonly SupabaseExcludableCapability[];
+			createdBy?: SupabaseStackRecord['createdBy'] | undefined;
+		}>,
+		cli: ResolvedSupabaseCli
+	): Promise<ProvisionalRecord | undefined> {
+		const { facts } = input;
+		const detection = facts.detection;
+		const stackId = facts.expectedStackId;
+		if (
+			stackId === undefined ||
+			detection?.status !== 'found' ||
+			facts.head?.status !== 'ok'
+		) {
+			return undefined;
+		}
+		if (this.stackStore.record(stackId)) {
+			await this.stackStore.updateRecord(stackId, (draft) => ({
+				...draft,
+				flags: { ...draft.flags, starting: true },
+			}));
+			return { stackId, written: 'updated' };
+		}
+		await this.stackStore.upsertRecord({
+			id: stackId,
+			origin: 'managed',
+			name: 'default',
+			projectRoot: detection.projectRoot,
+			worktreePath: facts.worktreePath,
+			appPaths: [facts.appPath],
+			repositoryId: facts.repositoryId,
+			branchContext: facts.head.branchContext,
+			createdBy: input.createdBy ?? { via: 'desktop' },
+			createdAt: this.now(),
+			cliVersion: cli.version,
+			binaryPath: cli.binaryPath,
+			runtime: 'native',
+			pinned: false,
+			holds: [],
+			clocks: {},
+			exclusions: [...input.exclusions],
+			studioEnabled: false,
+			flags: { starting: true },
+		});
+		return { stackId, written: 'created' };
+	}
+
+	/** Undoes a provisional record whose create turned out not to make that stack. */
+	async #forgetProvisional(provisional: ProvisionalRecord): Promise<void> {
+		if (provisional.written === 'created') {
+			await this.stackStore.removeRecords([provisional.stackId]);
+			return;
+		}
+		await this.stackStore.updateRecord(provisional.stackId, withoutStarting);
 	}
 
 	async #recordStart(
@@ -3726,23 +4063,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			studioEnabled: false,
 			flags: {},
 		};
-		// A start clears what an earlier failure or a branch follow noted, and
-		// the key fingerprints older versions wrote.
-		const {
-			failedStart: _failedStart,
-			interrupted: _interrupted,
-			needsRecreate: _needsRecreate,
-			prepared: _prepared,
-			supersededBy: _supersededBy,
-			supersededAt: _supersededAt,
-			...flags
-		} = base.flags;
-		const {
-			lastError: _lastError,
-			recreateError: _recreateError,
-			keyFingerprints: _keyFingerprints,
-			...rest
-		} = base;
+		const { flags, ...rest } = startedRecord(base);
 		await this.stackStore.upsertRecord({
 			...rest,
 			origin: rest.origin === 'external' ? 'adopted' : rest.origin,
@@ -3810,12 +4131,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			: existing
 				? supabaseRecreateError(existing)
 				: undefined;
+		// The create has reported back, so its provisional flag goes.
+		const { starting: _starting, ...flags } = base.flags;
 		await this.stackStore.upsertRecord({
 			...kept,
 			lastError: error,
 			...(recreateError ? { recreateError } : {}),
 			flags: {
-				...base.flags,
+				...flags,
 				...(recreate ? { needsRecreate: true as const } : {}),
 				...(interrupted ? { interrupted: true as const } : {}),
 				// The first start failed but still registered an empty stack.
@@ -3837,7 +4160,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			job.step('verify', 'failed', exposed.error.title);
 			return { status: 'failed', error: exposed.error };
 		}
-		job.step('verify', 'done', '127.0.0.1 only');
+		job.step('verify', 'done', LOOPBACK_ONLY_DETAIL);
 		// The job completes once the list has the stack, or a new stack's
 		// row would still be the expected one. The list drops statuses of
 		// stacks it doesn't show, so read the status after it.
