@@ -16,7 +16,7 @@ import {
 import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { ProgressBar, useGetStarted } from '@/components/get-started';
 import { TargetStatePill } from '@/components/simulator-ui';
-import { CodePreview } from '@/components/ui';
+import { CodePreview, ConfirmAction } from '@/components/ui';
 import {
 	adjacentSetupStep,
 	closeSetup,
@@ -81,6 +81,13 @@ const STEP_ICONS: Partial<
 	app: Cable,
 	extras: Layers3,
 };
+
+/**
+ * What Set up coding agents changes on this Mac, shown before it runs. Kept in
+ * step with the Local agent CLI section in Settings.
+ */
+const AGENT_SETUP_DISCLOSURE =
+	'Registers the bundled rndevtools CLI as an MCP server with Claude Code, Codex, Cursor and Kiro, installs the lanes skill where each discovers skills, links the CLI into ~/.local/bin, and adds a user-level Claude Code hook that steers raw simctl and Metro commands back to RN Devtools in every project. Existing configuration is preserved.';
 
 const CLIENT_SNIPPET = `import {
   shouldStartDesktopClient,
@@ -632,11 +639,17 @@ function ExtrasStage() {
 							</ul>
 						) : null}
 					</span>
-					<Button
+					{/* It edits files outside this app for every project on the Mac,
+					    so it says what it changes before it runs, as Settings does. */}
+					<ConfirmAction
+						confirmLabel="Set up coding agents"
+						description={AGENT_SETUP_DISCLOSURE}
 						isDisabled={!isBridgeAvailable || agents.busy}
-						size="sm"
-						variant="secondary"
-						onPress={async () => {
+						title="Set up coding agents?"
+						tone="warning"
+						triggerLabel={agents.busy ? 'Setting up…' : 'Set up'}
+						triggerVariant="secondary"
+						onConfirm={async () => {
 							setAgents({ busy: true, lines: [] });
 							const receipt = await runOnboardingOperation({
 								kind: 'agentCli.setup',
@@ -648,9 +661,7 @@ function ExtrasStage() {
 									: [receipt.error ?? 'Setup failed.'],
 							});
 						}}
-					>
-						{agents.busy ? 'Setting up…' : 'Set up'}
-					</Button>
+					/>
 				</li>
 			</ul>
 			<p className="setup-stage-foot">
