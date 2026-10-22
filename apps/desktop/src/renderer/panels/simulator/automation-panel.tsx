@@ -42,7 +42,10 @@ import {
 	useState,
 } from 'react';
 import { RecipeStepEditor } from '@/components/recipe-step-editor';
-import { DenseVirtualList } from '@/components/simulator-ui';
+import {
+	DenseVirtualList,
+	isDiscoveringSimulators,
+} from '@/components/simulator-ui';
 import {
 	ConfirmAction,
 	CopyButton,
@@ -854,6 +857,7 @@ export function AutomationPanel() {
 							summary={selectedSummary}
 							targetUdids={targetUdids}
 							devices={simulatorRuntime.state.devices}
+							discovering={isDiscoveringSimulators(simulatorRuntime)}
 							onCancel={(runId) => void recipeRuntime.cancelRun(runId)}
 							onApprove={(run, acknowledgement) =>
 								void approvePendingRun(run, acknowledgement)
@@ -1104,6 +1108,7 @@ function RunInspector({
 	summary,
 	approval,
 	devices,
+	discovering,
 	targetUdids,
 	concurrency,
 	concurrencyValid,
@@ -1125,6 +1130,8 @@ function RunInspector({
 	summary: RecipeSummary | null;
 	approval: RecipeApprovalAnalysis;
 	devices: ReturnType<typeof useSimulatorRuntime>['state']['devices'];
+	/** The first Simulator scan is still running. */
+	discovering: boolean;
 	targetUdids: string[];
 	concurrency: number;
 	concurrencyValid: boolean;
@@ -1163,7 +1170,11 @@ function RunInspector({
 					aria-label="Recipe target Simulators"
 				>
 					{devices.length === 0 ? (
-						<p>No Simulator targets discovered.</p>
+						<p>
+							{discovering
+								? 'Looking for Simulators…'
+								: 'No Simulator targets discovered.'}
+						</p>
 					) : (
 						devices.map((device) => {
 							const selected = targetUdids.includes(device.udid);

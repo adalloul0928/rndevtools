@@ -47,13 +47,29 @@ export function RefreshSimulatorsButton({
 	);
 }
 
+/**
+ * True while the first Simulator scan runs, so an empty list reads as
+ * "still looking" rather than "none found".
+ */
+export function isDiscoveringSimulators(runtime: {
+	isLoading: boolean;
+	isBridgeAvailable: boolean;
+	state: { capability: { status: string } };
+}): boolean {
+	return (
+		runtime.isLoading ||
+		(runtime.isBridgeAvailable &&
+			runtime.state.capability.status === 'checking')
+	);
+}
+
 export function SimulatorTargetSelect({
 	className = '',
 }: {
 	className?: string;
 }) {
-	const { selectedDevice, setSelectedDeviceUdid, state } =
-		useSimulatorRuntime();
+	const runtime = useSimulatorRuntime();
+	const { selectedDevice, setSelectedDeviceUdid, state } = runtime;
 	return (
 		<NativeSelect
 			className={`sim-target-select ${className}`}
@@ -67,12 +83,14 @@ export function SimulatorTargetSelect({
 			>
 				{state.devices.length === 0 ? (
 					<NativeSelect.Option value="">
-						No target discovered
+						{isDiscoveringSimulators(runtime)
+							? 'Looking for Simulators…'
+							: 'No target discovered'}
 					</NativeSelect.Option>
 				) : null}
 				{state.devices.map((device) => (
 					<NativeSelect.Option key={device.udid} value={device.udid}>
-						{device.name} · {device.state}
+						{device.name} · {TARGET_STATE_LABELS[device.state]}
 					</NativeSelect.Option>
 				))}
 				<NativeSelect.Indicator>

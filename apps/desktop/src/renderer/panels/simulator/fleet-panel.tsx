@@ -182,9 +182,19 @@ function readStoredLiveScreenOpen(): boolean {
 	}
 }
 
+/**
+ * The stored wall tile size, or the default when none was stored yet:
+ * `Number(null)` is 0, which clamped to the smallest size.
+ */
+export function storedFleetTile(raw: string | null): number {
+	return raw === null || raw.trim() === ''
+		? FLEET_TILE_RANGE.default
+		: clampFleetTile(Number(raw));
+}
+
 function readStoredTile(): number {
 	try {
-		return clampFleetTile(Number(window.localStorage.getItem(FLEET_TILE_KEY)));
+		return storedFleetTile(window.localStorage.getItem(FLEET_TILE_KEY));
 	} catch {
 		return FLEET_TILE_RANGE.default;
 	}
