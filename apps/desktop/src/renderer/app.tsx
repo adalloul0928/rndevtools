@@ -324,6 +324,14 @@ export function App() {
 	const supabase = useSupabaseActions();
 	const [route, setRoute] = useState<WorkspaceRoute>(routeFromHash);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	// At the minimum window size the tool list scrolls, and a tool opened by
+	// its shortcut or a link could sit below the fold; keep it in view.
+	useEffect(() => {
+		if (!sidebarOpen) return;
+		document
+			.querySelector<HTMLElement>('.desktop-sidebar [aria-current="page"]')
+			?.scrollIntoView({ block: 'nearest' });
+	}, [route.workspace, route.simulatorTool, route.connectedTool, sidebarOpen]);
 	const [statusOrder] = useState(createActionStatusOrder);
 	const [successTimers] = useState(createSuccessNoticeTimers);
 	// Every runtime that reports an actionStatus. Which of them the active tool
