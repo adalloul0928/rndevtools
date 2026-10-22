@@ -17,7 +17,7 @@ pnpm --dir packages/react-native quality
 - Import from `@rndevtools/core`'s narrow subpaths (`/redact`, `/serialize`, `/desktop-protocol`), never the root barrel. The barrel pulls in the panel UI and Reanimated, which headless host modules must not depend on.
 - Ships TypeScript source for the same reason as `@rndevtools/core`. Do not add a bundler.
 - The broker socket is unauthenticated loopback. Keep `shouldStartDesktopClient` conservative: development builds only, inert under test, and honouring the kill switch.
-- Any local process can answer on the broker's port, so the client keeps the broker's contract itself: it runs only actions for its own device and advertised capabilities, paces outgoing frames under the broker's per-connection rate limit, and bounds each host action with `actionTimeoutMs`.
+- Any local process can answer on the broker's port, so the client keeps the broker's contract itself: it runs only actions for its own device and advertised capabilities, paces outgoing frames under the broker's per-connection rate limit, and bounds each host action by its command's `desktopActionTimeoutMs`, which the broker outwaits by a short grace and which `actionTimeoutMs` can only shorten.
 - Authorization is a revocation boundary. A failed or changed owner read must revoke synchronously; re-granting is the host's explicit decision. While a source is bound, a grant applies only to its live owner, and a source whose `subscribe` throws revokes and refuses grants until a working one is bound.
 - The secure-store adapter reads only keys in its caller-supplied manifest. Never enumerate a keychain.
 - `withDevtoolsPruning` and `rndevtools-verify-bundle` are a pair. Changing either without the other silently weakens the production guarantee.
