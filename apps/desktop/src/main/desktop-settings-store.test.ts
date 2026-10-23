@@ -83,6 +83,34 @@ describe('DesktopSettingsStore', () => {
 		await expect(store.load()).rejects.toThrow();
 	});
 
+	it('preserves unreadable settings across writes until a successful reload', async () => {
+		const { root, store } = await fixture();
+		const file = path.join(root, 'settings-v1.json');
+		const invalid = '{"version":2,"appearance":"dark"}';
+		await writeFile(file, invalid);
+		await expect(store.load()).rejects.toThrow();
+		await expect(store.setAppearance('light')).rejects.toThrow('loaded');
+		await expect(store.setXcodeDeveloperDirectory('/Example')).rejects.toThrow(
+			'loaded'
+		);
+		expect(await readFile(file, 'utf8')).toBe(invalid);
+		await writeFile(file, '{"version":1,"appearance":"dark"}');
+		await store.load();
+		await store.setXcodeDeveloperDirectory('/Example');
+		expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
+			appearance: 'dark',
+			xcodeDeveloperDirectory: '/Example',
+		});
+	});
+
+	it('requires a successful load before the first write', async () => {
+		const { root, store } = await fixture();
+		const file = path.join(root, 'settings-v1.json');
+		await writeFile(file, '{"version":1,"appearance":"dark"}');
+		await expect(store.setAppearance('light')).rejects.toThrow('loaded');
+		expect(JSON.parse(await readFile(file, 'utf8')).appearance).toBe('dark');
+	});
+
 	it('recovers its write queue after failure and persists only a successful selection', async () => {
 		const { root, store } = await fixture();
 		await store.load();

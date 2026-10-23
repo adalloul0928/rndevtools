@@ -265,6 +265,8 @@
   and source location that it uses, where it read every descriptor.
 - Capability registry notifications isolate failing listeners, so healthy observers
   still receive the committed capability state.
+- Reinstalled console capture leaves forwarded wrappers from old subscriptions
+  passive, so another logger wrapping the method cannot duplicate capture.
 
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
@@ -406,3 +408,6 @@
   start is no longer stopped as it ends. A start that RN Devtools adopts after
   a restart is still checked for 127.0.0.1 only when its record cannot be
   saved, and its job then fails with that error instead of passing as verified.
+
+- Desktop settings writes require a successful load, preserving unreadable settings
+  until they can be recovered and loaded again.
