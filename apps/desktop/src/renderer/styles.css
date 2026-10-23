@@ -1374,6 +1374,8 @@ select {
 
 .sim-slimming-orphan-list {
 	display: grid;
+	/* An auto track would grow to fit the longest UDID instead of truncating it. */
+	grid-template-columns: minmax(0, 1fr);
 	max-height: 164px;
 	overflow: auto;
 	gap: 6px;
@@ -1399,6 +1401,8 @@ select {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
+	/* Without this the UDID wraps at its hyphens and the ellipsis never shows. */
+	white-space: nowrap;
 	color: var(--text-secondary);
 }
 
@@ -2439,9 +2443,13 @@ select {
 	border-bottom: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
+/*
+ * A .sim-section-heading is an h2 where it sits directly under the panel title
+ * and an h3 inside a detail section. Both look the same.
+ */
 .sim-detail-section h3,
 .sim-danger-zone strong,
-.sim-section-heading h3 {
+.sim-section-heading :is(h2, h3) {
 	margin: 0;
 	font-size: var(--font-size-control);
 	font-weight: 600;

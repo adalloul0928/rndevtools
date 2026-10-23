@@ -76,6 +76,12 @@ const DEFAULT_DOCTOR_CAPABILITIES = [
 	'photo-library',
 ] as const;
 
+// Forgetting cannot be taken back and a helper outage may be brief, so the list
+// says when forgetting is right instead of presenting it as the only way out.
+// The native confirmation in main/slimming-confirmation.ts says the same.
+const ORPHANED_FORGET_GUIDANCE =
+	'Forget a restore point only when Undo can no longer use it.';
+
 export function SlimmingPanel() {
 	const simulatorRuntime = useSimulatorRuntime();
 	const {
@@ -421,11 +427,12 @@ export function SlimmingPanel() {
 				<section className="sim-slimming-orphans">
 					<div className="sim-section-heading">
 						<div>
-							<h3>Restore points that can only be forgotten</h3>
+							<h2>Restore points the Simulator list cannot reach</h2>
 							<p>
 								{state.helper.status === 'available'
 									? 'The helper inventory no longer lists these Simulators, so nothing can reconcile or undo their interrupted mutations.'
-									: 'The native helper is unavailable, so nothing can reconcile or undo these interrupted mutations until it is back.'}
+									: 'The native helper is unavailable, so nothing can reconcile or undo these interrupted mutations until it is back.'}{' '}
+								{ORPHANED_FORGET_GUIDANCE}
 							</p>
 						</div>
 						<span>{orphanedRecords.length}</span>
@@ -433,7 +440,7 @@ export function SlimmingPanel() {
 					<ul className="sim-slimming-orphan-list">
 						{orphanedRecords.map((status) => (
 							<li className="sim-slimming-orphan" key={status.simulatorUdid}>
-								<code>{status.simulatorUdid}</code>
+								<code title={status.simulatorUdid}>{status.simulatorUdid}</code>
 								<Button
 									aria-label={`Forget restore point ${status.simulatorUdid}`}
 									isDisabled={!isBridgeAvailable}
