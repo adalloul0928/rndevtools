@@ -692,6 +692,46 @@ describe('destroy and recreate', () => {
 		await expect(stat(uploads)).resolves.toBeTruthy();
 	});
 
+	it.each(['queued', 'destroying'] as const)(
+		'refuses recreate after HEAD moves while %s',
+		async (phase) => {
+			const { h, repo, stackId } = await started();
+			await runToEnd(h, { kind: 'stop', stackIds: [stackId] });
+			await h.settle();
+			const stack = h.cli.stacks.get(stackId);
+			if (stack) stack.configChanged = true;
+			h.cli.replyNext('stack start', 'start-needs-recreate');
+			await runToEnd(h, { kind: 'start', stackId });
+			await h.settle();
+			const starts = h.cli.count('stack start');
+			let release = () => {};
+			const held =
+				phase === 'queued'
+					? h.engine.lockStack(
+							stackId,
+							() =>
+								new Promise<void>((resolve) => {
+									release = resolve;
+								})
+						)
+					: undefined;
+			if (phase === 'destroying') release = h.cli.hold('stack destroy');
+			const receipt = await run(h, { kind: 'recreate', stackId }, CONFIRMED);
+			expect(receipt.jobId).toBeDefined();
+			if (phase === 'destroying') await h.cli.waitForCall('stack destroy');
+			await h.checkout(repo, 'next-branch');
+			release();
+			await held;
+			await h.engine.waitForJob(receipt.jobId ?? '', 10_000);
+			expect(jobOf(h, receipt.jobId)).toMatchObject({
+				status: 'failed',
+				error: { title: 'Worktree switched branches' },
+			});
+			expect(h.cli.count('stack start')).toBe(starts);
+			expect(h.cli.count('stack destroy')).toBe(phase === 'queued' ? 0 : 1);
+		}
+	);
+
 	it('recreates a stack whose saved configuration cannot adopt the new one', async () => {
 		const { h, stackId } = await started();
 		await runToEnd(h, { kind: 'stop', stackIds: [stackId] });

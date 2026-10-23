@@ -269,6 +269,9 @@
 
 ### Desktop app
 
+- Recreate rechecks the selected Supabase branch after acquiring its lock and
+  before each start attempt; a checkout cannot redirect a queued recreation.
+
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
