@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Offline now blocks instrumented requests with untrusted init dictionaries
+  without inspecting them. Other profiles report unsupported request boundaries
+  instead of silently bypassing the selected conditions.
+
 - Preserve app writes made during asynchronous Zustand patch validation.
   A stale or rejected edit no longer restores an old state before its own
   mutation has started. Validators must not mutate the store.
