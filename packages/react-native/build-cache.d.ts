@@ -10,6 +10,8 @@ export type BuildCacheRunOptions = {
 	configuration?: 'Debug' | 'Release';
 	/** Android: Gradle variant. */
 	variant?: string;
+	/** Actual Gradle target ABIs; Android caching is skipped when absent. */
+	architectures?: string | readonly string[];
 	[key: string]: unknown;
 };
 
@@ -64,11 +66,13 @@ export function entryDirectory(
 
 /**
  * The toolchain path segment for a platform: `<arch>-<12 hex>`, where the
- * digest covers the CPU architecture and, for iOS, `xcodebuild -version`.
+ * digest covers Android target ABIs or the iOS host CPU and Xcode version.
+ * Android requires the actual target ABIs; missing or unsupported ABIs throw.
  */
 export function toolchainSegment(
 	platform: BuildCachePlatform | string,
 	internals?: { arch?: string; xcodeIdentity?: () => string },
+	architectures?: string | readonly string[],
 ): string;
 
 /** Default cache root for this machine. */

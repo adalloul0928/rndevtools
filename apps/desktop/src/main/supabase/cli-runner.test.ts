@@ -7,6 +7,7 @@ import {
 	mkdtemp,
 	readdir,
 	realpath,
+	rename,
 	rm,
 	stat,
 	symlink,
@@ -349,6 +350,68 @@ describe('buildSupabaseCliEnvironment', () => {
 });
 
 describe('SupabaseCliRunner.run', () => {
+	it.each(['run', 'spawnDetached'] as const)(
+		'%s refuses a cached binary changed before execution',
+		async (method) => {
+			const base = await tempDirectory();
+			const binaryPath = path.join(base, 'supabase');
+			await writeFile(binaryPath, 'original', { mode: 0o700 });
+			const expectedBinary = await stat(binaryPath);
+			await rename(binaryPath, `${binaryPath}.old`);
+			await writeFile(binaryPath, 'replacement', { mode: 0o700 });
+			const { spawn, calls } = fakeSpawn({
+				onSpawn: (child) => process.nextTick(() => void child.finish(0)),
+			});
+			await expect(
+				runnerWith(spawn)[method]({
+					binaryPath,
+					expectedBinary,
+					argv: listArgv,
+					cwd: path.join(base, 'cwd'),
+					timeoutMs: 20_000,
+					progressDirectory: path.join(base, 'progress'),
+					progressLabel: 'test',
+				})
+			).rejects.toThrow('changed or is no longer safe');
+			expect(calls).toHaveLength(0);
+			if (method === 'spawnDetached')
+				expect(await readdir(path.join(base, 'progress'))).toEqual([]);
+		}
+	);
+
+	it.each(['writable', 'not-executable', 'symlink', 'unchanged'] as const)(
+		'revalidates binary permissions and path: %s',
+		async (change) => {
+			const base = await tempDirectory();
+			const binaryPath = path.join(base, 'supabase');
+			await writeFile(binaryPath, 'original', { mode: 0o700 });
+			const expectedBinary = await stat(binaryPath);
+			if (change === 'writable') await chmod(binaryPath, 0o720);
+			if (change === 'not-executable') await chmod(binaryPath, 0o600);
+			if (change === 'symlink') {
+				await rename(binaryPath, `${binaryPath}.old`);
+				await symlink(`${binaryPath}.old`, binaryPath);
+			}
+			const { spawn, calls } = fakeSpawn({
+				onSpawn: (child) => process.nextTick(() => void child.finish(0)),
+			});
+			const result = runnerWith(spawn).run({
+				binaryPath,
+				expectedBinary,
+				argv: listArgv,
+				cwd: path.join(base, 'cwd'),
+				timeoutMs: 20_000,
+			});
+			if (change === 'unchanged') {
+				expect((await result).succeeded).toBe(true);
+				expect(calls).toHaveLength(1);
+			} else {
+				await expect(result).rejects.toThrow('changed or is no longer safe');
+				expect(calls).toHaveLength(0);
+			}
+		}
+	);
+
 	it('spawns an argv array, without a shell, from a private neutral directory', async () => {
 		const cwd = path.join(await tempDirectory(), 'neutral', 'cwd');
 		const { spawn, calls } = fakeSpawn({

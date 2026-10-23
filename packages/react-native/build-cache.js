@@ -112,14 +112,26 @@ function xcodeIdentity() {
 	return xcodeIdentityCache;
 }
 
-/**
- * Short, stable id for the host toolchain a binary was produced with. iOS
- * builds depend on the Xcode version and the CPU architecture; Android APKs
- * only on the architecture of the emulator image being targeted, which Expo
- * folds into the build itself, so arch alone keeps distinct hosts apart.
- */
-function toolchainSegment(platform, internals = {}) {
-	const arch = internals.arch || process.arch;
+/** Normalize the actual Gradle target ABIs, never the build host's CPU. */
+function androidAbis(value) {
+	const parts = typeof value === 'string' ? value.split(',') : value;
+	const allowed = new Set(['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']);
+	if (
+		!Array.isArray(parts) ||
+		parts.length === 0 ||
+		parts.length > 4 ||
+		parts.some((part) => !allowed.has(part))
+	)
+		return undefined;
+	return [...new Set(parts)].sort();
+}
+
+/** iOS uses the host toolchain; Android requires the resolved target ABIs. */
+function toolchainSegment(platform, internals = {}, architectures) {
+	const abis = platform === 'android' ? androidAbis(architectures) : undefined;
+	if (platform === 'android' && !abis)
+		throw new TypeError('build-cache: Android target ABIs are required.');
+	const arch = abis ? `abi-${abis.join('-')}` : internals.arch || process.arch;
 	const parts =
 		platform === 'ios'
 			? [arch, (internals.xcodeIdentity || xcodeIdentity)()]
@@ -150,7 +162,11 @@ function entryDirectory(context, options = {}, internals = {}) {
 		'v2',
 		safeSegment(context.platform, 'unknown-platform'),
 		safeSegment(configurationOf(context.runOptions)),
-		toolchainSegment(context.platform, internals),
+		toolchainSegment(
+			context.platform,
+			internals,
+			context.runOptions?.architectures,
+		),
 		safeSegment(context.fingerprintHash, 'no-fingerprint'),
 	);
 }
@@ -384,6 +400,13 @@ function createBuildCacheProvider(internals = {}) {
 	const claims = new Map();
 
 	async function resolveBuildCache(context, options = {}) {
+		// Expo currently omits resolved Android ABIs from the provider context.
+		// A normal build is safer than installing a host-keyed, incompatible APK.
+		if (
+			context?.platform === 'android' &&
+			!androidAbis(context.runOptions?.architectures)
+		)
+			return null;
 		const entry = entryDirectory(context, options, internals);
 		const waitTimeoutMs =
 			Number.isFinite(options.waitTimeoutMs) && options.waitTimeoutMs >= 0
@@ -393,6 +416,13 @@ function createBuildCacheProvider(internals = {}) {
 	}
 
 	async function uploadBuildCache(context, options = {}) {
+		// Expo currently omits resolved Android ABIs from the provider context.
+		// A normal build is safer than installing a host-keyed, incompatible APK.
+		if (
+			context?.platform === 'android' &&
+			!androidAbis(context.runOptions?.architectures)
+		)
+			return null;
 		const entry = entryDirectory(context, options, internals);
 		const claim = claims.get(entry);
 		try {
@@ -435,7 +465,11 @@ function createBuildCacheProvider(internals = {}) {
 							artifact: name,
 							platform: context.platform,
 							configuration: configurationOf(context.runOptions),
-							toolchain: toolchainSegment(context.platform, internals),
+							toolchain: toolchainSegment(
+								context.platform,
+								internals,
+								context.runOptions?.architectures,
+							),
 							fingerprintHash: context.fingerprintHash,
 							createdAt: new Date(now()).toISOString(),
 							sourceProject: context.projectRoot,

@@ -6,6 +6,8 @@
 
 - Refused desktop actions keep read-only diagnostics connected. Authorization read
   failures also refuse safely; replies remain paced, bounded and rate-limited.
+- Android build-cache entries require resolved target ABIs; provider calls without
+  them build normally instead of reusing potentially incompatible host-keyed APKs.
 
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
@@ -279,6 +281,8 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Metro pruning checks the finished dependency graph before serialization, catching
+  later resolver wrappers that bypass replacement. Artifact verification remains required.
 - Debug camera fixtures honor the image picker's string, array, and legacy enum
   media selections for both image and video flows.
 
@@ -313,6 +317,9 @@
   `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
+- Recheck Supabase CLI identity, permissions and canonical path immediately before
+  every execution, including version probes. A changed installation must be refreshed.
 
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,

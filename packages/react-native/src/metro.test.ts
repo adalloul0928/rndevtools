@@ -167,6 +167,79 @@ afterEach(() => {
 });
 
 describe('withDevtoolsPruning', () => {
+	it.each([false, undefined])(
+		'checks the finished graph even when a later resolver bypasses pruning (dev=%s)',
+		(dev) => {
+			devtoolsPackage();
+			const previous = jest.fn();
+			const config = {
+				resolver: { resolveRequest: metroLike },
+				serializer: { experimentalSerializerHook: previous },
+			};
+			withDevtoolsPruning(config, { projectRoot, replace: [host] });
+			config.resolver.resolveRequest = metroLike;
+			const file = path.join(
+				projectRoot,
+				'node_modules/@rndevtools/core/index.ts',
+			);
+			expect(() =>
+				config.serializer.experimentalSerializerHook(
+					{ transformOptions: { dev }, dependencies: new Map([[file, {}]]) },
+					{},
+				),
+			).toThrow('finished graph');
+			expect(previous).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it('preserves serializer hooks and rejects devtools a hook adds to the graph', () => {
+		devtoolsPackage();
+		const dependencies = new Map<string, unknown>();
+		const previous = jest.fn((_graph: unknown, _delta: unknown) =>
+			dependencies.set(
+				path.join(projectRoot, 'node_modules/@rndevtools/core/index.ts'),
+				{},
+			),
+		);
+		const config = { serializer: { experimentalSerializerHook: previous } };
+		withDevtoolsPruning(config, { projectRoot, replace: [host] });
+		expect(() =>
+			config.serializer.experimentalSerializerHook(
+				{ transformOptions: { dev: false }, dependencies },
+				{},
+			),
+		).toThrow('finished graph');
+	});
+
+	it.each([true, false])(
+		'checks a development graph only with enabled=%s',
+		(enabled) => {
+			devtoolsPackage();
+			const previous = jest.fn(
+				(_graph: unknown, _delta: unknown) => 'previous-result',
+			);
+			const config = { serializer: { experimentalSerializerHook: previous } };
+			withDevtoolsPruning(config, { projectRoot, replace: [host], enabled });
+			const graph = {
+				transformOptions: { dev: true },
+				dependencies: new Map([
+					[
+						path.join(projectRoot, 'node_modules/@rndevtools/core/index.ts'),
+						{},
+					],
+				]),
+			};
+			if (enabled)
+				expect(() =>
+					config.serializer.experimentalSerializerHook(graph, {}),
+				).toThrow('finished graph');
+			else
+				expect(config.serializer.experimentalSerializerHook(graph, {})).toBe(
+					'previous-result',
+				);
+		},
+	);
+
 	it('replaces the alias specifier', () => {
 		expect(resolveWith(pruning([host]), '@/lib/devtools/host')).toBe(stub);
 	});
