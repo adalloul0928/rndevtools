@@ -263,6 +263,8 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Capability registry notifications isolate failing listeners, so healthy observers
+  still receive the committed capability state.
 - Reinstalled console capture leaves forwarded wrappers from old subscriptions
   passive, so another logger wrapping the method cannot duplicate capture.
 
@@ -271,6 +273,8 @@
   stack overflows.
 - Desktop header projections redact names, omit accessors and oversized values,
   and bound total redaction work before storing the projection.
+- Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
+  and serialization while retaining heartbeats and client diagnostic updates.
 
 - The desktop client fits every snapshot to every size and range bound the
   desktop validates before it sends it, with the new `fitDesktopSnapshot` of
