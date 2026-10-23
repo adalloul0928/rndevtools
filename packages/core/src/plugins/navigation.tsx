@@ -309,10 +309,14 @@ export function createNavigationPlugin(
 	const prunePendingTransitions = (at: number): void => {
 		for (const pending of pendingTransitions.values()) {
 			if (at - pending.requestedAt <= 30_000) continue;
-			appendTransition(pending, 'failed', at, {
-				durationMs: Math.max(0, at - pending.requestedAt),
-				error: 'Timed out waiting for the requested route to focus.',
-			});
+			// A committed route already succeeded. Hosts may only call record(),
+			// so absence of a later focus observation is not a navigation failure.
+			if (pending.committedAt === undefined) {
+				appendTransition(pending, 'failed', at, {
+					durationMs: Math.max(0, at - pending.requestedAt),
+					error: 'Timed out waiting for the requested route to commit.',
+				});
+			}
 			pendingTransitions.delete(pending.transitionId);
 		}
 	};
@@ -324,10 +328,12 @@ export function createNavigationPlugin(
 				| PendingTransition
 				| undefined;
 			if (!oldest) break;
-			appendTransition(oldest, 'failed', at, {
-				durationMs: Math.max(0, at - oldest.requestedAt),
-				error: 'Superseded because the pending transition limit was reached.',
-			});
+			if (oldest.committedAt === undefined) {
+				appendTransition(oldest, 'failed', at, {
+					durationMs: Math.max(0, at - oldest.requestedAt),
+					error: 'Superseded because the pending transition limit was reached.',
+				});
+			}
 			pendingTransitions.delete(oldest.transitionId);
 		}
 	};
@@ -391,7 +397,8 @@ export function createNavigationPlugin(
 			source: normalizedContext.source ?? 'panel',
 		});
 		try {
-			await options.onNavigate(normalizeNavigationText(route));
+			// The host gets the actual target; only stored diagnostics are redacted.
+			await options.onNavigate(route);
 		} catch (error) {
 			failTransition(transitionId, error);
 			throw error;

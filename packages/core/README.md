@@ -423,3 +423,10 @@ and at most 100 nonempty warnings. The engine trims summary/warning text,
 checks the recovery bounds, and copies only the supported fields before any
 rollback capture or mutation. Adapter-owned objects cannot change a saved
 checkpoint after preflight.
+
+## Navigation observations
+
+`record()` confirms a committed navigation. `updateStack()` can add focus
+evidence, but a missing focus observation never turns a commit into a failure.
+Only requests that never commit time out. `navigate()` passes the original
+route to the host callback; routes stored in diagnostic history stay redacted.
