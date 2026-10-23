@@ -33,7 +33,7 @@ export const PACKAGED_RENDERER_CONTENT_SECURITY_POLICY = [
 	"frame-src 'none'",
 	"frame-ancestors 'none'",
 	"worker-src 'none'",
-	'media-src rndevtools-capture:',
+	'media-src rndevtools-capture: blob:',
 	"base-uri 'self'",
 	"form-action 'self'",
 ].join('; ');

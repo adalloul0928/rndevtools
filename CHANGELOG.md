@@ -287,6 +287,9 @@
 
 ### Desktop app
 
+- The packaged renderer allows local blob video, matching development playback
+  without allowing remote media sources.
+
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
 
