@@ -1428,3 +1428,14 @@ func canonicalPath(path string) string {
 	}
 	return path
 }
+
+// supabaseEnvironmentAt honors the same explicit socket the CLI uses for calls.
+// Production hooks omit it and keep the account-owned default socket.
+func supabaseEnvironmentAt(socketPath string) supabaseEnvironment {
+	environment := defaultSupabaseEnvironment()
+	if socketPath != "" {
+		environment.reachable = func() bool { return client.Reachable(socketPath, desktopProbeTimeout) }
+		environment.steering = func() (steeringState, bool) { return readSteering(filepath.Dir(socketPath)) }
+	}
+	return environment
+}

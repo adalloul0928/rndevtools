@@ -287,6 +287,9 @@
 
 ### Desktop app
 
+- The agent hook only redirects Simulator mutations and Metro starts while
+  the desktop is reachable; unrelated shell commands never run a reachability probe.
+
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 
