@@ -4,6 +4,14 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Preserve app writes made during asynchronous Zustand patch validation.
+  A stale or rejected edit no longer restores an old state before its own
+  mutation has started. Validators must not mutate the store.
+- Network capture labels uninspected request methods `UNKNOWN` and unread or
+  opaque response statuses with a neutral dash instead of inventing GET / OK.
+- Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
+  native-memory abort without dropping odd-offset marker or secret checks.
+
 - Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
   tokens, and complete or truncated private-key blocks in diagnostic capture.
   Runtime token patterns now share one source with the public-content check.
@@ -95,6 +103,18 @@
 - `createAsyncStorageDevtoolsAdapter` and `createSecureStoreDevtoolsAdapter`
   throw a `TypeError` when given no store, instead of returning an adapter
   whose every read fails.
+- The restore-point and scenario repositories refuse to write while their
+  stored document could not be loaded. A failed `getItem` used to leave the
+  repository empty, and the next capture or save then replaced everything that
+  was stored with a document of one entry. Writes now reject with the load
+  error. `ScenarioRepository` reports it as `loadError` on its snapshot and
+  through `subscribeToLoadError()`, which fires with every change to the
+  repository, and `getLoadError()`. `reload()` reads the document again behind
+  any queued write. `discardStoredData()` deletes it on purpose, and only while
+  the load error still stands, so a confirmation given before a successful
+  retry cannot destroy what that retry loaded. The restore-points panel shows
+  the error with Retry and Discard controls, and the plugin exposes
+  `getLoadError()`, `reload()` and `discardStoredData()`.
 - `rndevtools-verify-bundle --forbid-loopback-urls` and
   `--preset supabase-local` fail a release bundle that still carries a
   loopback URL or a local Supabase key.
@@ -251,6 +271,7 @@
 
 - Fit Network, Storage, and React Query grids to narrow panes. Secondary
   columns hide while their values remain available in the detail pane.
+- Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
@@ -295,6 +316,15 @@
   runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
   missing verification in a notice and job summary. Desktop changes must
   pass the full local quality gate before merging when it skips.
+- Forget restore point now works for a restore point whose Simulator has been
+  deleted or whose helper is unavailable, so an interrupted SimSlim mutation
+  can no longer leave a Simulator permanently marked "Check required". The
+  SimSlim panel lists such restore points, each with its own Forget restore
+  point button, and the app no longer requires the helper or the Simulator
+  inventory for that one action; it still asks before running. Before, the
+  action was refused as long as the helper was unavailable or the Simulator
+  was missing from the inventory, and a restore point behind an unavailable
+  helper was not shown at all.
 - A local Supabase stack whose first start is still running when RN Devtools
   quits is now recorded before the CLI is spawned. When the restarted app
   adopts that start, it checks that the stack listens on 127.0.0.1 only and
@@ -302,3 +332,8 @@
   as for any other stack; a first start that failed meanwhile is marked
   interrupted, like a cancelled one. Before, the stack ran with no record, no
   loopback check and no automatic stop.
+- An unheld local Supabase stack now gets its stop linger from the end of the
+  job that started it, not from the moment its owner came up, so a long first
+  start is no longer stopped as it ends. A start that RN Devtools adopts after
+  a restart is still checked for 127.0.0.1 only when its record cannot be
+  saved, and its job then fails with that error instead of passing as verified.

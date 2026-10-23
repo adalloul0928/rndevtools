@@ -385,8 +385,9 @@ attempts never replace the prior successful restore point. After startup,
 reconciliation inspects a retained record only while its target is booted and
 no other mutation holds the target, less often each time the state stays
 ambiguous. When Undo can no longer use the emergency token, for example after
-the tuple changed, the operator may forget it after a main-owned confirmation,
-which clears that pending record and nothing else.
+the tuple changed or the Simulator was deleted, the operator may forget it
+after a main-owned confirmation, which clears that pending record and nothing
+else. Forgetting needs neither the helper nor the Simulator.
 
 Closing the FD 4 control channel requests graceful cancellation; the helper
 installs no signal handler, so a signal ends it without cleanup. A mutation failure

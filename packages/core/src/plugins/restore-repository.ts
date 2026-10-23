@@ -1,5 +1,5 @@
 import { ExternalStore } from '../core/external-store';
-import { redactDiagnosticText } from '../core/redact';
+import { diagnosticErrorText, redactDiagnosticText } from '../core/redact';
 import { truncateText, utf8ByteLength } from '../core/serialize';
 import type {
 	RestorePoint,
@@ -299,8 +299,15 @@ function validateRepositoryPoints(
 	}
 }
 
+function refusedWhileUnloaded(loadError: string): Error {
+	return new Error(
+		`Stored restore points could not be loaded (${loadError}), so nothing was written. Retry loading them or discard the stored data.`,
+	);
+}
+
 export class RestorePointRepository {
 	readonly #store = new ExternalStore<readonly RestorePoint[]>([]);
+	readonly #loadErrorStore = new ExternalStore<string | undefined>(undefined);
 	readonly #storage?: RestorePointStorage;
 	readonly #key: string;
 	readonly #maxPoints: number;
@@ -308,7 +315,11 @@ export class RestorePointRepository {
 	readonly #maxTotalBytes: number;
 	#serial: Promise<void> = Promise.resolve();
 	#nextId = 1;
-	#loadError?: string;
+	/**
+	 * Settles once the first load attempt has finished, whether or not the
+	 * stored document could be read, and never rejects. `getLoadError()` says
+	 * why a load failed; `reload()` tries again.
+	 */
 	readonly ready: Promise<void>;
 
 	constructor(options: RestorePointRepositoryOptions) {
@@ -350,9 +361,15 @@ export class RestorePointRepository {
 	readonly getServerSnapshot = (): readonly RestorePoint[] =>
 		this.#store.getServerSnapshot();
 
-	getLoadError(): string | undefined {
-		return this.#loadError;
-	}
+	readonly subscribeToLoadError = (listener: () => void): (() => void) =>
+		this.#loadErrorStore.subscribe(listener);
+
+	/** Why the stored document could not be loaded; every write is refused while set. */
+	readonly getLoadError = (): string | undefined =>
+		this.#loadErrorStore.getSnapshot();
+
+	readonly getServerLoadError = (): string | undefined =>
+		this.#loadErrorStore.getServerSnapshot();
 
 	async add(point: RestorePoint): Promise<RestorePoint> {
 		const parsed = parsePoint(point, this.#maxSourceBytes);
@@ -398,6 +415,8 @@ export class RestorePointRepository {
 
 	async duplicate(id: string, label?: string): Promise<RestorePoint> {
 		await this.ready;
+		const loadError = this.#loadErrorStore.getSnapshot();
+		if (loadError !== undefined) throw refusedWhileUnloaded(loadError);
 		const source = this.#store
 			.getSnapshot()
 			.find((candidate) => candidate.id === id);
@@ -466,6 +485,45 @@ export class RestorePointRepository {
 		return imported;
 	}
 
+	/**
+	 * Reads the stored document again, behind any queued write. Resolves once
+	 * the stored restore points are loaded and the load error is cleared, and
+	 * rejects with that error when the document still cannot be loaded.
+	 */
+	reload(): Promise<void> {
+		return this.#enqueue(async () => {
+			await this.#hydrate();
+			const loadError = this.#loadErrorStore.getSnapshot();
+			if (loadError !== undefined) throw new Error(loadError);
+		});
+	}
+
+	/**
+	 * Deletes the stored document on purpose, clears the load error and empties
+	 * the repository. This is the only way to write again while a load error
+	 * stands without first loading the stored data. It rejects, and deletes
+	 * nothing, once the points have loaded after all, so a confirmation given
+	 * while they could not be loaded cannot destroy them after a retry worked.
+	 */
+	discardStoredData(): Promise<void> {
+		return this.#enqueue(async () => {
+			const storage = this.#storage;
+			if (!storage) return;
+			if (this.#loadErrorStore.getSnapshot() === undefined) {
+				throw new Error(
+					'The stored restore points loaded in the meantime, so nothing was discarded.',
+				);
+			}
+			if (storage.removeItem) {
+				await storage.removeItem(this.#key);
+			} else {
+				await storage.setItem(this.#key, JSON.stringify(documentFor([])));
+			}
+			this.#store.set([]);
+			this.#loadErrorStore.set(undefined);
+		});
+	}
+
 	createId(createdAt = Date.now()): string {
 		const id = `${createdAt.toString(36)}-${this.#nextId.toString(36)}`;
 		this.#nextId += 1;
@@ -474,35 +532,56 @@ export class RestorePointRepository {
 
 	async #hydrate(): Promise<void> {
 		if (!this.#storage) return;
+		let retained: readonly RestorePoint[] = [];
+		let trimmed = false;
 		try {
 			const raw = await this.#storage.getItem(this.#key);
-			if (!raw) return;
-			const parsed = parseDocument(raw, this.#maxSourceBytes, true);
-			const retained = retainWithinLimits(
-				parsed.points,
-				this.#maxPoints,
-				this.#maxTotalBytes,
-			);
-			this.#store.set(retained);
-			if (parsed.discarded > 0 || retained.length !== parsed.points.length) {
-				await this.#storage.setItem(
-					this.#key,
-					JSON.stringify(documentFor(retained)),
+			if (raw) {
+				const parsed = parseDocument(raw, this.#maxSourceBytes, true);
+				retained = retainWithinLimits(
+					parsed.points,
+					this.#maxPoints,
+					this.#maxTotalBytes,
 				);
+				trimmed =
+					parsed.discarded > 0 || retained.length !== parsed.points.length;
 			}
 		} catch (error) {
-			this.#loadError =
-				error instanceof Error
-					? error.message
-					: 'Restore points could not be loaded.';
+			// Never empty: a blank message must still stand as an error.
+			this.#loadErrorStore.set(
+				diagnosticErrorText(error) || 'The stored document could not be read.',
+			);
+			return;
 		}
+		this.#store.set(retained);
+		this.#loadErrorStore.set(undefined);
+		if (!trimmed) return;
+		try {
+			await this.#storage.setItem(
+				this.#key,
+				JSON.stringify(documentFor(retained)),
+			);
+		} catch {
+			// The points loaded, so this is not a load error; the next write
+			// persists the trimmed list.
+		}
+	}
+
+	#enqueue(task: () => Promise<void>): Promise<void> {
+		const run = this.#serial.then(async () => {
+			await this.ready;
+			await task();
+		});
+		this.#serial = run.catch(() => undefined);
+		return run;
 	}
 
 	#mutate(
 		operation: (points: readonly RestorePoint[]) => readonly RestorePoint[],
 	): Promise<void> {
-		const run = this.#serial.then(async () => {
-			await this.ready;
+		return this.#enqueue(async () => {
+			const loadError = this.#loadErrorStore.getSnapshot();
+			if (loadError !== undefined) throw refusedWhileUnloaded(loadError);
 			const previous = this.#store.getSnapshot();
 			const next = operation(previous);
 			validateRepositoryPoints(next, this.#maxPoints, this.#maxTotalBytes);
@@ -514,7 +593,5 @@ export class RestorePointRepository {
 			}
 			this.#store.set(next);
 		});
-		this.#serial = run.catch(() => undefined);
-		return run;
 	}
 }

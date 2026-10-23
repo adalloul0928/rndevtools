@@ -3,6 +3,7 @@ import {
 	SLIMMING_EXPERIMENTAL_ACKNOWLEDGEMENT,
 	type SlimmingSettingRequest,
 	type SlimmingSimulatorStatus,
+	type SlimmingState,
 } from '../../shared/slimming-protocol';
 
 export type UnknownTupleAcknowledgement = {
@@ -75,6 +76,35 @@ export function allSelectedNeedAttention(
 			);
 		})
 	);
+}
+
+/**
+ * The emergency restore points that the selection-based Forget cannot reach:
+ * those of Simulators the signed inventory no longer lists and, while the
+ * helper is away, every one, since nothing can reconcile or undo them until it
+ * is back. Main projects each as needs-attention, so finding them takes no
+ * request of their own. Forgetting is all that is offered for them, one at a
+ * time, and main still asks before it runs.
+ */
+export function orphanedRestorePoints(
+	state: Pick<SlimmingState, 'helper' | 'simulators' | 'statusBySimulator'>
+): SlimmingSimulatorStatus[] {
+	// Main matches UDIDs without regard to case, so this must as well, or a
+	// listed Simulator could show up here beside the selection's own Forget.
+	const listed = new Set(
+		state.simulators.map((simulator) => simulator.udid.toUpperCase())
+	);
+	return Object.values(state.statusBySimulator)
+		.filter(
+			(status) =>
+				status.condition === 'needs-attention' &&
+				status.checkpointAvailable &&
+				(state.helper.status !== 'available' ||
+					!listed.has(status.simulatorUdid.toUpperCase()))
+		)
+		.sort((left, right) =>
+			left.simulatorUdid.localeCompare(right.simulatorUdid)
+		);
 }
 
 export function unknownCompatibilityBinding(

@@ -130,6 +130,12 @@ export type RestorePointsPlugin = {
 	importJson: (value: string, mode?: 'replace' | 'merge') => Promise<void>;
 	getPoints: () => readonly RestorePoint[];
 	getReceipts: () => readonly RestoreTransactionReceipt[];
+	/** Why stored restore points could not be loaded; writes are refused while set. */
+	getLoadError: () => string | undefined;
+	/** Reads the stored restore points again; rejects if they still cannot be loaded. */
+	reload: () => Promise<void>;
+	/** Deletes the stored restore points so writes can resume from an empty list. */
+	discardStoredData: () => Promise<void>;
 };
 
 type CanonicalSnapshot = {
@@ -692,6 +698,26 @@ export function createRestorePointsPlugin(
 		ensureIdle('Cannot import restore points during an active operation.');
 		await repository.importJson(value, mode);
 	};
+	const reload = async (): Promise<void> => {
+		ensureIdle('Cannot reload restore points during an active operation.');
+		operationStore.set(true);
+		try {
+			await repository.reload();
+		} finally {
+			operationStore.set(false);
+		}
+	};
+	const discardStoredData = async (): Promise<void> => {
+		ensureIdle(
+			'Cannot discard stored restore points during an active operation.',
+		);
+		operationStore.set(true);
+		try {
+			await repository.discardStoredData();
+		} finally {
+			operationStore.set(false);
+		}
+	};
 	const retentionDescription = options.persistence
 		? 'persisted in the dedicated devtools namespace'
 		: 'held in memory for this tools session';
@@ -707,7 +733,33 @@ export function createRestorePointsPlugin(
 			operationStore.getSnapshot,
 			operationStore.getServerSnapshot,
 		);
+		const loadError = useSyncExternalStore(
+			repository.subscribeToLoadError,
+			repository.getLoadError,
+			repository.getServerLoadError,
+		);
 		const now = Date.now();
+		const retryLoad = () => {
+			void actions.run({
+				pluginId: id,
+				label: 'Retry loading restore points',
+				action: () => reload(),
+			});
+		};
+		const discardStored = () => {
+			void actions.run({
+				pluginId: id,
+				label: 'Discard stored restore points',
+				confirmation: {
+					title: 'Discard stored restore points?',
+					message:
+						'The stored restore points could not be loaded. Discarding deletes them from storage so new points can be saved. This cannot be undone and does not change current app state.',
+					confirmLabel: 'Discard',
+					destructive: true,
+				},
+				action: () => discardStoredData(),
+			});
+		};
 		const capturePoint = () => {
 			void actions.run({
 				pluginId: id,
@@ -767,6 +819,43 @@ export function createRestorePointsPlugin(
 				{Platform.OS === 'ios' ? (
 					<Host style={{ flex: 1 }}>
 						<List modifiers={[listStyle('insetGrouped')]}>
+							{loadError ? (
+								<Section>
+									<Label
+										color={PlatformColor('systemOrangeColor')}
+										systemImage="exclamationmark.triangle.fill"
+										title="Stored restore points unavailable"
+									/>
+									<UIText
+										modifiers={[
+											font({ textStyle: 'footnote' }),
+											foregroundStyle('secondary'),
+										]}
+									>
+										{loadError}
+									</UIText>
+									<UIText
+										modifiers={[
+											font({ textStyle: 'footnote' }),
+											foregroundStyle('secondary'),
+										]}
+									>
+										Nothing is written until they load or you discard them.
+									</UIText>
+									<Button
+										label="Retry loading"
+										modifiers={[disabled(operationInFlight)]}
+										onPress={retryLoad}
+									/>
+									{/* biome-ignore lint/a11y/useValidAriaRole: SwiftUI ButtonRole, not ARIA */}
+									<Button
+										label="Discard stored restore points"
+										modifiers={[disabled(operationInFlight)]}
+										onPress={discardStored}
+										role="destructive"
+									/>
+								</Section>
+							) : null}
 							<Section
 								footer={
 									<UIText>
@@ -861,6 +950,29 @@ export function createRestorePointsPlugin(
 					</Host>
 				) : (
 					<AndroidPanelScroll>
+						{loadError ? (
+							<AndroidPanelSection
+								footer="Nothing is written until the stored restore points load or you discard them."
+								title="Stored data"
+							>
+								<AndroidPanelRow
+									detail={loadError}
+									label="Stored restore points unavailable"
+									tone="warning"
+								/>
+								<AndroidPanelRow
+									label="Retry loading"
+									onPress={operationInFlight ? undefined : retryLoad}
+									value={operationInFlight ? 'Working…' : undefined}
+								/>
+								<AndroidPanelRow
+									label="Discard stored restore points"
+									onPress={operationInFlight ? undefined : discardStored}
+									tone="danger"
+									value={operationInFlight ? 'Working…' : undefined}
+								/>
+							</AndroidPanelSection>
+						) : null}
 						<AndroidPanelSection
 							footer={`Restore points are JSON-only, bounded, and ${retentionDescription}. A rollback snapshot is taken before every restore.`}
 							title="Safety"
@@ -965,5 +1077,8 @@ export function createRestorePointsPlugin(
 		importJson,
 		getPoints: repository.getSnapshot,
 		getReceipts: receiptStore.getSnapshot,
+		getLoadError: repository.getLoadError,
+		reload,
+		discardStoredData,
 	};
 }

@@ -15,10 +15,10 @@ test('routes panel lists the sitemap and marks the current route', async () => {
 	await harness.openPanel('routes');
 	expect(await harness.hasErrorBoundary()).toBe(false);
 
-	// The demo current route is "Active workout"; it shows a Current pill.
+	// The demo current route is "Active project"; it shows a Current pill.
 	await expect(harness.window.getByText('Current').first()).toBeVisible();
 	await expect(
-		harness.window.getByRole('button', { name: /Active workout/ })
+		harness.window.getByRole('button', { name: /Active project/ })
 	).toBeVisible();
 	await harness.screenshot('routes-list');
 });
@@ -41,8 +41,8 @@ test('routes search filters the list and Navigate reflects selection', async () 
 	await harness.screenshot('routes-navigable');
 
 	// Clearing back to the current route shows the disabled "Currently visible".
-	await search.fill('active workout');
-	await harness.window.getByRole('button', { name: /Active workout/ }).click();
+	await search.fill('active project');
+	await harness.window.getByRole('button', { name: /Active project/ }).click();
 	await expect(
 		harness.window.getByRole('button', { name: 'Currently visible' })
 	).toBeDisabled();

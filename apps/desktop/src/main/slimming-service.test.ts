@@ -170,6 +170,8 @@ class FakeHelper implements SlimmingHelperProvider {
 	mutationVerificationVerified = true;
 	deviceState: 'Booted' | 'Shutdown' = 'Booted';
 	compatibility: SimHelperCompatibility = COMPATIBILITY;
+	/** What the signed inventory lists; a deleted Simulator is left out. */
+	inventory: string[] = [UDID, SECOND_UDID];
 
 	handshake = vi.fn(
 		async (): Promise<SimHelperHandshake> => ({
@@ -220,7 +222,7 @@ class FakeHelper implements SlimmingHelperProvider {
 		})
 	);
 	listSimulators = vi.fn(async () =>
-		[UDID, SECOND_UDID].map((id, index) => ({
+		this.inventory.map((id, index) => ({
 			id,
 			name: `Simulator ${index + 1}`,
 			state: this.deviceState,
@@ -2035,7 +2037,9 @@ describe('slimming service', () => {
 		 */
 		async function stuckRecord(
 			deviceState: 'Booted' | 'Shutdown',
-			mutationCoordinator?: SimulatorMutationCoordinatorPort
+			mutationCoordinator?: SimulatorMutationCoordinatorPort,
+			/** Shapes the restarted helper before the service starts on it. */
+			configure?: (helper: FakeHelper) => void
 		) {
 			const helper = new FakeHelper();
 			const first = await createService(helper);
@@ -2056,6 +2060,7 @@ describe('slimming service', () => {
 				pending.checkpointToken,
 				pending.beforeServiceIds
 			);
+			configure?.(restartedHelper);
 			const clock = { now: 1_000_000 };
 			const service = new SlimmingService({
 				resourceDirectory: '/unused',
@@ -2219,6 +2224,215 @@ describe('slimming service', () => {
 			expect(
 				(await waitForJob(stuck.service, restore.jobId ?? '')).status
 			).toBe('complete');
+			await stuck.service.stop();
+		});
+
+		it('shows the restore point of a Simulator the inventory no longer lists without probing it', async () => {
+			const stuck = await stuckRecord('Booted', undefined, (helper) => {
+				helper.inventory = [SECOND_UDID];
+			});
+			expect(
+				stuck.service.getState().simulators.map((simulator) => simulator.udid)
+			).toEqual([SECOND_UDID]);
+			expect(stuck.service.getState().statusBySimulator[UDID]).toMatchObject({
+				condition: 'needs-attention',
+				checkpointAvailable: true,
+				message: expect.stringContaining('no longer lists this Simulator'),
+			});
+			// Not even the restart pass inspects a Simulator that is not there.
+			expect(stuck.inspections()).toBe(0);
+			stuck.clock.now += MAX_BACKOFF_MS;
+			await stuck.service.refresh();
+			expect(stuck.inspections()).toBe(0);
+			expect(stuck.service.getState().statusBySimulator[UDID]?.condition).toBe(
+				'needs-attention'
+			);
+			expect(
+				(await readPersistedState(stuck.directory)).pendingMutations[UDID]
+			).toEqual(stuck.pending);
+			await stuck.service.stop();
+		});
+
+		it('forgets the restore point of a Simulator the inventory no longer lists', async () => {
+			const stuck = await stuckRecord('Booted', undefined, (helper) => {
+				helper.inventory = [SECOND_UDID];
+			});
+			// Forgetting is the one action that needs no Simulator to act on.
+			expect(
+				stuck.service.runAction(
+					action({
+						actionId: 'verify-deleted',
+						kind: 'profile.verify',
+						simulatorUdids: [UDID],
+						profileId: PROFILE,
+					})
+				)
+			).toMatchObject({
+				accepted: false,
+				error: 'Every target must exist in the signed helper inventory.',
+			});
+			const receipt = stuck.service.runAction(
+				action({
+					actionId: 'forget-deleted',
+					kind: 'pending.forget',
+					simulatorUdids: [UDID],
+					confirmation: SLIMMING_CONFIRMATIONS.forget,
+				})
+			);
+			expect(receipt.error).toBeUndefined();
+			expect(receipt.accepted).toBe(true);
+			expect(
+				(await waitForJob(stuck.service, receipt.jobId ?? '')).status
+			).toBe('complete');
+			const persisted = await readPersistedState(stuck.directory);
+			expect(persisted.pendingMutations[UDID]).toBeUndefined();
+			expect(JSON.stringify(persisted)).not.toContain(
+				stuck.pending.checkpointToken
+			);
+			expect(
+				stuck.service.getState().operationsBySimulator[UDID]?.[0]
+			).toMatchObject({ kind: 'pending.forget', status: 'complete' });
+			// A Simulator that is not there has nothing left to show.
+			expect(stuck.service.getState().statusBySimulator[UDID]).toBeUndefined();
+			stuck.clock.now += MAX_BACKOFF_MS;
+			await stuck.service.refresh();
+			expect(stuck.service.getState().statusBySimulator[UDID]).toBeUndefined();
+			expect(stuck.inspections()).toBe(0);
+			await stuck.service.stop();
+		});
+
+		it('shows every restore point while the helper is unavailable', async () => {
+			const stuck = await stuckRecord('Booted', undefined, (helper) => {
+				helper.handshake.mockRejectedValue(
+					new Error('Injected helper outage.')
+				);
+			});
+			expect(stuck.service.getState().helper).toMatchObject({
+				status: 'unavailable',
+				error: expect.stringContaining('Injected helper outage.'),
+			});
+			expect(stuck.service.getState().simulators).toEqual([]);
+			expect(stuck.service.getState().statusBySimulator[UDID]).toMatchObject({
+				condition: 'needs-attention',
+				checkpointAvailable: true,
+				message: expect.stringContaining('helper is unavailable'),
+			});
+			expect(stuck.inspections()).toBe(0);
+			await stuck.service.stop();
+		});
+
+		it('forgets a restore point while the helper is unavailable, though no other action runs', async () => {
+			const stuck = await stuckRecord('Booted', undefined, (helper) => {
+				helper.handshake.mockRejectedValue(
+					new Error('Injected helper outage.')
+				);
+			});
+			// Every other kind still needs the helper, and forgetting a record
+			// still needs the record.
+			expect(
+				stuck.service.runAction(
+					action({
+						actionId: 'restore-without-helper',
+						kind: 'profile.restore',
+						simulatorUdids: [UDID],
+						confirmation: SLIMMING_CONFIRMATIONS.restore,
+					})
+				)
+			).toMatchObject({
+				accepted: false,
+				error: expect.stringContaining('Injected helper outage.'),
+			});
+			expect(
+				stuck.service.runAction(
+					action({
+						actionId: 'forget-nothing',
+						kind: 'pending.forget',
+						simulatorUdids: [SECOND_UDID],
+						confirmation: SLIMMING_CONFIRMATIONS.forget,
+					})
+				)
+			).toMatchObject({
+				accepted: false,
+				error: `${SECOND_UDID} has no emergency restore point to forget.`,
+			});
+
+			const receipt = stuck.service.runAction(
+				action({
+					actionId: 'forget-without-helper',
+					kind: 'pending.forget',
+					simulatorUdids: [UDID],
+					confirmation: SLIMMING_CONFIRMATIONS.forget,
+				})
+			);
+			expect(receipt.error).toBeUndefined();
+			expect(receipt.accepted).toBe(true);
+			expect(
+				(await waitForJob(stuck.service, receipt.jobId ?? '')).status
+			).toBe('complete');
+			expect(
+				(await readPersistedState(stuck.directory)).pendingMutations[UDID]
+			).toBeUndefined();
+			expect(stuck.service.getState().statusBySimulator[UDID]).toBeUndefined();
+
+			// Once the helper is back, the Simulator is inspected like any other
+			// and nothing is left to reconcile.
+			stuck.helper.handshake.mockReset();
+			await stuck.service.refresh();
+			expect(stuck.service.getState().helper.status).toBe('available');
+			expect(stuck.service.getState().statusBySimulator[UDID]).toMatchObject({
+				condition: 'managed-clean',
+				checkpointAvailable: false,
+			});
+			expect(stuck.inspections()).toBe(0);
+			await stuck.service.stop();
+		});
+
+		it('leaves a restore point to the job that owns it when the helper drops out mid-job', async () => {
+			const coordinator = new SimulatorMutationCoordinator();
+			const stuck = await stuckRecord('Booted', coordinator);
+			const ambiguous = stuck.service.getState().statusBySimulator[UDID];
+			expect(ambiguous?.condition).toBe('needs-attention');
+			// A refresh is already waiting on the helper when the forget starts.
+			const outage = deferred();
+			stuck.helper.handshake.mockImplementationOnce(async () => {
+				await outage.promise;
+				throw new Error('Injected helper outage.');
+			});
+			const refreshing = stuck.service.refresh();
+			// The job queues behind another holder of the Simulator's lease, so it
+			// is still active when the refresh fails.
+			const lease = deferred();
+			const holding = coordinator.runExclusive(
+				UDID,
+				new AbortController().signal,
+				() => lease.promise
+			);
+			const receipt = stuck.service.runAction(
+				action({
+					actionId: 'forget-mid-outage',
+					kind: 'pending.forget',
+					simulatorUdids: [UDID],
+					confirmation: SLIMMING_CONFIRMATIONS.forget,
+				})
+			);
+			expect(receipt.error).toBeUndefined();
+			expect(receipt.accepted).toBe(true);
+			outage.resolve();
+			await refreshing;
+			expect(stuck.service.getState().helper.status).toBe('unavailable');
+			// The job still owns the record, so the outage does not restate it.
+			expect(stuck.service.getState().statusBySimulator[UDID]).toEqual(
+				ambiguous
+			);
+
+			lease.resolve();
+			await holding;
+			expect(
+				(await waitForJob(stuck.service, receipt.jobId ?? '')).status
+			).toBe('complete');
+			expect(
+				(await readPersistedState(stuck.directory)).pendingMutations[UDID]
+			).toBeUndefined();
 			await stuck.service.stop();
 		});
 	});
