@@ -316,6 +316,9 @@
 
 ### Desktop app
 
+- Native helper packaging skips unsupported platforms before touching generated
+  sources and rejects malformed Apple team IDs before constructing linker flags.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 

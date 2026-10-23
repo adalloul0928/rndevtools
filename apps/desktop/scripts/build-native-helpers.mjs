@@ -32,10 +32,26 @@ const goPackage = join(desktopDirectory, 'native', 'rndevtools-sim-helper');
 const cliPackage = join(desktopDirectory, 'native', 'rndevtools-cli');
 const swiftPackage = join(desktopDirectory, 'native', 'rndevtools-native-host');
 
+const options = parseOptions(process.argv.slice(2));
+if (process.platform !== 'darwin' && options.ifSupported) {
+	process.stdout.write(
+		'Skipping macOS native helpers on this packaging platform.\n'
+	);
+	process.exit(0);
+}
+if (process.platform !== 'darwin') {
+	fail('The Swift native host can only be built on macOS.');
+}
+
 // Apple Developer Team ID compiled into the simulator helper's parent
 // attestation. Without it the helper fails closed and refuses every mutation,
 // which is the correct behaviour for an unsigned local build.
 const signingTeamIdentifier = (process.env.APPLE_TEAM_ID ?? '').trim();
+if (signingTeamIdentifier && !/^[A-Z0-9]{10}$/.test(signingTeamIdentifier)) {
+	fail(
+		'APPLE_TEAM_ID must be a 10-character uppercase alphanumeric signing team ID.'
+	);
+}
 const simulatorHelperTeamFlag = signingTeamIdentifier
 	? ` -X github.com/adalloul0928/rndevtools-sim-helper/internal/authorization.expectedTeamIdentifier=${signingTeamIdentifier}`
 	: '';
@@ -64,13 +80,6 @@ if (process.env.RNDEVTOOLS_RELEASE_MODE === 'public') {
 }
 const sourceCommit = nativeSourceIdentity();
 
-const options = parseOptions(process.argv.slice(2));
-if (process.platform !== 'darwin' && options.ifSupported) {
-	process.stdout.write(
-		'Skipping macOS native helpers on this packaging platform.\n'
-	);
-	process.exit(0);
-}
 const architectures = options.all ? ['arm64', 'x64'] : [hostArchitecture()];
 
 requireCommand('go', ['version'], {
@@ -82,9 +91,6 @@ requireCommand('go', ['version'], {
 	GOTOOLCHAIN: 'local',
 	GOWORK: 'off',
 });
-if (process.platform !== 'darwin') {
-	fail('The Swift native host can only be built on macOS.');
-}
 requireCommand('swift', ['--version'], allowlistedBuildEnvironment());
 
 for (const architecture of architectures) {
