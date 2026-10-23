@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Preserve app writes made during asynchronous Zustand patch validation.
+  A stale or rejected edit no longer restores an old state before its own
+  mutation has started. Validators must not mutate the store.
+
 - **Breaking:** the image overlay no longer reads
   `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` or `EXPO_PUBLIC_SUPABASE_URL`. Pass the
   hosts it may download from to `configureImageOverlay({ allowedRemoteHosts })`

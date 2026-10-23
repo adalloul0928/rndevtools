@@ -362,3 +362,8 @@ trimmed. It does so for every release bundle by default, and fails the build
 when an import would still reach this package. `rndevtools-verify-bundle`
 asserts over an exported bundle that no devtools markers survived. Wire both
 up before shipping, and keep the shim list current when you add a plugin.
+
+Zustand adapters that enable edits must keep `validatePatch` pure. An edit
+rechecks the current projection after validation and refuses a stale patch.
+If the app writes while validation is pending, that write is preserved;
+rollback is attempted only after the devtools mutation has actually started.
