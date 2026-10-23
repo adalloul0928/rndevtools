@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Recognize Expo fetch cancellation wrappers and preserved abort causes without
+  inspecting untrusted request inputs or relabeling unrelated failures.
+
 - Scenario preflight results are normalized, validated and detached before any
   mutation, so durable recovery checkpoints can be loaded after restart.
 

@@ -465,21 +465,38 @@ function abortedRequestError(): Error {
 	return error;
 }
 
-function safelyInspectErrorName(error: unknown): string | undefined {
-	if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+function safelyInspectErrorField(
+	error: unknown,
+	key: 'name' | 'message' | 'cause',
+): unknown {
+	if (!error || (typeof error !== 'object' && typeof error !== 'function'))
 		return undefined;
-	}
 	try {
-		const ownName = Object.getOwnPropertyDescriptor(error, 'name');
-		if (ownName) {
-			return 'value' in ownName && typeof ownName.value === 'string'
-				? ownName.value
-				: undefined;
-		}
+		const field = Object.getOwnPropertyDescriptor(error, key);
+		return field && 'value' in field ? field.value : undefined;
 	} catch {
 		// Hostile rejected values remain ordinary request errors.
+		return undefined;
 	}
-	return undefined;
+}
+
+function isRequestCancellation(error: unknown, signal?: AbortSignal): boolean {
+	if (safelyInspectErrorField(error, 'name') === 'AbortError') return true;
+	// Expo wraps cancellation in FetchError, losing AbortError's name. Match
+	// only its exact native cancellation messages, never arbitrary substrings.
+	const message = safelyInspectErrorField(error, 'message');
+	if (
+		message === 'fetch failed: The operation was aborted.' ||
+		message === 'fetch failed: Fetch request has been canceled' ||
+		message === 'fetch failed: cancelled'
+	)
+		return true;
+	if (!signal?.aborted) return false;
+	const reason = signal.reason;
+	return (
+		error === reason ||
+		(reason !== undefined && safelyInspectErrorField(error, 'cause') === reason)
+	);
 }
 
 function deterministicHash(value: string): number {
@@ -2856,10 +2873,7 @@ export function createNetworkPlugin(
 				}) satisfies NetworkTimingPhases;
 				let aborted = false;
 				try {
-					aborted =
-						safelyInspectErrorName(error) === 'AbortError' ||
-						(diagnosticRequestSignal?.aborted === true &&
-							error === diagnosticRequestSignal.reason);
+					aborted = isRequestCancellation(error, diagnosticRequestSignal);
 				} catch {
 					// Hostile thrown values are ordinary request errors.
 				}

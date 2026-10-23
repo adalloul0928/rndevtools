@@ -392,3 +392,7 @@ and at most 100 nonempty warnings. The engine trims summary/warning text,
 checks the recovery bounds, and copies only the supported fields before any
 rollback capture or mutation. Adapter-owned objects cannot change a saved
 checkpoint after preflight.
+
+Expo fetch cancellation wrappers are recorded as aborted when they carry a known
+cancellation message or preserve the safely captured signal reason as their cause.
+Unrelated transport failures remain errors, even if the caller aborts later.
