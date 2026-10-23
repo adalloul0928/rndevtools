@@ -1556,6 +1556,61 @@ describe('desktop client', () => {
 		},
 	);
 
+	it('backs off whole failed discovery rounds, caps the delay, and resets on connection', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL, 'ws://127.0.0.1:47932/device'],
+		});
+		try {
+			const delays: number[] = [];
+			for (let round = 0; round < 6; round += 1) {
+				latestSocket().serverClose(1006, 'unavailable');
+				expect(await reconnectDelayMs()).toBe(100);
+				latestSocket().serverClose(1006, 'unavailable');
+				delays.push(await reconnectDelayMs());
+			}
+			expect(delays).toEqual([2500, 5000, 10000, 20000, 30000, 30000]);
+			latestSocket().open();
+			latestSocket().serverClose(1000, 'desktop quit');
+			expect(await reconnectDelayMs()).toBe(2500);
+			latestSocket().serverClose(1006, 'unavailable');
+			expect(await reconnectDelayMs()).toBe(100);
+			latestSocket().serverClose(1006, 'unavailable');
+			expect(await reconnectDelayMs()).toBe(2500);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('backs off constructor failures and cancels a pending discovery retry on stop', async () => {
+		jest.useFakeTimers();
+		const original = globalThis.WebSocket;
+		const throwingSocket = jest.fn(() => {
+			throw new Error('unavailable');
+		});
+		globalThis.WebSocket = throwingSocket as unknown as typeof WebSocket;
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			expect(throwingSocket).toHaveBeenCalledTimes(1);
+			await jest.advanceTimersByTimeAsync(2500);
+			expect(throwingSocket).toHaveBeenCalledTimes(2);
+			await jest.advanceTimersByTimeAsync(4999);
+			expect(throwingSocket).toHaveBeenCalledTimes(2);
+			await jest.advanceTimersByTimeAsync(1);
+			expect(throwingSocket).toHaveBeenCalledTimes(3);
+			client.stop();
+			await jest.advanceTimersByTimeAsync(60000);
+			expect(throwingSocket).toHaveBeenCalledTimes(3);
+		} finally {
+			client.stop();
+			globalThis.WebSocket = original;
+		}
+	});
+
 	it('backs off after consecutive broker rejections and reports why', async () => {
 		jest.useFakeTimers();
 		const client = startDesktopClient({
