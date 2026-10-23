@@ -8,7 +8,7 @@ A desktop workspace for React Native diagnostics, iOS Simulators, and parallel d
 
 Signed and notarized. No HeroUI account or license is needed to run the app. [Release notes and checksums](https://github.com/adalloul0928/rndevtools/releases/tag/desktop-v0.2.0).
 
-![RN Devtools Simulator fleet and worktree lanes](docs/images/simulator-fleet.png)
+![RN Devtools Simulator fleet](docs/images/simulator-fleet.png)
 
 ## Features
 
