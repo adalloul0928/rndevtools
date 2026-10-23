@@ -49,7 +49,7 @@ func TestBuildPlacesTypedArgumentsLikeFlags(t *testing.T) {
 	fromArguments, err := Build(protocol.CommandInput, map[string]any{
 		"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "swipe",
 		"from-x": 0.5, "from-y": 0.8, "to-x": 0.5, "to-y": 0.3, "duration-ms": float64(300),
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,26 +62,26 @@ func TestBuildPlacesTypedArgumentsLikeFlags(t *testing.T) {
 }
 
 func TestBuildValidatesAndDerivesTimeouts(t *testing.T) {
-	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "tap", "x": 1.5, "y": 0.5}, nil); err == nil {
+	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "tap", "x": 1.5, "y": 0.5}); err == nil {
 		t.Fatal("out-of-range tap accepted")
 	}
-	if _, err := Build(protocol.CommandLane, map[string]any{"operation": "ls", "bogus": true}, nil); err == nil || !strings.Contains(err.Error(), "unknown argument") {
+	if _, err := Build(protocol.CommandLane, map[string]any{"operation": "ls", "bogus": true}); err == nil || !strings.Contains(err.Error(), "unknown argument") {
 		t.Fatalf("unknown argument accepted: %v", err)
 	}
-	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "key", "usage": 40.5}, nil); err == nil || !strings.Contains(err.Error(), "integer") {
+	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "key", "usage": 40.5}); err == nil || !strings.Contains(err.Error(), "integer") {
 		t.Fatalf("fractional integer accepted: %v", err)
 	}
-	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "key", "usage": 40, "modifiers": []any{"shift", 7}}, nil); err == nil {
+	if _, err := Build(protocol.CommandInput, map[string]any{"udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "kind": "key", "usage": 40, "modifiers": []any{"shift", 7}}); err == nil {
 		t.Fatal("non-string modifier accepted")
 	}
-	lane, err := Build(protocol.CommandLane, map[string]any{"operation": "ls"}, nil)
+	lane, err := Build(protocol.CommandLane, map[string]any{"operation": "ls"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lane.Timeout != 240*time.Second {
 		t.Fatalf("lane timeout %v", lane.Timeout)
 	}
-	wait, err := Build(protocol.CommandWait, map[string]any{"condition": "network-idle", "quiet-ms": 500, "timeout-ms": 120000}, nil)
+	wait, err := Build(protocol.CommandWait, map[string]any{"condition": "network-idle", "quiet-ms": 500, "timeout-ms": 120000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,26 +90,29 @@ func TestBuildValidatesAndDerivesTimeouts(t *testing.T) {
 	}
 }
 
-func TestBuildAttachesAgentToLaneUp(t *testing.T) {
-	lookup := func(name string) string {
-		if name == "CODEX_THREAD_ID" {
-			return "thread-9"
+func TestBuildNeverAttachesAnAgent(t *testing.T) {
+	// The session is a claim on the request envelope. A tool call builds a
+	// lane command from its arguments alone, so no agent is added to it, and
+	// none can be passed: "agent" is not an argument any tool declares.
+	for _, arguments := range []map[string]any{
+		{"operation": "up", "worktree": "/tmp/wt", "udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"},
+		{"operation": "launch", "worktree": "/tmp/wt"},
+		{"operation": "ls"},
+	} {
+		built, err := Build(protocol.CommandLane, arguments)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return ""
+		if strings.Contains(string(built.Command), "agent") {
+			t.Fatalf("lane %v must not carry an agent: %s", arguments["operation"], built.Command)
+		}
 	}
-	parsed, err := Build(protocol.CommandLane, map[string]any{"operation": "up", "worktree": "/tmp/wt", "udid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"}, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(parsed.Command), `"agent":{"kind":"codex","sessionId":"thread-9"}`) {
-		t.Fatalf("agent not attached: %s", parsed.Command)
-	}
-	listed, err := Build(protocol.CommandLane, map[string]any{"operation": "ls"}, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(listed.Command), "agent") {
-		t.Fatalf("agent attached to ls: %s", listed.Command)
+	_, err := Build(protocol.CommandLane, map[string]any{
+		"operation": "up", "worktree": "/tmp/wt",
+		"agent": map[string]any{"kind": "claude", "sessionId": "session-1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown argument "agent"`) {
+		t.Fatalf("a tool call naming an agent must be rejected: %v", err)
 	}
 }
 
@@ -122,7 +125,7 @@ func TestBuildSupabaseFromToolArguments(t *testing.T) {
 	if types["service"] != "array" || types["wait-ms"] != "integer" || types["seed"] != "boolean" || types["worktree"] != "string" {
 		t.Fatalf("supabase field types: %v", types)
 	}
-	up, err := Build(protocol.CommandSupabase, map[string]any{"operation": "up", "worktree": "/Users/dev/app", "wait-ms": float64(10_000)}, nil)
+	up, err := Build(protocol.CommandSupabase, map[string]any{"operation": "up", "worktree": "/Users/dev/app", "wait-ms": float64(10_000)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +134,7 @@ func TestBuildSupabaseFromToolArguments(t *testing.T) {
 	}
 	// One service may arrive as a plain string; it means a list of one.
 	for _, services := range []any{[]any{"auth", "gateway"}, "auth,gateway"} {
-		logs, err := Build(protocol.CommandSupabase, map[string]any{"operation": "log", "stack-id": "0123abcd", "service": services}, nil)
+		logs, err := Build(protocol.CommandSupabase, map[string]any{"operation": "log", "stack-id": "0123abcd", "service": services})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,11 +149,11 @@ func TestBuildSupabaseFromToolArguments(t *testing.T) {
 		{"operation": "up", "worktree": "/Users/dev/app", "wait-ms": 1.5},
 		{"operation": "up", "worktree": "/Users/dev/app", "backend": "auto"},
 	} {
-		if _, err := Build(protocol.CommandSupabase, bad, nil); err == nil {
+		if _, err := Build(protocol.CommandSupabase, bad); err == nil {
 			t.Fatalf("accepted %v", bad)
 		}
 	}
-	reset, err := Build(protocol.CommandSupabase, map[string]any{"operation": "reset", "worktree": "/Users/dev/app", "seed": false}, nil)
+	reset, err := Build(protocol.CommandSupabase, map[string]any{"operation": "reset", "worktree": "/Users/dev/app", "seed": false})
 	if err != nil {
 		t.Fatal(err)
 	}

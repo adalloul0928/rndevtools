@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentSession } from '../shared/agent-protocol';
 import { DEVICE_HOLD_GRACE_MS } from '../shared/device-hold';
 import type { Lane } from '../shared/lane-protocol';
+import type { ProcessTableEntry } from './agent-peer';
 import { AgentService } from './agent-service';
 import { type CodexDatabase, discoverAgentSessions } from './agent-sessions';
 import type { MetroLaunchInput, MetroSupervisorPort } from './lane-metro';
@@ -319,12 +320,20 @@ describe('AgentService', () => {
 
 		const claude = { kind: 'claude' as const, sessionId: 'claude-1' };
 		const codex = { kind: 'codex' as const, sessionId: 'codex-9' };
-		expect(service.access(A, undefined).allowed).toBe(true);
+		expect(service.access(A, 'operator').allowed).toBe(true);
 		expect(service.access(A, claude).allowed).toBe(false);
 		expect(service.access(B, codex).allowed).toBe(true);
 		expect(service.access(B, claude).allowed).toBe(false);
 		expect(
 			service.access('AAAAAAAA-0000-4000-8000-00000000000F', claude).allowed
+		).toBe(true);
+		// A request with no verified identity is nobody's: it gets the free
+		// device and neither the operator's lane nor the claimed one.
+		expect(service.access(A, 'anonymous').allowed).toBe(false);
+		expect(service.access(B, 'anonymous').allowed).toBe(false);
+		expect(
+			service.access('AAAAAAAA-0000-4000-8000-00000000000F', 'anonymous')
+				.allowed
 		).toBe(true);
 
 		// codex-9 is not a live session, but Codex discovery is unavailable in
@@ -819,5 +828,250 @@ describe('AgentService holds through the lane reconcile', () => {
 		expect(
 			agents.access(A, { kind: 'claude', sessionId: 'claude-1' }).allowed
 		).toBe(false);
+	});
+});
+
+describe('AgentService.identify', () => {
+	// Two Claude sessions with pids, and one Codex thread, which has none.
+	const claudeA = { kind: 'claude', sessionId: 'claude-a' } as const;
+	const claudeB = { kind: 'claude', sessionId: 'claude-b' } as const;
+	const codexT = { kind: 'codex', sessionId: 'codex-t' } as const;
+	const CLAUDE_A_PID = 100;
+	const CLAUDE_B_PID = 200;
+
+	function entry(pid: number, ppid: number) {
+		return { pid, ppid } satisfies ProcessTableEntry;
+	}
+
+	/**
+	 * launchd (1) starts claude A (100) and B (200) and a terminal (300). The
+	 * CLI that session A ran is 111, under a shell (110); the one B ran is 211.
+	 * The terminal's CLI is 301. 400 is a Codex app-server with a CLI under it
+	 * (401), and 500 a shell whose parent has already exited (ppid 1).
+	 */
+	const baseTable = [
+		entry(1, 0),
+		entry(CLAUDE_A_PID, 1),
+		entry(110, CLAUDE_A_PID),
+		entry(111, 110),
+		entry(CLAUDE_B_PID, 1),
+		entry(210, CLAUDE_B_PID),
+		entry(211, 210),
+		entry(300, 1),
+		entry(301, 300),
+		entry(400, 1),
+		entry(401, 400),
+		entry(500, 1),
+	];
+
+	let root: string;
+	let service: AgentService;
+	let discovered: AgentSession[];
+	let table: readonly ProcessTableEntry[] | Error;
+	let discoveries: number;
+
+	function live(
+		kind: AgentSession['kind'],
+		sessionId: string,
+		pid?: number
+	): AgentSession {
+		return {
+			kind,
+			sessionId,
+			title: sessionId,
+			cwd: '/Users/dev/app',
+			...(pid === undefined ? {} : { pid }),
+		};
+	}
+
+	beforeEach(async () => {
+		root = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-agent-identify-'));
+		discoveries = 0;
+		table = baseTable;
+		discovered = [
+			live('claude', claudeA.sessionId, CLAUDE_A_PID),
+			live('claude', claudeB.sessionId, CLAUDE_B_PID),
+			live('codex', codexT.sessionId),
+		];
+		service = new AgentService({
+			directory: root,
+			lanes: () => [],
+			discover: async () => {
+				discoveries += 1;
+				return { sessions: discovered, claude: 'ok', codex: 'ok' };
+			},
+			processTable: async () => {
+				if (table instanceof Error) throw table;
+				return table;
+			},
+			pollIntervalMs: 60_000,
+			now: () => now,
+		});
+		await service.start();
+		discoveries = 0;
+	});
+	afterEach(async () => {
+		await service.stop();
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it('takes a request that claims no session for anonymous, whoever sent it', async () => {
+		await expect(service.identify({})).resolves.toEqual({
+			status: 'anonymous',
+		});
+		await expect(service.identify({ peerPid: 111 })).resolves.toEqual({
+			status: 'anonymous',
+		});
+		expect(discoveries).toBe(0);
+	});
+
+	it('leaves a claim unverified when the sender was not proven, or cannot be traced', async () => {
+		const unproven = await service.identify({ claimed: claudeA });
+		expect(unproven).toMatchObject({ status: 'unverified' });
+		table = new Error('ps is not available');
+		const untraceable = await service.identify({
+			claimed: claudeA,
+			peerPid: 111,
+		});
+		expect(untraceable).toMatchObject({ status: 'unverified' });
+		expect(untraceable).toHaveProperty(
+			'reason',
+			expect.stringContaining('process table')
+		);
+	});
+
+	it('verifies a process under a session that claims exactly that session', async () => {
+		// The CLI itself, and the shell it was run from, are both under claude A.
+		for (const pid of [111, 110, CLAUDE_A_PID]) {
+			await expect(
+				service.identify({ claimed: claudeA, peerPid: pid })
+			).resolves.toEqual({
+				status: 'verified',
+				agent: claudeA,
+				basis: 'process',
+			});
+		}
+		// Nothing needed to look again.
+		expect(discoveries).toBe(0);
+	});
+
+	it('refuses a process under one session that claims another live session', async () => {
+		const result = await service.identify({ claimed: claudeB, peerPid: 111 });
+		expect(result).toMatchObject({ status: 'mismatch' });
+		expect(result).toHaveProperty(
+			'reason',
+			expect.stringMatching(/claude session claude-b.*another claude session/)
+		);
+		// Nor may it pass for a Codex thread or an agent no one discovered.
+		await expect(
+			service.identify({ claimed: codexT, peerPid: 111 })
+		).resolves.toMatchObject({ status: 'mismatch' });
+		await expect(
+			service.identify({
+				claimed: { kind: 'other', sessionId: 'mcp-some-client' },
+				peerPid: 111,
+			})
+		).resolves.toMatchObject({ status: 'mismatch' });
+	});
+
+	it('takes the session nearest the sender when sessions nest', async () => {
+		// Claude B was started from a shell under claude A.
+		table = [
+			...baseTable.filter((candidate) => candidate.pid !== CLAUDE_B_PID),
+			entry(CLAUDE_B_PID, 110),
+		];
+		await expect(
+			service.identify({ claimed: claudeB, peerPid: 211 })
+		).resolves.toMatchObject({ status: 'verified', basis: 'process' });
+		await expect(
+			service.identify({ claimed: claudeA, peerPid: 211 })
+		).resolves.toMatchObject({ status: 'mismatch' });
+	});
+
+	it('does not verify an undiscovered tree from its claimed session id', async () => {
+		// A terminal, a Codex app-server and a hook whose claude already exited
+		// (the registry file of an ending session may be gone) are no session's.
+		for (const [pid, claimed] of [
+			[301, { kind: 'claude', sessionId: 'claude-ended' }],
+			[401, { kind: 'other', sessionId: 'mcp-codex-mcp-client' }],
+			[500, { kind: 'claude', sessionId: 'claude-ending' }],
+		] as const) {
+			await expect(
+				service.identify({ claimed, peerPid: pid })
+			).resolves.toMatchObject({ status: 'unverified' });
+		}
+	});
+
+	it('refuses an undiscovered tree that claims a live session with a process', async () => {
+		const result = await service.identify({ claimed: claudeB, peerPid: 301 });
+		expect(result).toMatchObject({ status: 'mismatch' });
+		expect(result).toHaveProperty(
+			'reason',
+			expect.stringMatching(/claude session claude-b.*does not run under it/)
+		);
+		await expect(
+			service.identify({ claimed: claudeA, peerPid: 500 })
+		).resolves.toMatchObject({ status: 'mismatch' });
+	});
+
+	it('refuses to verify a Codex thread that shares a process with other threads', async () => {
+		// The thread is live and discovered, yet nothing ties a process to it, so
+		// the app-server's CLI, a hook and a terminal must all remain unverified.
+		for (const pid of [401, 301, 500]) {
+			await expect(
+				service.identify({ claimed: codexT, peerPid: pid })
+			).resolves.toMatchObject({ status: 'unverified' });
+		}
+	});
+
+	it('discovers sessions once more for a session the last poll had not seen', async () => {
+		const claudeC = { kind: 'claude', sessionId: 'claude-c' } as const;
+		table = [...baseTable, entry(600, 1), entry(611, 600)];
+		// Not discovered yet: an undiscovered tree claiming an unknown id.
+		discovered = [...discovered, live('claude', claudeC.sessionId, 600)];
+		await expect(
+			service.identify({ claimed: claudeC, peerPid: 611 })
+		).resolves.toEqual({
+			status: 'verified',
+			agent: claudeC,
+			basis: 'process',
+		});
+		expect(discoveries).toBe(1);
+		// Once it is known, nothing needs to look again.
+		await expect(
+			service.identify({ claimed: claudeC, peerPid: 611 })
+		).resolves.toMatchObject({ basis: 'process' });
+		expect(discoveries).toBe(1);
+	});
+
+	it('discovers sessions again before a claim the list cannot confirm counts against the sender', async () => {
+		// Claude A took a new id (a /clear, say) since the last poll.
+		const renamed = { kind: 'claude', sessionId: 'claude-a-cleared' } as const;
+		discovered = [
+			live('claude', renamed.sessionId, CLAUDE_A_PID),
+			live('claude', claudeB.sessionId, CLAUDE_B_PID),
+		];
+		await expect(
+			service.identify({ claimed: renamed, peerPid: 111 })
+		).resolves.toEqual({
+			status: 'verified',
+			agent: renamed,
+			basis: 'process',
+		});
+		expect(discoveries).toBe(1);
+		// The id it dropped is no one's now, and the sender is still under A.
+		await expect(
+			service.identify({ claimed: claudeA, peerPid: 111 })
+		).resolves.toMatchObject({ status: 'mismatch' });
+	});
+
+	it('walks a process table with a cycle without hanging', async () => {
+		table = [entry(700, 701), entry(701, 700)];
+		const claimed = { kind: 'other', sessionId: 'looping-tool' } as const;
+		await expect(
+			service.identify({ claimed, peerPid: 700 })
+		).resolves.toMatchObject({
+			status: 'unverified',
+		});
 	});
 });

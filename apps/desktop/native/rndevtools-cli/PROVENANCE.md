@@ -52,8 +52,26 @@ recovery message instead of misreading it, and an older CLI never sends it.
 - `lane.backend`: `"auto"`, `"off"`, or `"required"`, accepted only with
   `operation: "up"`; it selects the worktree's local Supabase for the lane.
   The receipt's `lane.backend` summary is wire-only on the desktop side.
+- `peer.pid` on the envelope: `{"peer":{"pid":<integer 1..4194304>}}`, the
+  sending process's own pid. The CLI, the MCP server, and the session-end hook
+  send it with every request (the doctor probe that `setup` runs claims no
+  session and sends none). The desktop checks that the process owns the
+  connection and follows its parents to the agent session that spawned it, so
+  the envelope's `agent` is a claim the desktop verifies, not an identity. A
+  desktop without the field rejects the request as malformed, and one with it
+  treats a session claimed by a CLI that sends no pid as unverified
+  (`agent_identity_unverified`), so the CLI and the desktop ship in one app.
 
 The PreToolUse hook also reads `steering.json` v1, which the desktop writes
 into the agent socket directory; it is a local file contract between the
 desktop and this CLI, not part of `rndevtools/1`, and the hook ignores any
 file that is not exactly that shape.
+
+## Removed within `rndevtools/1`
+
+- The lane command's `agent` field. The session is a claim on the envelope
+  that the desktop verifies, so a lane command that names one fails validation
+  as an unknown field in the Go schema and in the desktop's, and the desktop no
+  longer prefers a command's agent to the connection's. A CLI built before this
+  change sent `agent` with `lane up` and `lane launch`, which a desktop built
+  after it rejects as malformed, so the two ship together in one app.

@@ -345,7 +345,7 @@ func (server *Server) screenResource(ctx context.Context, uri string, udid strin
 // run executes a command for a resource read, mapping failures to JSON-RPC
 // errors since resources have no isError channel.
 func (server *Server) run(ctx context.Context, kind protocol.Command, arguments map[string]any) (json.RawMessage, *rpcError) {
-	parsed, err := command.Build(kind, arguments, server.config.Lookup)
+	parsed, err := command.Build(kind, arguments)
 	if err != nil {
 		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
 	}

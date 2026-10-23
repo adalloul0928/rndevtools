@@ -1,7 +1,13 @@
 import {
+	type DesktopToolId,
+	desktopActionAcknowledgementTimeoutMs,
 	desktopActionCapability,
+	desktopActionTimeoutMs,
 	parseDesktopActionEnvelope,
 	parseDesktopDeviceAction,
+	RNDEVTOOLS_ACTION_ACKNOWLEDGEMENT_GRACE_MS,
+	RNDEVTOOLS_ACTION_CAPABILITIES,
+	RNDEVTOOLS_ACTION_TIMEOUTS_MS,
 	RNDEVTOOLS_PROTOCOL_VERSION,
 	RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS,
 } from './desktop-protocol';
@@ -391,5 +397,77 @@ describe('desktop action protocol', () => {
 				payload: { json: 'x'.repeat(512 * 1024 + 1), mode: 'replace' },
 			}),
 		).toBeNull();
+	});
+});
+
+describe('desktop action timeouts', () => {
+	// The longest delay a timer can hold.
+	const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+	it('has a timeout for exactly the capabilities, and each fits a timer', () => {
+		expect(Object.keys(RNDEVTOOLS_ACTION_TIMEOUTS_MS).sort()).toEqual(
+			[...RNDEVTOOLS_ACTION_CAPABILITIES].sort(),
+		);
+		for (const capability of RNDEVTOOLS_ACTION_CAPABILITIES) {
+			const [tool, command] = capability.split('.') as [DesktopToolId, string];
+			const device = desktopActionTimeoutMs(tool, command);
+			expect({ capability, device }).toEqual({
+				capability,
+				device: RNDEVTOOLS_ACTION_TIMEOUTS_MS[capability],
+			});
+			expect(Number.isSafeInteger(device) && device > 0).toBe(true);
+			expect(desktopActionAcknowledgementTimeoutMs(tool, command)).toBe(
+				device + RNDEVTOOLS_ACTION_ACKNOWLEDGEMENT_GRACE_MS,
+			);
+			expect(
+				desktopActionAcknowledgementTimeoutMs(tool, command),
+			).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
+		}
+	});
+
+	it('makes the desktop wait longer than the device may take', () => {
+		for (const capability of RNDEVTOOLS_ACTION_CAPABILITIES) {
+			const [tool, command] = capability.split('.') as [DesktopToolId, string];
+			expect(
+				desktopActionAcknowledgementTimeoutMs(tool, command),
+			).toBeGreaterThan(desktopActionTimeoutMs(tool, command));
+		}
+	});
+
+	it('gives scenario runs and undos the longest allowance, and quick commands the shortest', () => {
+		const all = Object.values(RNDEVTOOLS_ACTION_TIMEOUTS_MS);
+		expect(desktopActionTimeoutMs('scenarios', 'execute')).toBe(
+			Math.max(...all),
+		);
+		expect(desktopActionTimeoutMs('scenarios', 'undo')).toBe(Math.max(...all));
+		expect(desktopActionTimeoutMs('console', 'clear')).toBe(Math.min(...all));
+		// Restores and refetches wait on more than the device's own state.
+		expect(desktopActionTimeoutMs('query', 'refetch')).toBeGreaterThan(
+			desktopActionTimeoutMs('console', 'clear'),
+		);
+		expect(desktopActionTimeoutMs('restore', 'restore')).toBe(
+			desktopActionTimeoutMs('query', 'refetch'),
+		);
+	});
+
+	it('resolves a command spelled differently from its capability', () => {
+		expect(desktopActionTimeoutMs('storage', 'set')).toBe(
+			RNDEVTOOLS_ACTION_TIMEOUTS_MS['storage.write'],
+		);
+		expect(desktopActionTimeoutMs('performance', 'start')).toBe(
+			RNDEVTOOLS_ACTION_TIMEOUTS_MS['performance.review'],
+		);
+		expect(desktopActionTimeoutMs('performance', 'stop')).toBe(
+			RNDEVTOOLS_ACTION_TIMEOUTS_MS['performance.review'],
+		);
+	});
+
+	it('falls back to the quick allowance for a command without a capability', () => {
+		expect(desktopActionTimeoutMs('network', 'evaluate')).toBe(
+			desktopActionTimeoutMs('console', 'clear'),
+		);
+		expect(desktopActionAcknowledgementTimeoutMs('network', 'evaluate')).toBe(
+			desktopActionAcknowledgementTimeoutMs('console', 'clear'),
+		);
 	});
 });

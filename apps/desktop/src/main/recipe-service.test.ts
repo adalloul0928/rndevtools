@@ -26,7 +26,10 @@ import {
 	type RecipeSlimmingPort,
 } from './recipe-service';
 import { RecipeStore } from './recipe-store';
-import { SimulatorMutationCoordinator } from './simulator-mutation-coordinator';
+import {
+	SimulatorMutationCoordinator,
+	type SimulatorMutationLease,
+} from './simulator-mutation-coordinator';
 import {
 	type SimulatorHostProvider,
 	SimulatorService,
@@ -123,6 +126,7 @@ class FakeBroker implements RecipeBrokerPort {
 	active = 0;
 	maxActive = 0;
 	beforeDispatch: (() => Promise<void>) | undefined;
+	duringDispatch: ((action: DesktopAction) => Promise<void>) | undefined;
 
 	getState = () => this.state;
 
@@ -146,7 +150,8 @@ class FakeBroker implements RecipeBrokerPort {
 		}
 		this.active += 1;
 		this.maxActive = Math.max(this.maxActive, this.active);
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		if (this.duringDispatch) await this.duringDispatch(action);
+		else await new Promise((resolve) => setTimeout(resolve, 100));
 		this.active -= 1;
 		return { actionId: action.actionId, ok: true };
 	};
@@ -300,6 +305,10 @@ class FakeSimulator implements RecipeSimulatorPort {
 class FakeSlimming implements RecipeSlimmingPort {
 	readonly listeners = new Set<(state: SlimmingState) => void>();
 	readonly actions: SlimmingAction[] = [];
+	/** The lease each refresh was handed; undefined when the caller held none. */
+	readonly refreshLeases: Array<SimulatorMutationLease | undefined> = [];
+	/** The lease each action arrived with, in step with `actions`. */
+	readonly actionLeases: Array<SimulatorMutationLease | undefined> = [];
 	jobs: SlimmingJob[] = [];
 	active = 0;
 	acknowledged = false;
@@ -324,10 +333,14 @@ class FakeSlimming implements RecipeSlimmingPort {
 			operationsBySimulator: {},
 		}) as SlimmingState;
 
-	refresh = async () => this.getState();
+	refresh = async (lease?: SimulatorMutationLease) => {
+		this.refreshLeases.push(lease);
+		return this.getState();
+	};
 
-	runAction = (action: SlimmingAction) => {
+	runAction = (action: SlimmingAction, lease?: SimulatorMutationLease) => {
 		this.actions.push(action);
+		this.actionLeases.push(lease);
 		if (this.requiresExternalAcknowledgement && !this.acknowledged) {
 			return {
 				actionId: action.actionId,
@@ -566,6 +579,19 @@ describe('RecipeService', () => {
 				},
 			])
 		);
+		let release = () => {};
+		const bothEntered = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const activeDevices = new Set<string>();
+		broker.duringDispatch = async (action) => {
+			expect(activeDevices.has(action.deviceId)).toBe(false);
+			activeDevices.add(action.deviceId);
+			if (activeDevices.size === 2) release();
+			await bothEntered;
+			activeDevices.delete(action.deviceId);
+		};
+
 		const receipt = await service.runRecipe({
 			actionId: 'concurrent-run',
 			recipeId: 'service-test',
@@ -773,6 +799,43 @@ describe('RecipeService', () => {
 		expect(run).not.toHaveProperty('pendingRequest');
 		expect(slimming.mutations).toBe(2);
 		expect(slimming.maxActive).toBe(1);
+	});
+
+	it('refreshes SimSlim for each target under the lease its run holds, then mutates under that same lease', async () => {
+		const { service, slimming } = await serviceFixture(
+			definition([
+				{
+					id: 'slim',
+					kind: 'slimming.mutation',
+					operation: 'apply',
+					profileId: 'rndevtools-development',
+				},
+			])
+		);
+		const accepted = await service.runRecipe(
+			{
+				actionId: 'lease-run',
+				recipeId: 'service-test',
+				targetUdids: [UDID_ONE, UDID_TWO],
+				concurrency: 2,
+			},
+			{ runApproved: true }
+		);
+		expect((await waitForTerminal(service, accepted.runId ?? '')).status).toBe(
+			'complete'
+		);
+		// A status check never probes a Simulator whose lease is held, so a
+		// refresh that is not handed the run's own lease skips its target. The
+		// target would keep a stale inventory entry and compatibility tuple, and
+		// the mutation would be refused. The slimming queue runs one target at a
+		// time, so the nth refresh pairs with the nth action.
+		expect(slimming.refreshLeases).toHaveLength(2);
+		expect(slimming.actionLeases).toHaveLength(2);
+		expect(
+			slimming.refreshLeases.map((lease) => lease?.simulatorUdid).sort()
+		).toEqual([UDID_ONE, UDID_TWO]);
+		expect(slimming.refreshLeases[0]).toBe(slimming.actionLeases[0]);
+		expect(slimming.refreshLeases[1]).toBe(slimming.actionLeases[1]);
 	});
 
 	it('never turns a recipe field into unknown-tuple acknowledgement authority', async () => {
