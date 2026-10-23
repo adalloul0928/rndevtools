@@ -216,15 +216,17 @@ class FakeSimulator implements LaneSimulatorPort {
 }
 
 /**
- * Stand-in for the SimSlim service. It records every action and the lease it
- * arrived with, and lets a test decide whether the gate rejects the action
- * (`rejectWith`) or the job fails after it was accepted (`failWith`).
+ * Stand-in for the SimSlim service. It records every action and every refresh
+ * with the lease each arrived with (none for a caller that held no lease), and
+ * lets a test decide whether the gate rejects the action (`rejectWith`) or the
+ * job fails after it was accepted (`failWith`).
  */
 class FakeSlimming implements LaneSlimmingPort {
 	readonly actions: Array<{
 		action: SlimmingAction;
 		lease: SimulatorMutationLease | undefined;
 	}> = [];
+	readonly refreshLeases: Array<SimulatorMutationLease | undefined> = [];
 	readonly listeners = new Set<(state: SlimmingState) => void>();
 	rejectWith: string | undefined;
 	failWith: string | undefined;
@@ -258,8 +260,9 @@ class FakeSlimming implements LaneSlimmingPort {
 		...this.state,
 		helper: { ...this.state.helper, status: this.helperStatus },
 	});
-	refresh = async () => {
+	refresh = async (lease?: SimulatorMutationLease) => {
 		this.refreshes += 1;
+		this.refreshLeases.push(lease);
 		return this.getState();
 	};
 	cancelJob = () => true;
@@ -3027,6 +3030,21 @@ describe('LaneService', () => {
 				'url.open',
 			]);
 			expect(metro.started).toHaveLength(1);
+		});
+
+		it('refreshes SimSlim under the lease the slim step holds, then applies under that same lease', async () => {
+			healthyMetro();
+			const receipt = await startWithSlim();
+			expect(receipt.lane?.slim).toMatchObject({ status: 'applied' });
+			// A status check never probes a Simulator whose lease is held, so a
+			// refresh that is not handed the lane's own lease skips the Simulator it
+			// just booted. That Simulator would keep a stale inventory entry and
+			// compatibility tuple, and the apply would be refused.
+			expect(slimming.refreshLeases).toHaveLength(1);
+			expect(slimming.actions).toHaveLength(1);
+			const [refreshLease] = slimming.refreshLeases;
+			expect(refreshLease?.simulatorUdid).toBe(UDID);
+			expect(refreshLease).toBe(slimming.actions[0]?.lease);
 		});
 
 		it('records a rejection from the SimSlim gate as skipped and keeps the lane usable', async () => {
