@@ -66,6 +66,56 @@ export const RNDEVTOOLS_SNAPSHOT_LIMITS = {
 export type DesktopSnapshotLimit = keyof typeof RNDEVTOOLS_SNAPSHOT_LIMITS;
 
 /**
+ * Item caps the desktop schema applies beyond `RNDEVTOOLS_SNAPSHOT_LIMITS`:
+ * fields of a map and entries of a list inside a row.
+ */
+export const RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS = {
+	headerFields: 200,
+	storageStructuralDiff: 200,
+	storageSummaryErrors: 10,
+	querySimulationFamilies: 50,
+	querySimulationModes: 4,
+	scenarioVariableOptions: 50,
+	scenarioWarnings: 100,
+	componentActions: 4,
+	componentRenderChangedKeys: 20,
+	accessibilityStateFields: 50,
+} as const;
+
+/**
+ * Longest text the desktop schema takes, before it redacts. The schema counts
+ * code points; `fitDesktopSnapshot` cuts by UTF-16 code units, which is never
+ * longer. `identifier` and `httpMethod` are measured after trimming.
+ */
+export const RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS = {
+	identifier: 256,
+	httpMethod: 16,
+	headerName: 256,
+	short: 4 * 1024,
+	long: 512 * 1024,
+	scenario: 16 * 1024,
+} as const;
+
+/**
+ * Largest values the desktop schema takes, beyond the finite, non-negative and
+ * safe-integer checks it applies to its numbers everywhere.
+ */
+export const RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS = {
+	timestamp: 8_640_000_000_000_000,
+	httpStatus: 999,
+	fps: 240,
+	cpuPercent: 100,
+	zustandStateBytes: 1024 * 1024,
+	componentDepth: 100,
+	componentZIndex: 100_000,
+	renderDurationMs: 60_000,
+	renderCount: 1_000_000_000,
+	cameraFixtureBytes: 384 * 1024,
+	cameraFixtureDimension: 16_384,
+	cameraFixtureDurationMs: 10 * 60 * 1_000,
+} as const;
+
+/**
  * Every remotely invokable operation has one capability with the same
  * `tool.command` spelling. Read-only tools intentionally have no capability.
  */
@@ -1307,4 +1357,1137 @@ export function parseDesktopActionEnvelope(
 	} catch {
 		return null;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Fitting a snapshot to the desktop schema
+// ---------------------------------------------------------------------------
+
+// The rules below mirror the desktop's snapshot schema field by field, and the
+// tables above are where the two share their bounds. A rule is built once,
+// from the path of its field, so fitting costs one call per bounded field and
+// joins no path. `snapshot-fit.test.ts` in the desktop app holds the rules to
+// the schema: it lists every bounded field, so a field added to the contract
+// or a bound changed in only one of the two fails it.
+
+const LIMITS = RNDEVTOOLS_SNAPSHOT_LIMITS;
+const EXTRA = RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS;
+const TEXT = RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS;
+const NUMBERS = RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS;
+
+/** What a fit changed, each change described once, in the order it was met. */
+type FitTrace = Set<string>;
+
+/** Returns `value` itself or a changed copy of it, and records the change. */
+type Fit<T> = (value: T, trace: FitTrace) => T;
+
+/**
+ * Builds the `Fit` of the field at `label`, its path in the snapshot, which
+ * also names the changes the `Fit` records. A rule is built once, when the
+ * first snapshot is fitted, so no path is joined again for every row.
+ */
+type FitRule<T> = (label: string) => Fit<T>;
+
+/** One rule for every key of `T`, so a field added to the contract needs one. */
+type FitRules<T> = { readonly [K in keyof T]-?: FitRule<T[K]> };
+
+/** Which rows of a list over its cap survive: its first, or its last. */
+type Retained = 'first' | 'newest';
+
+/** For a field the schema does not bound, such as a flag or an enum. */
+function keepAsIs<T>(_label: string): Fit<T> {
+	return (value) => value;
+}
+
+/** Cuts `value` to `limit` code units without leaving half a surrogate pair. */
+function cutText(value: string, limit: number): string {
+	const last = value.charCodeAt(limit - 1);
+	return value.slice(0, last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit);
+}
+
+/**
+ * A text cut to `limit`. Anything that is not a string is left for the
+ * desktop schema to judge, so a malformed snapshot is rejected there rather
+ * than thrown on here. A boolean is allowed in the type for a map of
+ * accessibility state, which holds both.
+ */
+function fitText(limit: number) {
+	return <T extends string | boolean | undefined>(label: string): Fit<T> => {
+		const change = `${label} to ${limit} characters`;
+		return (value, trace) => {
+			if (typeof value !== 'string' || value.length <= limit) return value;
+			trace.add(change);
+			return cutText(value, limit) as T;
+		};
+	};
+}
+
+/** A text the schema trims before it measures, so only the trimmed part counts. */
+function fitTrimmedText(limit: number) {
+	return <T extends string | undefined>(label: string): Fit<T> => {
+		const change = `${label} to ${limit} characters`;
+		return (value, trace) => {
+			if (typeof value !== 'string' || value.length <= limit) return value;
+			const trimmed = value.trim();
+			if (trimmed.length <= limit) return value;
+			trace.add(change);
+			return cutText(trimmed, limit) as T;
+		};
+	};
+}
+
+type NumberBounds = Readonly<{ min: number; max: number; integer: boolean }>;
+
+function finiteRange(min: number, max: number): NumberBounds {
+	return { min, max, integer: false };
+}
+
+function integerRange(min: number, max: number): NumberBounds {
+	return { min, max, integer: true };
+}
+
+function describeRange({ min, max }: NumberBounds): string {
+	if (!Number.isFinite(min)) {
+		return Number.isFinite(max) ? `at most ${max}` : 'finite numbers';
+	}
+	return Number.isFinite(max) ? `${min}..${max}` : `at least ${min}`;
+}
+
+/**
+ * A required number clamped into `bounds`, an integer's fraction cut off. A
+ * number that is not finite becomes the lower bound, or 0 where there is none.
+ */
+function fitNumber(bounds: NumberBounds): FitRule<number> {
+	return (label) => {
+		const change = `${label} to ${describeRange(bounds)}`;
+		const fallback = Number.isFinite(bounds.min) ? bounds.min : 0;
+		return (value, trace) => {
+			if (typeof value !== 'number') return value;
+			let next = fallback;
+			if (Number.isFinite(value)) {
+				next = bounds.integer ? Math.trunc(value) : value;
+				next = Math.min(Math.max(next, bounds.min), bounds.max);
+			}
+			if (next !== value) trace.add(change);
+			return next;
+		};
+	};
+}
+
+/** As `fitNumber`, but an optional number that is not finite is dropped. */
+function fitOptionalNumber(bounds: NumberBounds): FitRule<number | undefined> {
+	return (label) => {
+		const fit = fitNumber(bounds)(label);
+		const change = `${label} dropped (not a finite number)`;
+		return (value, trace) => {
+			if (typeof value !== 'number') return value;
+			if (Number.isFinite(value)) return fit(value, trace);
+			trace.add(change);
+			return undefined;
+		};
+	};
+}
+
+/** As `fitNumber`, but a number that is not finite becomes `null`, as JSON writes it. */
+function fitNullableNumber(bounds: NumberBounds): FitRule<number | null> {
+	return (label) => {
+		const fit = fitNumber(bounds)(label);
+		const change = `${label} to null (not a finite number)`;
+		return (value, trace) => {
+			if (typeof value !== 'number') return value;
+			if (Number.isFinite(value)) return fit(value, trace);
+			trace.add(change);
+			return null;
+		};
+	};
+}
+
+function fitOptional<T>(rule: FitRule<T>): FitRule<T | undefined> {
+	return (label) => {
+		const fit = rule(label);
+		return (value, trace) =>
+			value === undefined ? undefined : fit(value, trace);
+	};
+}
+
+function fitNullable<T>(rule: FitRule<T>): FitRule<T | null> {
+	return (label) => {
+		const fit = rule(label);
+		return (value, trace) => (value === null ? null : fit(value, trace));
+	};
+}
+
+/**
+ * A list cut to `limit` rows, then each row fitted by `item`. The list and
+ * its rows are copied only where something changed.
+ */
+function fitList<T>(
+	limit: number,
+	retained: Retained,
+	item: FitRule<T>,
+): FitRule<readonly T[]> {
+	return (label) => {
+		const change = `${label} to ${limit} rows`;
+		const fitRow = item === keepAsIs ? undefined : item(`${label}[]`);
+		return (rows, trace) => {
+			if (!Array.isArray(rows)) return rows;
+			const source: readonly T[] = rows;
+			let kept = source;
+			if (source.length > limit) {
+				trace.add(change);
+				kept =
+					retained === 'newest' ? source.slice(-limit) : source.slice(0, limit);
+			}
+			if (!fitRow) return kept;
+			let fitted: T[] | undefined;
+			for (let index = 0; index < kept.length; index += 1) {
+				const row = kept[index] as T;
+				const next = fitRow(row, trace);
+				if (next === row) continue;
+				fitted ??= kept === source ? source.slice() : (kept as T[]);
+				fitted[index] = next;
+			}
+			return fitted ?? kept;
+		};
+	};
+}
+
+type FieldFit = Readonly<{ name: string; fit: Fit<unknown> }>;
+
+/**
+ * An object with each field fitted by its rule. `repair` runs on the fitted
+ * object, for what only fields together can break.
+ */
+function fitObject<T extends object>(
+	rules: FitRules<T>,
+	repair?: (row: T, trace: FitTrace, label: string) => T,
+): FitRule<T> {
+	return (label) => {
+		const fields: FieldFit[] = [];
+		for (const [name, rule] of Object.entries(rules) as [
+			string,
+			FitRule<unknown>,
+		][]) {
+			if (rule === keepAsIs) continue;
+			fields.push({ name, fit: rule(label ? `${label}.${name}` : name) });
+		}
+		return (row, trace) => {
+			if (typeof row !== 'object' || row === null) return row;
+			const current = row as Record<string, unknown>;
+			let copy: Record<string, unknown> | undefined;
+			for (let index = 0; index < fields.length; index += 1) {
+				const { name, fit } = fields[index] as FieldFit;
+				const value = current[name];
+				const next = fit(value, trace);
+				if (next === value) continue;
+				copy ??= { ...current };
+				if (next === undefined) delete copy[name];
+				else copy[name] = next;
+			}
+			const fitted = (copy ?? row) as T;
+			return repair ? repair(fitted, trace, label) : fitted;
+		};
+	};
+}
+
+/**
+ * A map of at most `maxFields` fields. A field whose name is over
+ * `maxNameLength` is dropped, not cut, since a cut name could collide with
+ * another; the fields kept are the first.
+ */
+function fitRecord<V>(
+	maxFields: number,
+	maxNameLength: number,
+	value: FitRule<V>,
+): FitRule<Readonly<Record<string, V>>> {
+	return (label) => {
+		const fitValue = value(`${label}[]`);
+		const tooMany = `${label} to ${maxFields} fields`;
+		const nameTooLong = `${label} names over ${maxNameLength} characters dropped`;
+		return (fields, trace) => {
+			if (typeof fields !== 'object' || fields === null) return fields;
+			if (Array.isArray(fields)) return fields;
+			const names = Object.keys(fields);
+			let copy: Record<string, V> | undefined;
+			let kept = 0;
+			for (let index = 0; index < names.length; index += 1) {
+				const name = names[index] as string;
+				const entry = fields[name] as V;
+				const dropped =
+					name.length > maxNameLength
+						? nameTooLong
+						: kept >= maxFields
+							? tooMany
+							: undefined;
+				if (dropped) trace.add(dropped);
+				else kept += 1;
+				const next = dropped ? entry : fitValue(entry, trace);
+				if (!dropped && next === entry && !copy) continue;
+				if (!copy) {
+					// The first difference: copy the fields kept so far, unchanged. A
+					// map without a prototype keeps a field named `__proto__` as data.
+					copy = Object.create(null) as Record<string, V>;
+					for (let before = 0; before < index; before += 1) {
+						const earlier = names[before] as string;
+						copy[earlier] = fields[earlier] as V;
+					}
+				}
+				if (!dropped) copy[name] = next;
+			}
+			return copy ?? fields;
+		};
+	};
+}
+
+const TIMESTAMP = finiteRange(0, NUMBERS.timestamp);
+const NON_NEGATIVE = finiteRange(0, Number.POSITIVE_INFINITY);
+const COUNT = integerRange(0, Number.MAX_SAFE_INTEGER);
+const POSITIVE_COUNT = integerRange(1, Number.MAX_SAFE_INTEGER);
+
+const identifier = fitTrimmedText(TEXT.identifier);
+const shortText = fitText(TEXT.short);
+const longText = fitText(TEXT.long);
+const timestamp = fitNumber(TIMESTAMP);
+const optionalTimestamp = fitOptionalNumber(TIMESTAMP);
+const count = fitNumber(COUNT);
+const optionalCount = fitOptionalNumber(COUNT);
+const positiveCount = fitNumber(POSITIVE_COUNT);
+const optionalPositiveCount = fitOptionalNumber(POSITIVE_COUNT);
+const nonNegative = fitNumber(NON_NEGATIVE);
+const optionalNonNegative = fitOptionalNumber(NON_NEGATIVE);
+
+type Tools = DesktopDeviceToolsSnapshot;
+type Row<K extends keyof Tools> = Tools[K] extends readonly (infer R)[]
+	? R
+	: never;
+type Item<T> = NonNullable<T> extends readonly (infer R)[] ? R : never;
+
+type ScenarioPrimitive = string | number | boolean | null;
+
+/**
+ * A scenario value: a text cut to its limit. A number that is not finite
+ * becomes `null`, which is how JSON writes it.
+ */
+function fitScenarioValue<T extends ScenarioPrimitive | undefined>(
+	label: string,
+): Fit<T> {
+	const change = `${label} to ${TEXT.scenario} characters`;
+	const notFinite = `${label} to null (not a finite number)`;
+	return (value, trace) => {
+		if (typeof value === 'string' && value.length > TEXT.scenario) {
+			trace.add(change);
+			return cutText(value, TEXT.scenario) as T;
+		}
+		if (typeof value === 'number' && !Number.isFinite(value)) {
+			trace.add(notFinite);
+			return null as T;
+		}
+		return value;
+	};
+}
+
+const headers = fitRecord<string>(
+	EXTRA.headerFields,
+	TEXT.headerName,
+	longText,
+);
+
+const networkRow = fitObject<Row<'network'>>({
+	id: identifier,
+	at: timestamp,
+	method: fitTrimmedText(TEXT.httpMethod),
+	url: longText,
+	host: shortText,
+	path: longText,
+	status: fitOptionalNumber(integerRange(0, NUMBERS.httpStatus)),
+	state: keepAsIs,
+	durationMs: optionalNonNegative,
+	requestBytes: optionalCount,
+	responseBytes: optionalCount,
+	requestHeaders: fitOptional(headers),
+	responseHeaders: fitOptional(headers),
+	requestBody: longText,
+	responseBody: longText,
+	contentType: shortText,
+	source: shortText,
+	error: longText,
+});
+
+const consoleRow = fitObject<Row<'console'>>({
+	id: identifier,
+	at: timestamp,
+	firstAt: optionalTimestamp,
+	lastAt: optionalTimestamp,
+	level: keepAsIs,
+	message: longText,
+	attributesText: longText,
+	source: shortText,
+	scope: shortText,
+	correlationId: identifier,
+	groupId: identifier,
+	repeatCount: optionalPositiveCount,
+	errorName: shortText,
+	errorStack: longText,
+	sourceLocation: fitOptional(
+		fitObject<NonNullable<Row<'console'>['sourceLocation']>>({
+			file: longText,
+			line: optionalPositiveCount,
+			column: optionalPositiveCount,
+		}),
+	),
+});
+
+const storageRow = fitObject<Row<'storage'>>({
+	id: identifier,
+	adapterId: identifier,
+	adapterTitle: shortText,
+	key: longText,
+	valueText: longText,
+	valueType: keepAsIs,
+	bytes: count,
+	sensitive: keepAsIs,
+	editable: keepAsIs,
+	updatedAt: optionalTimestamp,
+});
+
+const storageEventRow = fitObject<Row<'storageEvents'>>({
+	id: identifier,
+	at: timestamp,
+	adapterId: identifier,
+	key: longText,
+	kind: keepAsIs,
+	previousText: longText,
+	nextText: longText,
+	bookmarked: keepAsIs,
+	undoAvailable: keepAsIs,
+	undoStatus: keepAsIs,
+	structuralDiff: fitOptional(
+		fitList(
+			EXTRA.storageStructuralDiff,
+			'first',
+			fitObject<Item<Row<'storageEvents'>['structuralDiff']>>({
+				path: shortText,
+				kind: keepAsIs,
+				previousText: shortText,
+				nextText: shortText,
+			}),
+		),
+	),
+});
+
+const storageSummary = fitObject<Tools['storageSummary']>({
+	adapterCount: count,
+	totalKeyCount: count,
+	omittedKeyCount: count,
+	truncated: keepAsIs,
+	errors: fitList(
+		EXTRA.storageSummaryErrors,
+		'first',
+		fitObject<Item<Tools['storageSummary']['errors']>>({
+			adapterId: identifier,
+			adapterTitle: shortText,
+			message: longText,
+		}),
+	),
+});
+
+const queryRow = fitObject<Row<'queries'>>({
+	id: identifier,
+	hash: longText,
+	keyText: longText,
+	status: keepAsIs,
+	fetchStatus: keepAsIs,
+	updatedAt: timestamp,
+	observers: count,
+	isStale: keepAsIs,
+	dataText: longText,
+	errorText: longText,
+	truncated: keepAsIs,
+});
+
+const mutationRow = fitObject<Row<'mutations'>>({
+	id: identifier,
+	keyText: longText,
+	status: keepAsIs,
+	submittedAt: optionalTimestamp,
+	variablesText: longText,
+	errorText: longText,
+	truncated: keepAsIs,
+});
+
+const querySummary = fitObject<Tools['querySummary']>({
+	sourceQueryCount: count,
+	omittedQueryCount: count,
+	sourceMutationCount: count,
+	omittedMutationCount: count,
+	truncated: keepAsIs,
+});
+
+type QuerySimulation = NonNullable<Tools['querySimulation']>;
+type SimulationFamily = QuerySimulation['families'][number];
+
+/**
+ * The simulation's active entry has to name a supported mode of a family that
+ * is still listed, under the label the family has; one whose family was cut
+ * away, or that never matched, is dropped.
+ */
+function keepMatchingActive(
+	simulation: QuerySimulation,
+	trace: FitTrace,
+	label: string,
+): QuerySimulation {
+	const { active, families } = simulation;
+	if (active === undefined) return simulation;
+	// The schema trims an identifier before it compares two.
+	const sameId = (a: unknown, b: unknown) =>
+		typeof a === 'string' && typeof b === 'string' && a.trim() === b.trim();
+	const family = Array.isArray(families)
+		? families.find((candidate: SimulationFamily | undefined) =>
+				sameId(candidate?.id, active.familyId),
+			)
+		: undefined;
+	const mode = Array.isArray(family?.modes)
+		? family.modes.find(
+				(candidate: SimulationFamily['modes'][number] | undefined) =>
+					candidate?.mode === active.mode,
+			)
+		: undefined;
+	if (family?.label === active.familyLabel && mode?.supported) {
+		return simulation;
+	}
+	trace.add(`${label}.active dropped (it names no supported family mode)`);
+	const { active: _dropped, ...rest } = simulation;
+	return rest;
+}
+
+const querySimulation = fitObject<QuerySimulation>(
+	{
+		families: fitList(
+			EXTRA.querySimulationFamilies,
+			'first',
+			fitObject<QuerySimulation['families'][number]>({
+				id: identifier,
+				label: shortText,
+				description: longText,
+				modes: fitList(
+					EXTRA.querySimulationModes,
+					'first',
+					fitObject<QuerySimulation['families'][number]['modes'][number]>({
+						mode: keepAsIs,
+						supported: keepAsIs,
+						reason: longText,
+					}),
+				),
+			}),
+		),
+		active: fitOptional(
+			fitObject<NonNullable<QuerySimulation['active']>>({
+				familyId: identifier,
+				familyLabel: shortText,
+				mode: keepAsIs,
+				receiptId: identifier,
+				startedAt: timestamp,
+			}),
+		),
+	},
+	keepMatchingActive,
+);
+
+const routeRow = fitObject<Row<'routes'>>({
+	id: identifier,
+	path: longText,
+	name: shortText,
+	kind: keepAsIs,
+	filename: longText,
+	isCurrent: keepAsIs,
+	isVisible: keepAsIs,
+	depth: count,
+});
+
+const routeEventRow = fitObject<Row<'routeEvents'>>({
+	id: identifier,
+	at: timestamp,
+	route: longText,
+	metadataText: longText,
+	transitionId: identifier,
+	phase: keepAsIs,
+	source: keepAsIs,
+	correlationId: identifier,
+	durationMs: optionalNonNegative,
+	error: longText,
+});
+
+const environmentRow = fitObject<Row<'environment'>>({
+	id: identifier,
+	section: shortText,
+	key: shortText,
+	valueText: longText,
+	status: keepAsIs,
+	description: longText,
+});
+
+const zustandStoreRow = fitObject<Row<'zustandStores'>>({
+	id: identifier,
+	title: shortText,
+	description: shortText,
+	stateText: longText,
+	// The schema caps a store's keys at the storage key limit.
+	keys: fitList<string>(LIMITS.storageKeys, 'first', shortText),
+	updatedAt: timestamp,
+	capabilities: keepAsIs,
+	error: longText,
+});
+
+const zustandChangeRow = fitObject<Row<'zustandChanges'>>({
+	id: identifier,
+	at: timestamp,
+	storeId: identifier,
+	storeTitle: shortText,
+	changedKeys: fitList<string>(LIMITS.zustandChangedKeys, 'first', shortText),
+	stateText: longText,
+	error: longText,
+});
+
+const zustandStateSnapshotRow = fitObject<Row<'zustandStateSnapshots'>>({
+	id: identifier,
+	storeId: identifier,
+	storeTitle: shortText,
+	createdAt: timestamp,
+	stateText: longText,
+	stateBytes: fitNumber(integerRange(0, NUMBERS.zustandStateBytes)),
+	truncated: keepAsIs,
+});
+
+const zustandMutationReceiptRow = fitObject<Row<'zustandMutationReceipts'>>({
+	id: identifier,
+	storeId: identifier,
+	kind: keepAsIs,
+	status: keepAsIs,
+	startedAt: timestamp,
+	completedAt: timestamp,
+	changedKeys: fitList<string>(LIMITS.zustandChangedKeys, 'first', shortText),
+	correlationId: identifier,
+	snapshotId: identifier,
+	error: longText,
+});
+
+const zustandSummary = fitObject<Tools['zustandSummary']>({
+	totalStoreCount: count,
+	omittedStoreCount: count,
+	truncated: keepAsIs,
+	error: longText,
+});
+
+const restorePointRow = fitObject<Row<'restorePoints'>>({
+	id: identifier,
+	label: shortText,
+	createdAt: timestamp,
+	estimatedBytes: count,
+	sources: fitList(
+		LIMITS.restoreSources,
+		'first',
+		fitObject<Item<Row<'restorePoints'>['sources']>>({
+			id: identifier,
+			title: shortText,
+			preview: longText,
+			bytes: count,
+		}),
+	),
+});
+
+const restoreReceiptRow = fitObject<Row<'restoreReceipts'>>({
+	id: identifier,
+	pointId: identifier,
+	pointLabel: shortText,
+	startedAt: timestamp,
+	completedAt: timestamp,
+	status: keepAsIs,
+	error: longText,
+	sourceResults: fitList(
+		LIMITS.restoreSources,
+		'first',
+		fitObject<Item<Row<'restoreReceipts'>['sourceResults']>>({
+			sourceId: identifier,
+			sourceTitle: shortText,
+			preflight: keepAsIs,
+			apply: keepAsIs,
+			rollback: keepAsIs,
+			error: longText,
+			rollbackError: longText,
+		}),
+	),
+});
+
+type ScenarioVariable = Item<Row<'scenarios'>['variables']>;
+
+/** A default has to be of the variable's declared type, or the schema fails it. */
+function dropMismatchedDefault(
+	variable: ScenarioVariable,
+	trace: FitTrace,
+	label: string,
+): ScenarioVariable {
+	const { defaultValue } = variable;
+	if (defaultValue === undefined || typeof defaultValue === variable.type) {
+		return variable;
+	}
+	trace.add(`${label}.defaultValue dropped (it is not a ${variable.type})`);
+	const { defaultValue: _dropped, ...rest } = variable;
+	return rest;
+}
+
+const scenarioRow = fitObject<Row<'scenarios'>>({
+	id: identifier,
+	version: positiveCount,
+	definitionToken: identifier,
+	name: shortText,
+	description: fitText(TEXT.scenario),
+	bundled: keepAsIs,
+	variables: fitList(
+		LIMITS.scenarioVariables,
+		'first',
+		fitObject<ScenarioVariable>(
+			{
+				id: identifier,
+				label: shortText,
+				type: keepAsIs,
+				required: keepAsIs,
+				defaultValue: fitScenarioValue,
+				options: fitOptional(
+					fitList(
+						EXTRA.scenarioVariableOptions,
+						'first',
+						fitScenarioValue<ScenarioPrimitive>,
+					),
+				),
+			},
+			dropMismatchedDefault,
+		),
+	),
+	preconditionCount: count,
+	steps: fitList(
+		LIMITS.scenarioSteps,
+		'first',
+		fitObject<Item<Row<'scenarios'>['steps']>>({
+			id: identifier,
+			type: keepAsIs,
+			label: shortText,
+		}),
+	),
+});
+
+const scenarioWarnings = fitList<string>(
+	EXTRA.scenarioWarnings,
+	'first',
+	shortText,
+);
+
+const scenarioRuntime = fitObject<Tools['scenarioRuntime']>({
+	running: keepAsIs,
+	recoveryError: longText,
+	active: fitOptional(
+		fitObject<NonNullable<Tools['scenarioRuntime']['active']>>({
+			receiptId: identifier,
+			scenarioId: identifier,
+			scenarioVersion: positiveCount,
+			scenarioName: shortText,
+			activatedAt: timestamp,
+			stepCount: count,
+			privileged: keepAsIs,
+			warnings: scenarioWarnings,
+			recoveryRequired: keepAsIs,
+		}),
+	),
+});
+
+const scenarioReceiptRow = fitObject<Row<'scenarioReceipts'>>({
+	id: identifier,
+	scenarioId: identifier,
+	scenarioVersion: positiveCount,
+	scenarioName: shortText,
+	startedAt: timestamp,
+	completedAt: timestamp,
+	status: keepAsIs,
+	error: longText,
+	stepResults: fitList(
+		LIMITS.scenarioSteps,
+		'first',
+		fitObject<Item<Row<'scenarioReceipts'>['stepResults']>>({
+			stepId: identifier,
+			stepType: keepAsIs,
+			label: shortText,
+			preflight: keepAsIs,
+			apply: keepAsIs,
+			rollback: keepAsIs,
+			reversible: keepAsIs,
+			privileged: keepAsIs,
+			warnings: fitOptional(scenarioWarnings),
+			summary: shortText,
+			error: longText,
+			rollbackError: longText,
+		}),
+	),
+});
+
+/** Only a persona identity carries a persona identifier. */
+function dropStrayPersonaId(
+	who: DesktopIdentitySnapshot,
+	trace: FitTrace,
+	label: string,
+): DesktopIdentitySnapshot {
+	if (who.kind === 'persona' || who.personaId === undefined) return who;
+	trace.add(`${label}.personaId dropped (only a persona has one)`);
+	const { personaId: _dropped, ...rest } = who;
+	return rest;
+}
+
+const identity = fitObject<DesktopIdentitySnapshot>(
+	{ kind: keepAsIs, label: shortText, personaId: identifier },
+	dropStrayPersonaId,
+);
+
+const identitySession = fitObject<Tools['identitySession']>({
+	running: keepAsIs,
+	active: fitOptional(
+		fitObject<NonNullable<Tools['identitySession']['active']>>({
+			historyId: identifier,
+			startedAt: timestamp,
+			actor: identity,
+			target: identity,
+			status: keepAsIs,
+			error: longText,
+		}),
+	),
+	history: fitList(
+		LIMITS.identityHistory,
+		'newest',
+		fitObject<Item<Tools['identitySession']['history']>>({
+			id: identifier,
+			startedAt: timestamp,
+			stoppedAt: optionalTimestamp,
+			actor: identity,
+			target: identity,
+			status: keepAsIs,
+			error: longText,
+		}),
+	),
+	personas: fitList(
+		LIMITS.identityPersonas,
+		'first',
+		fitObject<Item<Tools['identitySession']['personas']>>({
+			id: identifier,
+			label: shortText,
+			note: shortText,
+		}),
+	),
+});
+
+const fps = fitNumber(finiteRange(0, NUMBERS.fps));
+const optionalFps = fitOptionalNumber(finiteRange(0, NUMBERS.fps));
+
+const performanceReview = fitObject<Tools['performance']>({
+	isActive: keepAsIs,
+	startedAt: fitNullableNumber(TIMESTAMP),
+	stoppedAt: fitNullableNumber(TIMESTAMP),
+	error: longText,
+	droppedSampleCount: count,
+	samples: fitList(
+		LIMITS.performanceSamples,
+		'newest',
+		fitObject<DesktopPerformanceSampleSnapshot>({
+			id: identifier,
+			at: timestamp,
+			jsFps: fps,
+			uiFps: optionalFps,
+			cpuPercent: fitOptionalNumber(finiteRange(0, NUMBERS.cpuPercent)),
+			memoryMb: optionalNonNegative,
+			eventLoopLagMs: nonNegative,
+			longFrames: count,
+			maxFrameMs: nonNegative,
+			route: longText,
+		}),
+	),
+	summary: fitObject<Tools['performance']['summary']>({
+		grade: keepAsIs,
+		durationMs: nonNegative,
+		sampleCount: count,
+		averageJsFps: nonNegative,
+		averageUiFps: optionalNonNegative,
+		averageEventLoopLagMs: nonNegative,
+		p95EventLoopLagMs: nonNegative,
+		maxEventLoopLagMs: nonNegative,
+		longFrameCount: count,
+	}),
+});
+
+const coordinate = fitNumber(
+	finiteRange(Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY),
+);
+
+type ComponentAction = NonNullable<Row<'components'>['actions']>[number];
+
+const componentRow = fitObject<Row<'components'>>({
+	id: identifier,
+	targetId: identifier,
+	parentId: identifier,
+	depth: fitOptionalNumber(integerRange(0, NUMBERS.componentDepth)),
+	zIndex: fitOptionalNumber(
+		finiteRange(-NUMBERS.componentZIndex, NUMBERS.componentZIndex),
+	),
+	name: shortText,
+	kind: shortText,
+	feature: shortText,
+	route: longText,
+	testID: shortText,
+	targetKey: shortText,
+	sourceFiles: fitList<string>(LIMITS.componentSourceFiles, 'first', longText),
+	instanceText: longText,
+	instanceTruncated: keepAsIs,
+	bounds: fitNullable(
+		fitObject<NonNullable<Row<'components'>['bounds']>>({
+			x: coordinate,
+			y: coordinate,
+			width: nonNegative,
+			height: nonNegative,
+		}),
+	),
+	isFocused: keepAsIs,
+	accessibilityLabel: shortText,
+	accessibilityHint: shortText,
+	accessibilityRole: shortText,
+	accessibilityValue: shortText,
+	accessibilityState: fitOptional(
+		fitRecord<boolean | string>(
+			EXTRA.accessibilityStateFields,
+			TEXT.short,
+			shortText,
+		),
+	),
+	styleText: longText,
+	styleTruncated: keepAsIs,
+	actions: fitOptional(
+		fitList<ComponentAction>(EXTRA.componentActions, 'first', keepAsIs),
+	),
+	screenHash: identifier,
+});
+
+const renderDuration = fitNumber(finiteRange(0, NUMBERS.renderDurationMs));
+
+const componentRenderRow = fitObject<Row<'componentRenders'>>({
+	id: identifier,
+	targetId: identifier,
+	at: timestamp,
+	phase: keepAsIs,
+	actualDuration: renderDuration,
+	baseDuration: renderDuration,
+	startTime: timestamp,
+	commitTime: timestamp,
+	renderCount: fitNumber(integerRange(1, NUMBERS.renderCount)),
+	cause: keepAsIs,
+	changedKeys: fitList<string>(
+		EXTRA.componentRenderChangedKeys,
+		'first',
+		shortText,
+	),
+});
+
+const componentSummary = fitObject<Tools['componentSummary']>({
+	sourceTargetCount: count,
+	omittedTargetCount: count,
+	truncated: keepAsIs,
+	screenHash: identifier,
+	registrationDiagnostics: fitOptional(
+		fitList(
+			LIMITS.componentDiagnostics,
+			'first',
+			fitObject<Item<Tools['componentSummary']['registrationDiagnostics']>>({
+				code: keepAsIs,
+				targetId: identifier,
+				instanceIds: fitList<string>(LIMITS.components, 'first', identifier),
+				message: longText,
+			}),
+		),
+	),
+	error: longText,
+});
+
+type CameraFixture = DesktopCameraFixtureSnapshot;
+
+/** Mirrors the schema's check that a camera fixture's metadata agrees. */
+function isConsistentCameraFixture(fixture: CameraFixture): boolean {
+	const { active, kind, mimeType, bytes, width, height, durationMs } = fixture;
+	if (!active) {
+		return [
+			kind,
+			fixture.label,
+			mimeType,
+			bytes,
+			width,
+			height,
+			durationMs,
+		].every((detail) => detail === undefined);
+	}
+	if (!kind) return false;
+	if (kind === 'unavailable' || kind === 'error') {
+		return [mimeType, bytes, width, height, durationMs].every(
+			(detail) => detail === undefined,
+		);
+	}
+	if (
+		mimeType === undefined ||
+		bytes === undefined ||
+		bytes <= 0 ||
+		width === undefined ||
+		height === undefined
+	) {
+		return false;
+	}
+	if (kind === 'video') {
+		return (
+			(mimeType === 'video/mp4' || mimeType === 'video/quicktime') &&
+			durationMs !== undefined
+		);
+	}
+	return (
+		(mimeType === 'image/jpeg' ||
+			mimeType === 'image/png' ||
+			mimeType === 'image/webp') &&
+		durationMs === undefined
+	);
+}
+
+/**
+ * A fixture whose metadata disagrees, or lost a number to the fit, is reported
+ * as no fixture rather than rejected with the whole snapshot.
+ */
+function resetInconsistentCameraFixture(
+	fixture: CameraFixture,
+	trace: FitTrace,
+	label: string,
+): CameraFixture {
+	if (isConsistentCameraFixture(fixture)) return fixture;
+	trace.add(`${label} reset (its metadata is inconsistent)`);
+	return { active: false };
+}
+
+const cameraFixture = fitObject<CameraFixture>(
+	{
+		active: keepAsIs,
+		kind: keepAsIs,
+		label: shortText,
+		mimeType: keepAsIs,
+		bytes: fitOptionalNumber(integerRange(0, NUMBERS.cameraFixtureBytes)),
+		width: fitOptionalNumber(integerRange(1, NUMBERS.cameraFixtureDimension)),
+		height: fitOptionalNumber(integerRange(1, NUMBERS.cameraFixtureDimension)),
+		durationMs: fitOptionalNumber(
+			integerRange(1, NUMBERS.cameraFixtureDurationMs),
+		),
+	},
+	resetInconsistentCameraFixture,
+);
+
+const diagnosticRow = fitObject<Row<'diagnostics'>>({
+	id: identifier,
+	at: timestamp,
+	level: keepAsIs,
+	scope: shortText,
+	message: longText,
+});
+
+const snapshotRule = fitObject<Tools>({
+	network: fitList(LIMITS.network, 'newest', networkRow),
+	networkProfile: fitOptional(
+		fitObject<NonNullable<Tools['networkProfile']>>({
+			id: keepAsIs,
+			name: shortText,
+			active: keepAsIs,
+			scope: keepAsIs,
+		}),
+	),
+	console: fitList(LIMITS.console, 'newest', consoleRow),
+	storage: fitList(LIMITS.storage, 'newest', storageRow),
+	storageEvents: fitList(LIMITS.storageEvents, 'newest', storageEventRow),
+	storageSummary,
+	queries: fitList(LIMITS.queries, 'newest', queryRow),
+	mutations: fitList(LIMITS.mutations, 'newest', mutationRow),
+	querySummary,
+	querySimulation: fitOptional(querySimulation),
+	routes: fitList(LIMITS.routes, 'newest', routeRow),
+	routeEvents: fitList(LIMITS.routeEvents, 'newest', routeEventRow),
+	environment: fitList(LIMITS.environment, 'newest', environmentRow),
+	zustandStores: fitList(LIMITS.zustandStores, 'newest', zustandStoreRow),
+	zustandChanges: fitList(LIMITS.zustandChanges, 'newest', zustandChangeRow),
+	zustandStateSnapshots: fitList(
+		LIMITS.zustandStateSnapshots,
+		'newest',
+		zustandStateSnapshotRow,
+	),
+	zustandMutationReceipts: fitList(
+		LIMITS.zustandMutationReceipts,
+		'newest',
+		zustandMutationReceiptRow,
+	),
+	zustandSummary,
+	restorePoints: fitList(LIMITS.restorePoints, 'newest', restorePointRow),
+	restoreReceipts: fitList(LIMITS.restoreReceipts, 'newest', restoreReceiptRow),
+	scenarios: fitList(LIMITS.scenarios, 'newest', scenarioRow),
+	scenarioRuntime,
+	scenarioReceipts: fitList(
+		LIMITS.scenarioReceipts,
+		'newest',
+		scenarioReceiptRow,
+	),
+	identitySession,
+	performance: performanceReview,
+	components: fitList(LIMITS.components, 'newest', componentRow),
+	componentRenders: fitList(
+		LIMITS.componentRenders,
+		'newest',
+		componentRenderRow,
+	),
+	componentSummary,
+	cameraFixture: fitOptional(cameraFixture),
+	diagnostics: fitList(LIMITS.diagnostics, 'newest', diagnosticRow),
+});
+
+let fitSnapshot: Fit<DesktopDeviceToolsSnapshot> | undefined;
+
+/**
+ * Fits a snapshot to everything the desktop schema bounds, so the broker
+ * takes it instead of closing the socket: the rows of every list, nested ones
+ * included, the fields of every map, the length of every text and the range
+ * of every number. The schema reads its bounds from the tables above, so the
+ * two agree.
+ *
+ * A list over its cap keeps its newest rows if it is chronological, as
+ * core's stores append, and its first rows if it is ordered, such as keys,
+ * sources, variables, steps and files. A map keeps its first fields and loses
+ * any whose name is too long. A text is cut to its limit without splitting a
+ * surrogate pair. A number is clamped into its range and an integer's
+ * fraction cut off; one that is not finite is dropped if it is optional,
+ * written as `null` if it is nullable, as JSON would, and made its lower
+ * bound, or 0 where there is none, if it is required. The desktop redacts, so
+ * this only bounds.
+ *
+ * What a bound can leave disagreeing is dropped or reset, since the schema
+ * would reject the whole snapshot for it: a query simulation's active entry
+ * whose family the cap cut away, a camera fixture whose metadata disagrees, a
+ * scenario variable default that is not of the variable's type, and a persona
+ * identifier on an identity that is not a persona. What else is wrong with a
+ * snapshot, such as a missing or unexpected field, a value of the wrong type
+ * or an unknown enum value, is left for the schema, and the fit does not
+ * throw on it.
+ *
+ * Returns `tools` itself when nothing had to change, and otherwise shares
+ * every row it did not change with `tools`. `trimmed` describes each change
+ * once, in the order met, as a path and what it was cut to, for example
+ * `network to 2000 rows` or `components[].sourceFiles to 20 rows`.
+ */
+export function fitDesktopSnapshot(tools: DesktopDeviceToolsSnapshot): {
+	tools: DesktopDeviceToolsSnapshot;
+	trimmed: readonly string[];
+} {
+	fitSnapshot ??= snapshotRule('');
+	const trace: FitTrace = new Set();
+	const fitted = fitSnapshot(tools, trace);
+	return { tools: fitted, trimmed: [...trace] };
 }

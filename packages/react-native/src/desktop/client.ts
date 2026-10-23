@@ -3,9 +3,9 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 	desktopActionCapability,
+	fitDesktopSnapshot,
 	parseDesktopActionEnvelope,
 	RNDEVTOOLS_PROTOCOL_VERSION,
-	RNDEVTOOLS_SNAPSHOT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import {
 	diagnosticErrorText,
@@ -96,7 +96,9 @@ const MIN_REMOTE_BROKER_TOKEN_LENGTH = 16;
 const MAX_PENDING_DESKTOP_ACTIONS = 16;
 const MAX_DESKTOP_ACTIONS_PER_WINDOW = 60;
 const DESKTOP_ACTION_RATE_WINDOW_MS = 10_000;
-const SNAPSHOT_ROW_LIMITS = Object.entries(RNDEVTOOLS_SNAPSHOT_LIMITS);
+// How many of the changes a fit made one warning names, so that a snapshot
+// over many bounds still gives a short line.
+const MAX_REPORTED_TRIMS = 6;
 
 type ActionResultMessage = {
 	type: 'action-result';
@@ -294,32 +296,6 @@ type DesktopOutbox = {
 	lastSnapshotBytes: number;
 	flushTimer: ReturnType<typeof setTimeout> | undefined;
 };
-
-/**
- * Trims every top-level collection to the row limit the desktop schema
- * enforces. The broker rejects a whole snapshot that is over any limit and
- * closes the socket, so one oversized projection would otherwise leave the
- * device reconnecting in a loop. The newest rows are kept: core's event stores
- * append, so those are last.
- */
-function trimToSnapshotLimits(tools: DesktopDeviceToolsSnapshot): {
-	tools: DesktopDeviceToolsSnapshot;
-	trimmed: readonly string[];
-} {
-	const fields: Readonly<Record<string, unknown>> = tools;
-	let trimmedFields: Record<string, unknown> | undefined;
-	const trimmed: string[] = [];
-	for (const [name, limit] of SNAPSHOT_ROW_LIMITS) {
-		const rows = fields[name];
-		if (!Array.isArray(rows) || rows.length <= limit) continue;
-		trimmedFields ??= { ...fields };
-		trimmedFields[name] = rows.slice(-limit);
-		trimmed.push(`${name} to ${limit} rows`);
-	}
-	return trimmedFields
-		? { tools: trimmedFields as DesktopDeviceToolsSnapshot, trimmed }
-		: { tools, trimmed };
-}
 
 function closeDetail(
 	event: { code?: number; reason?: string } | undefined,
@@ -630,14 +606,17 @@ export function startDesktopClient(
 	};
 
 	const reportTrim = (trimmed: readonly string[]) => {
-		const summary = trimmed.join(', ');
-		if (summary === reportedTrim) return;
-		reportedTrim = summary;
-		if (!summary) return;
+		// The same trims every second are reported once, however many there are.
+		const key = trimmed.join('\n');
+		if (key === reportedTrim) return;
+		reportedTrim = key;
+		if (!key) return;
+		const named = trimmed.slice(0, MAX_REPORTED_TRIMS).join(', ');
+		const more = trimmed.length - MAX_REPORTED_TRIMS;
 		record(
 			'warn',
 			'snapshot',
-			`Trimmed ${summary} in the desktop snapshot to fit its row limits; the newest rows were kept.`,
+			`Trimmed ${named}${more > 0 ? ` and ${more} more` : ''} in the desktop snapshot to fit its limits.`,
 		);
 	};
 
@@ -657,7 +636,10 @@ export function startDesktopClient(
 		}
 		backpressureReported = false;
 		try {
-			const captured = trimToSnapshotLimits(host.captureTools(diagnostics));
+			// The broker closes the socket on a snapshot that is over any bound, so
+			// one oversized projection would leave the device reconnecting in a
+			// loop.
+			const captured = fitDesktopSnapshot(host.captureTools(diagnostics));
 			reportTrim(captured.trimmed);
 			const serialized = JSON.stringify({
 				type: 'snapshot',

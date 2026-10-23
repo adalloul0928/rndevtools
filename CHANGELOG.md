@@ -192,6 +192,25 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- The desktop client fits every snapshot to everything the desktop validates
+  before it sends it, with the new `fitDesktopSnapshot` of
+  `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
+  lists of `RNDEVTOOLS_SNAPSHOT_LIMITS`, so a nested list (10 of its 30 limits
+  are nested, such as a component's `sourceFiles`), a text or a number over
+  its bound made the broker close the socket and the device reconnect in a
+  loop. Core keeps up to 10,000 performance samples where the desktop takes
+  1,500, and does not cap a scenario's warnings where it takes 100. A list
+  over its cap keeps its newest rows if it is chronological and its first if
+  it is ordered, a text is cut without splitting a surrogate pair, a number is
+  clamped into its range, and a map keeps its first fields. A query
+  simulation's active entry, a camera fixture, a scenario variable default or
+  a persona identifier that disagrees with the rest, which the schema would
+  reject, is dropped or reset. One text over its limit no longer keeps a
+  snapshot from being sent. The client's warning names the first six changes
+  and counts the rest. The bounds the schema applies beyond
+  `RNDEVTOOLS_SNAPSHOT_LIMITS` are exported as
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`, `RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
 
@@ -200,3 +219,8 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- The device snapshot schema reads its text, number and item bounds from
+  `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
+  holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
+  of a snapshot past its bound, then requires the schema to reject the
+  snapshot as it stands and accept it fitted. No bound changed.

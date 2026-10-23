@@ -6,7 +6,10 @@ import {
 	parseDesktopDeviceAction,
 	RNDEVTOOLS_ACTION_CAPABILITIES,
 	RNDEVTOOLS_PROTOCOL_VERSION,
+	RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS,
 	RNDEVTOOLS_SNAPSHOT_LIMITS,
+	RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS,
+	RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS,
 	RNDEVTOOLS_SUPPORTED_PROTOCOL_VERSIONS,
 	RNDEVTOOLS_TOOL_IDS,
 } from '@rndevtools/core/desktop-protocol';
@@ -25,8 +28,8 @@ export const DEFAULT_BROKER_PORT = 47931;
 
 export { desktopActionCapability };
 
-const SHORT_TEXT_MAX_LENGTH = 4 * 1024;
-const LONG_TEXT_MAX_LENGTH = 512 * 1024;
+const SHORT_TEXT_MAX_LENGTH = RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.short;
+const LONG_TEXT_MAX_LENGTH = RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.long;
 
 /**
  * Redaction can lengthen text — `jwt:a` becomes `jwt:[REDACTED]` — so a value
@@ -47,7 +50,11 @@ function redactWithinLength(value: string, maxLength: number): string {
 		: clamped;
 }
 
-const identifierSchema = z.string().trim().min(1).max(256);
+const identifierSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.identifier);
 const networkSimulationProfileIds = [
 	'none',
 	'offline',
@@ -70,13 +77,21 @@ const timestampSchema = z
 	.number()
 	.finite()
 	.nonnegative()
-	.max(8_640_000_000_000_000);
+	.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.timestamp);
 const optionalTextSchema = shortTextSchema.optional();
 const headerRecordSchema = z
-	.record(z.string().max(256), longTextSchema)
-	.refine((headers) => Object.keys(headers).length <= 200, {
-		message: 'Header maps cannot contain more than 200 fields.',
-	})
+	.record(
+		z.string().max(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.headerName),
+		longTextSchema
+	)
+	.refine(
+		(headers) =>
+			Object.keys(headers).length <=
+			RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.headerFields,
+		{
+			message: `Header maps cannot contain more than ${RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.headerFields} fields.`,
+		}
+	)
 	.transform((headers) => {
 		const output = Object.create(null) as Record<string, string>;
 		for (const [name, value] of Object.entries(headers)) {
@@ -137,11 +152,20 @@ export type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 const networkEntrySchema = z.strictObject({
 	id: identifierSchema,
 	at: timestampSchema,
-	method: z.string().trim().min(1).max(16),
+	method: z
+		.string()
+		.trim()
+		.min(1)
+		.max(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.httpMethod),
 	url: longTextSchema,
 	host: shortTextSchema,
 	path: longTextSchema,
-	status: z.number().int().min(0).max(999).optional(),
+	status: z
+		.number()
+		.int()
+		.min(0)
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.httpStatus)
+		.optional(),
 	state: z.enum(['pending', 'success', 'error', 'aborted']),
 	durationMs: z.number().finite().nonnegative().optional(),
 	requestBytes: z.number().int().nonnegative().optional(),
@@ -260,7 +284,7 @@ const storageEventSchema = z.strictObject({
 				nextText: shortTextSchema.optional(),
 			})
 		)
-		.max(200)
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.storageStructuralDiff)
 		.optional(),
 });
 const boundedCountSchema = z
@@ -282,7 +306,7 @@ const storageSummarySchema = z.strictObject({
 				message: longTextSchema,
 			})
 		)
-		.max(10),
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.storageSummaryErrors),
 });
 const queryEntrySchema = z.strictObject({
 	id: identifierSchema,
@@ -337,11 +361,11 @@ const querySimulationSchema = z
 								reason: longTextSchema.optional(),
 							})
 						)
-						.length(4),
+						.length(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.querySimulationModes),
 				})
 			)
 			.min(1)
-			.max(50),
+			.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.querySimulationFamilies),
 		active: z
 			.strictObject({
 				familyId: identifierSchema,
@@ -501,7 +525,7 @@ const zustandStateSnapshotSchema = z.strictObject({
 		.number()
 		.int()
 		.nonnegative()
-		.max(1024 * 1024),
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.zustandStateBytes),
 	truncated: z.boolean(),
 });
 const zustandMutationReceiptSchema = z.strictObject({
@@ -568,9 +592,19 @@ const restoreReceiptSchema = z.strictObject({
 const performanceSampleSchema = z.strictObject({
 	id: identifierSchema,
 	at: timestampSchema,
-	jsFps: z.number().finite().min(0).max(240),
-	uiFps: z.number().finite().min(0).max(240).optional(),
-	cpuPercent: z.number().finite().min(0).max(100).optional(),
+	jsFps: z.number().finite().min(0).max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.fps),
+	uiFps: z
+		.number()
+		.finite()
+		.min(0)
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.fps)
+		.optional(),
+	cpuPercent: z
+		.number()
+		.finite()
+		.min(0)
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.cpuPercent)
+		.optional(),
 	memoryMb: z.number().finite().nonnegative().optional(),
 	eventLoopLagMs: z.number().finite().nonnegative(),
 	longFrames: z.number().int().nonnegative(),
@@ -604,7 +638,7 @@ const performanceReviewSchema = z.strictObject({
 export type PerformanceReview = z.infer<typeof performanceReviewSchema>;
 
 const scenarioPrimitiveSchema = z.union([
-	z.string().max(16 * 1024),
+	z.string().max(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.scenario),
 	z.number().finite(),
 	z.boolean(),
 	z.null(),
@@ -626,7 +660,10 @@ const scenarioVariableSchema = z
 		type: z.enum(['string', 'number', 'boolean']),
 		required: z.boolean(),
 		defaultValue: scenarioPrimitiveSchema.optional(),
-		options: z.array(scenarioPrimitiveSchema).max(50).optional(),
+		options: z
+			.array(scenarioPrimitiveSchema)
+			.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioVariableOptions)
+			.optional(),
 	})
 	.refine(
 		(variable) =>
@@ -641,7 +678,7 @@ const scenarioDefinitionSummarySchema = z.strictObject({
 	name: shortTextSchema,
 	description: z
 		.string()
-		.max(16 * 1024)
+		.max(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.scenario)
 		.optional(),
 	bundled: z.boolean(),
 	variables: z
@@ -669,7 +706,9 @@ const activeScenarioSchema = z.strictObject({
 	activatedAt: timestampSchema,
 	stepCount: boundedCountSchema,
 	privileged: z.boolean(),
-	warnings: z.array(shortTextSchema).max(100),
+	warnings: z
+		.array(shortTextSchema)
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioWarnings),
 	recoveryRequired: z.boolean(),
 });
 const scenarioRuntimeSchema = z.strictObject({
@@ -686,7 +725,10 @@ const scenarioStepReceiptSchema = z.strictObject({
 	rollback: z.enum(['not-needed', 'succeeded', 'failed']),
 	reversible: z.boolean().optional(),
 	privileged: z.boolean().optional(),
-	warnings: z.array(shortTextSchema).max(100).optional(),
+	warnings: z
+		.array(shortTextSchema)
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioWarnings)
+		.optional(),
 	summary: shortTextSchema.optional(),
 	error: longTextSchema.optional(),
 	rollbackError: longTextSchema.optional(),
@@ -763,8 +805,18 @@ const componentTargetSchema = z.strictObject({
 	id: identifierSchema,
 	targetId: identifierSchema.optional(),
 	parentId: identifierSchema.optional(),
-	depth: z.number().int().min(0).max(100).optional(),
-	zIndex: z.number().finite().min(-100_000).max(100_000).optional(),
+	depth: z
+		.number()
+		.int()
+		.min(0)
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.componentDepth)
+		.optional(),
+	zIndex: z
+		.number()
+		.finite()
+		.min(-RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.componentZIndex)
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.componentZIndex)
+		.optional(),
 	name: shortTextSchema,
 	kind: shortTextSchema,
 	feature: optionalTextSchema,
@@ -791,9 +843,14 @@ const componentTargetSchema = z.strictObject({
 	accessibilityValue: optionalTextSchema,
 	accessibilityState: z
 		.record(shortTextSchema, z.union([z.boolean(), shortTextSchema]))
-		.refine((state) => Object.keys(state).length <= 50, {
-			message: 'Accessibility state cannot contain more than 50 fields.',
-		})
+		.refine(
+			(state) =>
+				Object.keys(state).length <=
+				RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.accessibilityStateFields,
+			{
+				message: `Accessibility state cannot contain more than ${RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.accessibilityStateFields} fields.`,
+			}
+		)
 		.optional(),
 	styleText: longTextSchema.optional(),
 	styleTruncated: z.boolean().optional(),
@@ -801,7 +858,7 @@ const componentTargetSchema = z.strictObject({
 	// optional so supported v1 sessions continue through the same bounded parser.
 	actions: z
 		.array(z.enum(['activate', 'focus', 'setText', 'scroll']))
-		.max(4)
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.componentActions)
 		.optional(),
 	screenHash: identifierSchema.optional(),
 });
@@ -812,13 +869,27 @@ const componentRenderSchema = z.strictObject({
 	targetId: identifierSchema,
 	at: timestampSchema,
 	phase: z.enum(['mount', 'update', 'nested-update']),
-	actualDuration: z.number().finite().nonnegative().max(60_000),
-	baseDuration: z.number().finite().nonnegative().max(60_000),
+	actualDuration: z
+		.number()
+		.finite()
+		.nonnegative()
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.renderDurationMs),
+	baseDuration: z
+		.number()
+		.finite()
+		.nonnegative()
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.renderDurationMs),
 	startTime: timestampSchema,
 	commitTime: timestampSchema,
-	renderCount: z.number().int().positive().max(1_000_000_000),
+	renderCount: z
+		.number()
+		.int()
+		.positive()
+		.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.renderCount),
 	cause: z.enum(['mount', 'props', 'tracked-state', 'parent', 'unknown']),
-	changedKeys: z.array(shortTextSchema).max(20),
+	changedKeys: z
+		.array(shortTextSchema)
+		.max(RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.componentRenderChangedKeys),
 });
 
 const componentSummarySchema = z.strictObject({
@@ -863,15 +934,25 @@ const cameraFixtureSchema = z
 			.number()
 			.int()
 			.nonnegative()
-			.max(384 * 1024)
+			.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.cameraFixtureBytes)
 			.optional(),
-		width: z.number().int().positive().max(16_384).optional(),
-		height: z.number().int().positive().max(16_384).optional(),
+		width: z
+			.number()
+			.int()
+			.positive()
+			.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.cameraFixtureDimension)
+			.optional(),
+		height: z
+			.number()
+			.int()
+			.positive()
+			.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.cameraFixtureDimension)
+			.optional(),
 		durationMs: z
 			.number()
 			.int()
 			.positive()
-			.max(10 * 60 * 1_000)
+			.max(RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.cameraFixtureDurationMs)
 			.optional(),
 	})
 	.refine(
