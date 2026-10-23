@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Committed navigation stays successful when a host supplies no focus updates.
+  Navigation callbacks receive the original route while captured diagnostics stay redacted.
+
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 
