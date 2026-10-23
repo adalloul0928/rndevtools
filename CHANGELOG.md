@@ -405,6 +405,8 @@
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
+- Refresh demo-only desktop screenshots after the shared controls, status styling
+  and responsive Connected App panel updates.
 - Added light and dark themes plus a persistent System / Light / Dark appearance
   setting. Main applies the stored theme before creating the window, and failed
   preference writes restore the previous selection.
