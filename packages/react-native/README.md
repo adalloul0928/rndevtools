@@ -44,6 +44,8 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
     host: {
       // Project your registered diagnostics into a snapshot payload.
       captureTools: (diagnostics) => buildToolsSnapshot(diagnostics),
+      // Optional: a cheap revision of every value in that projection.
+      getToolsRevision: () => diagnosticsRevision,
       // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
       // Apply one desktop-issued action. Throw to reject it. `signal` aborts
@@ -407,3 +409,9 @@ MIT
 Desktop discovery waits 2.5, 5, 10, 20, then at most 30 seconds between
 unsuccessful candidate sweeps. Candidates within a sweep still advance promptly.
 A successful connection resets discovery backoff; `stop()` cancels pending retries.
+
+`getToolsRevision` is an optional nonnegative safe integer covering all data your
+`captureTools` projects. Advance it whenever that data changes. An unchanged
+revision avoids rebuilding and serializing the snapshot; client diagnostics still
+trigger updates and heartbeats continue. Hosts without a revision source, or with
+a failed/invalid revision read, retain the once-per-second capture fallback.

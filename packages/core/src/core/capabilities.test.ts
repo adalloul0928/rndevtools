@@ -90,6 +90,18 @@ describe('DevTools capability registry', () => {
 		);
 	});
 
+	it('notifies healthy observers when another observer throws', () => {
+		const registry = createDevToolsCapabilityRegistry();
+		registry.subscribe(() => {
+			throw new Error('observer failed');
+		});
+		const listener = jest.fn();
+		registry.subscribe(listener);
+		expect(() => registry.reconcile([capability()])).not.toThrow();
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(registry.resolve('storage', 'read', 'inspect').allowed).toBe(true);
+	});
+
 	it('reconciles atomically, sorts snapshots, and notifies subscribers once', () => {
 		const registry = createDevToolsCapabilityRegistry();
 		const listener = jest.fn();
