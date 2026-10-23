@@ -828,7 +828,6 @@ function readTarget(target: unknown): string[] {
 	return ['--db-url', `${base}?${parameters.toString()}`];
 }
 
-// ---------------------------------------------------------------------------
 // Argv allowlist
 
 type FlagRule = Readonly<{

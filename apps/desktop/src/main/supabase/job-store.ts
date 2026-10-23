@@ -45,7 +45,6 @@ export type SupabaseJobStep = NonNullable<SupabaseJob['steps']>[number];
 export type SupabaseJobStepState = SupabaseJobStep['state'];
 type JobRequester = SupabaseJob['requestedBy'];
 
-// ---------------------------------------------------------------------------
 // Steps
 
 /**
@@ -483,7 +482,6 @@ function markDoneBefore(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Store
 
 /** A detached lifecycle CLI child, recorded so a restarted desktop can adopt it. */

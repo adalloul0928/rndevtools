@@ -28,7 +28,6 @@ import { BACKEND_STATUS, type StatusTone } from './status-presentation';
  * imports only zod and other shared modules.
  */
 
-// ---------------------------------------------------------------------------
 // Primitives
 
 const MAX_LABEL_LENGTH = 1_024;
@@ -217,7 +216,6 @@ export function sanitizeSupabaseDisplayText(
 		: `${characters.slice(0, Math.max(0, maxLength - 1)).join('')}…`;
 }
 
-// ---------------------------------------------------------------------------
 // Vocabulary
 
 export const SUPABASE_EXCLUDABLE_CAPABILITIES = [
@@ -393,7 +391,6 @@ export const SUPABASE_STACK_FLAGS = [
 ] as const;
 export type SupabaseStackFlag = (typeof SUPABASE_STACK_FLAGS)[number];
 
-// ---------------------------------------------------------------------------
 // Errors
 
 /** Main's classifier codes (main/supabase/cli-errors.ts), mirrored. */
@@ -591,7 +588,6 @@ export function supabaseDesktopError(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Stacks
 
 const holdAgentSchema = z.strictObject({
@@ -958,7 +954,6 @@ const supabaseInspectionSchema = z.strictObject({
 });
 export type SupabaseInspection = z.infer<typeof supabaseInspectionSchema>;
 
-// ---------------------------------------------------------------------------
 // Repositories, requests, jobs, clean up
 
 const SUPABASE_REPOSITORY_CHECK_IDS = [
@@ -1251,7 +1246,6 @@ export const supabasePruneSummarySchema = z.strictObject({
 });
 export type SupabasePruneSummary = z.infer<typeof supabasePruneSummarySchema>;
 
-// ---------------------------------------------------------------------------
 // Policy
 
 /**
@@ -1565,7 +1559,6 @@ export function supabasePolicyTrustChanges(
 	return changes;
 }
 
-// ---------------------------------------------------------------------------
 // App traffic signature (P5)
 
 /**
@@ -1637,7 +1630,6 @@ export function supabaseTrafficSignature(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // State
 
 const activityEntrySchema = z.strictObject({
@@ -1829,7 +1821,6 @@ export const EMPTY_SUPABASE_STATE: SupabaseState = Object.freeze<SupabaseState>(
 	}
 );
 
-// ---------------------------------------------------------------------------
 // Operations
 
 const LOG_SERVICE_NAMES: ReadonlySet<string> = new Set([
@@ -2257,7 +2248,6 @@ export function withSupabaseConfirmation(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Receipts
 
 const supabaseLogRecordSchema = z.discriminatedUnion('type', [
@@ -2450,7 +2440,6 @@ export type SupabaseOperationReceipt = z.infer<
  */
 export const SUPABASE_CLIPBOARD_CLEAR_MS = 60_000;
 
-// ---------------------------------------------------------------------------
 // Interest
 
 export const SUPABASE_DETAIL_SECTIONS = [
@@ -2492,7 +2481,6 @@ export const SUPABASE_NO_INTEREST: SupabaseInterest = Object.freeze({
 	sections: [],
 });
 
-// ---------------------------------------------------------------------------
 // Bridge
 
 export type SupabaseBridge = {
@@ -2510,7 +2498,6 @@ export type SupabaseBridge = {
 	setSupabaseInterest: (interest: SupabaseInterest) => void;
 };
 
-// ---------------------------------------------------------------------------
 // Lanes
 
 const LANE_BACKEND_REASONS = [
@@ -2722,7 +2709,6 @@ export function laneDefaultBackend(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Agent surface (rndevtools supabase --operation …, MCP tool `supabase`)
 
 /**
@@ -3230,7 +3216,6 @@ export const supabaseDoctorInfoSchema = z.strictObject({
 });
 export type SupabaseDoctorInfo = z.infer<typeof supabaseDoctorInfoSchema>;
 
-// ---------------------------------------------------------------------------
 // Display helpers
 
 /** `feat-x` from `refs/heads/feat-x`; `detached HEAD`; other refs as they are. */
@@ -3363,7 +3348,6 @@ function activeJobFor(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Status model A: absolute stack status
 
 export type SupabaseTone =
@@ -3671,7 +3655,6 @@ export function stackStatus(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Status model D: service rows in the CLI's words
 
 export type SupabaseServiceLabel = {
@@ -3729,7 +3712,6 @@ export function serviceStateLabel(member: {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Row flags
 
 const ALWAYS_SHOWN_FLAGS: ReadonlySet<SupabaseStackFlag> = new Set([
@@ -3825,7 +3807,6 @@ export function visibleStackFlags(
 	return { chips, more };
 }
 
-// ---------------------------------------------------------------------------
 // Attention: one ranker for notices, the badge and the Needs attention filter
 
 export type SupabaseAttentionRank =
@@ -4371,7 +4352,6 @@ export function sidebarBadge(
 		: undefined;
 }
 
-// ---------------------------------------------------------------------------
 // What happens next
 
 export type SupabaseNextEvent = Readonly<{
@@ -4575,7 +4555,6 @@ export function nextEvents(
 	return [...untimed, ...timed, ...tail];
 }
 
-// ---------------------------------------------------------------------------
 // Availability: one pure function decides every control
 
 export type SupabaseStackAction =

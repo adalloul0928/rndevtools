@@ -33,7 +33,6 @@ import { hasSupabaseControlCharacters } from './engine-support';
  * of overwriting it, and a store's memory changes only after its write lands.
  */
 
-// ---------------------------------------------------------------------------
 // Durable files
 
 /**
@@ -245,7 +244,6 @@ export class SupabaseStoreQueue {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Policy
 
 const POLICY_FILE = 'policy-v1.json';

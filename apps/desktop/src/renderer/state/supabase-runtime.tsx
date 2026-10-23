@@ -64,7 +64,6 @@ import {
 
 const IDLE: ActionStatus = { kind: 'idle', message: '' };
 
-// ---------------------------------------------------------------------------
 // Bridge and revisions
 
 const BRIDGE_METHODS = [
@@ -101,7 +100,6 @@ export function acceptSupabaseState(
 		: current;
 }
 
-// ---------------------------------------------------------------------------
 // Operations
 
 export function createSupabaseActionId(): string {
@@ -255,7 +253,6 @@ export async function confirmThenRunSupabaseOperation(
 		: receipt;
 }
 
-// ---------------------------------------------------------------------------
 // Action notices
 
 /**
@@ -863,7 +860,6 @@ export function settleSupabaseJobs(
 	return { watches: next, notices };
 }
 
-// ---------------------------------------------------------------------------
 // Interest
 
 /**
@@ -903,7 +899,6 @@ export function resolveSupabaseInterest(
 
 const INTEREST_DEBOUNCE_MS = 60;
 
-// ---------------------------------------------------------------------------
 // Navigation
 
 type SupabaseFocusTarget =
@@ -1235,7 +1230,6 @@ function browserStorage(): Storage | undefined {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Contexts
 
 type SupabaseStateValue = Readonly<{

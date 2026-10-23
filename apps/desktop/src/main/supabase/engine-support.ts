@@ -10,7 +10,6 @@ import { isPathStrictlyWithin } from './bounded-read';
  * Storage uploads). Nothing here knows Supabase command words.
  */
 
-// ---------------------------------------------------------------------------
 // Timers
 
 /** The timers the service schedules on; tests substitute a manual clock. */
@@ -78,7 +77,6 @@ export function supabaseWithin<T>(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // Concurrency
 
 /** At most `limit` holders at a time, first come first served. */
@@ -219,7 +217,6 @@ export class SupabaseSingleFlight<T> {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Small helpers
 
 export function sha256Hex(value: string): string {
@@ -265,7 +262,6 @@ export function shellQuote(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-// ---------------------------------------------------------------------------
 // Filesystem walks
 
 export type SupabaseDirectorySize = Readonly<{

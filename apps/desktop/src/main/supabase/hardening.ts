@@ -40,7 +40,6 @@ import type { PinnedListener } from './project';
  * pinned config, which is why this stays a compatibility mode.
  */
 
-// ---------------------------------------------------------------------------
 // Per-stack keys
 
 const KEY_NAMES = [
@@ -400,7 +399,6 @@ export class SupabaseKeyStore {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Pinned-port leases
 
 /** RN Devtools' own port range, clear of the CLI's 10000-32767. */

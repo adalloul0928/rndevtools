@@ -837,7 +837,6 @@ export function createSupabaseDemoState(
 	return derive(base, false);
 }
 
-// ---------------------------------------------------------------------------
 // Derived fields
 
 const PRUNE_ORDER = [
@@ -929,7 +928,6 @@ function derive(state: SupabaseState, bumpPrune: boolean): SupabaseState {
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Reducer
 
 /** FNV-1a, stretched to 64 hex characters: deterministic ids for new demo stacks. */

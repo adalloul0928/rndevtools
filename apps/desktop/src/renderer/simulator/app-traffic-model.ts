@@ -240,7 +240,6 @@ export function stackAppTrafficRow(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Network: per-request target badges and the backend filter
 
 /** One backend a request went to; the Network filter matches on `key`. */
@@ -357,7 +356,6 @@ export function appTrafficTarget(
 	return supabaseTrafficTarget(entry, signature, context.expectedStackId);
 }
 
-// ---------------------------------------------------------------------------
 // Diagnostics: the Local Supabase health card
 
 type AppTrafficHealth = Readonly<{
@@ -407,7 +405,6 @@ export function appTrafficHealth(view: AppTrafficView): AppTrafficHealth {
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Environment: the declared Supabase URL against the lane's stack
 
 type EnvironmentSupabaseCheck = Readonly<{

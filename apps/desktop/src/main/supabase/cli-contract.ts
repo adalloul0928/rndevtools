@@ -295,7 +295,6 @@ function projectEndpoints(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // version
 
 const VERSION_OUTPUT =
@@ -310,7 +309,6 @@ export function parseSupabaseVersion(stdout: string): string {
 	return version;
 }
 
-// ---------------------------------------------------------------------------
 // stack list
 
 const listSchema = z.object({
@@ -382,7 +380,6 @@ export function parseSupabaseStackList(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // stack status
 
 const memberSchema = z.object({
@@ -581,7 +578,6 @@ export function parseSupabaseStackStatus(json: unknown): SupabaseStackStatus {
 	});
 }
 
-// ---------------------------------------------------------------------------
 // stack start
 
 const startSchema = z.object({
@@ -656,7 +652,6 @@ export function parseSupabaseStackStart(json: unknown): SupabaseStackStart {
 	});
 }
 
-// ---------------------------------------------------------------------------
 // stack stop, restart, destroy
 
 const stopSchema = z.object({
@@ -747,7 +742,6 @@ export function parseSupabaseStackDestroy(json: unknown): SupabaseStackDestroy {
 	return Object.freeze({ destroyedIds: Object.freeze(ids) });
 }
 
-// ---------------------------------------------------------------------------
 // stack logs
 
 const logSource = z.enum(['history', 'live']);
@@ -865,7 +859,6 @@ export function parseSupabaseStackLogs(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // stack prepare
 
 const prepareSchema = z.object({
@@ -902,7 +895,6 @@ export function parseSupabaseStackPrepare(json: unknown): SupabaseStackPrepare {
 	});
 }
 
-// ---------------------------------------------------------------------------
 // migrations
 
 const migrationVersion = z.string().regex(/^[+-]?\d{0,32}$/);
@@ -1082,7 +1074,6 @@ export function parseSupabaseDbReset(json: unknown): SupabaseDbReset {
 	return Object.freeze({ target: parsed.target, version: parsed.version });
 }
 
-// ---------------------------------------------------------------------------
 // inspect db
 
 function statText(
@@ -1186,7 +1177,6 @@ export function parseSupabaseInspectTableStats(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // seed buckets
 
 const bucketNames = z.array(text(256)).max(1_000);
@@ -1218,7 +1208,6 @@ export function parseSupabaseSeedBuckets(json: unknown): SupabaseSeedBuckets {
 	});
 }
 
-// ---------------------------------------------------------------------------
 // error envelope
 
 const stackChangeSchema = z.object({
