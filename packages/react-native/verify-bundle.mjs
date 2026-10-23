@@ -68,24 +68,39 @@ const USAGE =
 // `index.android.bundle`).
 const BUNDLE_FILE = /\.(?:[cm]?js|hbc|bundle|jsbundle)$/i;
 
+// Hermes bytecode: `.hbc`, and the embedded bundles, which are bytecode when
+// Hermes is on and plain JavaScript otherwise. Hermes keeps every string
+// literal in one byte array, as 8-bit bytes when all its characters are
+// ASCII and as UTF-16LE otherwise, each literal right after the previous
+// one, so these files are searched as bytes in both encodings.
+const BYTECODE_FILE = /\.(?:hbc|bundle|jsbundle)$/i;
+
 // Literal loopback hosts, including `*.localhost` (RFC 6761) and JSON-escaped
 // slashes. Hostnames that merely start with `localhost.` are not loopback.
-const LOOPBACK_URL =
-	/\b(?:https?|wss?):(?:\/\/|\\\/\\\/)(?:(?:[a-z\d-]+\.)*localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d{1,5})?(?![\w.-])/gi;
+const LOOPBACK_URL_BODY = String.raw`(?:https?|wss?):(?:\/\/|\\\/\\\/)(?:(?:[a-z\d-]+\.)*localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d{1,5})?(?![\w.-])`;
+const LOOPBACK_URL = new RegExp(String.raw`\b${LOOPBACK_URL_BODY}`, 'gi');
+// Hermes keeps its string literals back to back in one byte array, so in
+// bytecode the previous literal's last character precedes a URL
+// (`globalThishttp://127.0.0.1:8081/`) and a word boundary would hide it.
+const LOOPBACK_URL_IN_BYTECODE = new RegExp(LOOPBACK_URL_BODY, 'gi');
 
 // A key body follows the prefix. supabase-js itself ships the bare prefix in
 // its key-type check, so the prefix alone is not a finding.
 const SUPABASE_SECRET_KEY = /sb_secret_[A-Za-z\d_-]{20,}/;
-// Each match consumes its whole run of token characters, so scanning stays
-// linear however a bundle repeats `eyJ`.
-const JWT_CANDIDATE = /eyJ[A-Za-z\d_-]*(?:\.[A-Za-z\d_-]*){0,2}/g;
+// A token's claims are its second part. Hermes keeps its string literals back
+// to back, so a token's signature can run straight into the next literal, which
+// may be another token's header. A match therefore takes the header and the
+// payload only and ends at the dot that closes the payload; the scan resumes
+// there and still finds a token that follows. The caps bound the work per
+// `eyJ`: a real header is under 200 characters and a real payload a few KiB.
+const JWT_CANDIDATE = /eyJ[A-Za-z\d_-]{0,1024}\.[A-Za-z\d_-]{1,16384}\./g;
 // The issuer of the default anon and service_role keys that every local
 // Supabase stack shares (supabase/cli apps/cli/src/command-internal/go-jwt.ts).
 const SUPABASE_LOCAL_ISSUER = 'supabase-demo';
 
 function jwtPayload(candidate) {
-	const [header, payload, signature] = candidate.split('.');
-	if (!header || !payload || signature === undefined) return undefined;
+	const [header, payload] = candidate.split('.');
+	if (!header || !payload) return undefined;
 	try {
 		const claims = JSON.parse(Buffer.from(payload, 'base64url').toString());
 		return claims !== null && typeof claims === 'object' ? claims : undefined;
@@ -125,8 +140,12 @@ function supabaseLocalFindings(contents) {
 const LOOPBACK_CHECK = Object.freeze({
 	title: 'Production bundle contains loopback URLs',
 	label: 'loopback URLs',
-	find: (contents) =>
-		Array.from(contents.matchAll(LOOPBACK_URL), ([url]) => url),
+	find: (bundle) => {
+		const pattern = bundle.bytecode ? LOOPBACK_URL_IN_BYTECODE : LOOPBACK_URL;
+		return bundle.texts.flatMap((text) =>
+			Array.from(text.matchAll(pattern), ([url]) => url),
+		);
+	},
 });
 
 const PRESET_CHECKS = new Map([
@@ -135,7 +154,8 @@ const PRESET_CHECKS = new Map([
 		Object.freeze({
 			title: 'Production bundle contains Supabase secrets or local keys',
 			label: 'preset supabase-local',
-			find: supabaseLocalFindings,
+			find: (bundle) =>
+				bundle.texts.flatMap((text) => supabaseLocalFindings(text)),
 		}),
 	],
 ]);
@@ -143,7 +163,7 @@ const PRESET_CHECKS = new Map([
 function markerCheck(markers) {
 	return {
 		title: 'Production bundle contains devtools code',
-		find: (contents) => markers.filter((marker) => contents.includes(marker)),
+		find: (bundle) => markers.filter((marker) => bundle.has(marker)),
 	};
 }
 
@@ -191,6 +211,43 @@ async function bundleFiles(root) {
 }
 
 /**
+ * What the checks scan in one file: `texts`, its decodings, for the pattern
+ * checks, `bytecode`, whether it is a bytecode bundle, and `has`, whether a
+ * marker occurs in it. A text bundle is its UTF-8 decoding. A bytecode bundle
+ * is decoded as UTF-8, which keeps its 8-bit strings, and as UTF-16LE from
+ * byte 0 and from byte 1, which keeps its UTF-16 strings whatever their
+ * alignment. A marker is searched as its UTF-8 and its UTF-16LE bytes, because
+ * an ASCII marker inside a literal with one non-ASCII character is UTF-16
+ * too. The needles are Buffers: on a string needle, `Buffer#includes` reads
+ * UTF-16 at even offsets only.
+ *
+ * @param {string} file
+ * @returns {Promise<{ texts: string[], bytecode: boolean, has: (marker: string) => boolean }>}
+ */
+async function readBundle(file) {
+	if (!BYTECODE_FILE.test(file)) {
+		const text = await readFile(file, 'utf8');
+		return {
+			texts: [text],
+			bytecode: false,
+			has: (marker) => text.includes(marker),
+		};
+	}
+	const bytes = await readFile(file);
+	return {
+		texts: [
+			bytes.toString('utf8'),
+			bytes.toString('utf16le'),
+			bytes.subarray(1).toString('utf16le'),
+		],
+		bytecode: true,
+		has: (marker) =>
+			bytes.includes(Buffer.from(marker, 'utf8')) ||
+			bytes.includes(Buffer.from(marker, 'utf16le')),
+	};
+}
+
+/**
  * @param {string} root Exported bundle directory, or a single bundle file.
  * @param {readonly string[]} [markers] Strings that must not appear, checked
  *   in addition to `DEFAULT_MARKERS`.
@@ -208,7 +265,7 @@ export async function verifyPrunedBundle(root, markers = [], options = {}) {
 	].map((check) => ({ check, lines: [] }));
 	const files = await bundleFiles(root);
 	for (const file of files) {
-		const contents = await readFile(file, 'utf8');
+		const contents = await readBundle(file);
 		for (const { check, lines } of results) {
 			for (const finding of new Set(check.find(contents))) {
 				lines.push(`${file}: ${finding}`);

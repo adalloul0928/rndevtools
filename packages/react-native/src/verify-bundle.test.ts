@@ -5,24 +5,40 @@
  * @types/node to a React Native package.
  */
 declare const require: ((id: string) => unknown) & {
-	resolve: (id: string) => string;
+	resolve: (id: string, options?: { paths?: readonly string[] }) => string;
 };
 declare const __dirname: string;
 declare const process: {
 	execPath: string;
 	env: Record<string, string | undefined>;
+	platform: string;
+};
+
+/** The part of a Buffer this file reads. */
+type Bytes = {
+	indexOf: (needle: Bytes) => number;
+	subarray: (start?: number, end?: number) => Bytes;
+	toString: (encoding: 'hex') => string;
+};
+type BufferModule = {
+	Buffer: {
+		from: ((value: string, encoding: 'utf8' | 'utf16le') => Bytes) &
+			((values: readonly number[]) => Bytes);
+		concat: (parts: readonly Bytes[]) => Bytes;
+	};
 };
 
 type Fs = {
 	mkdtempSync: (prefix: string) => string;
 	mkdirSync: (p: string, options?: { recursive?: boolean }) => void;
-	readFileSync: (p: string, encoding: 'utf8') => string;
+	readFileSync: ((p: string, encoding: 'utf8') => string) &
+		((p: string) => Bytes);
 	rmSync: (
 		p: string,
 		options?: { recursive?: boolean; force?: boolean },
 	) => void;
 	symlinkSync: (target: string, p: string) => void;
-	writeFileSync: (p: string, data: string) => void;
+	writeFileSync: (p: string, data: string | Bytes) => void;
 };
 type Path = {
 	dirname: (p: string) => string;
@@ -30,7 +46,12 @@ type Path = {
 };
 type Os = { tmpdir: () => string };
 type Url = { pathToFileURL: (p: string) => { href: string } };
-type SpawnResult = { status: number | null; stdout: string; stderr: string };
+type SpawnResult = {
+	status: number | null;
+	stdout: string;
+	stderr: string;
+	error?: { message: string };
+};
 type ChildProcess = {
 	spawnSync: (
 		command: string,
@@ -50,6 +71,7 @@ const {
 const os = require('node:os') as Os;
 const path = require('node:path') as Path;
 const { pathToFileURL } = require('node:url') as Url;
+const { Buffer } = require('node:buffer') as BufferModule;
 const { spawnSync } = require('node:child_process') as ChildProcess;
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
@@ -300,6 +322,60 @@ function exportForProduction(
 	return outputRoot;
 }
 
+/**
+ * The `hermesc` that react-native's `hermes-compiler` dependency ships for
+ * this platform, found through react-native as Expo finds it, so pnpm's
+ * layout gives the copy react-native uses. A supported platform without the
+ * binary is a broken install, so this throws instead of skipping: a skipped
+ * suite would leave the bytecode path unproven without a signal.
+ */
+const HERMESC_BY_PLATFORM: Readonly<Record<string, string>> = {
+	darwin: 'osx-bin/hermesc',
+	linux: 'linux64-bin/hermesc',
+	win32: 'win64-bin/hermesc.exe',
+};
+
+function hermesc(): string {
+	const binary = HERMESC_BY_PLATFORM[process.platform];
+	if (!binary) {
+		throw new Error(`hermes-compiler ships no hermesc for ${process.platform}`);
+	}
+	const reactNative = path.dirname(
+		require.resolve('react-native/package.json'),
+	);
+	const compiler = path.dirname(
+		require.resolve('hermes-compiler/package.json', { paths: [reactNative] }),
+	);
+	return path.join(compiler, 'hermesc', binary);
+}
+
+// The first eight bytes of every Hermes bytecode file.
+const HERMES_MAGIC = 'c61fbc03c103191f';
+
+/**
+ * Compiles `source` to Hermes bytecode as a release build does (`hermesc
+ * -emit-binary -O`, the flags Expo, Gradle and Xcode pass), writes it to
+ * `output` and returns its bytes. Hermes stores a string literal as 8-bit
+ * bytes when every character is ASCII and as UTF-16 otherwise.
+ */
+function compileHermes(source: string, output: string): Bytes {
+	const input = path.join(scratch(), 'index.js');
+	writeFileSync(input, source);
+	mkdirSync(path.dirname(output), { recursive: true });
+	const result = spawnSync(
+		hermesc(),
+		['-emit-binary', '-O', '-out', output, input],
+		{ encoding: 'utf8' },
+	);
+	if (result.status !== 0) {
+		throw new Error(result.error?.message ?? result.stderr);
+	}
+	const bytes = readFileSync(output);
+	// Bytecode, not a compiler log or an empty file.
+	expect(bytes.subarray(0, 8).toString('hex')).toBe(HERMES_MAGIC);
+	return bytes;
+}
+
 describe('default markers', () => {
 	it('catch the entry points the older markers cannot see', () => {
 		const files = PINNED_MARKERS.map(([marker], index) => ({
@@ -460,6 +536,124 @@ describe('rndevtools-verify-bundle entry point', () => {
 	});
 });
 
+const HBC = '_expo/static/js/android/index-4567cdef.hbc';
+
+describe('Hermes bytecode', () => {
+	it('finds a marker Hermes stores as UTF-16, and a default marker inside such a literal', () => {
+		const root = scratch();
+		const hbc = path.join(root, HBC);
+		const bytes = compileHermes(
+			'var a="Example Débug Panel",b="rndevtools-scenarios — restore";globalThis.x=[a,b];',
+			hbc,
+		);
+		// The fixture must take the UTF-16 path, or this proves nothing.
+		expect(bytes.indexOf(Buffer.from('Example Débug Panel', 'utf8'))).toBe(-1);
+		expect(
+			bytes.indexOf(Buffer.from('Example Débug Panel', 'utf16le')),
+		).toBeGreaterThan(0);
+		expect(bytes.indexOf(Buffer.from('rndevtools-scenarios', 'utf8'))).toBe(-1);
+		const result = verify(root, '--marker', 'Example Débug Panel');
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain(
+			[
+				'Production bundle contains devtools code:',
+				`${hbc}: rndevtools-scenarios`,
+				`${hbc}: Example Débug Panel`,
+			].join('\n'),
+		);
+	});
+
+	it('keeps the default markers through hermesc -O on the code they stand for', () => {
+		const modules = PINNED_MARKERS.map(([marker, source], index) => ({
+			name: `module-${index}.js`,
+			marker,
+			source,
+		}));
+		const js = exportForProduction(
+			Object.fromEntries(modules.map(({ name, source }) => [name, source])),
+		);
+		const root = scratch();
+		const files = modules.map(({ name, marker }) => {
+			const hbc = path.join(
+				root,
+				'_expo/static/js/android',
+				name.replace(/\.js$/, '.hbc'),
+			);
+			compileHermes(readFileSync(path.join(js, name), 'utf8'), hbc);
+			return { hbc, marker };
+		});
+		const result = verify(root);
+		expect(result.status).toBe(1);
+		for (const { hbc, marker } of files) {
+			expect(result.stderr).toContain(`${hbc}: ${marker}`);
+		}
+	});
+
+	it('finds a service-role token Hermes stores right after another token', () => {
+		// Hermes keeps its literals back to back, so the first token's signature
+		// runs straight into the second token's header.
+		const root = scratch();
+		const hbc = path.join(root, HBC);
+		const hosted = jwt({ iss: 'supabase', ref: 'project', role: 'anon' });
+		const bytes = compileHermes(
+			`var tokens=["${hosted}","${SERVICE_ROLE_JWT}"];globalThis.x=tokens;`,
+			hbc,
+		);
+		// The fixture must keep the two literals adjacent, or this proves nothing.
+		expect(
+			bytes.indexOf(Buffer.from(`${hosted}${SERVICE_ROLE_JWT}`, 'utf8')),
+		).toBeGreaterThan(0);
+		const result = verify(root, '--preset', 'supabase-local');
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain(`${hbc}: JWT with role service_role`);
+		expect(result.stderr).not.toContain('eyJ');
+	});
+
+	it('finds a token inside a literal Hermes stores as UTF-16', () => {
+		const root = scratch();
+		const hbc = path.join(root, HBC);
+		const literal = `Bearer ${SERVICE_ROLE_JWT} — é`;
+		const bytes = compileHermes(
+			`var header="${literal}";globalThis.x=header;`,
+			hbc,
+		);
+		// UTF-16, so the old UTF-8 read cannot see the token.
+		expect(bytes.indexOf(Buffer.from(SERVICE_ROLE_JWT, 'utf8'))).toBe(-1);
+		expect(
+			bytes.indexOf(Buffer.from(SERVICE_ROLE_JWT, 'utf16le')),
+		).toBeGreaterThan(0);
+		const result = verify(root, '--preset', 'supabase-local');
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain(`${hbc}: JWT with role service_role`);
+	});
+
+	it('reads UTF-16 text whichever byte it starts at', () => {
+		// Hermes aligns its UTF-16 literals, but the verifier does not rely on it:
+		// the same text one byte in is found too. Hand-built, since hermesc output
+		// cannot place a literal at an odd offset.
+		const url = Buffer.from('http://localhost:8081/', 'utf16le');
+		const even = scratch();
+		const odd = scratch();
+		const evenFile = path.join(even, HBC);
+		const oddFile = path.join(odd, HBC);
+		for (const [file, bytes] of [
+			[evenFile, url],
+			[oddFile, Buffer.concat([Buffer.from([0]), url])],
+		] as const) {
+			mkdirSync(path.dirname(file), { recursive: true });
+			writeFileSync(file, bytes);
+		}
+		for (const [root, file] of [
+			[even, evenFile],
+			[odd, oddFile],
+		] as const) {
+			const result = verify(root, '--forbid-loopback-urls');
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain(`${file}: http://localhost:8081`);
+		}
+	});
+});
+
 describe('--forbid-loopback-urls', () => {
 	it('flags literal loopback URLs in JavaScript and Hermes bytecode', () => {
 		const root = bundle({
@@ -470,17 +664,28 @@ describe('--forbid-loopback-urls', () => {
 				'"ws://app.localhost:8080/socket"',
 				'"http:\\/\\/127.0.0.1:9000"',
 			].join(';'),
-			'_expo/static/js/android/index-4567cdef.hbc':
-				'Æ\u001fHermes\u0000http://localhost:8081/',
 		});
+		const hbc = path.join(root, HBC);
+		// One URL Hermes stores as UTF-16, one as 8-bit bytes.
+		compileHermes(
+			'var a="Example Débug Panel",u="http://localhost:8081/café",v="http://127.0.0.1:54321/rest/v1";globalThis.x=[a,u,v];',
+			hbc,
+		);
 		const result = verify('--forbid-loopback-urls', root);
 		expect(result.status).toBe(1);
 		const js = path.join(root, BUNDLE);
-		const hbc = path.join(root, '_expo/static/js/android/index-4567cdef.hbc');
+		const lines = result.stderr.split('\n');
+		// hermesc orders its string table, and so the findings in it, as it likes.
+		expect(lines.filter((line) => line.startsWith(`${hbc}: `)).sort()).toEqual(
+			[
+				`${hbc}: http://127.0.0.1:54321`,
+				`${hbc}: http://localhost:8081`,
+			].sort(),
+		);
 		expect(result.stderr).toContain(
 			[
 				'Production bundle contains loopback URLs:',
-				`${hbc}: http://localhost:8081`,
+				...lines.filter((line) => line.startsWith(`${hbc}: `)),
 				`${js}: http://127.0.0.1:54321`,
 				`${js}: HTTPS://LOCALHOST:3000`,
 				`${js}: http://[::1]:8081`,

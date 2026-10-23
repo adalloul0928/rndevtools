@@ -53,8 +53,11 @@ export type DesktopClientHost = {
 	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
 	/**
 	 * Applies one desktop-issued action. Rejecting throws. `signal` aborts when
-	 * the client stops waiting for the action; a host holding an on-device
-	 * prompt should dismiss it and reject.
+	 * the client stops waiting for the action. With `subscribeToAuthorization`
+	 * it also aborts when internal tools authorization is revoked or changes
+	 * owner while the action runs. A host holding an on-device prompt should
+	 * dismiss it and reject when the signal aborts, and a host that can stop
+	 * and roll back the work should.
 	 */
 	runAction: (
 		action: DesktopDeviceAction,
@@ -62,6 +65,14 @@ export type DesktopClientHost = {
 	) => Promise<void>;
 	/** Current authorization. The client refuses actions while disabled. */
 	getAuthorization: () => DevtoolsAuthorization;
+	/**
+	 * Notifies the client when `getAuthorization()` may have changed, and
+	 * returns the unsubscribe. With it, the client aborts an action the moment
+	 * its grant is revoked or its owner changes; without it, the change is only
+	 * detected once the action settles. The authorization mirror's is
+	 * `subscribeToDevtoolsAuthorization`.
+	 */
+	subscribeToAuthorization?: (listener: () => void) => () => void;
 };
 
 const DEFAULT_PORT = 47_931;
@@ -93,6 +104,9 @@ const MAX_BROKER_URL_LENGTH = 8 * 1024;
 const MAX_BROKER_CANDIDATES = 100;
 const MAX_BROKER_TOKEN_LENGTH = 512;
 const MIN_REMOTE_BROKER_TOKEN_LENGTH = 16;
+// The host machine's loopback as seen from inside an Android emulator.
+// `desktopBrokerCandidates` decides when it is safe to dial.
+const ANDROID_EMULATOR_HOST_ALIAS = '10.0.2.2';
 const MAX_PENDING_DESKTOP_ACTIONS = 16;
 const MAX_DESKTOP_ACTIONS_PER_WINDOW = 60;
 const DESKTOP_ACTION_RATE_WINDOW_MS = 10_000;
@@ -105,6 +119,11 @@ type ActionResultMessage = {
 	error?: string;
 };
 
+// The host may have finished the work before it saw the abort, so the desktop
+// is told the outcome is unknown, as it is for a timeout.
+const AUTHORIZATION_CHANGED_DURING_EXECUTION =
+	'Internal tools authorization changed during execution; its outcome is unknown.';
+
 type ProcessedAction = {
 	fingerprint: string;
 	result: ActionResultMessage;
@@ -114,6 +133,15 @@ type ActionReplayLookup =
 	| { kind: 'new' }
 	| { kind: 'replay'; result: ActionResultMessage }
 	| { kind: 'conflict' };
+
+/** The host action in flight, and why the client aborted it, if it did. */
+type ActiveAction = {
+	readonly controller: AbortController;
+	/** The owner the action was admitted for. */
+	readonly ownerId: string | null;
+	/** Set before the abort for a revocation; stop and disconnect leave it. */
+	revoked: boolean;
+};
 
 /**
  * The length and hash of an action's JSON. Retaining only this keeps the
@@ -347,8 +375,67 @@ function socketUrl(host: string, port: number): string {
 	return `ws://${displayHost}:${port}/device`;
 }
 
+/**
+ * React Native's WebSocket takes connection options as a non-standard third
+ * argument, `{ headers }`, which the DOM declaration of the global stops
+ * short of. Only the shape the client passes is declared here.
+ */
+type ReactNativeWebSocketConstructor = new (
+	url: string,
+	protocols?: string | readonly string[] | null,
+	options?: { headers?: Readonly<Record<string, string>> },
+) => WebSocket;
+
+/**
+ * Connection options for one broker candidate, or undefined for the default.
+ *
+ * Without an origin header, React Native's Android transport derives one from
+ * the socket URL. For the emulator's host alias that is `http://10.0.2.2:<port>`,
+ * which the broker refuses with 403 while it has no token, because it admits
+ * only loopback origins. The connection reaches the broker from the host's own
+ * loopback, so the header names that instead. This applies only to the plain
+ * `ws:` alias candidates the client discovered itself on Android, which are
+ * the ones it dials without a token. The other candidates keep the default: the
+ * loopback ones already derive a loopback origin, and an explicit URL carries a
+ * token, which the broker checks instead of the origin.
+ */
+function brokerSocketOptions(
+	url: string,
+	allowAndroidEmulatorAlias: boolean,
+): { headers: { origin: string } } | undefined {
+	if (!allowAndroidEmulatorAlias) return undefined;
+	try {
+		const parsed = new URL(url);
+		if (
+			parsed.protocol !== 'ws:' ||
+			parsed.hostname !== ANDROID_EMULATOR_HOST_ALIAS
+		) {
+			return undefined;
+		}
+		const port = parsed.port ? `:${parsed.port}` : '';
+		return { headers: { origin: `http://127.0.0.1${port}` } };
+	} catch {
+		return undefined;
+	}
+}
+
+function openBrokerSocket(
+	url: string,
+	allowAndroidEmulatorAlias: boolean,
+): WebSocket {
+	const options = brokerSocketOptions(url, allowAndroidEmulatorAlias);
+	if (!options) return new WebSocket(url);
+	return new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
+		url,
+		undefined,
+		options,
+	);
+}
+
 function isLocalBrokerHost(hostname: string): boolean {
-	return hostname === '10.0.2.2' || isLoopbackBrokerHost(hostname);
+	return (
+		hostname === ANDROID_EMULATOR_HOST_ALIAS || isLoopbackBrokerHost(hostname)
+	);
 }
 
 function isLoopbackBrokerHost(hostname: string): boolean {
@@ -372,7 +459,7 @@ function normalizeExplicitUrl(
 		if (url.username || url.password || url.hash) return undefined;
 		const isLoopback = isLoopbackBrokerHost(url.hostname);
 		const isTrustedEmulatorAlias =
-			allowAndroidEmulatorAlias && url.hostname === '10.0.2.2';
+			allowAndroidEmulatorAlias && url.hostname === ANDROID_EMULATOR_HOST_ALIAS;
 		if (url.protocol === 'ws:' && !isLoopback && !isTrustedEmulatorAlias) {
 			return undefined;
 		}
@@ -438,7 +525,9 @@ export function desktopBrokerCandidates({
 		// physical phone it is an ordinary routable RFC1918 address, so sweeping it
 		// would offer a full unauthenticated diagnostic snapshot to whatever
 		// machine happens to hold it on the developer's network.
-		platform === 'android' && isEmulator ? '10.0.2.2' : undefined,
+		platform === 'android' && isEmulator
+			? ANDROID_EMULATOR_HOST_ALIAS
+			: undefined,
 		'127.0.0.1',
 		'localhost',
 	].filter(
@@ -539,7 +628,8 @@ export function startDesktopClient(
 	let snapshotTimer: ReturnType<typeof setInterval> | undefined;
 	let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 	let actionQueue = Promise.resolve();
-	let activeActionController: AbortController | undefined;
+	let activeAction: ActiveAction | undefined;
+	let unsubscribeAuthorization: (() => void) | undefined;
 	let backpressureReported = false;
 	const diagnostics: DesktopDiagnostic[] = [];
 	const processedActions = new DesktopActionReplayCache();
@@ -585,10 +675,34 @@ export function startDesktopClient(
 
 	const cancelActiveAction = () => {
 		try {
-			activeActionController?.abort();
+			activeAction?.controller.abort();
 		} catch {
 			// A host's abort observer must not interrupt diagnostics teardown.
 		}
+	};
+
+	/** Whether the host still grants internal tools to `ownerId`. */
+	const isAuthorizedOwner = (ownerId: string | null): boolean => {
+		try {
+			const authorization = host.getAuthorization();
+			return authorization.enabled && authorization.ownerId === ownerId;
+		} catch {
+			// A failed authorization read is a revocation boundary.
+			return false;
+		}
+	};
+
+	/**
+	 * Aborts the active action once its grant no longer holds. Only the abort
+	 * happens here: `handleAction` answers the desktop, so an action gets one
+	 * result however the change was noticed.
+	 */
+	const onAuthorizationChange = () => {
+		const current = activeAction;
+		if (!active || !current || current.revoked) return;
+		if (isAuthorizedOwner(current.ownerId)) return;
+		current.revoked = true;
+		cancelActiveAction();
 	};
 
 	const sendSerialized = (serialized: string, target = socket): boolean => {
@@ -749,13 +863,23 @@ export function startDesktopClient(
 	/** Runs one host action, giving up after `actionTimeoutMs`. */
 	const runHostAction = async (
 		action: DesktopDeviceAction,
-	): Promise<'completed' | 'timed-out' | 'cancelled'> => {
-		const controller = new AbortController();
-		activeActionController = controller;
+		expectedOwnerId: string | null,
+	): Promise<'completed' | 'timed-out' | 'cancelled' | 'revoked'> => {
+		const current: ActiveAction = {
+			controller: new AbortController(),
+			ownerId: expectedOwnerId,
+			revoked: false,
+		};
+		const { controller } = current;
+		activeAction = current;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let cancel: (() => void) | undefined;
-		const cancellation = new Promise<'cancelled'>((resolve) => {
-			cancel = () => resolve('cancelled');
+		const cancellation = new Promise<'cancelled' | 'revoked'>((resolve) => {
+			// 'cancelled' is stop or disconnect, which need no answer. 'revoked' is
+			// an authorization change that the host's subscription reported
+			// while the action ran. `revoked` is set before the abort, so this
+			// listener, registered before the host's, tells the two apart.
+			cancel = () => resolve(current.revoked ? 'revoked' : 'cancelled');
 			controller.signal.addEventListener('abort', cancel, { once: true });
 		});
 		try {
@@ -774,9 +898,7 @@ export function startDesktopClient(
 		} finally {
 			clearTimeout(timer);
 			if (cancel) controller.signal.removeEventListener('abort', cancel);
-			if (activeActionController === controller) {
-				activeActionController = undefined;
-			}
+			if (activeAction === current) activeAction = undefined;
 		}
 	};
 
@@ -816,7 +938,9 @@ export function startDesktopClient(
 		}
 		let result: ActionResultMessage;
 		try {
-			const outcome = await runHostAction(action);
+			const outcome = await runHostAction(action, expectedOwnerId);
+			// Stop and disconnect need no answer: the broker fails the action
+			// itself when the device goes.
 			if (outcome === 'cancelled') return;
 			if (outcome === 'timed-out') {
 				// The queue moves on: one action that never settles, such as a prompt
@@ -831,6 +955,20 @@ export function startDesktopClient(
 					actionId: action.actionId,
 					ok: false,
 					error: `Desktop action timed out after ${actionTimeoutMs} ms; its outcome is unknown.`,
+				};
+			} else if (outcome === 'revoked' || !isAuthorizedOwner(expectedOwnerId)) {
+				// Without a subscription, or when the host settled before the
+				// abort reached it, the change shows only now. The work may be done.
+				record(
+					'warn',
+					action.tool,
+					`Desktop action revoked: ${action.command}; internal tools authorization changed during execution.`,
+				);
+				result = {
+					type: 'action-result',
+					actionId: action.actionId,
+					ok: false,
+					error: AUTHORIZATION_CHANGED_DURING_EXECUTION,
 				};
 			} else {
 				record(
@@ -875,7 +1013,7 @@ export function startDesktopClient(
 		const urlLabel = socketDiagnosticLabel(url);
 		let nextSocket: WebSocket;
 		try {
-			nextSocket = new WebSocket(url);
+			nextSocket = openBrokerSocket(url, allowAndroidEmulatorAlias);
 		} catch (error) {
 			record(
 				'warn',
@@ -1135,6 +1273,18 @@ export function startDesktopClient(
 		};
 	};
 
+	try {
+		const unsubscribe = host.subscribeToAuthorization?.(onAuthorizationChange);
+		unsubscribeAuthorization =
+			typeof unsubscribe === 'function' ? unsubscribe : undefined;
+	} catch (error) {
+		record(
+			'warn',
+			'authorization',
+			`Could not subscribe to authorization changes (${diagnosticErrorText(error)}); a change during an action is detected when it settles.`,
+		);
+	}
+
 	if (brokerCandidates.length === 0) {
 		record(
 			'error',
@@ -1150,6 +1300,13 @@ export function startDesktopClient(
 		stop: () => {
 			active = false;
 			cancelActiveAction();
+			const unsubscribe = unsubscribeAuthorization;
+			unsubscribeAuthorization = undefined;
+			try {
+				unsubscribe?.();
+			} catch {
+				// A listener the host cannot remove stays inert: `active` is false.
+			}
 			if (reconnectTimer) clearTimeout(reconnectTimer);
 			reconnectTimer = undefined;
 			clearConnectionTimers();

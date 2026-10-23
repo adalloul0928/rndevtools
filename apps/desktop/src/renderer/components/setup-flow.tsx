@@ -207,16 +207,23 @@ function SetupWindow({ step }: { step: SetupStep }) {
 					) : (
 						<img alt="" className="setup-app-icon" src={appIcon} />
 					)}
-					<div className="setup-text">
+					{/* Focus stays on the same primary button from step to step, so
+					    nothing would announce a new step without a live region. */}
+					<div aria-atomic="true" aria-live="polite" className="setup-text">
 						<h1 id="setup-title">{copy.title}</h1>
 						<p>{copy.body}</p>
 					</div>
 					<SetupAside step={step} />
 				</div>
 				<div className="setup-stage">
-					<div className="setup-stage-card">
+					<section
+						aria-label={`${copy.title}: details`}
+						className="setup-stage-card"
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: the step's details scroll when they overflow (many worktrees, long snippets), and a scrolling region must be reachable from the keyboard
+						tabIndex={0}
+					>
 						<SetupStage step={step} />
-					</div>
+					</section>
 				</div>
 			</div>
 			<footer className="setup-footer">

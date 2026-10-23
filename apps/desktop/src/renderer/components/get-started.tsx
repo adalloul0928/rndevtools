@@ -95,7 +95,10 @@ export function useGetStarted() {
 			getStartedTasks({
 				capability: simulator.state.capability,
 				repositories: lanes.state.repositories,
-				worktreeCount: lanes.state.worktrees.length,
+				// The task names the first repository, so count only its worktrees.
+				worktreeCount: lanes.state.worktrees.filter(
+					(worktree) => worktree.repositoryRoot === lanes.state.repositories[0]
+				).length,
 				bootedCount: simulator.state.devices.filter(
 					(device) => device.state === 'booted'
 				).length,
@@ -117,7 +120,7 @@ export function useGetStarted() {
 			simulator.state.devices,
 			simulator.state.captures.length,
 			lanes.state.repositories,
-			lanes.state.worktrees.length,
+			lanes.state.worktrees,
 			lanes.state.lanes.length,
 			desktop.state?.devices,
 			supabase.availability.platform.supported,
@@ -263,6 +266,15 @@ export function GetStartedChecklist({
 					onPress={() => {
 						setChecklistHidden(true);
 						onRun?.();
+						// This button and the card that opened it both unmount, which
+						// would drop focus to the page; hand it to the current tool.
+						requestAnimationFrame(() =>
+							document
+								.querySelector<HTMLElement>(
+									'.desktop-sidebar [aria-current="page"]'
+								)
+								?.focus()
+						);
 					}}
 				>
 					Hide Get started
@@ -273,6 +285,16 @@ export function GetStartedChecklist({
 }
 
 /** The sidebar's progress card; it opens the checklist until every task is done. */
+/**
+ * Keeps the checklist popover below the titlebar: bounded by the whole
+ * window, it grew to 683 of 700 px at the minimum size and covered the
+ * workspace switch. React Aria then limits its height to fit.
+ */
+function popoverBoundary(): { boundaryElement?: Element } {
+	const body = document.querySelector('.desktop-body');
+	return body ? { boundaryElement: body } : {};
+}
+
 export function GetStartedCard() {
 	const { checklistHidden } = useOnboarding();
 	const { progress } = useGetStarted();
@@ -299,7 +321,11 @@ export function GetStartedCard() {
 					</span>
 				) : null}
 			</Button>
-			<Popover.Content className="get-started-popover" placement="right bottom">
+			<Popover.Content
+				{...popoverBoundary()}
+				className="get-started-popover"
+				placement="right bottom"
+			>
 				<Popover.Dialog aria-label="Get started">
 					<GetStartedChecklist onRun={() => setOpen(false)} />
 				</Popover.Dialog>

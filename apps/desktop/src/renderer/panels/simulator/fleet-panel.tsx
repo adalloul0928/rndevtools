@@ -871,7 +871,9 @@ function DeviceWall({
 								{primaryAgent(row) ? (
 									<AgentGlyph kind={primaryAgent(row)?.kind ?? 'other'} />
 								) : null}
-								<strong className="device-tile-name">{row.device.name}</strong>
+								<strong className="device-tile-name" title={row.device.name}>
+									{row.device.name}
+								</strong>
 								<span
 									className={`device-tile-dot ${row.live ? 'is-live' : row.transitioning ? 'is-transitioning' : ''}`}
 									aria-hidden="true"
@@ -914,7 +916,11 @@ function FleetRowText({
 	return (
 		<div className="sim-list-copy">
 			<span className="fleet-row-line">
-				<strong className="fleet-row-name">{target.name}</strong>
+				{/* Names such as "iPad Air 11-inch (M4)" and "iPad Air 13-inch (M4)"
+				    truncate to the same text; the full name is on hover. */}
+				<strong className="fleet-row-name" title={target.name}>
+					{target.name}
+				</strong>
 				<span
 					className="fleet-row-meta"
 					title={
