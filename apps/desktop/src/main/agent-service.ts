@@ -1,6 +1,10 @@
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import type {
+	AgentCliClaim,
+	AgentIdentityResolution,
+} from '../shared/agent-cli-protocol';
 import {
 	AGENT_TOUCH_TTL_MS,
 	type AgentClaim,
@@ -18,6 +22,7 @@ import {
 import {
 	type DeviceHold,
 	type DeviceHolder,
+	type DeviceRequester,
 	decideDeviceAccess,
 	type HolderLiveness,
 	type HolderLivenessInputs,
@@ -25,6 +30,11 @@ import {
 	resolveDeviceHolds,
 	resolveHolderLiveness,
 } from '../shared/device-hold';
+import {
+	type ProcessTableReader,
+	processAncestry,
+	readProcessTable,
+} from './agent-peer';
 import {
 	discoverAgentSessions,
 	type SessionDiscoveryResult,
@@ -155,6 +165,7 @@ export class AgentService {
 	readonly #lanes: AgentLaneSource;
 	readonly #holders: AgentHolderSource;
 	readonly #discover: () => Promise<SessionDiscoveryResult>;
+	readonly #processTable: ProcessTableReader;
 	readonly #now: () => number;
 	readonly #pollIntervalMs: number;
 	readonly #listeners = new Set<AgentListener>();
@@ -184,6 +195,7 @@ export class AgentService {
 		lanes,
 		holders = () => [],
 		discover = discoverAgentSessions,
+		processTable = readProcessTable,
 		pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 		now = Date.now,
 	}: {
@@ -192,6 +204,8 @@ export class AgentService {
 		/** Holders of other resources, so their clocks run; see `holderLiveness`. */
 		holders?: AgentHolderSource;
 		discover?: () => Promise<SessionDiscoveryResult>;
+		/** The live process table, for `identify`; tests inject one. */
+		processTable?: ProcessTableReader;
 		pollIntervalMs?: number;
 		now?: () => number;
 	}) {
@@ -199,6 +213,7 @@ export class AgentService {
 		this.#lanes = lanes;
 		this.#holders = holders;
 		this.#discover = discover;
+		this.#processTable = processTable;
 		this.#pollIntervalMs = pollIntervalMs;
 		this.#now = now;
 		this.#updatedAt = now();
@@ -245,22 +260,117 @@ export class AgentService {
 		return resolveHolderLiveness(holder, this.#livenessInputs(), directory);
 	}
 
-	/** Whether `requester` (an agent, or the operator when undefined) may touch the device. */
-	access(simulatorUdid: string, requester: DeviceHolder | undefined) {
+	/**
+	 * Whether `requester` (an agent, the operator, or an anonymous socket
+	 * request) may touch the device; see `decideDeviceAccess`.
+	 */
+	access(simulatorUdid: string, requester: DeviceRequester) {
 		const hold = this.holds().get(simulatorUdid.toUpperCase());
 		const lane = hold?.laneId
 			? this.#lanes().find((candidate) => candidate.id === hold.laneId)
 			: undefined;
-		const session = requester
-			? this.#sessions.find(
-					(candidate) =>
-						agentSessionKey(candidate) === agentSessionKey(requester)
-				)
-			: undefined;
+		const session =
+			typeof requester === 'string'
+				? undefined
+				: this.#sessions.find(
+						(candidate) =>
+							agentSessionKey(candidate) === agentSessionKey(requester)
+					);
 		return decideDeviceAccess(hold, requester, this.#now(), {
 			directory: lane?.worktreePath,
 			requesterCwd: session?.cwd,
 		});
+	}
+
+	/**
+	 * Resolves who sent a request, from the connection rather than the
+	 * envelope. `claimed` is the session the envelope names and `peerPid` the
+	 * process that sent it, given only once the CLI service has proven that it
+	 * owns the connection. The rules, in order:
+	 *
+	 * 1. No claim: `anonymous`, whoever sent it.
+	 * 2. A claim without a proven sender, or a sender that cannot be traced
+	 *    because the process table cannot be read: `unverified`.
+	 * 3. The sender, or an ancestor of it (nearest first), is the process of a
+	 *    discovered session S (a Claude Code session's pid, under which its
+	 *    shell, its hooks and the MCP servers it spawns run): the identity is S.
+	 *    A claim of exactly S is `verified` by `process`; any other claim is a
+	 *    `mismatch`. A claim that the discovered list does not confirm is
+	 *    checked again after discovering sessions afresh, once: a session that
+	 *    started, or took a new id (a /clear, a resume), since the last poll is
+	 *    not in the list yet, and its own requests must not read as another's.
+	 * 4. No matching discovered session in the ancestry: never promote the
+	 *    claim into an identity. Codex threads share one process, and other
+	 *    agents and ended sessions may have no discoverable process. Their
+	 *    claims remain unverified until a session-bound proof is available.
+	 */
+	async identify({
+		claimed,
+		peerPid,
+	}: {
+		claimed?: AgentCliClaim;
+		peerPid?: number;
+	}): Promise<AgentIdentityResolution> {
+		if (!claimed) return { status: 'anonymous' };
+		if (peerPid === undefined) {
+			return {
+				status: 'unverified',
+				reason:
+					'The process that sent this request did not prove that it owns the connection, so the agent session it names cannot be verified.',
+			};
+		}
+		let ancestry: number[];
+		try {
+			ancestry = processAncestry(await this.#processTable(), peerPid);
+		} catch {
+			return {
+				status: 'unverified',
+				reason:
+					'The process table could not be read, so the process that sent this request cannot be mapped to its agent session.',
+			};
+		}
+		const agent = { kind: claimed.kind, sessionId: claimed.sessionId };
+		const key = agentSessionKey(agent);
+		let owner = this.#sessionOfProcess(ancestry);
+		if (!owner || agentSessionKey(owner) !== key) {
+			await this.refresh();
+			owner = this.#sessionOfProcess(ancestry);
+		}
+		if (owner) {
+			if (agentSessionKey(owner) === key) {
+				return { status: 'verified', agent, basis: 'process' };
+			}
+			return {
+				status: 'mismatch',
+				reason: `The request names ${agent.kind} session ${agent.sessionId}, but the process that sent it belongs to another ${owner.kind} session.`,
+			};
+		}
+		// A live session owned by another process is a definite mismatch.
+		if (
+			this.#sessions.some(
+				(session) =>
+					session.pid !== undefined && agentSessionKey(session) === key
+			)
+		) {
+			return {
+				status: 'mismatch',
+				reason: `The request names ${agent.kind} session ${agent.sessionId}, a live session, but the process that sent it does not run under it.`,
+			};
+		}
+		return {
+			status: 'unverified',
+			reason:
+				'The connection owner could not be mapped to the claimed agent session. Shared-process, undiscovered, and ended sessions cannot establish ownership from an identifier alone.',
+		};
+	}
+
+	/** The discovered session whose process comes first in `ancestry`, if any. */
+	#sessionOfProcess(ancestry: readonly number[]): AgentSession | undefined {
+		for (const pid of ancestry) {
+			const session = this.#sessions.find((candidate) => candidate.pid === pid);
+			if (session) return session;
+		}
+		return undefined;
 	}
 
 	subscribe(listener: AgentListener): () => void {

@@ -224,6 +224,19 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- Agent requests over the local socket now prove which process sent them. The
+  CLI, its MCP server and its session-end hook send their own pid, the desktop
+  checks that the process owns the connection, and it follows the process's
+  parents to the Claude Code session that spawned it. A request that names
+  another live session is refused with `agent_identity_mismatch`. Before, the
+  session was whatever the request said it was, and a request that named none
+  counted as the person at the desktop: `rndevtools lane up --udid` on a
+  Simulator another agent had claimed took the claim over, and setting another
+  session's id let `release --all` stop its lanes. Requests with no identity,
+  may now use free Simulators only and cannot claim, release or take over a
+  hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
+  Codex threads, synthetic MCP identities and ended sessions, cannot perform
+  ownership-changing operations. Lane commands no longer accept an `agent` field.
 - Background SimSlim status checks now take a Simulator's lease and skip one
   with a running job, never boot a shut-down Simulator (it shows as not
   inspected, not as clean), and update each Simulator's status on its own. A
@@ -239,3 +252,10 @@
   runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
   missing verification in a notice and job summary. Desktop changes must
   pass the full local quality gate before merging when it skips.
+- A local Supabase stack whose first start is still running when RN Devtools
+  quits is now recorded before the CLI is spawned. When the restarted app
+  adopts that start, it checks that the stack listens on 127.0.0.1 only and
+  stops it if not, and stops it after the usual linger once nothing holds it,
+  as for any other stack; a first start that failed meanwhile is marked
+  interrupted, like a cancelled one. Before, the stack ran with no record, no
+  loopback check and no automatic stop.

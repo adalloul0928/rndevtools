@@ -935,8 +935,9 @@ describe('LaneService', () => {
 			if (
 				!lane ||
 				!holder ||
-				!requester ||
-				(holder.kind === requester.kind &&
+				requester === 'operator' ||
+				(typeof requester !== 'string' &&
+					holder.kind === requester.kind &&
 					holder.sessionId === requester.sessionId)
 			) {
 				return { allowed: true };
@@ -3301,6 +3302,140 @@ describe('LaneService', () => {
 			expect(receipt.error).toMatch(/held by codex session thread-b/);
 			expect(simulator.actions).toEqual([]);
 			expect(metro.started).toEqual([]);
+		});
+	});
+
+	describe('a start from a request with no verified identity', () => {
+		const LANE_AGENT = { kind: 'claude' as const, sessionId: 'session-a' };
+		const OTHER_AGENT = { kind: 'codex' as const, sessionId: 'thread-b' };
+		const anonymous = { requester: 'anonymous' } as const;
+		let agents: AgentService | undefined;
+		let guarded: LaneService | undefined;
+
+		/** The desktop's wiring: the lane and agent services ask each other. */
+		async function wire() {
+			const lanes = new LaneService({
+				store: new LaneStore(path.join(root, 'anonymous-lanes')),
+				simulator,
+				metro,
+				worktrees,
+				holds: () => holder.holds(),
+				deviceAccess: (udid, requester) => holder.access(udid, requester),
+				now: () => now,
+			});
+			const holder = new AgentService({
+				directory: path.join(root, 'anonymous-agents'),
+				lanes: () => lanes.holdingLanes(),
+				discover: async () => ({
+					sessions: [
+						{ ...LANE_AGENT, title: 'lane agent', cwd: WORKTREE },
+						{ ...OTHER_AGENT, title: 'other agent', cwd: OTHER_WORKTREE },
+					],
+					claude: 'ok',
+					codex: 'ok',
+				}),
+				pollIntervalMs: 60_000,
+				now: () => now,
+			});
+			await lanes.start();
+			await holder.start();
+			agents = holder;
+			guarded = lanes;
+			return { agents: holder, lanes };
+		}
+
+		afterEach(async () => {
+			await agents?.stop();
+			await guarded?.stop();
+			agents = undefined;
+			guarded = undefined;
+		});
+
+		const start = (input: { simulatorUdid?: string; actionId: string }) => ({
+			kind: 'lane.start' as const,
+			worktreePath: WORKTREE,
+			environment: 'development' as const,
+			launch: false,
+			...input,
+		});
+		const signal = new AbortController().signal;
+
+		it('is refused a named Simulator that another session claimed after the router checked it, which an absent agent would not have been', async () => {
+			const wired = await wire();
+			// The claim lands while the start lists worktrees, before it reserves.
+			const list = worktrees.listWorktrees;
+			worktrees.listWorktrees = async () => {
+				await wired.agents.runOperation({
+					kind: 'agent.claim',
+					simulatorUdid: UDID,
+					agent: OTHER_AGENT,
+				});
+				return list();
+			};
+			const receipt = await wired.lanes.runOperation(
+				start({ actionId: 'op-anonymous-claimed', simulatorUdid: UDID }),
+				signal,
+				anonymous
+			);
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toMatch(
+				/held by codex session thread-b.*free Simulators only\.$/
+			);
+			expect(simulator.actions).toEqual([]);
+			expect(metro.started).toEqual([]);
+			expect(wired.lanes.getState().lanes).toEqual([]);
+		});
+
+		it('is refused the lane another session started for the same app while it waited, which an absent agent would resume', async () => {
+			metro.healthyPorts.add(8_100);
+			const wired = await wire();
+			await wired.lanes.runOperation(
+				{
+					...start({ actionId: 'op-owner', simulatorUdid: UDID }),
+					agent: LANE_AGENT,
+				},
+				signal
+			);
+			const opens = () =>
+				simulator.actions.filter((action) => action.kind === 'url.open').length;
+
+			const refused = await wired.lanes.runOperation(
+				{ ...start({ actionId: 'op-anonymous' }), launch: true },
+				signal,
+				anonymous
+			);
+			expect(refused.completed).toBe(false);
+			expect(refused.error).toMatch(
+				/held by claude session session-a.*free Simulators only\.$/
+			);
+			expect(opens()).toBe(0);
+			expect(metro.stopped).toEqual([]);
+
+			// The operator (no marker) is the renderer's, and resumes it.
+			const resumed = await wired.lanes.runOperation(
+				{ ...start({ actionId: 'op-operator' }), launch: true },
+				signal
+			);
+			expect(resumed.completed).toBe(true);
+			expect(opens()).toBe(1);
+		});
+
+		it('starts on a free Simulator as it always did, and holds nothing for an agent', async () => {
+			healthyMetro();
+			const wired = await wire();
+			const receipt = await wired.lanes.runOperation(
+				start({ actionId: 'op-anonymous-free' }),
+				signal,
+				anonymous
+			);
+			expect(receipt.completed).toBe(true);
+			expect(receipt.lane?.agent).toBeUndefined();
+			expect(
+				wired.agents.holds().get(receipt.lane?.simulatorUdid ?? '')
+			).toMatchObject({
+				via: 'lane',
+				holderLive: true,
+			});
 		});
 	});
 

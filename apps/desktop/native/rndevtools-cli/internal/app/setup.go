@@ -247,8 +247,11 @@ func sessionEndReleaseCommand(cwd string) json.RawMessage {
 
 // runSessionEndHook releases the ending session's lanes and claims. The
 // session id comes from the payload (both agents send one); the environment
-// variables are a fallback. Nothing is fatal here: a hook that fails loudly on
-// exit helps nobody, so problems go to stderr and the exit status stays 0.
+// variables are a fallback. Either way it is only a claim: the request also
+// names this process's pid, which the desktop traces to the agent that ran the
+// hook, and it refuses an id that belongs to another live session. Nothing is
+// fatal here: a hook that fails loudly on exit helps nobody, so problems go to
+// stderr and the exit status stays 0.
 func runSessionEndHook(config Config) int {
 	payload := setup.ReadSessionEnd(config.Stdin)
 	getenv := config.lookup()
@@ -292,6 +295,7 @@ func runSessionEndHook(config Config) int {
 		ID:       requestID,
 		Command:  sessionEndReleaseCommand(payload.Cwd),
 		Agent:    agent,
+		Peer:     &protocol.Peer{PID: os.Getpid()},
 	})
 	if err != nil {
 		// The desktop is not running: there is nothing holding a lane either.

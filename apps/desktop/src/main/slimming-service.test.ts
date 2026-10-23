@@ -630,10 +630,13 @@ describe('slimming service', () => {
 		}
 	});
 	it('refuses a mutation on a device another session holds, for agents and the panel alike', async () => {
-		const decisions: Array<[string, string | undefined]> = [];
+		const decisions: Array<[string, string]> = [];
 		const deviceAccess: DeviceAccessPort = (udid, requester) => {
-			decisions.push([udid, requester?.sessionId]);
-			if (requester?.sessionId === 'owner') return { allowed: true };
+			// An action with no requester comes from the panel: the operator.
+			const who =
+				typeof requester === 'string' ? requester : requester.sessionId;
+			decisions.push([udid, who]);
+			if (who === 'owner') return { allowed: true };
 			return {
 				allowed: false,
 				reason: `Simulator ${udid} is held by claude session owner through lane lane-1.`,
@@ -694,7 +697,7 @@ describe('slimming service', () => {
 		);
 		expect(decisions.map(([, who]) => who)).toEqual([
 			'stranger',
-			undefined,
+			'operator',
 			'owner',
 		]);
 

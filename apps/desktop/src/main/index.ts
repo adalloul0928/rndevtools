@@ -1582,8 +1582,12 @@ if (!app.requestSingleInstanceLock()) {
 				),
 				encode: createNativeImageFrameEncoder(nativeImage),
 			});
+			// Who sent each socket request is the agent service's call: it knows
+			// the live sessions and the processes they run.
+			const identityService = agentService;
 			agentCliService = new AgentCliService({
 				socketPath: agentSocketPath,
+				identify: (input) => identityService.identify(input),
 				handler: createAgentCommandRouter({
 					broker,
 					simulator: simulatorService,
