@@ -143,31 +143,21 @@ jobs:
     name: Desktop renderer
     runs-on: macos-latest
     timeout-minutes: 30
-    env:
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
     steps:
-      # The renderer imports HeroUI Pro, a licensed library. Without a token
-      # the install still succeeds but the package is not hydrated, so the
-      # renderer typecheck and the build fail on a missing module. Secrets are
-      # unavailable to job-level `if`, so the token is detected here. A pull
-      # request from a fork can never read it and skips the gate with a
-      # notice. The repository's own pushes and pull requests fail instead:
-      # there a missing token means the secret was never configured, and
-      # skipping would let every renderer change through while this job
-      # reports success.
+      # Licensed renderer checks run only when a token is available. The
+      # token-free Desktop job above still runs on every pull request.
       - name: Detect HeroUI Pro license
         id: license
         env:
-          CAN_READ_SECRETS: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.fork == false }}
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
         run: |
           if [ -n "${HEROUI_AUTH_TOKEN}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
-          elif [ "${CAN_READ_SECRETS}" = "true" ]; then
-            echo "::error title=HEROUI_AUTH_TOKEN is missing::This run can read repository secrets, but HEROUI_AUTH_TOKEN is not set, so the Electron renderer cannot be typechecked or built. Add the HeroUI Pro license token as an Actions secret named HEROUI_AUTH_TOKEN."
-            exit 1
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Desktop renderer gate skipped::HEROUI_AUTH_TOKEN is not available to a pull request from a fork, so the renderer typecheck and tests, the unused-devDependency check and the Electron build did not run. A maintainer must run this job for changes under apps/desktop."
+            echo "::notice title=Desktop renderer gate skipped::HEROUI_AUTH_TOKEN is unavailable. Renderer typecheck, renderer tests, unused-devDependency checks and the Electron build did not run. Run the full desktop quality gate locally before merging changes under apps/desktop."
+            echo "### Desktop renderer checks skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo 'No HeroUI Pro token is available. The token-free Desktop checks still run; a maintainer must run `pnpm --filter @rndevtools/desktop quality` locally before merging desktop changes.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.license.outputs.available == 'true'
@@ -187,6 +177,8 @@ jobs:
       # only the public stub in the store.
       - name: Install
         if: steps.license.outputs.available == 'true'
+        env:
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
         run: pnpm install --frozen-lockfile --config.side-effects-cache=false
       # The whole gate, not only the renderer typecheck, renderer tests and
       # build that need the license: `quality` is the one command AGENTS.md

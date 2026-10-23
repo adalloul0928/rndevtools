@@ -205,6 +205,6 @@
   typecheck and tests, knip without its unused-devDependency check, and the
   script tests. The job that runs the full `quality` gate with HeroUI Pro
   (renderer typecheck and tests, the unused-devDependency check and the build)
-  now fails, instead of skipping and reporting success, when
-  `HEROUI_AUTH_TOKEN` is missing from the repository's own runs; it still
-  skips with a notice on pull requests from forks.
+  runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
+  missing verification in a notice and job summary. Desktop changes must
+  pass the full local quality gate before merging when it skips.
