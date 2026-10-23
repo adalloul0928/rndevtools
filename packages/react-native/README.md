@@ -421,3 +421,7 @@ by the broker retires rather than reconnecting and evicting its replacement.
 revision avoids rebuilding and serializing the snapshot; client diagnostics still
 trigger updates and heartbeats continue. Hosts without a revision source, or with
 a failed/invalid revision read, retain the once-per-second capture fallback.
+
+An action refused because internal tools are unauthorized leaves diagnostics
+connected. Authorization-read failures refuse safely too. Reply pacing, queue
+bounds and action admission limits still close abusive connections.

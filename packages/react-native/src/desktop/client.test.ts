@@ -645,6 +645,57 @@ describe('desktop client', () => {
 		});
 	});
 
+	it.each([false, true])(
+		'keeps snapshots connected after an authorization refusal (read throws=%s)',
+		async (throws) => {
+			jest.useFakeTimers();
+			const authorization = jest.fn(() => {
+				if (throws) throw new Error('owner unavailable');
+				return { enabled: false, ownerId: null };
+			});
+			const client = startDesktopClient({
+				host: { ...testHost, getAuthorization: authorization },
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				expect(() => socket.receive(consoleClear('refused'))).not.toThrow();
+				await jest.advanceTimersByTimeAsync(2_000);
+				expect(socket.close).not.toHaveBeenCalled();
+				expect(actionResults(socket)).toContainEqual(
+					expect.objectContaining({ actionId: 'refused', ok: false }),
+				);
+				expect(
+					sentMessages(socket).filter((message) => message.type === 'snapshot')
+						.length,
+				).toBeGreaterThan(1);
+				expect(mockRunDesktopAction).not.toHaveBeenCalled();
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it('bounds a flood of unauthorized action replies', () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			const socket = latestSocket();
+			socket.open();
+			for (let i = 0; i < 200; i++)
+				socket.receive(consoleClear(`refused-${i}`));
+			expect(socket.close).toHaveBeenCalled();
+			expect(actionResults(socket).length).toBeLessThanOrEqual(61);
+			expect(mockRunDesktopAction).not.toHaveBeenCalled();
+		} finally {
+			client.stop();
+		}
+	});
+
 	it('rechecks the authorized owner before queued actions execute', async () => {
 		let finishFirstAction: (() => void) | undefined;
 		mockRunDesktopAction.mockImplementationOnce(
@@ -1799,11 +1850,13 @@ describe('desktop client', () => {
 			for (let attempt = 0; attempt < 3; attempt += 1) {
 				const socket = latestSocket();
 				socket.open();
-				// Unauthorized, so the client refuses and closes with 1008 itself.
-				socket.receive(consoleClear(`unauthorized-${attempt}`));
+				// A wrong-device action is a protocol violation and closes with 1008.
+				socket.receive(
+					consoleClear(`wrong-device-${attempt}`, 'another-device'),
+				);
 				expect(socket.close).toHaveBeenCalledWith(
 					1008,
-					'internal tools authorization required',
+					'desktop action for another device',
 				);
 				delays.push(await reconnectDelayMs());
 			}
