@@ -166,7 +166,8 @@ export function ToolsSheet({
 		return (
 			<Modal
 				animationType="slide"
-				onRequestClose={onClose}
+				onRequestClose={selectedPlugin ? onBack : onClose}
+				testID="devtools-sheet-modal"
 				presentationStyle="overFullScreen"
 				statusBarTranslucent
 				transparent

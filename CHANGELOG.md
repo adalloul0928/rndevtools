@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
   and omitting undeclared fields instead of entering a broker rejection loop.
 
@@ -321,9 +323,8 @@
 
 ### Desktop app
 
-- Mutation helpers must match the verified Electron signing team and compiled
-  handshake team. Unsigned local builds report them as untrusted before offering
-  controls that the native broker would refuse.
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
@@ -335,6 +336,10 @@
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
+- Mutation helpers must match the verified Electron signing team and compiled
+  handshake team. Unsigned local builds report them as untrusted before offering
+  controls that the native broker would refuse.
+
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 

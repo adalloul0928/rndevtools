@@ -38,7 +38,7 @@ test('query panel switches tabs and filters', async () => {
 	});
 
 	// Status filters toggle aria-pressed.
-	const errors = window.getByRole('button', { name: 'errors', exact: true });
+	const errors = window.getByRole('button', { name: 'Errors', exact: true });
 	await errors.click();
 	await expect(errors).toHaveAttribute('aria-pressed', 'true');
 
@@ -85,7 +85,7 @@ test('query detail exposes refetch and invalidate on a selected query', async ()
 	await expect(
 		window.getByRole('heading', { name: 'React Query' })
 	).toBeVisible();
-	await window.getByRole('button', { name: 'all', exact: true }).click();
+	await window.getByRole('button', { name: 'All', exact: true }).click();
 	await expect(window.locator('.desktop-grid')).toBeVisible({
 		timeout: 20_000,
 	});
