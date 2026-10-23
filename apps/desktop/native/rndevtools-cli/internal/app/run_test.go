@@ -253,19 +253,21 @@ func TestRunSetupDryRunAndHook(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	exitCode = Run(Config{
-		Arguments: []string{"hook", "claude-pre-tool-use"},
-		Stdin:     strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44"}}`),
-		Stdout:    &stdout,
-		Stderr:    &stderr,
+		SocketPath: socketPath,
+		Arguments:  []string{"hook", "claude-pre-tool-use"},
+		Stdin:      strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44"}}`),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
 	})
 	if exitCode != 2 || !strings.Contains(stderr.String(), "rndevtools") {
 		t.Fatalf("hook exit %d stderr %q", exitCode, stderr.String())
 	}
 	exitCode = Run(Config{
-		Arguments: []string{"hook", "claude-pre-tool-use"},
-		Stdin:     strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl list"}}`),
-		Stdout:    &stdout,
-		Stderr:    &stderr,
+		SocketPath: socketPath,
+		Arguments:  []string{"hook", "claude-pre-tool-use"},
+		Stdin:      strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl list"}}`),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
 	})
 	if exitCode != ExitSuccess {
 		t.Fatalf("read-only simctl must pass, exit %d", exitCode)
