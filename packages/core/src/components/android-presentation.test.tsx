@@ -245,6 +245,31 @@ describe('Android presentation boundary', () => {
 		expect(onClose).toHaveBeenCalledTimes(1);
 	});
 
+	it('Android Back returns to the tool list before dismissing the sheet', async () => {
+		const onBack = jest.fn();
+		const onClose = jest.fn();
+		const props = {
+			actions,
+			isPresented: true,
+			onBack,
+			onClose,
+			onPresentationModeChange: jest.fn(),
+			onQuickActionPinnedChange: jest.fn(),
+			onSelectPlugin: jest.fn(),
+			pinnedPillQuickActionIds: [],
+			plugins: [plugin],
+			safeAreaTop: 24,
+			title: 'Developer Tools',
+		};
+		await render(<ToolsSheet {...props} selectedPlugin={plugin} />);
+		await fireEvent(screen.getByTestId('devtools-sheet-modal'), 'requestClose');
+		expect(onBack).toHaveBeenCalledTimes(1);
+		expect(onClose).not.toHaveBeenCalled();
+		await screen.rerender(<ToolsSheet {...props} />);
+		await fireEvent(screen.getByTestId('devtools-sheet-modal'), 'requestClose');
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
 	it('uses the community menu for Android pill quick actions', async () => {
 		const quickAction = jest.fn();
 		const quickActionPlugin: DevToolsPluginWithPillQuickAction = {

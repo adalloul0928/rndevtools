@@ -66,6 +66,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
 	buttonStyle: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	listStyle: (value: unknown) => value,

@@ -23,6 +23,7 @@ import {
 	Video,
 } from 'lucide-react';
 import { type ComponentType, useMemo, useState } from 'react';
+import { SegmentedControl } from '@/components/selection-controls';
 import {
 	BridgeUnavailableNotice,
 	RefreshSimulatorsButton,
@@ -428,22 +429,21 @@ function AppearanceSurface() {
 						<p>System follows macOS. Light and Dark stay fixed.</p>
 						{error ? <p className="sim-field-error">{error}</p> : null}
 					</div>
-					<fieldset className="sim-layout-toggle">
-						<legend className="sr-only">Theme</legend>
-						{APPEARANCE_OPTIONS.map(({ value, label, icon: Icon }) => (
-							<Button
-								aria-pressed={preference === value}
-								isDisabled={!available}
-								key={value}
-								size="sm"
-								variant={preference === value ? 'secondary' : 'ghost'}
-								onPress={() => void setAppearancePreference(value)}
-							>
-								<Icon className="h-3.5 w-3.5" />
-								{label}
-							</Button>
-						))}
-					</fieldset>
+					<SegmentedControl
+						label="Theme"
+						value={preference}
+						onChange={(value) => void setAppearancePreference(value)}
+						disabled={!available}
+						items={APPEARANCE_OPTIONS.map(({ value, label, icon: Icon }) => ({
+							value,
+							label: (
+								<>
+									<Icon className="h-3.5 w-3.5" />
+									{label}
+								</>
+							),
+						}))}
+					/>
 				</div>
 			</div>
 		</section>
