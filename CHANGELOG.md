@@ -287,6 +287,9 @@
 
 ### Desktop app
 
+- The CLI still reads and validates a buffered reply if the desktop closes
+  just before the client half-closes its request, avoiding a spurious transport error.
+
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
 
