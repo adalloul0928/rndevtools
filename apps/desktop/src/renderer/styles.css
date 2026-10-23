@@ -1123,7 +1123,8 @@ select {
 	gap: 8px;
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	text-transform: uppercase;
+	letter-spacing: normal;
+	text-transform: none;
 	color: var(--muted);
 }
 
@@ -1291,7 +1292,8 @@ select {
 .sim-slimming-switch-label {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
-	text-transform: uppercase;
+	letter-spacing: normal;
+	text-transform: none;
 	color: var(--text-3);
 }
 
@@ -2389,8 +2391,8 @@ select {
 	font-family: 'Geist Mono Variable', monospace;
 	font-size: var(--font-size-caption);
 	font-weight: 500;
-	letter-spacing: 0.09em;
-	text-transform: uppercase;
+	letter-spacing: normal;
+	text-transform: none;
 	color: var(--text-4);
 }
 
@@ -4723,15 +4725,12 @@ select {
 .sim-activity-row > div { flex: 1; min-width: 0; }
 .sim-activity-row strong, .sim-activity-row span { overflow-wrap: anywhere; }
 .sim-activity-row > div > span { display: block; color: var(--text-2); font-size: 12px; }
-.sim-slimming-switch-label { text-transform: none; letter-spacing: normal; }
 .sim-section-heading > div:has(> .info-button) { display: flex; align-items: center; gap: 6px; }
 .sim-slimming-header-actions .switch { flex-direction: row; align-items: center; }
 .recipe-workspace:not(:has(.recipe-run-inspector)) { grid-template-columns: 190px minmax(0, 1fr); }
 .sim-settings-layout { grid-template-columns: minmax(0, 1fr); max-width: 960px; }
 .sim-settings-layout > .sim-surface > .panel-disclosure > summary { padding-left: 16px; }
 .sim-composition-editor > .switch { flex-direction: row; align-items: center; gap: 8px; }
-.sim-eyebrow { text-transform: none; letter-spacing: normal; }
-.sim-toolbar-field { text-transform: none; letter-spacing: normal; }
 .sim-profile-categories .info-button { display: inline-flex; vertical-align: middle; margin-left: 6px; }
 .sim-profile-categories strong { display: inline; }
 .sim-profile-categories em { margin-top: 4px; }
