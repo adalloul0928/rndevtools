@@ -316,6 +316,9 @@
 
 ### Desktop app
 
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
+
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before

@@ -6,6 +6,7 @@ import {
 } from '@heroui-pro/react/data-grid';
 import { DatabaseZap, RefreshCw, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { SegmentedControl } from '@/components/selection-controls';
 import {
 	Badge,
 	Chip,
@@ -210,22 +211,18 @@ export function QueryPanel() {
 				}
 			/>
 			<Toolbar>
-				<div className="flex rounded-md border border-foreground/8 bg-background/25 p-0.5">
-					{(['queries', 'mutations'] as const).map((value) => (
-						<Button
-							aria-pressed={tab === value}
-							className="h-7 rounded px-3 text-xs"
-							key={value}
-							size="sm"
-							variant={tab === value ? 'secondary' : 'ghost'}
-							onPress={() => setTab(value)}
-						>
-							{value === 'queries'
+				<SegmentedControl
+					label="Cache entries"
+					value={tab}
+					onChange={setTab}
+					items={(['queries', 'mutations'] as const).map((value) => ({
+						value,
+						label:
+							value === 'queries'
 								? `Queries ${queries.length}${summary?.omittedQueryCount ? ` / ${summary.sourceQueryCount}` : ''}`
-								: `Mutations ${mutations.length}${summary?.omittedMutationCount ? ` / ${summary.sourceMutationCount}` : ''}`}
-						</Button>
-					))}
-				</div>
+								: `Mutations ${mutations.length}${summary?.omittedMutationCount ? ` / ${summary.sourceMutationCount}` : ''}`,
+					}))}
+				/>
 				<SearchControl
 					ariaLabel={`Search ${tab}`}
 					placeholder={`Search ${tab}…`}
@@ -233,22 +230,17 @@ export function QueryPanel() {
 					onChange={setQuery}
 				/>
 				{tab === 'queries' ? (
-					<div className="flex items-center gap-1">
-						{(['all', 'active', 'stale', 'fetching', 'errors'] as const).map(
-							(value) => (
-								<Button
-									aria-pressed={filter === value}
-									className="h-7 rounded-md px-2 text-xs capitalize"
-									key={value}
-									size="sm"
-									variant={filter === value ? 'secondary' : 'ghost'}
-									onPress={() => setFilter(value)}
-								>
-									{value}
-								</Button>
-							)
-						)}
-					</div>
+					<SegmentedControl
+						label="Query status"
+						value={filter}
+						onChange={setFilter}
+						items={(
+							['all', 'active', 'stale', 'fetching', 'errors'] as const
+						).map((value) => ({
+							value,
+							label: value.charAt(0).toUpperCase() + value.slice(1),
+						}))}
+					/>
 				) : null}
 			</Toolbar>
 			{simulation && selectedFamily ? (
