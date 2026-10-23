@@ -18,6 +18,7 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	EmptyPanel,
 	InlineCode,
@@ -26,7 +27,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -445,13 +445,13 @@ export function ComponentsPanel() {
 													{event.baseDuration.toFixed(1)} ms
 												</p>
 											</div>
-											<StatusPill
+											<Chip
 												tone={
 													event.actualDuration >= 16 ? 'warning' : 'success'
 												}
 											>
 												{event.actualDuration.toFixed(1)} ms
-											</StatusPill>
+											</Chip>
 										</div>
 									))}
 								</SectionCard>

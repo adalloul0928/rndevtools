@@ -31,6 +31,7 @@ import {
 	SimulatorMetric,
 } from '@/components/simulator-ui';
 import {
+	Chip,
 	ConfirmAction,
 	Disclosure,
 	EmptyPanel,
@@ -38,7 +39,6 @@ import {
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import {
@@ -654,9 +654,9 @@ function ProfileWorkspace({
 						</InfoPopover>
 					</div>
 				</div>
-				<StatusPill tone={profile.experimental ? 'warning' : 'default'}>
+				<Chip tone={profile.experimental ? 'warning' : 'default'}>
 					{profile.experimental ? 'Experimental' : 'Built-in profile'}
-				</StatusPill>
+				</Chip>
 			</header>
 
 			<section className="sim-slimming-action-card">
@@ -968,9 +968,9 @@ function FeatureChecks({ result }: { result: SlimmingDoctorResult }) {
 						className="flex items-center justify-between gap-3"
 					>
 						<span>{labels[capability.id] ?? capability.id}</span>
-						<StatusPill tone={capability.available ? 'success' : 'danger'}>
+						<Chip tone={capability.available ? 'success' : 'danger'}>
 							{capability.available ? 'Available' : 'Blocked'}
-						</StatusPill>
+						</Chip>
 					</li>
 				))}
 			</ul>
@@ -1247,9 +1247,7 @@ function ConditionPill({
 		'needs-attention': 'Check required',
 	};
 	return (
-		<StatusPill tone={tone}>
-			{condition ? labels[condition] : 'Not checked'}
-		</StatusPill>
+		<Chip tone={tone}>{condition ? labels[condition] : 'Not checked'}</Chip>
 	);
 }
 
@@ -1283,7 +1281,7 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 						}
 					</strong>
 				</span>
-				<StatusPill
+				<Chip
 					tone={
 						job.status === 'complete'
 							? 'success'
@@ -1295,7 +1293,7 @@ function JobRow({ job, onCancel }: { job: SlimmingJob; onCancel: () => void }) {
 					}
 				>
 					{job.status}
-				</StatusPill>
+				</Chip>
 			</header>
 			<p>{job.message}</p>
 			<div className="sim-job-progress">

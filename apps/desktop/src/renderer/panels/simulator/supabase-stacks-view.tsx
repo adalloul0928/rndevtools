@@ -5,11 +5,11 @@ import { AgentBadge } from '@/components/lane-ui';
 import { DenseVirtualList } from '@/components/simulator-ui';
 import {
 	Badge,
+	Chip,
 	DetailPlaceholder,
 	DisabledReason,
 	Skeleton,
 	StatusDot,
-	StatusPill,
 } from '@/components/ui';
 import { formatSize } from '@/lib/format';
 import {
@@ -470,9 +470,7 @@ function GettingStarted({
 									{repository.detail}
 								</span>
 							</span>
-							<StatusPill tone={repository.pill.tone}>
-								{repository.pill.label}
-							</StatusPill>
+							<Chip tone={repository.pill.tone}>{repository.pill.label}</Chip>
 							<Button
 								aria-label={`Review ${repository.title} in Repositories`}
 								size="sm"

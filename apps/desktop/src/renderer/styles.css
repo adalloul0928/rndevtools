@@ -5,7 +5,6 @@
 @import '@heroui/styles/base' layer(base);
 @import '@heroui/styles/components/label.css' layer(components);
 @import '@heroui/styles/components/button.css' layer(components);
-@import '@heroui/styles/components/checkbox.css' layer(components);
 @import '@heroui/styles/components/card.css' layer(components);
 @import '@heroui/styles/components/input.css' layer(components);
 @import '@heroui/styles/components/search-field.css' layer(components);
@@ -8469,7 +8468,7 @@ button.supabase-prune-row:hover {
 }
 
 .fleet-row-metro.is-starting .fleet-row-dot,
-.sim-lane-health.is-warning .fleet-row-dot {
+.sim-lane-health.is-info .fleet-row-dot {
 	border: 1.5px dashed var(--info);
 	background: transparent;
 }
@@ -8479,9 +8478,16 @@ button.supabase-prune-row:hover {
 	background: var(--danger);
 }
 
-.fleet-row-backend.is-warning,
-.fleet-row-backend.is-danger {
+.fleet-row-backend.is-warning {
 	color: var(--warning-text);
+}
+
+.fleet-row-backend.is-danger {
+	color: var(--danger-text);
+}
+
+.fleet-row-backend.is-info {
+	color: var(--info-text);
 }
 
 .device-tile-body .fleet-row-facts {
@@ -8497,7 +8503,7 @@ button.supabase-prune-row:hover {
 	color: var(--brand-text);
 }
 
-.sim-lane-health.is-warning {
+.sim-lane-health.is-info {
 	color: var(--info-text);
 }
 
@@ -8896,4 +8902,12 @@ button.supabase-prune-row:hover {
 	flex-basis: 100%;
 	flex-wrap: wrap;
 	gap: 4px;
+}
+
+.status-chip {
+	height: 24px;
+	gap: 7px;
+	font-family: var(--font-sans);
+	text-transform: none;
+	letter-spacing: normal;
 }

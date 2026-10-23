@@ -1,5 +1,5 @@
 import { Asterisk, ChevronRight, Cpu } from 'lucide-react';
-import { Badge } from '@/components/ui';
+import { Badge, Chip } from '@/components/ui';
 import { agentLabel, shortPath } from '@/simulator/fleet-model';
 import type { Lane, LaneAgent } from '../../shared/lane-protocol';
 import { laneHealth, laneSlimSummary } from '../../shared/lane-protocol';
@@ -20,9 +20,9 @@ export function LaneChip({
 	const health = laneHealth(lane);
 	return (
 		<span className="lane-chip" title={lane.worktreePath}>
-			<Badge tone={health.tone} className="lane-chip-port">
+			<Chip tone={health.tone} className="lane-chip-port">
 				:{lane.port} {health.label}
-			</Badge>
+			</Chip>
 			{!compact ? (
 				<code className="lane-chip-branch">{lane.branch}</code>
 			) : null}

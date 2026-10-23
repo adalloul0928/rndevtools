@@ -311,6 +311,9 @@
 
 ### Desktop app
 
+- Share status chips and dots across panels: starting work is blue, exposed backends
+  are red, and Connected App status labels use sentence-case typography.
+
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
