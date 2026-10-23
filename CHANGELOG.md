@@ -263,6 +263,9 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
+  and serialization while retaining heartbeats and client diagnostic updates.
+
 - The desktop client fits every snapshot to every size and range bound the
   desktop validates before it sends it, with the new `fitDesktopSnapshot` of
   `@rndevtools/core/desktop-protocol`. It used to trim only the top-level

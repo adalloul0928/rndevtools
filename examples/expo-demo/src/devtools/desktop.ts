@@ -64,6 +64,8 @@ export function connectToDesktop(): DesktopClientHandle | undefined {
 	return startDesktopClient({
 		host: {
 			captureTools,
+			// This wiring-only example has no projected tool data to refresh.
+			getToolsRevision: () => 0,
 			createDeviceInfo,
 			runAction: async (action) => {
 				// Reject anything this app has not explicitly implemented. Throwing

@@ -24,8 +24,12 @@ pnpm install
 pnpm --dir examples/expo-demo exec expo run:ios
 ```
 
-Open the desktop app alongside it and the device appears automatically — the
-client discovers a loopback broker on its own.
+Open the desktop app alongside a development build. The client discovers the
+loopback broker and announces the device. This example demonstrates connection
+wiring with empty tool projections and no privileged capabilities; populate
+`captureTools` and advertise implemented capabilities to inspect or act on host
+data. Its constant `getToolsRevision` avoids rebuilding that empty snapshot;
+a real projection must advance its revision whenever its data changes.
 
 ## Run several branches at once
 
