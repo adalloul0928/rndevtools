@@ -815,8 +815,12 @@ function SimulatorSidebar({
 					</p>
 				</div>
 				<output
-					aria-label={`Simulator capability ${state.capability.status}`}
-					className={`device-status ${state.capability.status === 'available' ? 'is-online' : 'is-empty'}`}
+					aria-label={
+						selectedDevice
+							? `Simulator ${sentenceCase(selectedDevice.state)}`
+							: 'No Simulator selected'
+					}
+					className={`device-status ${selectedDevice?.state === 'booted' ? 'is-online' : 'is-empty'}`}
 				/>
 			</header>
 			<nav className="desktop-sidebar-content" aria-label="Simulator tools">

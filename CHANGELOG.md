@@ -221,6 +221,9 @@
 
 ### Desktop app
 
+- Show the selected Simulator state in the sidebar dot; a shutdown device no
+  longer appears green just because the helper is available.
+
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.
