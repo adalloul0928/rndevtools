@@ -299,21 +299,10 @@ export class AgentService {
 	 *    checked again after discovering sessions afresh, once: a session that
 	 *    started, or took a new id (a /clear, a resume), since the last poll is
 	 *    not in the list yet, and its own requests must not read as another's.
-	 * 4. No discovered session in the ancestry: a claim naming a discovered
-	 *    session that has a pid is a `mismatch` (a live session's id presented
-	 *    by a process that is not under it). Any other claim is `verified` by
-	 *    `claim`: a Claude session whose registry file is already gone (as at
-	 *    SessionEnd), an `other` agent (never discovered), a synthetic `mcp-*`
-	 *    id, or a Codex thread.
-	 *
-	 * What stays unproven. Codex threads share one app-server process and are
-	 * discovered without a pid, so the kernel cannot tell them apart: a claim
-	 * naming a live Codex thread is accepted by `claim`, and Codex threads (like
-	 * `other` and synthetic ids) can act as one another. Only an identity with
-	 * a process behind it is proven. A process outside every discovered
-	 * session can likewise claim the id of a session that is gone, and so take
-	 * its hold before its grace period ends. A process under a session can
-	 * claim nothing but that session.
+	 * 4. No matching discovered session in the ancestry: never promote the
+	 *    claim into an identity. Codex threads share one process, and other
+	 *    agents and ended sessions may have no discoverable process. Their
+	 *    claims remain unverified until a session-bound proof is available.
 	 */
 	async identify({
 		claimed,
@@ -356,9 +345,7 @@ export class AgentService {
 				reason: `The request names ${agent.kind} session ${agent.sessionId}, but the process that sent it belongs to another ${owner.kind} session.`,
 			};
 		}
-		// Only a session with a pid can be told by its process. A Codex thread
-		// has none, so no sender is ever "outside" it: naming one proves nothing
-		// either way, and is taken as claimed.
+		// A live session owned by another process is a definite mismatch.
 		if (
 			this.#sessions.some(
 				(session) =>
@@ -370,7 +357,11 @@ export class AgentService {
 				reason: `The request names ${agent.kind} session ${agent.sessionId}, a live session, but the process that sent it does not run under it.`,
 			};
 		}
-		return { status: 'verified', agent, basis: 'claim' };
+		return {
+			status: 'unverified',
+			reason:
+				'The connection owner could not be mapped to the claimed agent session. Shared-process, undiscovered, and ended sessions cannot establish ownership from an identifier alone.',
+		};
 	}
 
 	/** The discovered session whose process comes first in `ancestry`, if any. */

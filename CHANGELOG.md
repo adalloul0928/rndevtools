@@ -209,6 +209,7 @@
   counted as the person at the desktop: `rndevtools lane up --udid` on a
   Simulator another agent had claimed took the claim over, and setting another
   session's id let `release --all` stop its lanes. Requests with no identity,
-  or whose identity the desktop cannot verify (`agent_identity_unverified`),
   may now use free Simulators only and cannot claim, release or take over a
-  hold, and lane commands no longer accept an `agent` field.
+  hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
+  Codex threads, synthetic MCP identities and ended sessions, cannot perform
+  ownership-changing operations. Lane commands no longer accept an `agent` field.

@@ -988,7 +988,7 @@ describe('AgentService.identify', () => {
 		).resolves.toMatchObject({ status: 'mismatch' });
 	});
 
-	it('verifies an undiscovered tree that claims an id no live session has', async () => {
+	it('does not verify an undiscovered tree from its claimed session id', async () => {
 		// A terminal, a Codex app-server and a hook whose claude already exited
 		// (the registry file of an ending session may be gone) are no session's.
 		for (const [pid, claimed] of [
@@ -998,11 +998,7 @@ describe('AgentService.identify', () => {
 		] as const) {
 			await expect(
 				service.identify({ claimed, peerPid: pid })
-			).resolves.toEqual({
-				status: 'verified',
-				agent: claimed,
-				basis: 'claim',
-			});
+			).resolves.toMatchObject({ status: 'unverified' });
 		}
 	});
 
@@ -1018,13 +1014,13 @@ describe('AgentService.identify', () => {
 		).resolves.toMatchObject({ status: 'mismatch' });
 	});
 
-	it('takes a Codex thread as claimed: threads share one process and have no pid to check', async () => {
+	it('refuses to verify a Codex thread that shares a process with other threads', async () => {
 		// The thread is live and discovered, yet nothing ties a process to it, so
-		// the app-server's CLI, a hook and a terminal all pass as claimed.
+		// the app-server's CLI, a hook and a terminal must all remain unverified.
 		for (const pid of [401, 301, 500]) {
 			await expect(
 				service.identify({ claimed: codexT, peerPid: pid })
-			).resolves.toEqual({ status: 'verified', agent: codexT, basis: 'claim' });
+			).resolves.toMatchObject({ status: 'unverified' });
 		}
 	});
 
@@ -1072,10 +1068,10 @@ describe('AgentService.identify', () => {
 	it('walks a process table with a cycle without hanging', async () => {
 		table = [entry(700, 701), entry(701, 700)];
 		const claimed = { kind: 'other', sessionId: 'looping-tool' } as const;
-		await expect(service.identify({ claimed, peerPid: 700 })).resolves.toEqual({
-			status: 'verified',
-			agent: claimed,
-			basis: 'claim',
+		await expect(
+			service.identify({ claimed, peerPid: 700 })
+		).resolves.toMatchObject({
+			status: 'unverified',
 		});
 	});
 });

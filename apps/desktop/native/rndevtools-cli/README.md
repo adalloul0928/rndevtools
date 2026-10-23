@@ -51,6 +51,12 @@ to know who is asking. A request that claims nothing is unprivileged, not the
 person at the desktop: it may use free Simulators and cannot claim, release, or
 take over a hold.
 
+Codex threads that share a process, synthetic MCP identities, undiscovered
+agents, and ended sessions cannot yet prove a distinct session identity. Their
+ownership-changing requests are refused. Use the desktop to manage those
+resources; abandoned holds still expire through their existing grace period.
+An identifier alone never authorizes a claim or release.
+
 The response is either:
 
 ```json

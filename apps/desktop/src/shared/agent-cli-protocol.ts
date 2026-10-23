@@ -516,21 +516,15 @@ export type AgentCliRequest = z.infer<typeof agentCliRequestSchema>;
 export type AgentCliClaim = NonNullable<AgentCliRequest['agent']>;
 
 /**
- * What the desktop makes of a request's identity, from the connection rather
- * than the envelope. `verified` carries the agent the handlers may act for:
- * by `process` when the sending process descends from the discovered session
- * it claims, by `claim` when it descends from no discovered session and
- * names none that has a process of its own (Codex threads share one process,
- * and other agents are never discovered). `unverified` is a claim without a
- * proven sender: a CLI that sends no pid, or a pid that does not own the
- * socket. `mismatch` is a claim naming a session other than the sender's,
- * refused before any handler runs. `anonymous` is a request that claims
- * nothing.
+ * Connection-bound identity. Only a sender that descends from the discovered
+ * session it claims is verified. Missing proof, undiscovered sessions and
+ * shared-process sessions stay unverified; a different discovered owner is a
+ * mismatch. Anonymous requests claim no session and are unprivileged.
  */
 export type AgentIdentityResolution =
 	| { status: 'anonymous' }
 	| { status: 'unverified'; reason: string }
-	| { status: 'verified'; agent: AgentCliClaim; basis: 'process' | 'claim' }
+	| { status: 'verified'; agent: AgentCliClaim; basis: 'process' }
 	| { status: 'mismatch'; reason: string };
 
 /**

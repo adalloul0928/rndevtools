@@ -2466,7 +2466,7 @@ describe('agent command router', () => {
 			expect(operations).toEqual([]);
 		});
 
-		it('releases everything a session holds for the session-end hook, which is verified by its claim alone once its registry file is gone', async () => {
+		it('refuses a session-end release after the session can no longer be verified', async () => {
 			const { dependencies } = fixture();
 			const { port, operations } = agentsPort();
 			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
@@ -2479,18 +2479,18 @@ describe('agent command router', () => {
 			});
 			const byClaim = {
 				...context,
-				agent: me,
-				identity: { status: 'verified', agent: me, basis: 'claim' },
+				identity: {
+					status: 'unverified',
+					reason: 'Session is no longer discoverable.',
+				},
 			} satisfies AgentCliHandlerContext;
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app' },
 					byClaim
 				)
-			).resolves.toMatchObject({ you: me, releasedClaims: [UDID], errors: [] });
-			expect(operations).toEqual([
-				{ kind: 'agent.release', simulatorUdid: UDID, agent: me },
-			]);
+			).rejects.toMatchObject({ code: 'agent_identity_unverified' });
+			expect(operations).toEqual([]);
 		});
 	});
 
