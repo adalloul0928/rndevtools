@@ -23,6 +23,8 @@
   mutation has started. Validators must not mutate the store.
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
+- Global fetch capture continues through another library's forwarding wrapper.
+  Removed or superseded collector wrappers stay passive, including after reinstall.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
   native-memory abort without dropping odd-offset marker or secret checks.
 
