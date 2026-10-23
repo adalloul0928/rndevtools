@@ -9,13 +9,13 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Chip,
 	EmptyPanel,
 	InlineCode,
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatClock, formatRelativeTime } from '@/lib/format';
@@ -158,7 +158,7 @@ export function RoutesPanel() {
 													{route.name}
 												</span>
 												{route.isCurrent ? (
-													<StatusPill tone="success">Current</StatusPill>
+													<Chip tone="success">Current</Chip>
 												) : null}
 											</div>
 											<p className="mb-0 mt-1 truncate font-mono text-xs text-(--text-3)">
@@ -184,9 +184,9 @@ export function RoutesPanel() {
 										{selected.name}
 									</h2>
 								</div>
-								<StatusPill tone={selected.isCurrent ? 'success' : 'default'}>
+								<Chip tone={selected.isCurrent ? 'success' : 'default'}>
 									{selected.kind}
-								</StatusPill>
+								</Chip>
 							</div>
 							<div className="mb-4 rounded-md border border-foreground/8 bg-background/30 p-3 font-mono text-xs text-(--foreground)">
 								{selected.path}
@@ -266,9 +266,9 @@ export function RoutesPanel() {
 										<div className="flex items-center justify-between gap-3">
 											<div className="flex min-w-0 items-center gap-2">
 												{event.phase ? (
-													<StatusPill tone={transitionTone(event)}>
+													<Chip tone={transitionTone(event)}>
 														{event.phase}
-													</StatusPill>
+													</Chip>
 												) : null}
 												<span className="truncate font-mono text-xs text-(--foreground)">
 													{event.route}

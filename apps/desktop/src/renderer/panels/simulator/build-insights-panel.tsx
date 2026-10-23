@@ -16,7 +16,7 @@ import {
 	formatDuration,
 	SimulatorMetric,
 } from '@/components/simulator-ui';
-import { Badge, PanelHeader, PanelNotice, StatusPill } from '@/components/ui';
+import { Badge, Chip, PanelHeader, PanelNotice } from '@/components/ui';
 import { nextActionId, type WithoutActionId } from '@/lib/runtime-action';
 import type {
 	BuildInsight,
@@ -325,7 +325,7 @@ function BuildDetail({
 					<h2>{build.name}</h2>
 					<span>{build.destination}</span>
 				</div>
-				<StatusPill tone={statusTone(build.status)}>{build.status}</StatusPill>
+				<Chip tone={statusTone(build.status)}>{build.status}</Chip>
 			</header>
 			<section className="sim-build-facts">
 				<Fact label="Duration" value={formatDuration(build.durationMs)} />

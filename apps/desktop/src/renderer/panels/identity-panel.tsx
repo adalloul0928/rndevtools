@@ -8,11 +8,11 @@ import {
 } from 'lucide-react';
 import {
 	Badge,
+	Chip,
 	ConfirmAction,
 	EmptyPanel,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -56,7 +56,7 @@ export function IdentityPanel() {
 				}
 				description="Run allowlisted seeded identities as reversible sessions while keeping the original actor recoverable on the device."
 				meta={
-					<StatusPill
+					<Chip
 						dot
 						tone={
 							active?.status === 'needs-attention'
@@ -71,7 +71,7 @@ export function IdentityPanel() {
 							: active
 								? `${active.target.label} active`
 								: 'Original actor active'}
-					</StatusPill>
+					</Chip>
 				}
 				title="Test Identities"
 			/>
@@ -202,7 +202,7 @@ export function IdentityPanel() {
 								<span className="text-xs text-(--text-3)">
 									{formatRelativeTime(entry.startedAt)}
 								</span>
-								<StatusPill
+								<Chip
 									tone={
 										entry.status === 'stopped'
 											? 'success'
@@ -214,7 +214,7 @@ export function IdentityPanel() {
 									{entry.status === 'stopped'
 										? 'RESTORED'
 										: entry.status.toUpperCase()}
-								</StatusPill>
+								</Chip>
 							</div>
 						))}
 					</div>

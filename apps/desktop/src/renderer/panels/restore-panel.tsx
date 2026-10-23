@@ -15,13 +15,13 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	ConfirmAction,
 	EmptyPanel,
 	InlineCode,
 	PanelHeader,
 	SectionCard,
-	StatusPill,
 } from '@/components/ui';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -191,9 +191,9 @@ export function RestorePanel() {
 							<div className="mb-5 flex items-start justify-between gap-5">
 								<div>
 									<div className="mb-2 flex items-center gap-2">
-										<StatusPill tone="success" dot>
+										<Chip tone="success" dot>
 											Captured
-										</StatusPill>
+										</Chip>
 										<span className="text-xs text-(--text-3)">
 											{formatRelativeTime(selected.createdAt)}
 										</span>
@@ -355,9 +355,9 @@ export function RestorePanel() {
 													</p>
 												</div>
 												<div className="flex items-center gap-2">
-													<StatusPill tone={isSelected ? 'success' : 'default'}>
+													<Chip tone={isSelected ? 'success' : 'default'}>
 														{formatBytes(source.bytes)}
-													</StatusPill>
+													</Chip>
 													<Button
 														aria-pressed={isSelected}
 														size="sm"
@@ -394,7 +394,7 @@ export function RestorePanel() {
 									<SectionCard
 										title="Latest transaction"
 										actions={
-											<StatusPill
+											<Chip
 												tone={
 													selectedReceipts[0].status === 'complete'
 														? 'success'
@@ -404,7 +404,7 @@ export function RestorePanel() {
 												}
 											>
 												{selectedReceipts[0].status}
-											</StatusPill>
+											</Chip>
 										}
 									>
 										<div className="space-y-1 text-xs text-(--text-3)">

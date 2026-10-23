@@ -13,6 +13,7 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	ConfirmAction,
 	EmptyPanel,
@@ -22,7 +23,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatClock, formatRelativeTime } from '@/lib/format';
@@ -386,9 +386,9 @@ export function ZustandPanel() {
 									</div>
 									<div className="mt-2 flex flex-wrap gap-1">
 										{change.changedKeys.length === 0 ? (
-											<StatusPill tone={change.error ? 'danger' : 'default'}>
+											<Chip tone={change.error ? 'danger' : 'default'}>
 												{change.error ?? 'Projection refreshed'}
-											</StatusPill>
+											</Chip>
 										) : (
 											change.changedKeys.map((key) => (
 												<InlineCode key={key}>{key}</InlineCode>
@@ -417,13 +417,13 @@ export function ZustandPanel() {
 											<span className="text-xs font-medium text-(--foreground)">
 												{receipt.kind}
 											</span>
-											<StatusPill
+											<Chip
 												tone={
 													receipt.status === 'succeeded' ? 'success' : 'danger'
 												}
 											>
 												{receipt.status}
-											</StatusPill>
+											</Chip>
 										</div>
 										<p className="mb-0 mt-2 font-mono text-xs text-(--text-3)">
 											{formatClock(receipt.completedAt)} ·{' '}

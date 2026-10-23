@@ -28,6 +28,7 @@ import {
 import { SimulatorMetric } from '@/components/simulator-ui';
 import { SupabaseChip } from '@/components/supabase-ui';
 import {
+	Chip,
 	ConfirmAction,
 	CopyButton,
 	DisabledReason,
@@ -36,7 +37,6 @@ import {
 	KeyValue,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 } from '@/components/ui';
 import { shortPath } from '@/simulator/fleet-model';
 import {
@@ -1482,7 +1482,7 @@ function WorktreesOverview({
 											/>
 											<span className="worktree-list-meta">
 												{worktree.dirty ? (
-													<StatusPill tone="warning">dirty</StatusPill>
+													<Chip tone="warning">dirty</Chip>
 												) : null}
 												{lane ? <LaneChip lane={lane} compact /> : null}
 											</span>

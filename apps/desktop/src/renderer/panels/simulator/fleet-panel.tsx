@@ -40,6 +40,7 @@ import {
 	TargetStatePill,
 } from '@/components/simulator-ui';
 import {
+	Chip,
 	ConfirmAction,
 	Disclosure,
 	InfoPopover,
@@ -47,7 +48,7 @@ import {
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
+	StatusDot,
 	Toolbar,
 } from '@/components/ui';
 import { clearFleetRequest, useOnboarding } from '@/lib/onboarding';
@@ -762,7 +763,7 @@ export function FleetPanel() {
 										</strong>
 										<span>{job.message}</span>
 									</div>
-									<StatusPill
+									<Chip
 										tone={
 											job.status === 'failed' ||
 											job.status === 'needs-attention'
@@ -773,7 +774,7 @@ export function FleetPanel() {
 										}
 									>
 										{job.status}
-									</StatusPill>
+									</Chip>
 									{!job.finishedAt ? (
 										<Button
 											size="sm"
@@ -953,7 +954,7 @@ function FleetRowFacts({ row }: { row: FleetRow }) {
 						{lane.branch}
 					</code>
 					<span className={`fleet-row-metro is-${lane.metro}`}>
-						<span aria-hidden="true" className="fleet-row-dot" />:{lane.port}{' '}
+						<StatusDot tone={row.laneHealth?.tone ?? 'default'} />:{lane.port}{' '}
 						{row.laneHealth?.label ?? lane.metro}
 					</span>
 				</>
@@ -1289,7 +1290,7 @@ function TargetDetail({
 					</div>
 					{health ? (
 						<span className={`sim-lane-health is-${health.tone}`}>
-							<span aria-hidden="true" className="fleet-row-dot" />
+							<StatusDot tone={health.tone} />
 							Metro {health.label}
 						</span>
 					) : (

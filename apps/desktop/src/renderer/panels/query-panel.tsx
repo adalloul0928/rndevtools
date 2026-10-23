@@ -8,6 +8,7 @@ import { DatabaseZap, RefreshCw, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	DetailPlaceholder,
 	EmptyPanel,
@@ -17,7 +18,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
@@ -158,9 +158,9 @@ export function QueryPanel() {
 				header: 'Status',
 				width: 104,
 				cell: (entry) => (
-					<StatusPill tone={queryTone(entry)} dot>
+					<Chip tone={queryTone(entry)} dot>
 						{queryLabel(entry)}
-					</StatusPill>
+					</Chip>
 				),
 			},
 			{
@@ -407,11 +407,11 @@ export function QueryPanel() {
 										</div>
 										<div className="flex items-center gap-1.5">
 											{mutation.truncated ? (
-												<StatusPill tone="warning">shortened</StatusPill>
+												<Chip tone="warning">shortened</Chip>
 											) : null}
-											<StatusPill tone={mutationTone(mutation.status)}>
+											<Chip tone={mutationTone(mutation.status)}>
 												{mutation.status}
-											</StatusPill>
+											</Chip>
 										</div>
 									</div>
 									{mutation.variablesText ? (
@@ -469,9 +469,9 @@ export function QueryPanel() {
 											{selected.keyText}
 										</h2>
 									</div>
-									<StatusPill tone={queryTone(selected)} dot>
+									<Chip tone={queryTone(selected)} dot>
 										{queryLabel(selected)}
-									</StatusPill>
+									</Chip>
 								</div>
 								<div className="mb-4 flex gap-2">
 									<Button

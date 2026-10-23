@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UDID_PATTERN } from './simulator-protocol';
+import { METRO_STATUS } from './status-presentation';
 import {
 	laneBackendSummarySchema,
 	laneWorktreeSupabaseSchema,
@@ -435,7 +436,7 @@ export function laneDeepLink(
 
 export type LaneHealth = {
 	label: 'ready' | 'starting' | 'stopped';
-	tone: 'success' | 'warning' | 'danger';
+	tone: 'success' | 'info' | 'danger';
 };
 
 /** How a lane's slimming request reads in a row or a CLI summary. */
@@ -458,14 +459,7 @@ export function laneSlimSummary(
 }
 
 export function laneHealth(lane: Pick<Lane, 'metro'>): LaneHealth {
-	switch (lane.metro) {
-		case 'ready':
-			return { label: 'ready', tone: 'success' };
-		case 'starting':
-			return { label: 'starting', tone: 'warning' };
-		default:
-			return { label: 'stopped', tone: 'danger' };
-	}
+	return METRO_STATUS[lane.metro];
 }
 
 /**

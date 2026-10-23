@@ -13,6 +13,7 @@ import {
 	isPathInside,
 } from '../../shared/device-hold';
 import type { LaneView, LaneWorktree } from '../../shared/lane-protocol';
+import { BACKEND_STATUS } from '../../shared/status-presentation';
 import {
 	formatSupabaseSize,
 	isSupabaseStackLanExposed,
@@ -96,7 +97,7 @@ export function stackBackendChip(
 			: { label: `db :${stack.ports.api}`, tone: 'success' };
 	}
 	if (stack.state === 'starting' || supabaseActiveJob(stack, jobs)) {
-		return { label: 'db starting', tone: 'warning' };
+		return { label: 'db starting', tone: BACKEND_STATUS.starting.tone };
 	}
 	if (stack.flags.includes('stale-branch')) {
 		return { label: 'db stale', tone: 'warning' };
@@ -118,33 +119,8 @@ export function portOf(url: string | undefined): number | undefined {
 // ---------------------------------------------------------------------------
 // Lane backend: status words, reasons and notes
 
-type LaneBackendStatus = LaneBackendSummary['status'];
 type LaneBackendReason = NonNullable<LaneBackendSummary['reason']>;
 type LaneBackendWarning = LaneBackendSummary['warnings'][number];
-
-const SUMMARY_STATUS: Readonly<Record<LaneBackendStatus, string>> = {
-	ready: 'Ready',
-	starting: 'Starting…',
-	stopped: 'Stopped',
-	skipped: 'Skipped',
-	failed: 'Failed',
-	refused: 'Refused',
-	stale: 'Stale branch',
-	shadowed: 'Shadowed by .env',
-	blocked: 'Blocked',
-};
-
-const SUMMARY_TONE: Readonly<Record<LaneBackendStatus, Tone>> = {
-	ready: 'success',
-	starting: 'info',
-	stopped: 'warning',
-	skipped: 'warning',
-	failed: 'danger',
-	refused: 'danger',
-	stale: 'warning',
-	shadowed: 'warning',
-	blocked: 'warning',
-};
 
 /** What a lane-backend reason means when main sent no words of its own. */
 const LANE_BACKEND_REASON_TEXT: Readonly<Record<LaneBackendReason, string>> = {
@@ -210,13 +186,13 @@ export function laneBackendStatusText(
 		};
 	}
 	if (!summary) return { text: 'Not attached', tone: 'default' };
-	const word = SUMMARY_STATUS[summary.status];
+	const word = BACKEND_STATUS[summary.status].label;
 	return {
 		text:
 			summary.status === 'skipped' && summary.reason === 'capacity'
 				? `${word} · capacity`
 				: word,
-		tone: SUMMARY_TONE[summary.status],
+		tone: BACKEND_STATUS[summary.status].tone,
 	};
 }
 

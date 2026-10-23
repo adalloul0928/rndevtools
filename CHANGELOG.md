@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Refused desktop actions keep read-only diagnostics connected. Authorization read
+  failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
 
@@ -319,6 +321,8 @@
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
+- Share status chips and dots across panels: starting work is blue, exposed backends
+  are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 
