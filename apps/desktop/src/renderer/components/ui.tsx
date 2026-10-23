@@ -20,10 +20,11 @@ import {
 	useId,
 	useState,
 } from 'react';
-import { StatusPill, statusToneClassName } from '@/components/status-ui';
+import { Chip, statusToneClassName } from '@/components/status-ui';
 import { copyText } from '@/lib/format';
 
-export { StatusPill };
+export { StatusDot } from '@/components/status-ui';
+export { Chip };
 
 export function InfoPopover({
 	label,
@@ -442,28 +443,6 @@ export function ConfirmAction({
 }
 
 /**
- * The one status dot. It never carries meaning alone: a word always sits
- * beside it, so the dot is hidden from assistive technology.
- */
-export function StatusDot({
-	tone = 'default',
-	hollow = false,
-	className = '',
-}: {
-	tone?: 'default' | 'success' | 'info' | 'warning' | 'danger';
-	/** An outline only, for something that does not exist yet. */
-	hollow?: boolean;
-	className?: string;
-}) {
-	return (
-		<span
-			aria-hidden="true"
-			className={`status-dot is-${tone} ${hollow ? 'is-hollow' : ''} ${className}`}
-		/>
-	);
-}
-
-/**
  * Why a control is disabled, as visible text. Give the control
  * `aria-describedby={id}` so the reason is read with it.
  */
@@ -612,7 +591,7 @@ export function ReadinessRow({
 				) : null}
 			</div>
 			<div className="sim-capability-action">
-				<StatusPill tone={pill.tone}>{statusLabel ?? pill.label}</StatusPill>
+				<Chip tone={pill.tone}>{statusLabel ?? pill.label}</Chip>
 				{actions}
 			</div>
 		</div>
@@ -636,9 +615,8 @@ export function DetailPlaceholder({
 
 /**
  * Compact semantic label. Prefer this over hand-rolled `border … bg … text …`
- * spans so tone tints stay consistent across panels. `StatusPill` is the
- * mono/uppercase status variant; `Badge` is the softer sentence-case label used
- * for categories and counts.
+ * spans so tone tints stay consistent across panels. `Chip` adds the shared status dot;
+ * `Badge` is the compact label used for categories and counts.
  */
 export function Badge({
 	children,
