@@ -14,6 +14,47 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 describe('simulator command runner', () => {
+	it.each([0, null])(
+		'settles after the deadline when close never arrives (exit %s)',
+		async (exitCode) => {
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			const child = Object.assign(new EventEmitter(), {
+				exitCode,
+				signalCode: null,
+				stdin: new PassThrough(),
+				stdout: new PassThrough(),
+				stderr: new PassThrough(),
+				stdio: [null, null, null],
+				kill: vi.fn(() => true),
+				unref: vi.fn(),
+			});
+			vi.mocked(spawn).mockReturnValueOnce(child as unknown as ChildProcess);
+			let failure: unknown;
+			const command = runSimulatorCommand(process.execPath, [], {
+				timeoutMs: 25,
+				forceKillDelayMs: 50,
+			}).catch((error: unknown) => {
+				failure = error;
+			});
+			try {
+				child.stdout.emit('data', Buffer.from('captured before deadline'));
+				await vi.advanceTimersByTimeAsync(75);
+				expect(failure).toMatchObject({
+					kind: 'timeout',
+					stdout: 'captured before deadline',
+				});
+				expect(child.stdout.destroyed).toBe(true);
+				expect(child.stderr.destroyed).toBe(true);
+				if (exitCode === 0) expect(child.kill).not.toHaveBeenCalled();
+				else expect(child.kill).toHaveBeenLastCalledWith('SIGKILL');
+			} finally {
+				child.emit('close', exitCode);
+				await command;
+				vi.useRealTimers();
+			}
+		}
+	);
+
 	it('requires an absolute executable and preserves literal arguments', async () => {
 		await expect(runSimulatorCommand('node', [])).rejects.toMatchObject({
 			kind: 'spawn',

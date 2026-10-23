@@ -1,4 +1,5 @@
 import { ExternalStore } from '../core/external-store';
+import { diagnosticErrorText } from '../core/redact';
 import { utf8ByteLength } from '../core/serialize';
 import type { RestorePointStorage } from './restore-points';
 import {
@@ -18,6 +19,11 @@ export type ScenarioRepositorySnapshot = Readonly<{
 	bundled: readonly ScenarioDefinition[];
 	user: readonly ScenarioDefinition[];
 	all: readonly ScenarioDefinition[];
+	/**
+	 * Why the stored document could not be loaded. While set, `user` holds
+	 * what was loaded before, and every write is refused.
+	 */
+	loadError?: string;
 }>;
 
 export type ScenarioRepositoryOptions = Readonly<{
@@ -131,7 +137,11 @@ export class ScenarioRepository {
 	readonly #limits: ScenarioDefinitionLimits;
 	readonly #definitionTokens = new Map<string, string>();
 	#serial: Promise<void> = Promise.resolve();
-	#loadError?: string;
+	/**
+	 * Settles once the first load attempt has finished, whether or not the
+	 * stored document could be read, and never rejects. `getLoadError()` says
+	 * why a load failed; `reload()` tries again.
+	 */
 	readonly ready: Promise<void>;
 
 	constructor(options: ScenarioRepositoryOptions = {}) {
@@ -185,9 +195,17 @@ export class ScenarioRepository {
 	readonly getServerSnapshot = (): ScenarioRepositorySnapshot =>
 		this.#store.getServerSnapshot();
 
-	getLoadError(): string | undefined {
-		return this.#loadError;
-	}
+	// The load error lives on the snapshot, so a host that already renders
+	// `getSnapshot()` re-renders when it changes; these mirror the
+	// RestorePointRepository surface for a dedicated subscription.
+	readonly subscribeToLoadError = (listener: () => void): (() => void) =>
+		this.#store.subscribe(listener);
+
+	readonly getLoadError = (): string | undefined =>
+		this.#store.getSnapshot().loadError;
+
+	readonly getServerLoadError = (): string | undefined =>
+		this.#store.getServerSnapshot().loadError;
 
 	getTarget(id: string): ScenarioDefinitionTarget | undefined {
 		const scenario = this.#store
@@ -263,30 +281,89 @@ export class ScenarioRepository {
 		return freezeScenarioDefinition(parseScenarioJson(value, this.#limits));
 	}
 
-	async #hydrate(): Promise<void> {
-		if (!this.#storage) return;
-		try {
-			const raw = await this.#storage.getItem(this.#key);
-			if (!raw) return;
-			const parsed = parseDocument(raw, this.#limits, true);
-			const user = parsed.scenarios.filter(
-				(scenario) => !this.#bundledIds.has(scenario.id),
-			);
-			this.#validateUserScenarios(user);
-			this.#syncDefinitionTokens([], user);
-			this.#store.set(this.#snapshotFor(user));
-			if (parsed.discarded > 0 || user.length !== parsed.scenarios.length) {
-				await this.#storage.setItem(
-					this.#key,
-					JSON.stringify(documentFor(user)),
+	/**
+	 * Reads the stored document again, behind any queued write. Resolves once
+	 * the stored scenarios are loaded and the load error is cleared, and
+	 * rejects with that error when the document still cannot be loaded.
+	 */
+	reload(): Promise<void> {
+		return this.#enqueue(async () => {
+			await this.#hydrate();
+			const loadError = this.#store.getSnapshot().loadError;
+			if (loadError !== undefined) throw new Error(loadError);
+		});
+	}
+
+	/**
+	 * Deletes the stored document on purpose, clears the load error and empties
+	 * the user scenarios; bundled scenarios are untouched. It rejects, and
+	 * deletes nothing, once the scenarios have loaded after all, so a
+	 * confirmation given while they could not be loaded cannot destroy them
+	 * after a retry worked.
+	 */
+	discardStoredData(): Promise<void> {
+		return this.#enqueue(async () => {
+			const storage = this.#storage;
+			if (!storage) return;
+			if (this.#store.getSnapshot().loadError === undefined) {
+				throw new Error(
+					'The stored scenarios loaded in the meantime, so nothing was discarded.',
 				);
 			}
+			if (storage.removeItem) {
+				await storage.removeItem(this.#key);
+			} else {
+				await storage.setItem(this.#key, JSON.stringify(documentFor([])));
+			}
+			this.#syncDefinitionTokens(this.#store.getSnapshot().user, []);
+			this.#store.set(this.#snapshotFor([]));
+		});
+	}
+
+	async #hydrate(): Promise<void> {
+		if (!this.#storage) return;
+		let user: readonly ScenarioDefinition[] = [];
+		let trimmed = false;
+		try {
+			const raw = await this.#storage.getItem(this.#key);
+			if (raw) {
+				const parsed = parseDocument(raw, this.#limits, true);
+				user = parsed.scenarios.filter(
+					(scenario) => !this.#bundledIds.has(scenario.id),
+				);
+				this.#validateUserScenarios(user);
+				trimmed =
+					parsed.discarded > 0 || user.length !== parsed.scenarios.length;
+			}
 		} catch (error) {
-			this.#loadError =
-				error instanceof Error
-					? error.message
-					: 'Scenarios could not be loaded.';
+			this.#store.set(
+				this.#snapshotFor(
+					this.#store.getSnapshot().user,
+					// Never empty: a blank message must still stand as an error.
+					diagnosticErrorText(error) ||
+						'The stored document could not be read.',
+				),
+			);
+			return;
 		}
+		this.#syncDefinitionTokens(this.#store.getSnapshot().user, user);
+		this.#store.set(this.#snapshotFor(user));
+		if (!trimmed) return;
+		try {
+			await this.#storage.setItem(this.#key, JSON.stringify(documentFor(user)));
+		} catch {
+			// The scenarios loaded, so this is not a load error; the next write
+			// persists the trimmed list.
+		}
+	}
+
+	#enqueue(task: () => Promise<void>): Promise<void> {
+		const run = this.#serial.then(async () => {
+			await this.ready;
+			await task();
+		});
+		this.#serial = run.catch(() => undefined);
+		return run;
 	}
 
 	#mutate(
@@ -294,9 +371,13 @@ export class ScenarioRepository {
 			scenarios: readonly ScenarioDefinition[],
 		) => readonly ScenarioDefinition[],
 	): Promise<void> {
-		const run = this.#serial.then(async () => {
-			await this.ready;
-			const previous = this.#store.getSnapshot().user;
+		return this.#enqueue(async () => {
+			const { user: previous, loadError } = this.#store.getSnapshot();
+			if (loadError !== undefined) {
+				throw new Error(
+					`Stored scenarios could not be loaded (${loadError}), so nothing was written. Retry loading them or discard the stored data.`,
+				);
+			}
 			const next = operation(previous);
 			this.#validateUserScenarios(next);
 			if (this.#storage) {
@@ -308,8 +389,6 @@ export class ScenarioRepository {
 			this.#syncDefinitionTokens(previous, next);
 			this.#store.set(this.#snapshotFor(next));
 		});
-		this.#serial = run.catch(() => undefined);
-		return run;
 	}
 
 	#resolveTarget(
@@ -383,12 +462,14 @@ export class ScenarioRepository {
 
 	#snapshotFor(
 		user: readonly ScenarioDefinition[],
+		loadError?: string,
 	): ScenarioRepositorySnapshot {
 		const frozenUser = Object.freeze([...user]);
 		return Object.freeze({
 			bundled: this.#bundled,
 			user: frozenUser,
 			all: Object.freeze([...this.#bundled, ...frozenUser]),
+			...(loadError === undefined ? {} : { loadError }),
 		});
 	}
 }

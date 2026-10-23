@@ -34,7 +34,7 @@ test('zustand panel lists stores and refreshes projections', async () => {
 	).toBeEnabled();
 
 	// Store list renders selectable store buttons.
-	await expect(window.getByText('Active session').first()).toBeVisible({
+	await expect(window.getByText('Active project').first()).toBeVisible({
 		timeout: 20_000,
 	});
 	await harness.screenshot('zustand-stores');

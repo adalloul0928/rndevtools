@@ -79,6 +79,10 @@ reader is available. Header, URL, and body redaction runs before an event enters
 the store. Caller-supplied or custom fetch implementations remain untrusted and
 body-uninspectable unless the host explicitly vets that exact boundary; retained
 bodies are capped at 64 KB so admission matches the built-in redaction bound.
+An uninspected request method is shown as `UNKNOWN`; an unread or opaque response
+status is shown as a neutral `—`, never as an HTTP success. The fetch completing
+only records a transport outcome. Use the explicit trust options above when the
+host can vouch for its Request and Response boundary.
 
 Network condition profiles are an explicit, capability-gated opt-in. Offline,
 Edge, 3G, LTE, Wi-Fi, DSL, and Very Bad Network apply deterministic latency,
@@ -138,8 +142,11 @@ The advanced plugins use host-owned adapters instead of global interception:
   under a key whose name marks it sensitive, such as `refreshToken` or
   `session`. An adapter opts out of both with `revealValues: true`.
 - Restore points accept only declared sources. Snapshots must be JSON, are
-  bounded by source and session size, remain in memory, and capture rollback
-  state before applying a restore.
+  bounded by source and session size, remain in memory unless a persistence
+  adapter is given, and capture rollback state before applying a restore. When
+  persisted points cannot be loaded, the plugin writes nothing until they load
+  again or the stored points are discarded on purpose, so a transient storage
+  failure cannot replace them; the panel offers both choices.
 - Console subscribes to an application's structured logger, groups repeated
   entries, and preserves supplied scope, correlation, bounded stack, source,
   and bookmark metadata after redaction. It redacts a bounded window of each
@@ -362,6 +369,11 @@ trimmed. It does so for every release bundle by default, and fails the build
 when an import would still reach this package. `rndevtools-verify-bundle`
 asserts over an exported bundle that no devtools markers survived. Wire both
 up before shipping, and keep the shim list current when you add a plugin.
+
+Zustand adapters that enable edits must keep `validatePatch` pure. An edit
+rechecks the current projection after validation and refuses a stale patch.
+If the app writes while validation is pending, that write is preserved;
+rollback is attempted only after the devtools mutation has actually started.
 
 Captured diagnostics redact common credential aliases (including PIN, OTP,
 card/bank fields, private keys, and password confirmations), Unicode-escaped
