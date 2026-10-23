@@ -278,6 +278,19 @@ const ADOPTED_START_LOST_ERROR: SupabaseErrorView = Object.freeze({
 	details: Object.freeze({}),
 });
 /**
+ * What the job of a create that a previous desktop spawned fails with when
+ * its stack was verified but the record could not be saved.
+ */
+const ADOPTED_RECORD_ERROR: SupabaseErrorView = Object.freeze({
+	code: 'internal',
+	title: 'Stack record could not be saved',
+	message:
+		'The stack finished starting while RN Devtools was not running. RN Devtools checked it, but could not save its record, so it may not track or stop the stack on its own.',
+	recovery: 'Try again. If it keeps failing, restart RN Devtools.',
+	retry: 'none',
+	details: Object.freeze({}),
+});
+/**
  * Jobs that can bring a stack up: a turn-off with Stop managed stacks waits
  * for them, then stops their stacks too.
  */
@@ -3542,7 +3555,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 	 * again. A start that failed or was lost may still have left the stack
 	 * running, so it is verified too; one that isn't running has nothing to
 	 * verify. Undefined once the feature is off; else the verdict, which
-	 * fails the job of a start that took.
+	 * fails the job of a start that took: the exposure first, as the thing to
+	 * act on, else a record that could not be saved.
 	 */
 	async #settleAdopted(
 		jobId: string,
@@ -3555,12 +3569,23 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			if (status === 'complete') {
 				this.jobStore.markStep(jobId, 'verify', 'current');
 			}
-			// Verify before persistence: a failed record write must never bypass
-			// the exposure check. Verification refreshes the owner list itself.
+			// Verify before persistence, and whatever persistence does: a stack
+			// that came up is never left unchecked because its record could not
+			// be written. Verification refreshes the owner list itself.
 			const exposed = await this.enforceExposure(stackId, undefined, {
 				notRunning: 'pass',
 			});
-			await this.#recordAdopted(stackId, status);
+			let recorded = true;
+			try {
+				await this.#recordAdopted(stackId, status);
+			} catch (error) {
+				// A store that can't write: a failed disk write, the record cap, a
+				// record the schema refuses. The rest of the settling still runs.
+				recorded = false;
+				this.log(
+					`Supabase could not record an adopted stack: ${errorName(error)}`
+				);
+			}
 			if (status === 'complete') {
 				this.jobStore.markStep(
 					jobId,
@@ -3570,7 +3595,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				);
 			}
 			if (exposed.ok && this.entry(stackId)) await this.#rereadStatus(stackId);
-			return exposed;
+			return exposed.ok && !recorded
+				? { ok: false, error: ADOPTED_RECORD_ERROR }
+				: exposed;
 		});
 	}
 
