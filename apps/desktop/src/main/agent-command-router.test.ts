@@ -4609,7 +4609,10 @@ describe('agent command router', () => {
 				{ pid: 200, ppid: 1 },
 				{ pid: 300, ppid: 1 },
 				{ pid: 301, ppid: 300 },
-			];
+			].map((process) => ({
+				...process,
+				startedAt: 'Fri Oct 23 08:00:00 2026',
+			}));
 
 			async function identityDesk() {
 				const root = await mkdtemp(path.join(os.tmpdir(), 'rdt-id-'));
