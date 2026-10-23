@@ -139,7 +139,7 @@ export type LaneBackendPort = {
  * drive the Simulator: the agent service's answer, the one the router asks.
  * The lane service asks as the agent that started the lane, else as the
  * operator (the renderer starts lanes), and as `anonymous` only for a start
- * the router took from a request with no verified identity.
+ * the router took from a request that names no session.
  */
 export type LaneDeviceAccessPort = (
 	simulatorUdid: string,
@@ -150,8 +150,8 @@ type LaneListener = (state: LaneState) => void;
 
 type LaneStartInput = Extract<LaneOperation, { kind: 'lane.start' }> & {
 	/**
-	 * Set for a start the agent router took from a request with no verified
-	 * identity, which carries no `agent` either. The start then checks its
+	 * Set for a start the agent router took from a request that names no
+	 * session, which carries no `agent` either. The start then checks its
 	 * device as `anonymous`, not as the operator that an absent agent
 	 * otherwise means.
 	 */
@@ -777,7 +777,7 @@ export class LaneService {
 		}
 		// Who this start checks its device as, in its turn. An agent's start is
 		// the agent's; one with no agent is the operator's (the renderer), unless
-		// the router marked it as taken from a request with no verified identity.
+		// the router marked it as taken from a request that names no session.
 		// The check that comes after the reservation stays the agent's or the
 		// operator's: the reservation holds the device against any later claim,
 		// and is itself the hold an anonymous start would then be refused by.

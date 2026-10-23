@@ -33,6 +33,10 @@ export const DEVICE_HOLD_GRACE_MS = 10 * 60 * 1_000;
  * session variable, as Codex does. Every MCP session of that agent then shares
  * the one id, so such a synthetic holder is matched by where its sessions
  * work, never by the id alone. Detected by prefix, so nothing new is stored.
+ * The desktop no longer verifies a request that claims such an id (only a
+ * Claude Code session it can trace holds anything), so no new hold has one;
+ * the matching stays for the holds an older desktop recorded, which survive in
+ * the stores until they are released or their grace ends.
  */
 const SYNTHETIC_SESSION_PREFIX = 'mcp-';
 
@@ -261,7 +265,7 @@ export type DeviceAccessDecision =
 /**
  * Who asks for a device: an agent session, the `operator` (the person at the
  * desktop, acting through the renderer), or `anonymous`, a socket request
- * with no verified agent identity, which nothing ties to any holder.
+ * that names no agent session, which nothing ties to any holder.
  */
 export type DeviceRequester = DeviceHolder | 'operator' | 'anonymous';
 
@@ -272,10 +276,11 @@ export type DeviceRequester = DeviceHolder | 'operator' | 'anonymous';
  * may touch a free device or one whose hold is abandoned past its grace
  * period, and nothing anyone holds: it cannot be the holder of anything.
  *
- * A synthetic holder stands for every MCP session of its kind. A session of
- * that kind working inside the held lane's checkout (`scope`) is the one
- * keeping the hold alive, so it may use the device too, whether it calls over
- * MCP or the CLI.
+ * A synthetic holder (a hold an older desktop recorded; no request verifies
+ * as one now) stands for every MCP session of its kind. A session of that
+ * kind working inside the held lane's checkout (`scope`) is the one keeping
+ * the hold alive, so it may use the device too, whether it calls over MCP or
+ * the CLI.
  */
 export function decideDeviceAccess(
 	hold: DeviceHold | undefined,
@@ -296,7 +301,7 @@ export function decideDeviceAccess(
 		return {
 			allowed: false,
 			hold,
-			reason: `${describeHold(hold, now)} Requests without a verified agent identity may use free Simulators only.`,
+			reason: `${describeHold(hold, now)} A request that names no session may use free Simulators only.`,
 		};
 	}
 	if (hold.holder && holderKey(hold.holder) === holderKey(requester)) {
@@ -373,7 +378,8 @@ export type HoldCountdownInput = {
 	releaseAt?: number | undefined;
 	/**
 	 * `operator` is the person at the desktop (a pin, a lane they started);
-	 * `worktree` is a shared MCP identity matched by where its sessions work.
+	 * `worktree` is a shared MCP identity matched by where its sessions work,
+	 * as an older desktop recorded.
 	 */
 	holder?: 'operator' | 'lane' | 'claim' | 'session' | 'worktree' | undefined;
 	/** A shared `mcp-*` identity; it reads as held by its worktree. */

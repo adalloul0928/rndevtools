@@ -610,8 +610,9 @@ const holdTimes = {
 
 /**
  * Who keeps a stack running: a lane (with the agent driving it, if any), an
- * agent session's `supabase up`, a synthetic MCP caller held by worktree, or
- * the operator (a pin, or a start from the Supabase tab).
+ * agent session's `supabase up`, a synthetic MCP caller held by worktree (as
+ * an older desktop recorded it), or the operator (a pin, or a start from the
+ * Supabase tab).
  */
 export const supabaseHoldSchema = z
 	.discriminatedUnion('holder', [

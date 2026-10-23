@@ -3305,7 +3305,7 @@ describe('LaneService', () => {
 		});
 	});
 
-	describe('a start from a request with no verified identity', () => {
+	describe('a start from a request that names no session', () => {
 		const LANE_AGENT = { kind: 'claude' as const, sessionId: 'session-a' };
 		const OTHER_AGENT = { kind: 'codex' as const, sessionId: 'thread-b' };
 		const anonymous = { requester: 'anonymous' } as const;

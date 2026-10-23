@@ -416,9 +416,10 @@ describe('resolveSupabaseHolds', () => {
 		expect(result.clocks).toEqual({});
 	});
 
-	it('keeps a monorepo lane live while Codex works over MCP from the checkout root', () => {
-		// The lane's app is apps/mobile; Codex calls over MCP (one synthetic
-		// holder) from the repository root, above it.
+	it('keeps a monorepo lane held by a shared MCP identity live while a session of its kind works from the checkout root', () => {
+		// The lane's app is apps/mobile; an older desktop recorded the lane under
+		// one synthetic holder (Codex over MCP), and a session of that kind works
+		// from the repository root, above it.
 		const lanes = [
 			{
 				laneId: LANE,

@@ -16,8 +16,8 @@ import {
  * that pid points at it. Anything else (no lsof, a slow one, output that
  * does not match) proves nothing: the check never fails open.
  *
- * A proven pid is then mapped to the agent session that spawned it through
- * its ancestry: the process table from ps, walked parent by parent.
+ * A proven pid is then mapped to the Claude Code session that spawned it
+ * through its ancestry: the process table from ps, walked parent by parent.
  */
 
 const LSOF = '/usr/sbin/lsof';

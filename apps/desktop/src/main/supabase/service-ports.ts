@@ -34,7 +34,8 @@ import type { ClassifiedSupabaseError } from './cli-errors';
 /**
  * The operator, through a trusted renderer (`senderId` binds confirmation
  * tokens and owns the dialog window), or an agent session through the CLI
- * socket. A synthetic agent (`mcp-*`) is matched by `sessionCwd`.
+ * socket. A synthetic agent (`mcp-*`) is matched by `sessionCwd`; the CLI
+ * socket no longer produces one, since only a Claude Code session is verified.
  */
 type SupabaseActor =
 	| Readonly<{ kind: 'operator'; senderId: number }>
@@ -64,7 +65,10 @@ export type SupabaseAgentContext = Readonly<{
 	/** Absent for a request that claims no session. */
 	holder?: DeviceHolder | undefined;
 	synthetic: boolean;
-	/** Where the session works; how a synthetic holder is matched. */
+	/**
+	 * Where the session works; how a synthetic holder, which an older desktop
+	 * recorded, is matched.
+	 */
 	sessionCwd?: string | undefined;
 }>;
 

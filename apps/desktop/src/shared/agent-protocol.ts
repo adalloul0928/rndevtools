@@ -8,15 +8,17 @@ import { UDID_PATTERN } from './simulator-protocol';
  * Three signals, strongest first:
  * - a **claim** the session made on purpose (`rndevtools claim`), kept until
  *   released or until the session is no longer live;
- * - a **touch**: any device-targeted CLI command that carried the session id,
- *   expiring after 30 minutes of silence;
+ * - a **touch**: any device-targeted CLI command from the session, expiring
+ *   after 30 minutes of silence;
  * - a **lane** whose checkout the session works in. The checkout root counts:
  *   in a monorepo the lane's app is a subdirectory of it.
  *
  * Live sessions are discovered from the agents' own local state, so nothing
- * has to be installed into Claude Code or Codex. A claim is also a hold (see
- * `device-hold.ts`): until it is released, or abandoned past its grace
- * period, the desktop refuses other agents' claims and mutations on the
+ * has to be installed into Claude Code or Codex. Only a Claude Code session
+ * whose process the desktop can trace makes a claim or a touch; a Codex thread
+ * is listed, and counts by its working directory for a lane. A claim is also a
+ * hold (see `device-hold.ts`): until it is released, or abandoned past its
+ * grace period, the desktop refuses other agents' claims and mutations on the
  * device.
  */
 

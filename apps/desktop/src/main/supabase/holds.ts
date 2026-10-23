@@ -29,9 +29,10 @@ import type {
  * Holds are lanes attached to the stack (their agent, or the operator who
  * started them), agent session holds from `supabase up`, worktree holds for
  * synthetic `mcp-*` callers (live while a session of that kind works inside
- * the worktree), and the operator's pin. A live session whose cwd is inside
- * the worktree also keeps the stack running, except the session asking for
- * its own down or release.
+ * the worktree; an older desktop recorded them, and no request verifies as
+ * one now), and the operator's pin. A live session whose cwd is inside the
+ * worktree also keeps the stack running, except the session asking for its
+ * own down or release.
  *
  * Automatic stops (data is always kept): 60 s after the last hold is
  * released, once every holder has been gone past the abandonment grace, at

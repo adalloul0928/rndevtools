@@ -733,7 +733,8 @@ function viaText(
 /**
  * The stacks an agent session holds: by its own lane, session or worktree
  * hold, as the shared MCP identity of its kind working in the worktree
- * (held by worktree), or as a session working inside it (cwd).
+ * (held by worktree; an older desktop recorded those), or as a session
+ * working inside it (cwd).
  */
 export function sessionSupabaseBackends(
 	session: SessionRef,
@@ -781,8 +782,9 @@ export function sessionSupabaseBackends(
 				stack.worktreeLabel !== undefined &&
 				pathInsideLabel(cwd, stack.worktreeLabel));
 		if (!inside) continue;
-		// The shared MCP identity of this session's kind holds it for every
-		// session of that kind working in the worktree, this one included.
+		// The shared MCP identity of this session's kind holds it (an older
+		// desktop recorded the hold) for every session of that kind working in
+		// the worktree, this one included.
 		const hold = stack.holds.find(
 			(candidate) =>
 				candidate.holder === 'worktree' &&
