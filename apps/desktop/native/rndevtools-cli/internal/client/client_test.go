@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -376,5 +377,22 @@ func assertClientError(t *testing.T, err error, kind ErrorKind) {
 	var clientError *ClientError
 	if !errors.As(err, &clientError) || clientError.Kind != kind {
 		t.Fatalf("error = %v, want kind %s", err, kind)
+	}
+}
+
+type halfCloseResult struct{ err error }
+
+func (result halfCloseResult) CloseWrite() error { return result.err }
+
+func TestFinishRequestReadsAfterPeerCloseButPreservesOtherFailures(t *testing.T) {
+	for _, err := range []error{nil, syscall.ENOTCONN, &net.OpError{Op: "close", Net: "unix", Err: syscall.ENOTCONN}} {
+		if got := finishRequest(halfCloseResult{err}); got != nil {
+			t.Errorf("peer close must permit reading buffered response: %v", got)
+		}
+	}
+	for _, err := range []error{syscall.EBADF, context.Canceled, os.ErrDeadlineExceeded} {
+		if got := finishRequest(halfCloseResult{err}); !errors.Is(got, err) {
+			t.Errorf("lost actual finish failure %v: %v", err, got)
+		}
 	}
 }
