@@ -331,6 +331,9 @@
 
 ### Desktop app
 
+- Failed lane starts report unverified Metro cleanup with its PID and port,
+  retaining an existing record until the verified stop succeeds.
+
 - A Simulator chosen for a parked lane request becomes an agent-visible hold
   before worktree preparation; newly created clones are held as soon as discovered.
 
