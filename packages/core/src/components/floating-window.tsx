@@ -85,7 +85,10 @@ export function FloatingWindow({
 	const [query, setQuery] = useState('');
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
-	const availableWidth = Math.max(1, width - OUTER_MARGIN * 2);
+	const availableWidth = Math.max(
+		1,
+		width - insets.left - insets.right - OUTER_MARGIN * 2,
+	);
 	const availableHeight = Math.max(
 		1,
 		height - insets.top - insets.bottom - OUTER_MARGIN * 2,
@@ -102,15 +105,19 @@ export function FloatingWindow({
 		minimumHeight,
 		availableHeight,
 	);
-	const maximumX = Math.max(OUTER_MARGIN, width - resolvedWidth - OUTER_MARGIN);
+	const minimumX = insets.left + OUTER_MARGIN;
+	const maximumX = Math.max(
+		minimumX,
+		width - insets.right - resolvedWidth - OUTER_MARGIN,
+	);
 	const minimumY = insets.top + OUTER_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
 		height - resolvedHeight - insets.bottom - OUTER_MARGIN,
 	);
 	const resolvedX = clamp(
-		initialPosition?.x ?? (width - resolvedWidth) / 2,
-		OUTER_MARGIN,
+		initialPosition?.x ?? minimumX + (availableWidth - resolvedWidth) / 2,
+		minimumX,
 		maximumX,
 	);
 	const resolvedY = clamp(
@@ -165,7 +172,10 @@ export function FloatingWindow({
 			const nextWidth = clamp(
 				windowWidth.value + delta,
 				minimumWidth,
-				Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+				Math.max(
+					minimumWidth,
+					width - insets.right - translateX.value - OUTER_MARGIN,
+				),
 			);
 			const nextHeight = clamp(
 				windowHeight.value + delta,
@@ -183,6 +193,7 @@ export function FloatingWindow({
 			commitSize,
 			height,
 			insets.bottom,
+			insets.right,
 			minimumHeight,
 			minimumWidth,
 			translateX,
@@ -204,8 +215,11 @@ export function FloatingWindow({
 				.onUpdate((event) => {
 					translateX.value = clamp(
 						startX.value + event.translationX,
-						OUTER_MARGIN,
-						Math.max(OUTER_MARGIN, width - windowWidth.value - OUTER_MARGIN),
+						minimumX,
+						Math.max(
+							minimumX,
+							width - insets.right - windowWidth.value - OUTER_MARGIN,
+						),
 					);
 					translateY.value = clamp(
 						startY.value + event.translationY,
@@ -223,6 +237,8 @@ export function FloatingWindow({
 			commitPosition,
 			height,
 			insets.bottom,
+			insets.right,
+			minimumX,
 			minimumY,
 			startX,
 			startY,
@@ -246,7 +262,10 @@ export function FloatingWindow({
 					windowWidth.value = clamp(
 						startWidth.value + event.translationX,
 						minimumWidth,
-						Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+						Math.max(
+							minimumWidth,
+							width - insets.right - translateX.value - OUTER_MARGIN,
+						),
 					);
 					windowHeight.value = clamp(
 						startHeight.value + event.translationY,
@@ -264,6 +283,7 @@ export function FloatingWindow({
 			commitSize,
 			height,
 			insets.bottom,
+			insets.right,
 			minimumHeight,
 			minimumWidth,
 			startHeight,

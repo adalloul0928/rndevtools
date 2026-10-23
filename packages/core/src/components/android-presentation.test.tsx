@@ -133,7 +133,7 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
-	useSafeAreaInsets: () => ({ top: 24, right: 0, bottom: 24, left: 0 }),
+	useSafeAreaInsets: () => ({ top: 24, right: 32, bottom: 24, left: 20 }),
 }));
 
 jest.mock('react-native-worklets', () => ({
@@ -236,6 +236,11 @@ describe('Android presentation boundary', () => {
 			/>,
 		);
 
+		expect(screen.getByTestId('devtools-sheet')).toHaveStyle({
+			paddingLeft: 32,
+			paddingRight: 44,
+			paddingBottom: 24,
+		});
 		await fireEvent.press(screen.getByLabelText('Window'));
 		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		await fireEvent.press(screen.getByTestId('devtools-sheet-close'));
