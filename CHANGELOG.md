@@ -285,6 +285,9 @@
 
 ### Desktop app
 
+- SimSlim verification serializes absent observed-process evidence as empty arrays,
+  including preparation and failure responses, so desktop validation accepts it.
+
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 
