@@ -387,6 +387,35 @@ patterns are shared with the repository public-content check. Private-key
 blocks are omitted even when capture truncates the closing marker; the normal
 capture size and traversal budgets still apply.
 
+## Query simulation adapters
+
+Each supported mode registers `{ apply, release }` before the controller runs
+it. `release` must safely undo even a partially failed `apply`, and allow a
+retry if cleanup itself fails. The controller attempts cleanup on failure;
+failed cleanup remains visible and can be retried with `clear(receiptId)`.
+
+Migrate callback-style operations that returned a lease after mutation:
+
+```ts
+// Before: cleanup was unavailable if setOffline threw.
+offline: () => {
+  setOffline(true);
+  return { release: () => setOffline(false) };
+}
+
+// Now: both callbacks are validated before any mutation.
+offline: {
+  apply: () => setOffline(true),
+  release: () => setOffline(false),
+}
+```
+
+When restoring a previous value, capture it in `apply` before changing it and
+keep it in the adapter's closure for `release`. Construction never runs either
+callback. Callback-only operations are rejected before they can mutate state.
+
+## Scenario adapter recovery
+
 Scenario adapters return a nonempty preflight summary, boolean safety flags,
 and at most 100 nonempty warnings. The engine trims summary/warning text,
 checks the recovery bounds, and copies only the supported fields before any

@@ -16,17 +16,18 @@ export type QuerySimulationLease = Readonly<{
 	release: () => void | Promise<void>;
 }>;
 
+/** Cleanup is registered before apply, including for partially failed applies. */
+export type QuerySimulationOperation = QuerySimulationLease &
+	Readonly<{
+		apply: () => void | Promise<void>;
+	}>;
+
 export type QuerySimulationFamilyAdapter = Readonly<{
 	id: string;
 	label: string;
 	description?: string;
 	operations?: Partial<
-		Readonly<
-			Record<
-				QuerySimulationMode,
-				() => QuerySimulationLease | Promise<QuerySimulationLease>
-			>
-		>
+		Readonly<Record<QuerySimulationMode, QuerySimulationOperation>>
 	>;
 	unsupportedReasons?: Partial<Readonly<Record<QuerySimulationMode, string>>>;
 }>;
@@ -68,6 +69,7 @@ export type QuerySimulationController = Readonly<{
 
 type ActiveLease = ActiveQuerySimulation & {
 	release: QuerySimulationLease['release'];
+	cleanupRequired?: boolean;
 };
 
 const ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -157,12 +159,7 @@ function normalizeFamilies(
 	label: string;
 	description?: string;
 	operations: Readonly<
-		Partial<
-			Record<
-				QuerySimulationMode,
-				() => QuerySimulationLease | Promise<QuerySimulationLease>
-			>
-		>
+		Partial<Record<QuerySimulationMode, QuerySimulationOperation>>
 	>;
 	modes: QuerySimulationFamilySnapshot['modes'];
 }>[] {
@@ -208,10 +205,7 @@ function normalizeFamilies(
 			`Query simulation unsupported reasons for ${id}`,
 		);
 		const operations: Partial<
-			Record<
-				QuerySimulationMode,
-				() => QuerySimulationLease | Promise<QuerySimulationLease>
-			>
+			Record<QuerySimulationMode, QuerySimulationOperation>
 		> = {};
 		const modes = QUERY_SIMULATION_MODES.map((mode) => {
 			const operation = operationsRecord
@@ -221,15 +215,27 @@ function normalizeFamilies(
 						`Query simulation operations for ${id}`,
 					)
 				: undefined;
-			if (operation !== undefined && typeof operation !== 'function') {
-				throw new Error(
-					`Query simulation operation ${id}.${mode} must be a function.`,
-				);
-			}
-			if (typeof operation === 'function') {
-				operations[mode] = operation as () =>
-					| QuerySimulationLease
-					| Promise<QuerySimulationLease>;
+			if (operation !== undefined) {
+				const label = `Query simulation operation ${id}.${mode}`;
+				if (typeof operation === 'function') {
+					throw new Error(
+						`${label} must provide apply and release before mutation.`,
+					);
+				}
+				const record = plainDataRecord(operation, label);
+				const apply = record ? dataField(record, 'apply', label) : undefined;
+				const release = record
+					? dataField(record, 'release', label)
+					: undefined;
+				if (typeof apply !== 'function' || typeof release !== 'function') {
+					throw new Error(
+						`${label} must provide apply and release before mutation.`,
+					);
+				}
+				operations[mode] = Object.freeze({
+					apply: apply as QuerySimulationOperation['apply'],
+					release: release as QuerySimulationOperation['release'],
+				});
 			}
 			const rawReason = unsupportedReasonsRecord
 				? dataField(
@@ -376,6 +382,10 @@ export function createQuerySimulationController(
 					throw new Error(reason ?? 'Query simulation mode is unavailable.');
 				}
 				if (active?.familyId === family.id && active.mode === mode) {
+					if (active.cleanupRequired)
+						throw new Error(
+							'Clear the failed query simulation cleanup before applying again.',
+						);
 					return publicActive(active);
 				}
 				await releaseActive();
@@ -385,25 +395,29 @@ export function createQuerySimulationController(
 						'Query simulation clock returned an invalid timestamp.',
 					);
 				}
-				const lease = await operation();
-				const leaseRecord = plainDataRecord(lease, 'Query simulation lease');
-				const release = leaseRecord
-					? dataField(leaseRecord, 'release', 'Query simulation lease')
-					: undefined;
-				if (typeof release !== 'function') {
-					throw new Error(
-						'Query simulation host did not provide reversible cleanup.',
-					);
-				}
 				const nextActive: ActiveLease = {
 					familyId: family.id,
 					familyLabel: family.label,
 					mode,
 					receiptId: `query-simulation-${nextReceipt++}`,
 					startedAt,
-					release: release as QuerySimulationLease['release'],
+					release: operation.release,
 				};
 				active = nextActive;
+				try {
+					await operation.apply();
+				} catch (error) {
+					nextActive.cleanupRequired = true;
+					try {
+						await releaseActive(nextActive.receiptId);
+					} catch {
+						publish();
+						throw new Error(
+							'Query simulation cleanup failed. Clear the simulation to retry cleanup.',
+						);
+					}
+					throw error;
+				}
 				publish();
 				appendEvent('applied', nextActive);
 				return publicActive(nextActive);

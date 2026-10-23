@@ -4,6 +4,11 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- **Breaking:** query simulation modes now register `{ apply, release }` instead
+  of returning cleanup after applying. Failed applies are undone immediately;
+  failed cleanup stays available for an explicit retry. See the core README's
+  migration example.
+
 - Scenario preflight results are normalized, validated and detached before any
   mutation, so durable recovery checkpoints can be loaded after restart.
 
