@@ -8,11 +8,11 @@
 		"userInterfaceStyle": "automatic",
 		"newArchEnabled": true,
 		"ios": {
-			"bundleIdentifier": "io.github.adalloul0928.rndevtools.demo",
+			"bundleIdentifier": "com.example.app",
 			"supportsTablet": true
 		},
 		"android": {
-			"package": "io.github.adalloul0928.rndevtools.demo"
+			"package": "com.example.app"
 		}
 	}
 }

@@ -22,11 +22,17 @@
   keeping clocks and refresh arrows out of the shield icon and shipping boxes
   out of the pin icon.
 
+- The Expo example uses neutral native identifiers, sends its declared request
+  correlation header, and enables inspection only for its own fetch wrapper.
+  Integration docs identify host-owned projection functions and launcher behavior.
+
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
+- Event stores retain bounded history in a FIFO buffer and build immutable array
+  snapshots on demand, avoiding full-history copies for unobserved appends.
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 
@@ -342,6 +348,9 @@
 
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
+- Release notarization uses a temporary private key file with owner-only permissions,
+  removes it after storing the keychain profile, and keeps credentials out of child
+  process arguments and inherited environments.
 - Package release verification and packing run without publishing credentials.
   A separate runner publishes checked tarballs with lifecycle scripts disabled
   and npm trusted publishing; long-lived npm tokens are no longer used.
@@ -361,6 +370,8 @@
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Development startup rejects stale native helper manifests and mismatched host
+  handshakes with a rebuild command, while allowing diagnostics without helpers.
 - Packaging rejects native manifests for another app version or architecture.
   Release capability probes inspect the signed in-app host executable.
 

@@ -26,7 +26,11 @@ export function DevtoolsHost({ queryClient }: { queryClient: QueryClient }) {
 		setDevtoolsAuthorization({ enabled: __DEV__, ownerId: 'demo-user' });
 
 		// One instrumented request so the network panel has something to show.
-		void instrumentedFetch('https://api.example.com/health').catch(() => {
+		void instrumentedFetch('https://api.example.com/health', {
+			headers: {
+				'x-demo-request-id': `demo-health-${Date.now().toString(36)}`,
+			},
+		}).catch(() => {
 			// A failed demo request is still a captured request.
 		});
 

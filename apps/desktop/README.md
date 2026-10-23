@@ -74,6 +74,11 @@ Simulator-capable command at least once (and again after native changes):
 pnpm --filter @rndevtools/desktop dev:simulator
 ```
 
+Plain `dev` verifies any existing native helper bundle and its reported version
+before launching Electron. Rebuild stale helpers with `native:build`. Without a
+helper bundle, read-only app diagnostics remain available; Simulator tools require
+the native build. This preflight does not prompt for system permissions.
+
 That command verifies the pinned vendored SimSlim source, builds the Go and
 Swift helpers for the current architecture, then starts Electron.
 
