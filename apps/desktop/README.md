@@ -312,3 +312,18 @@ and restart the app before changing preferences.
 Supabase CLI selections are rechecked immediately before execution. If the file
 was replaced, redirected or made writable since validation, the call is refused;
 refresh the installation before retrying.
+
+### Licensed renderer integrity
+
+The HeroUI Pro installer hydrates code beyond the npm lockfile stub. Desktop dev
+and build verify `dist/`, `package.json`, and `LICENSE` against
+`scripts/heroui-pro-integrity.json` before loading the renderer toolchain. The
+initial manifest pins the locally hydrated 1.0.0-beta.8 payload, which matched in
+two independent workspace installs. This is a reviewed content pin, not a vendor
+signature. Installer dependencies remain pinned by the pnpm lockfile.
+
+For a deliberate licensed update, install it with `HEROUI_AUTH_TOKEN`, review the
+changed package and payload, then run
+`node apps/desktop/scripts/verify-heroui-pro.mjs --record` and review the manifest
+diff in the same PR. Builds never record new hashes automatically. Token-free
+main-process checks use fixture integrity tests and do not require the payload.
