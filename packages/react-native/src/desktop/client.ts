@@ -607,6 +607,7 @@ export function startDesktopClient(
 	let sequence = 0;
 	let diagnosticSequence = 0;
 	let brokerRejections = 0;
+	let failedDiscoveryRounds = 0;
 	let reportedTrim = '';
 	let socket: WebSocket | undefined;
 	let outbox: DesktopOutbox | undefined;
@@ -1007,6 +1008,15 @@ export function startDesktopClient(
 		}, delay);
 	};
 
+	const discoveryRetryDelay = (): number => {
+		if (candidateIndex !== 0) return 100;
+		failedDiscoveryRounds = Math.min(failedDiscoveryRounds + 1, 5);
+		return Math.min(
+			MAX_RETRY_DELAY_MS,
+			RETRY_DELAY_MS * 2 ** (failedDiscoveryRounds - 1),
+		);
+	};
+
 	const connect = () => {
 		if (!active || socket || brokerCandidates.length === 0) return;
 		const currentCandidateIndex = candidateIndex % brokerCandidates.length;
@@ -1023,7 +1033,7 @@ export function startDesktopClient(
 				`Could not open ${urlLabel}: ${diagnosticErrorText(error)}`,
 			);
 			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
-			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
+			scheduleReconnect(discoveryRetryDelay());
 			return;
 		}
 		socket = nextSocket;
@@ -1063,7 +1073,7 @@ export function startDesktopClient(
 					'Could not reach a desktop broker candidate; retrying discovery.',
 				);
 			}
-			scheduleReconnect(candidateIndex === 0 ? RETRY_DELAY_MS : 100);
+			scheduleReconnect(discoveryRetryDelay());
 		};
 
 		connectTimer = setTimeout(() => {
@@ -1093,6 +1103,7 @@ export function startDesktopClient(
 				return;
 			}
 			opened = true;
+			failedDiscoveryRounds = 0;
 			openedAt = Date.now();
 			if (connectTimer) clearTimeout(connectTimer);
 			connectTimer = undefined;
