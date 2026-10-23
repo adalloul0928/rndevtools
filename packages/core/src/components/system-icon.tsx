@@ -169,6 +169,7 @@ const materialIcons = {
 function iconKeyForSystemImage(
 	systemName: DevToolsSystemImage,
 ): keyof typeof materialIcons {
+	const segments = new Set(systemName.split('.'));
 	if (systemName === 'chevron.left') return 'back';
 	if (systemName === 'chevron.right') return 'forward';
 	if (systemName === 'xmark' || systemName.startsWith('xmark.')) return 'close';
@@ -186,10 +187,8 @@ function iconKeyForSystemImage(
 	if (systemName.includes('stack') || systemName.includes('database'))
 		return 'database';
 	if (systemName.includes('gear')) return 'settings';
-	if (systemName.includes('shield') || systemName.includes('lock'))
-		return 'shield';
-	if (systemName.includes('timer') || systemName.includes('clock'))
-		return 'timer';
+	if (systemName.includes('shield') || segments.has('lock')) return 'shield';
+	if (systemName.includes('timer') || segments.has('clock')) return 'timer';
 	if (systemName.includes('hourglass')) return 'hourglass';
 	if (systemName.includes('location')) return 'location';
 	if (systemName.includes('link')) return 'link';
@@ -203,7 +202,7 @@ function iconKeyForSystemImage(
 		return 'refresh';
 	if (systemName.includes('exclamationmark')) return 'warning';
 	if (systemName.includes('info')) return 'info';
-	if (systemName.includes('pin')) return 'pin';
+	if (segments.has('pin')) return 'pin';
 	if (
 		systemName.includes('arrow.up') ||
 		systemName.includes('square.and.arrow.up')

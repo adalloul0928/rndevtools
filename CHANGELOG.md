@@ -14,6 +14,10 @@
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
 
+- Symbol fallback matching treats lock, clock and pin as complete name segments,
+  keeping clocks and refresh arrows out of the shield icon and shipping boxes
+  out of the pin icon.
+
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
