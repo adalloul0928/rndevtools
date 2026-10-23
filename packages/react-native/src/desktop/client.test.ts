@@ -1525,6 +1525,37 @@ describe('desktop client', () => {
 		}
 	});
 
+	it.each([
+		['undefined', undefined],
+		['null', null],
+	])(
+		'records a failed capture, not a frame, when captureTools returns %s',
+		async (_name, returned) => {
+			jest.useFakeTimers();
+			mockCaptureDesktopTools.mockReturnValue(returned as never);
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				await jest.advanceTimersByTimeAsync(1_500);
+
+				expect(
+					sentMessages(socket).filter((message) => message.type === 'snapshot'),
+				).toEqual([]);
+				expect(
+					clientDiagnosticMessages().some((message) =>
+						message.includes('captureTools returned no snapshot object'),
+					),
+				).toBe(true);
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
 	it('backs off after consecutive broker rejections and reports why', async () => {
 		jest.useFakeTimers();
 		const client = startDesktopClient({

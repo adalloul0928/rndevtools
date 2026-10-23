@@ -225,9 +225,10 @@
   are nested, such as a component's `sourceFiles`), a text or a number over
   its bound made the broker close the socket and the device reconnect in a
   loop. Core keeps up to 10,000 performance samples where the desktop takes
-  1,500, and does not cap a scenario's warnings where it takes 100. A list
-  over its cap keeps its newest rows if it is chronological and its first if
-  it is ordered, a text is cut without splitting a surrogate pair, a number is
+  1,500, and does not cap a scenario's warnings where it takes 100. A
+  top-level list over its cap keeps its last rows, and a list inside a row
+  keeps its newest rows if it is chronological and its first if it is
+  ordered. A text is cut without splitting a surrogate pair, a number is
   clamped into its range, and a map keeps its first fields. A query
   simulation's active entry, a camera fixture, a scenario variable default or
   a persona identifier that disagrees with the rest, which the schema would

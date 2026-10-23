@@ -764,7 +764,13 @@ export function startDesktopClient(
 			// The broker closes the socket on a snapshot that is over any bound, so
 			// one oversized projection would leave the device reconnecting in a
 			// loop.
-			const captured = fitDesktopSnapshot(host.captureTools(diagnostics));
+			const tools = host.captureTools(diagnostics);
+			// A host that returns no snapshot object failed to capture one; sending
+			// the frame anyway would have the broker close the socket.
+			if (typeof tools !== 'object' || tools === null) {
+				throw new TypeError('captureTools returned no snapshot object.');
+			}
+			const captured = fitDesktopSnapshot(tools);
 			reportTrim(captured.trimmed);
 			const serialized = JSON.stringify({
 				type: 'snapshot',

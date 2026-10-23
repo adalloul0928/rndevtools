@@ -363,7 +363,7 @@ describe('fitDesktopSnapshot', () => {
 			expect(fitted.trimmed).toEqual([
 				'scenarioRuntime.active.warnings to 100 rows',
 				'performance.samples to 1500 rows',
-				'performance.droppedSampleCount raised by 8500',
+				'performance.droppedSampleCount raised for the samples cut',
 			]);
 		});
 
@@ -386,6 +386,16 @@ describe('fitDesktopSnapshot', () => {
 				fit({ performance: performance(3) }).tools.performance
 					.droppedSampleCount,
 			).toBe(103);
+			// The client reports a trim only once while it stays the same, so the
+			// description must not carry a number that grows with every snapshot.
+			expect(fit({ performance: performance(0) }).trimmed).toEqual(
+				fit({
+					performance: {
+						...performance(0),
+						samples: [...samples, ...samples.slice(0, 100)],
+					},
+				}).trimmed,
+			);
 			// The schema takes a safe integer at most.
 			expect(
 				fit({ performance: performance(Number.MAX_SAFE_INTEGER) }).tools

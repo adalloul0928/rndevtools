@@ -2378,7 +2378,7 @@ const performanceReview: FitRule<Tools['performance']> = (label) => {
 		const removed = value.samples.length - fitted.samples.length;
 		if (removed <= 0) return fitted;
 		trace.add(
-			`${label ? `${label}.` : ''}droppedSampleCount raised by ${removed}`,
+			`${label ? `${label}.` : ''}droppedSampleCount raised for the samples cut`,
 		);
 		return {
 			...fitted,
@@ -2629,9 +2629,10 @@ let fitSnapshot: Fit<DesktopDeviceToolsSnapshot> | undefined;
  * of every number. The schema reads its bounds from the tables above, so the
  * two agree.
  *
- * A list over its cap keeps its newest rows if it is chronological, as
- * core's stores append, and its first rows if it is ordered, such as keys,
- * sources, variables, steps and files. A map keeps its first fields and loses
+ * A top-level list over its cap keeps its last rows, as core's stores
+ * append. A list inside a row keeps its newest rows if it is chronological
+ * and its first rows if it is ordered, such as keys, sources, variables, steps
+ * and files; the identity history keeps the sessions that started latest. A map keeps its first fields and loses
  * any whose name is too long. A text is cut to its limit without splitting a
  * surrogate pair. A number is clamped into its range and an integer's
  * fraction cut off; one that is not finite is dropped if it is optional,

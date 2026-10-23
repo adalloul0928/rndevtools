@@ -90,10 +90,10 @@ the broker's contract itself:
 - The broker rejects a whole snapshot that is over any bound it validates, so
   the client fits each one before it sends it, with `fitDesktopSnapshot` from
   `@rndevtools/core/desktop-protocol`, and records a warning in its
-  diagnostics that names what it changed. A list over its cap, nested lists
-  included, keeps its newest rows if it is chronological, such as events and
-  samples, and its first rows if it is ordered, such as keys, sources,
-  variables, steps and files; the caps are in `RNDEVTOOLS_SNAPSHOT_LIMITS` and
+  diagnostics that names what it changed. A top-level list over its cap keeps
+  its last rows. A list inside a row keeps its newest rows if it is
+  chronological, such as samples, and its first rows if it is ordered, such as
+  keys, sources, variables, steps and files; the caps are in `RNDEVTOOLS_SNAPSHOT_LIMITS` and
   `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`. A text over its limit
   (`RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS`) is cut without splitting a surrogate
   pair. A number outside its range (`RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`) is

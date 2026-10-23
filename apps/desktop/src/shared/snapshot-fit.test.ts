@@ -1271,7 +1271,7 @@ describe('list limits', () => {
 			expect(fitted.trimmed).toEqual([
 				`${path} to ${limit} rows`,
 				...(path === 'performance.samples'
-					? ['performance.droppedSampleCount raised by 1']
+					? ['performance.droppedSampleCount raised for the samples cut']
 					: []),
 			]);
 			const kept = read(fitted.tools, path) as unknown[];
