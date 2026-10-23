@@ -18,6 +18,11 @@ const (
 	MaxResponseBytes = 512 * 1024
 )
 
+// maxPeerPID is the largest pid the desktop's envelope schema accepts. No pid
+// on a Mac comes near it, so a request the desktop would refuse as malformed
+// is refused here, before it is sent.
+const maxPeerPID = 4_194_304
+
 type Command string
 
 const (
@@ -43,13 +48,26 @@ const (
 	CommandInput      Command = "input"
 )
 
+// Peer names the process that sent a request by its own pid. The desktop
+// checks that this pid holds the other end of the connection the request
+// arrived on and then finds the agent session that spawned it, so the kernel
+// vouches for who is calling instead of a variable anyone can set.
+type Peer struct {
+	PID int `json:"pid"`
+}
+
 type Request struct {
 	Protocol string          `json:"protocol"`
 	ID       string          `json:"id"`
 	Command  json.RawMessage `json:"command"`
-	// Agent is the coding-agent session the CLI runs inside, when known. The
-	// desktop records a touch for every device-targeted command it carries.
+	// Agent is the coding-agent session this process says it runs inside, read
+	// from its session variables. It is a claim, not an identity: the desktop
+	// checks it against the process Peer names, and a request whose session it
+	// cannot verify is unprivileged, not the operator.
 	Agent map[string]any `json:"agent,omitempty"`
+	// Peer is the sending process's own pid. The desktop needs it only to
+	// check Agent, so a request that claims no session may leave it out.
+	Peer *Peer `json:"peer,omitempty"`
 }
 
 type Response struct {
@@ -183,6 +201,9 @@ func validateRequest(request Request) error {
 	}
 	if !validIdentifier(request.ID) {
 		return errors.New("id must be a 1..256 character ASCII identifier")
+	}
+	if request.Peer != nil && (request.Peer.PID < 1 || request.Peer.PID > maxPeerPID) {
+		return fmt.Errorf("peer pid must be between 1 and %d", maxPeerPID)
 	}
 	if len(request.Command) == 0 || !json.Valid(request.Command) {
 		return errors.New("command must be valid JSON")

@@ -41,8 +41,9 @@ import type { SupabaseStoredHold } from './stack-store';
 
 /**
  * `rndevtools supabase --operation …` and the MCP tool `supabase`. Identity
- * comes from the request envelope: a session hold for an attributed caller,
- * a worktree hold for a shared MCP identity. Results carry ports, never
+ * is the one the desktop verified for the request's connection: a session
+ * hold for an attributed caller, a worktree hold for a shared MCP identity,
+ * and none for a request that claims no session. Results carry ports, never
  * URLs or keys, except `env`, which returns the public values only. Errors
  * are AgentCliError with a code from SUPABASE_AGENT_ERROR_CODES and the
  * recovery that names the next call. Destroy always becomes a request for
@@ -98,7 +99,7 @@ function refusalError(refused: SupabaseEnsureRefusal): AgentCliError {
 	return agentError(refused.agentCode, refused.message, runner);
 }
 
-/** The holder an agent's `up` adds, or none when the CLI couldn't tell who asked. */
+/** The holder an agent's `up` adds, or none for a request that claims no session. */
 function holdFor(
 	context: SupabaseAgentContext,
 	now: number

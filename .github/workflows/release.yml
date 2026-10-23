@@ -50,19 +50,13 @@ jobs:
 
   desktop-app:
     name: Desktop app
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release-signing
     # This label is an Apple silicon standard runner; the release script also checks arm64.
     runs-on: macos-15
     timeout-minutes: 90
     permissions:
       contents: write
-    env:
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
-      # Compiled into the simulator helper's parent attestation. Without it the
-      # helper fails closed and refuses every mutation.
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
-      CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-      APPLE_KEYCHAIN_PROFILE: rndevtools-release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,14 +70,29 @@ jobs:
         with:
           go-version-file: apps/desktop/native/rndevtools-sim-helper/go.mod
           cache-dependency-path: apps/desktop/native/rndevtools-sim-helper/go.mod
-      - name: Require public distribution credentials
+      - name: Install
         env:
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+        run: pnpm install --frozen-lockfile --config.side-effects-cache=false
+      - name: Public content and desktop checks
+        run: |
+          pnpm check:public
+          pnpm --filter @rndevtools/desktop release:check
+          pnpm --filter @rndevtools/desktop quality
+      - name: Build, sign, notarize and verify arm64 DMG
+        env:
+          # The same team signs Electron and every native helper. The helper
+          # compiles this team into its parent-attestation requirement.
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PROFILE: rndevtools-release
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           node --input-type=module <<'JS'
           import { execFileSync } from 'node:child_process';
-          const required = ['HEROUI_AUTH_TOKEN', 'APPLE_TEAM_ID', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD'];
+          const required = [ 'APPLE_TEAM_ID', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD'];
           const missing = required.filter((name) => !process.env[name]);
           if (missing.length) throw new Error(`Missing release secrets: ${missing.join(', ')}`);
           execFileSync('/usr/bin/xcrun', [
@@ -94,15 +103,7 @@ jobs:
           ], { stdio: 'pipe' });
           JS
           node apps/desktop/scripts/release-macos.mjs --preflight
-      - name: Install
-        run: pnpm install --frozen-lockfile
-      - name: Public content and desktop checks
-        run: |
-          pnpm check:public
-          pnpm --filter @rndevtools/desktop release:check
-          pnpm --filter @rndevtools/desktop quality
-      - name: Build, sign, notarize and verify arm64 DMG
-        run: pnpm --filter @rndevtools/desktop release:mac
+          pnpm --filter @rndevtools/desktop release:mac
       - name: Verify native capabilities
         run: pnpm --filter @rndevtools/desktop native:verify:capabilities
       - name: Verify packaged cold start

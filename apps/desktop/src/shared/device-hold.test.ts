@@ -138,7 +138,10 @@ describe('decideDeviceAccess', () => {
 		expect(decideDeviceAccess(held.get(A), claude, now)).toEqual({
 			allowed: true,
 		});
-		expect(decideDeviceAccess(held.get(A), undefined, now)).toEqual({
+		expect(decideDeviceAccess(held.get(A), 'operator', now)).toEqual({
+			allowed: true,
+		});
+		expect(decideDeviceAccess(held.get(C), 'operator', now)).toEqual({
 			allowed: true,
 		});
 		expect(decideDeviceAccess(undefined, codex, now)).toEqual({
@@ -176,6 +179,65 @@ describe('decideDeviceAccess', () => {
 		expect(
 			decideDeviceAccess(abandoned, codex, since + DEVICE_HOLD_GRACE_MS)
 		).toEqual({ allowed: true });
+	});
+
+	it('lets an anonymous request use a free device and nothing anyone holds', () => {
+		expect(decideDeviceAccess(undefined, 'anonymous', now)).toEqual({
+			allowed: true,
+		});
+		const sentence =
+			'Requests without a verified agent identity may use free Simulators only.';
+		// A lane, a claim, and an operator-started lane are all someone's.
+		const byOwner = [
+			[A, 'claude session s1'],
+			[B, 'codex session t1'],
+			[C, 'the operator'],
+		] as const;
+		for (const [udid, owner] of byOwner) {
+			const refused = decideDeviceAccess(held.get(udid), 'anonymous', now);
+			expect(refused.allowed).toBe(false);
+			if (!refused.allowed) {
+				expect(refused.reason).toContain(owner);
+				expect(refused.reason.endsWith(sentence)).toBe(true);
+			}
+		}
+	});
+
+	it('opens an abandoned hold to an anonymous request only once the grace period has passed', () => {
+		const since = now - 3 * 60_000;
+		const abandoned = resolveDeviceHolds({
+			lanes: [lane(A, claude)],
+			claims: [],
+			liveSessionKeys: new Set(),
+			missingSince: new Map([['claude:s1', since]]),
+			now,
+		}).get(A);
+		const early = decideDeviceAccess(abandoned, 'anonymous', now);
+		expect(early.allowed).toBe(false);
+		if (!early.allowed) {
+			expect(early.reason).toMatch(/releases in 7 min/);
+			expect(early.reason).toMatch(/free Simulators only\.$/);
+		}
+		expect(
+			decideDeviceAccess(abandoned, 'anonymous', since + DEVICE_HOLD_GRACE_MS)
+		).toEqual({ allowed: true });
+	});
+
+	it('refuses an anonymous request on a live shared-identity lane, whatever works in its checkout', () => {
+		const synthetic = {
+			kind: 'codex',
+			sessionId: 'mcp-codex-mcp-client',
+		} as const;
+		const hold = resolveDeviceHolds({
+			lanes: [{ ...lane(A, synthetic), worktreePath: '/Users/dev/repo' }],
+			claims: [],
+			liveSessionKeys: new Set(),
+			liveSessions: [{ kind: 'codex', cwd: '/Users/dev/repo' }],
+			missingSince: new Map(),
+			now,
+		}).get(A);
+		expect(hold?.holderLive).toBe(true);
+		expect(decideDeviceAccess(hold, 'anonymous', now).allowed).toBe(false);
 	});
 });
 

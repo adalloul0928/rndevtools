@@ -1,13 +1,18 @@
 import { mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
-import { connect } from 'node:net';
+import { connect, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	type AgentCliResponse,
+	type AgentIdentityResolution,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
-import { AgentCliError, AgentCliService } from './agent-cli-service';
+import {
+	AgentCliError,
+	type AgentCliHandlerContext,
+	AgentCliService,
+} from './agent-cli-service';
 
 const LANE_ID = 'lane-11111111-2222-4333-8444-555555555555';
 
@@ -28,7 +33,14 @@ async function fixture(
 	handler: ConstructorParameters<typeof AgentCliService>[0]['handler'] = async (
 		command
 	) => ({ command }),
-	{ livenessProbeMs }: { livenessProbeMs?: number } = {}
+	{
+		livenessProbeMs,
+		verifyPeer,
+		identify,
+	}: Pick<
+		ConstructorParameters<typeof AgentCliService>[0],
+		'livenessProbeMs' | 'verifyPeer' | 'identify'
+	> = {}
 ): Promise<{ service: AgentCliService; socketPath: string }> {
 	const directory = await mkdtemp(path.join(tmpdir(), 'rndevtools-agent-cli-'));
 	temporaryDirectories.push(directory);
@@ -38,6 +50,8 @@ async function fixture(
 		handler,
 		platform: 'darwin',
 		...(livenessProbeMs === undefined ? {} : { livenessProbeMs }),
+		...(verifyPeer === undefined ? {} : { verifyPeer }),
+		...(identify === undefined ? {} : { identify }),
 	});
 	services.push(service);
 	expect(await service.start()).toMatchObject({
@@ -333,6 +347,186 @@ describe('agent CLI service', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	describe('who sent a request', () => {
+		const claim = { kind: 'claude', sessionId: 'claude-session-1' } as const;
+		const PEER_PID = 4_242;
+
+		function agentsRequest(extra: Record<string, unknown>) {
+			return {
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+				id: 'request-who',
+				command: { kind: 'agents' },
+				...extra,
+			};
+		}
+
+		/** A handler that records the context of every request it is given. */
+		function recordingHandler() {
+			const contexts: AgentCliHandlerContext[] = [];
+			return {
+				contexts,
+				handler: async (_command: unknown, context: AgentCliHandlerContext) => {
+					contexts.push(context);
+					return { ok: true };
+				},
+			};
+		}
+
+		it('leaves a claim without a peer unverified and passes the handler no agent', async () => {
+			const { contexts, handler } = recordingHandler();
+			const { socketPath } = await fixture(handler);
+			// The envelope's word is a claim: a CLI that sends no pid, as one from
+			// before the desktop checked, proves nothing.
+			const response = await request(
+				socketPath,
+				agentsRequest({ agent: claim })
+			);
+			expect(response).toMatchObject({ ok: true });
+			expect(contexts).toHaveLength(1);
+			expect(contexts[0]?.agent).toBeUndefined();
+			expect(contexts[0]?.identity.status).toBe('unverified');
+		});
+
+		it('takes a request that claims nothing for anonymous and verifies no process', async () => {
+			const { contexts, handler } = recordingHandler();
+			const verifyPeer = vi.fn(async () => true);
+			const { socketPath } = await fixture(handler, { verifyPeer });
+			await request(socketPath, agentsRequest({}));
+			await request(socketPath, agentsRequest({ peer: { pid: PEER_PID } }));
+			expect(contexts.map((context) => context.identity)).toEqual([
+				{ status: 'anonymous' },
+				{ status: 'anonymous' },
+			]);
+			expect(contexts.map((context) => context.agent)).toEqual([
+				undefined,
+				undefined,
+			]);
+			// The proof costs a process spawn, and nothing is to be proven.
+			expect(verifyPeer).not.toHaveBeenCalled();
+		});
+
+		it('refuses a claim that names another session before any handler runs', async () => {
+			const { contexts, handler } = recordingHandler();
+			const mismatch: AgentIdentityResolution = {
+				status: 'mismatch',
+				reason: 'The request names claude session claude-session-1.',
+			};
+			const { socketPath } = await fixture(handler, {
+				verifyPeer: async () => true,
+				identify: async () => mismatch,
+			});
+			const response = await request(
+				socketPath,
+				agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+			);
+			expect(response).toMatchObject({
+				ok: false,
+				error: {
+					code: 'agent_identity_mismatch',
+					message: mismatch.reason,
+					retryable: false,
+					recovery: expect.stringContaining('your own agent session'),
+				},
+			});
+			expect(contexts).toHaveLength(0);
+		});
+
+		it('hands the handler a verified claim as the agent', async () => {
+			const { contexts, handler } = recordingHandler();
+			const { socketPath } = await fixture(handler, {
+				verifyPeer: async () => true,
+				identify: async ({ claimed }) =>
+					claimed
+						? { status: 'verified', agent: claimed, basis: 'process' }
+						: { status: 'anonymous' },
+			});
+			await request(
+				socketPath,
+				agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+			);
+			expect(contexts[0]?.agent).toEqual(claim);
+			expect(contexts[0]?.identity).toEqual({
+				status: 'verified',
+				agent: claim,
+				basis: 'process',
+			});
+		});
+
+		it('hands the identifier the peer pid only once the socket proved it', async () => {
+			const identify = vi.fn(
+				async (): Promise<AgentIdentityResolution> => ({
+					status: 'unverified',
+					reason: 'unproven',
+				})
+			);
+			const asked: Array<{ socket: unknown; pid: number }> = [];
+			let proves: boolean | 'throws' = true;
+			const { socketPath } = await fixture(async () => ({}), {
+				// The service swallows what a verifier throws, so what it was asked
+				// is recorded and checked below rather than asserted in here.
+				verifyPeer: async (socket, pid) => {
+					asked.push({ socket, pid });
+					if (proves === 'throws') throw new Error('lsof is not here');
+					return proves;
+				},
+				identify,
+			});
+			const send = () =>
+				request(
+					socketPath,
+					agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+				);
+
+			await send();
+			expect(identify).toHaveBeenLastCalledWith({
+				claimed: claim,
+				peerPid: PEER_PID,
+			});
+			proves = false;
+			await send();
+			expect(identify).toHaveBeenLastCalledWith({ claimed: claim });
+			// A verifier that fails proves nothing, and the request still answers.
+			proves = 'throws';
+			expect(await send()).toMatchObject({ ok: true });
+			expect(identify).toHaveBeenLastCalledWith({ claimed: claim });
+			// It is asked about the pid the request named, over the connection the
+			// request arrived on: a socket of its own for each.
+			expect(asked.map(({ pid }) => pid)).toEqual([
+				PEER_PID,
+				PEER_PID,
+				PEER_PID,
+			]);
+			for (const { socket } of asked) expect(socket).toBeInstanceOf(Socket);
+			expect(new Set(asked.map(({ socket }) => socket)).size).toBe(3);
+		});
+
+		it('never asks the verifier when a claim comes without a peer', async () => {
+			const verifyPeer = vi.fn(async () => true);
+			const { socketPath } = await fixture(async () => ({}), { verifyPeer });
+			await request(socketPath, agentsRequest({ agent: claim }));
+			expect(verifyPeer).not.toHaveBeenCalled();
+		});
+
+		it('refuses a peer that names no valid pid', async () => {
+			const { contexts, handler } = recordingHandler();
+			const { socketPath } = await fixture(handler);
+			for (const peer of [
+				{ pid: 0 },
+				{ pid: -1 },
+				{ pid: 1.5 },
+				{ pid: 4_194_305 },
+				{ pid: PEER_PID, extra: true },
+				{},
+				PEER_PID,
+			]) {
+				expect(
+					await request(socketPath, agentsRequest({ agent: claim, peer }))
+				).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
+			}
+			expect(contexts).toHaveLength(0);
+		});
 	});
 
 	it('returns bounded typed handler errors without leaking query values', async () => {
