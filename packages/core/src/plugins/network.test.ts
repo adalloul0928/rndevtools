@@ -384,7 +384,7 @@ describe('createNetworkPlugin', () => {
 		expect(methodGetter).toHaveBeenCalledTimes(1);
 		expect(diagnostics.getEvents()[0]).toEqual(
 			expect.objectContaining({
-				method: 'GET',
+				method: 'UNKNOWN',
 				requestProjectionComplete: false,
 				simulationProfileId: 'none',
 			}),
@@ -576,7 +576,7 @@ describe('createNetworkPlugin', () => {
 		expect(trapCalls).toEqual(['get:method']);
 		expect(diagnostics.getEvents()[0]).toEqual(
 			expect.objectContaining({
-				method: 'GET',
+				method: 'UNKNOWN',
 				requestProjectionComplete: false,
 			}),
 		);
@@ -3535,6 +3535,12 @@ describe('network presentation model', () => {
 	});
 
 	it('presents status text and tone by request outcome', () => {
+		for (const status of [undefined, 0]) {
+			expect(networkStatusPresentation(networkEvent({ status }))).toEqual({
+				text: '—',
+				tone: 'neutral',
+			});
+		}
 		expect(
 			networkStatusPresentation(
 				networkEvent({ state: 'pending', status: undefined }),
