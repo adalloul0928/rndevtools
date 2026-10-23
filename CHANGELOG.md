@@ -290,8 +290,8 @@
 
 ### Desktop app
 
-- Uncaught main-process exceptions and unhandled rejections write a private,
-  bounded, redacted diagnostic log before exiting with a failure status.
+- SimSlim verification serializes absent observed-process evidence as empty arrays,
+  including preparation and failure responses, so desktop validation accepts it.
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 
@@ -361,6 +361,9 @@
   had just shut down, and one that finished after an apply replaced the status
   the apply recorded, so disabling slimming soon afterwards could skip the
   restore.
+- Uncaught main-process exceptions and unhandled rejections write a private,
+  bounded, redacted diagnostic log before exiting with a failure status.
+
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
