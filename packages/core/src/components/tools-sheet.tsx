@@ -47,6 +47,7 @@ import {
 	useWindowDimensions,
 	View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { groupPlugins, hasPillQuickAction } from '../core/plugins';
 import type {
 	DevToolsActionServices,
@@ -132,6 +133,7 @@ export function ToolsSheet({
 	const [query, setQuery] = useState('');
 	const colorScheme = useColorScheme();
 	const window = useWindowDimensions();
+	const insets = useSafeAreaInsets();
 	// SwiftUI quaternary-fill approximation for the circular header controls
 	// (Maps/Find My-style sheet dismiss buttons).
 	const headerControlFill = colorScheme === 'dark' ? '#7676803D' : '#7676801F';
@@ -162,7 +164,7 @@ export function ToolsSheet({
 	};
 	if (Platform.OS !== 'ios') {
 		const visiblePlugins = sections.flatMap((section) => section.plugins);
-		const sheetHeight = Math.max(360, window.height - safeAreaTop - 24);
+		const sheetHeight = Math.max(1, window.height - safeAreaTop - 24);
 		return (
 			<Modal
 				animationType="slide"
@@ -175,7 +177,15 @@ export function ToolsSheet({
 			>
 				<View style={styles.androidBackdrop}>
 					<View
-						style={[styles.androidSheet, { height: sheetHeight }]}
+						style={[
+							styles.androidSheet,
+							{
+								height: sheetHeight,
+								paddingLeft: 12 + insets.left,
+								paddingRight: 12 + insets.right,
+								paddingBottom: Math.max(8, insets.bottom),
+							},
+						]}
 						testID="devtools-sheet"
 					>
 						<View style={styles.androidDragIndicator} />

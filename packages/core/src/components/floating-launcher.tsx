@@ -47,8 +47,11 @@ export function FloatingLauncher({
 }: FloatingLauncherProps) {
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
-	const minimumX = EDGE_MARGIN;
-	const maximumX = Math.max(minimumX, width - SIZE - EDGE_MARGIN);
+	const minimumX = insets.left + EDGE_MARGIN;
+	const maximumX = Math.max(
+		minimumX,
+		width - insets.right - SIZE - EDGE_MARGIN,
+	);
 	const minimumY = insets.top + EDGE_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
@@ -120,6 +123,7 @@ export function FloatingLauncher({
 			commitPosition,
 			maximumX,
 			maximumY,
+			minimumX,
 			minimumY,
 			startX,
 			startY,

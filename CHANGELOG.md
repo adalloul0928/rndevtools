@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Floating controls and windows stay inside horizontal safe areas after rotation;
+  the Android sheet respects side and bottom insets in landscape.
 - Android Back returns from a tool panel to the tool list before closing the sheet.
   iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
@@ -327,6 +329,11 @@
 
 ### Desktop app
 
+- A Simulator chosen for a parked lane request becomes an agent-visible hold
+  before worktree preparation; newly created clones are held as soon as discovered.
+
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
 - CI notarization uses a temporary owner-only API key file, with cleanup on
   failure, instead of placing an app-specific password in process arguments.
 
@@ -334,8 +341,9 @@
   A separate runner publishes checked tarballs with lifecycle scripts disabled
   and npm trusted publishing; long-lived npm tokens are no longer used.
 
-- Shared 32px segmented controls and tabs support arrow, Home and End navigation
-  in Network, Query, Simulator layout and appearance settings.
+- Desktop dev and build verify the licensed HeroUI Pro payload against reviewed
+  content hashes, including additions, removals, metadata changes and symlinks.
+
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
@@ -345,6 +353,9 @@
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 
