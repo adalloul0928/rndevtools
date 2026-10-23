@@ -13,12 +13,71 @@ function deferred<T>() {
 }
 
 describe('createQuerySimulationController', () => {
+	it('rejects mutation callbacks before they can apply without registered cleanup', () => {
+		const mutate = jest.fn(() => ({}) as QuerySimulationLease);
+		expect(() =>
+			createQuerySimulationController([
+				{ id: 'all', label: 'All', operations: { offline: mutate as never } },
+			]),
+		).toThrow('apply and release');
+		expect(mutate).not.toHaveBeenCalled();
+	});
+
+	it('releases a partially applied operation that fails', async () => {
+		let offline = false;
+		const release = jest.fn(() => {
+			offline = false;
+		});
+		const controller = createQuerySimulationController([
+			{
+				id: 'all',
+				label: 'All',
+				operations: {
+					offline: {
+						apply: () => {
+							offline = true;
+							throw new Error('Apply failed');
+						},
+						release,
+					},
+				},
+			},
+		]);
+		await expect(controller.apply('all', 'offline')).rejects.toThrow(
+			'Apply failed',
+		);
+		expect(release).toHaveBeenCalledTimes(1);
+		expect(offline).toBe(false);
+		expect(controller.getSnapshot().active).toBeUndefined();
+	});
+
+	it('retains failed cleanup for an explicit retry', async () => {
+		const release = jest
+			.fn()
+			.mockRejectedValueOnce(new Error('Busy'))
+			.mockResolvedValue(undefined);
+		const apply = jest.fn(() => {
+			throw new Error('Apply failed');
+		});
+		const controller = createQuerySimulationController([
+			{ id: 'all', label: 'All', operations: { offline: { apply, release } } },
+		]);
+		await expect(controller.apply('all', 'offline')).rejects.toThrow('cleanup');
+		const receipt = controller.getSnapshot().active?.receiptId;
+		expect(receipt).toBeDefined();
+		await expect(controller.apply('all', 'offline')).rejects.toThrow('cleanup');
+		expect(apply).toHaveBeenCalledTimes(1);
+		await controller.clear(receipt);
+		expect(release).toHaveBeenCalledTimes(2);
+		expect(controller.getSnapshot().active).toBeUndefined();
+	});
+
 	it('advertises unsupported states with concrete reasons', async () => {
 		const controller = createQuerySimulationController([
 			{
 				id: 'all',
 				label: 'All queries',
-				operations: { offline: () => ({ release: jest.fn() }) },
+				operations: { offline: { apply: () => {}, release: jest.fn() } },
 				unsupportedReasons: { loading: 'No loading adapter is installed.' },
 			},
 		]);
@@ -50,7 +109,7 @@ describe('createQuerySimulationController', () => {
 				{
 					id: 'all',
 					label: 'All queries',
-					operations: { offline: () => ({ release }) },
+					operations: { offline: { apply: () => {}, release } },
 				},
 			],
 			{ eventStore, now: () => 900 },
@@ -85,19 +144,20 @@ describe('createQuerySimulationController', () => {
 	it('serializes mutations and releases the previous state before switching', async () => {
 		const firstRelease = deferred<void>();
 		const firstReleaseStarted = jest.fn();
-		const secondApply = jest.fn(() => ({ release: jest.fn() }));
+		const secondApply = jest.fn();
 		const controller = createQuerySimulationController([
 			{
 				id: 'all',
 				label: 'All queries',
 				operations: {
-					offline: () => ({
+					offline: {
+						apply: () => {},
 						release: () => {
 							firstReleaseStarted();
 							return firstRelease.promise;
 						},
-					}),
-					paused: secondApply,
+					},
+					paused: { apply: secondApply, release: () => {} },
 				},
 			},
 		]);
@@ -128,22 +188,19 @@ describe('createQuerySimulationController', () => {
 		expect(familyGetter).not.toHaveBeenCalled();
 
 		const leaseGetter = jest.fn(() => jest.fn());
-		const controller = createQuerySimulationController([
-			{
-				id: 'all',
-				label: 'All queries',
-				operations: {
-					offline: () =>
-						Object.defineProperty({}, 'release', {
-							enumerable: true,
-							get: leaseGetter,
-						}) as QuerySimulationLease,
+		const unsafe = Object.defineProperty({ apply: () => {} }, 'release', {
+			enumerable: true,
+			get: leaseGetter,
+		});
+		expect(() =>
+			createQuerySimulationController([
+				{
+					id: 'all',
+					label: 'All queries',
+					operations: { offline: unsafe as never },
 				},
-			},
-		]);
-		await expect(controller.apply('all', 'offline')).rejects.toThrow(
-			'data field',
-		);
+			]),
+		).toThrow('data field');
 		expect(leaseGetter).not.toHaveBeenCalled();
 	});
 
@@ -163,24 +220,21 @@ describe('createQuerySimulationController', () => {
 				{
 					id: 'all',
 					label: 'All queries',
-					operations: { offline: () => ({ release: jest.fn() }) },
+					operations: { offline: { apply: () => {}, release: jest.fn() } },
 				},
 			],
 			{ now: () => Number.NaN },
 		);
 		await expect(invalidClock.apply('all', 'offline')).rejects.toThrow('clock');
 
-		const invalidLease = createQuerySimulationController([
-			{
-				id: 'all',
-				label: 'All queries',
-				operations: {
-					offline: () => ({}) as QuerySimulationLease,
+		expect(() =>
+			createQuerySimulationController([
+				{
+					id: 'all',
+					label: 'All queries',
+					operations: { offline: { apply: () => {} } as never },
 				},
-			},
-		]);
-		await expect(invalidLease.apply('all', 'offline')).rejects.toThrow(
-			'reversible cleanup',
-		);
+			]),
+		).toThrow('apply and release');
 	});
 });

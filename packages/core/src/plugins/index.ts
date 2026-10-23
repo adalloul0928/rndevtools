@@ -167,6 +167,7 @@ export {
 	type QuerySimulationFamilySnapshot,
 	type QuerySimulationLease,
 	type QuerySimulationMode,
+	type QuerySimulationOperation,
 	type QuerySimulationSnapshot,
 	type QuerySnapshot,
 } from './query';

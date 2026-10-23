@@ -4,6 +4,11 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- **Breaking:** query simulation modes now register `{ apply, release }` instead
+  of returning cleanup after applying. Failed applies are undone immediately;
+  failed cleanup stays available for an explicit retry. See the core README's
+  migration example.
+
 - Scenario preflight results are normalized, validated and detached before any
   mutation, so durable recovery checkpoints can be loaded after restart.
 
@@ -18,6 +23,8 @@
   mutation has started. Validators must not mutate the store.
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
+- Global fetch capture continues through another library's forwarding wrapper.
+  Removed or superseded collector wrappers stay passive, including after reinstall.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
   native-memory abort without dropping odd-offset marker or secret checks.
 
@@ -290,6 +297,23 @@
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
+- Added light and dark themes plus a persistent System / Light / Dark appearance
+  setting. Main applies the stored theme before creating the window, and failed
+  preference writes restore the previous selection.
+- Added guided first-run setup and Get started progress that remembers completed
+  tasks. Setup waits for repository discovery, reports action results in place,
+  announces step changes, and confirms coding-agent configuration changes.
+- Refined the sidebar, titlebar, Simulator lists and dialogs at the 1040x700
+  minimum: scrollable tool navigation, visible grid selections, full names on
+  hover, readable disabled actions, opaque notices, and consistent corner radii.
+- Fixed Simulator crash-journal reconciliation and lane-start races so background
+  work cannot steal a device or overwrite a completed mutation. Failed lane
+  starts clean up their owned Metro process through PID verification.
+- Generate the native-host version from the desktop package version and check
+  it for drift. Rebuild local helpers after updating the desktop sources.
+- End-to-end coverage uses the current demo names and explicitly checks both
+  themes. Electron launch and graceful shutdown have bounded timeouts suitable
+  for a busy development machine.
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.

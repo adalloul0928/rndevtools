@@ -465,7 +465,7 @@ describe('createQueryPlugin', () => {
 			{
 				id: 'all',
 				label: 'All queries',
-				operations: { offline: () => ({ release }) },
+				operations: { offline: { apply: () => {}, release } },
 				unsupportedReasons: {
 					loading: 'Loading requires an explicit presentation adapter.',
 				},
