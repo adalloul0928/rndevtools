@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import {
 	assertCompiledTeam,
 	assertNoBuildHome,
 	assertSignature,
+	releaseBuilderConfig,
 	releaseSettings,
 } from './release-macos.mjs';
 
@@ -19,6 +21,34 @@ const signature = [
 	'CodeDirectory v=20500 size=300 flags=0x10000(runtime) hashes=5+7',
 	'Timestamp=Oct 20, 2026 at 10:00:00',
 ].join('\n');
+
+test('release builder configuration validates and enables updates only for public packages', async () => {
+	const require = createRequire(import.meta.url);
+	const builderRequire = createRequire(require.resolve('electron-builder'));
+	const { validateConfiguration } = builderRequire(
+		'app-builder-lib/out/util/config/config'
+	);
+	for (const local of [true, false]) {
+		const settings = releaseSettings(local, environment, '0.3.0');
+		const config = releaseBuilderConfig(
+			settings,
+			'/example/release',
+			undefined
+		);
+		await validateConfiguration(config);
+		assert.equal(
+			config.extraMetadata.rndevtoolsReleaseMode,
+			local ? 'local-development' : 'public'
+		);
+		assert.equal(config.publish === null, local);
+		assert.equal(config.dmg.publish, null);
+		assert.ok(config.artifactName.endsWith(`.\${ext}`));
+		if (!local) {
+			assert.equal(config.publish[0].releaseType, 'draft');
+			assert.equal(config.publish[0].channel, 'latest');
+		}
+	}
+});
 
 test('public and local candidates have separate names and notarization policies', () => {
 	assert.deepEqual(releaseSettings(false, environment, '0.1.0'), {

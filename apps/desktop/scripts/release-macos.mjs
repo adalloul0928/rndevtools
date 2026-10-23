@@ -44,6 +44,35 @@ export function releaseSettings(localDevelopment, env, version) {
 	};
 }
 
+export function releaseBuilderConfig(settings, output, identity) {
+	return {
+		forceCodeSigning: true,
+		artifactName: settings.artifactName.replace(/\.dmg$/, `.\${ext}`),
+		extraMetadata: { rndevtoolsReleaseMode: settings.mode },
+		publish: settings.notarize
+			? [
+					{
+						provider: 'github',
+						owner: 'adalloul0928',
+						repo: 'rndevtools',
+						channel: 'latest',
+						releaseType: 'draft',
+					},
+				]
+			: null,
+		directories: { output },
+		mac: {
+			type: settings.type,
+			identity,
+			hardenedRuntime: true,
+			minimumSystemVersion: '14.0',
+			notarize: settings.notarize,
+		},
+		// Only the ZIP enters the update feed; notarization later changes the DMG bytes.
+		dmg: { sign: settings.notarize, publish: null },
+	};
+}
+
 export function assertSignature(
 	details,
 	team,
@@ -234,20 +263,13 @@ export async function main(args = process.argv.slice(2)) {
 	const appPath = join(output, 'mac-arm64', `${manifest.productName}.app`);
 	await build({
 		projectDir: desktopDirectory,
-		targets: Platform.MAC.createTarget(['dmg'], Arch.arm64),
+		targets: Platform.MAC.createTarget(
+			settings.notarize ? ['dmg', 'zip'] : ['dmg'],
+			Arch.arm64
+		),
 		publish: 'never',
 		config: {
-			forceCodeSigning: true,
-			artifactName: settings.artifactName,
-			directories: { output },
-			mac: {
-				type: settings.type,
-				identity: process.env.CSC_NAME,
-				hardenedRuntime: true,
-				minimumSystemVersion: '14.0',
-				notarize: settings.notarize,
-			},
-			dmg: { sign: settings.notarize },
+			...releaseBuilderConfig(settings, output, process.env.CSC_NAME),
 			afterSign: () => verifyApp(appPath, settings, process.env.APPLE_TEAM_ID),
 		},
 	});
@@ -319,7 +341,17 @@ export async function main(args = process.argv.slice(2)) {
 		join(output, 'release-manifest.json'),
 		`${JSON.stringify(releaseManifest, null, 2)}\n`
 	);
-	const sums = [settings.artifactName, 'release-manifest.json']
+	const sums = [
+		settings.artifactName,
+		'release-manifest.json',
+		...(settings.notarize
+			? [
+					settings.artifactName.replace(/\.dmg$/, '.zip'),
+					settings.artifactName.replace(/\.dmg$/, '.zip.blockmap'),
+					'latest-mac.yml',
+				]
+			: []),
+	]
 		.map(
 			(name) =>
 				`${createHash('sha256')

@@ -70,6 +70,7 @@
 		"@vitejs/plugin-react": "6.1.2",
 		"electron": "44.7.0",
 		"electron-builder": "^26.17.0",
+		"electron-updater": "catalog:",
 		"electron-vite": "6.0.0-beta.8",
 		"knip": "catalog:",
 		"tailwindcss": "catalog:",
