@@ -525,3 +525,6 @@
 
 - Desktop settings writes require a successful load, preserving unreadable settings
   until they can be recovered and loaded again.
+
+- Supabase startup refuses unreadable ownership data and failed quarantine moves
+  instead of continuing with empty state. Transient read errors preserve the file.

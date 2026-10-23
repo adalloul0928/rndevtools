@@ -12,12 +12,13 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	SUPABASE_POLICY_DEFAULTS,
 	SUPABASE_POLICY_ERRORS,
 	supabasePolicySchema,
 } from '../../shared/supabase-protocol';
+import * as boundedRead from './bounded-read';
 import {
 	loadSupabaseStoreFile,
 	quarantineSupabaseStoreFile,
@@ -395,6 +396,52 @@ describe('durable store files', () => {
 			movedTo: `${file}.corrupt-${NOW}`,
 			reason: 'schema',
 		});
+	});
+
+	it('preserves unreadable store files instead of quarantining them', async () => {
+		const directory = await root();
+		await mkdir(directory, { recursive: true });
+		const file = path.join(directory, 'state.json');
+		await writeFile(file, '{"keep":true}');
+		const read = vi
+			.spyOn(boundedRead, 'readBoundedText')
+			.mockResolvedValueOnce({ status: 'error' });
+		try {
+			await expect(
+				loadSupabaseStoreFile(file, {
+					maxBytes: 64,
+					now: NOW,
+					parse: (value) => value,
+				})
+			).rejects.toThrow(/could not be read/i);
+			expect(await readFile(file, 'utf8')).toBe('{"keep":true}');
+			expect(await readdir(directory)).toEqual(['state.json']);
+		} finally {
+			read.mockRestore();
+		}
+	});
+
+	it('rejects recovery when no quarantine destination is available', async () => {
+		const directory = await root();
+		await mkdir(directory, { recursive: true });
+		const file = path.join(directory, 'state.json');
+		await writeFile(file, '{broken json');
+		await Promise.all(
+			Array.from({ length: 10 }, (_, index) =>
+				writeFile(
+					`${file}.corrupt-${NOW}${index ? `-${index}` : ''}`,
+					'older data'
+				)
+			)
+		);
+		await expect(
+			loadSupabaseStoreFile(file, {
+				maxBytes: 64,
+				now: NOW,
+				parse: () => undefined,
+			})
+		).rejects.toThrow(/could not be quarantined/i);
+		expect(await readFile(file, 'utf8')).toBe('{broken json');
 	});
 
 	it('runs queued tasks in order, past failures', async () => {
