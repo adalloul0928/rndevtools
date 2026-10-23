@@ -4,6 +4,7 @@ import {
 	mkdtemp,
 	readdir,
 	readFile,
+	rename,
 	rm,
 	symlink,
 	utimes,
@@ -77,6 +78,56 @@ describe('LaneStore', () => {
 		expect(store.get(id)?.metro).toBe('ready');
 		expect(await store.remove(id)).toBe(true);
 		expect(await store.remove(id)).toBe(false);
+	});
+
+	it('keeps committed state when a write fails, then accepts a retry', async () => {
+		const store = new LaneStore(root);
+		await store.start();
+		const id = store.newLaneId();
+		await store.upsert(lane(id));
+		await store.addRepository('/Users/dev/app');
+		const file = path.join(root, 'lanes.json');
+		const backup = `${file}.backup`;
+		await rename(file, backup);
+		await mkdir(file);
+
+		await expect(store.remove(id)).rejects.toThrow();
+		await expect(store.upsert(lane(id, { metro: 'ready' }))).rejects.toThrow();
+		await expect(store.removeRepository('/Users/dev/app')).rejects.toThrow();
+		await expect(store.addRepository('/Users/dev/other')).rejects.toThrow();
+		expect(store.get(id)).toEqual(lane(id));
+		expect(store.repositories()).toEqual(['/Users/dev/app']);
+
+		await rm(file, { recursive: true });
+		await rename(backup, file);
+		await expect(store.remove(id)).resolves.toBe(true);
+		const reopened = new LaneStore(root);
+		await reopened.start();
+		expect(reopened.lanes()).toEqual([]);
+		expect(reopened.repositories()).toEqual(['/Users/dev/app']);
+	});
+
+	it('refuses writes after a filesystem read failure', async () => {
+		const file = path.join(root, 'lanes.json');
+		await mkdir(file);
+		await writeFile(path.join(file, 'keep'), 'saved data');
+		const store = new LaneStore(root);
+		await expect(store.start()).rejects.toThrow();
+		await expect(store.addRepository('/Users/dev/app')).rejects.toThrow();
+		expect(await readFile(path.join(file, 'keep'), 'utf8')).toBe('saved data');
+	});
+
+	it('never persists more lanes than it can reload', async () => {
+		const store = new LaneStore(root);
+		await store.start();
+		await Promise.all(
+			Array.from({ length: 64 }, () => store.upsert(lane(store.newLaneId())))
+		);
+		await expect(store.upsert(lane(store.newLaneId()))).rejects.toThrow();
+		expect(store.lanes()).toHaveLength(64);
+		const reopened = new LaneStore(root);
+		await reopened.start();
+		expect(reopened.lanes()).toHaveLength(64);
 	});
 
 	it('quarantines a corrupt file instead of failing to start', async () => {

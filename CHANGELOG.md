@@ -340,6 +340,9 @@
 
 ### Desktop app
 
+- Lane changes become visible only after a successful save. Failed reads preserve
+  the stored file, and the lane limit is enforced before writing.
+
 - Session-end identity recovery checks process start times, bounds its cache, and
   keeps the latest session when discoveries occur at the same timestamp.
 
