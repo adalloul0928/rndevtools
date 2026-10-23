@@ -244,6 +244,13 @@
   hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
   Codex threads, synthetic MCP identities and ended sessions, cannot perform
   ownership-changing operations. Lane commands no longer accept an `agent` field.
+- Background SimSlim status checks now take a Simulator's lease and skip one
+  with a running job, never boot a shut-down Simulator (it shows as not
+  inspected, not as clean), and update each Simulator's status on its own. A
+  check could previously restart a Simulator that an apply, an erase or a lane
+  had just shut down, and one that finished after an apply replaced the status
+  the apply recorded, so disabling slimming soon afterwards could skip the
+  restore.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
