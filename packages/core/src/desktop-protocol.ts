@@ -1491,8 +1491,39 @@ type FitRule<T> = (label: string) => Fit<T>;
 /** One rule for every key of `T`, so a field added to the contract needs one. */
 type FitRules<T> = { readonly [K in keyof T]-?: FitRule<T[K]> };
 
-/** Which rows of a list over its cap survive: its first, or its last. */
-type Retained = 'first' | 'newest';
+/**
+ * Which rows of a list over its cap survive: its first, its last, or the ones
+ * a function picks.
+ */
+type Retained<T = never> =
+	| 'first'
+	| 'newest'
+	| ((rows: readonly T[], limit: number) => readonly T[]);
+
+/**
+ * The `limit` rows with the greatest `read(row)`, kept in their own order, for
+ * a list whose order the contract does not fix. A row without a finite number
+ * ranks last, and between equal ranks the later row wins.
+ */
+function latestBy<T>(read: (row: T) => unknown) {
+	return (rows: readonly T[], limit: number): readonly T[] => {
+		const ranked = rows.map((row, index) => {
+			const value = typeof row === 'object' && row !== null ? read(row) : null;
+			return {
+				index,
+				at:
+					typeof value === 'number' && Number.isFinite(value)
+						? value
+						: Number.NEGATIVE_INFINITY,
+			};
+		});
+		ranked.sort((a, b) =>
+			a.at === b.at ? b.index - a.index : a.at > b.at ? -1 : 1,
+		);
+		const kept = new Set(ranked.slice(0, limit).map(({ index }) => index));
+		return rows.filter((_, index) => kept.has(index));
+	};
+}
 
 /** For a field the schema does not bound, such as a flag or an enum. */
 function keepAsIs<T>(_label: string): Fit<T> {
@@ -1623,7 +1654,7 @@ function fitNullable<T>(rule: FitRule<T>): FitRule<T | null> {
  */
 function fitList<T>(
 	limit: number,
-	retained: Retained,
+	retained: Retained<T>,
 	item: FitRule<T>,
 ): FitRule<readonly T[]> {
 	return (label) => {
@@ -1636,7 +1667,11 @@ function fitList<T>(
 			if (source.length > limit) {
 				trace.add(change);
 				kept =
-					retained === 'newest' ? source.slice(-limit) : source.slice(0, limit);
+					retained === 'newest'
+						? source.slice(-limit)
+						: retained === 'first'
+							? source.slice(0, limit)
+							: retained(source, limit);
 			}
 			if (!fitRow) return kept;
 			let fitted: T[] | undefined;
@@ -1937,7 +1972,8 @@ function keepMatchingActive(
 	label: string,
 ): QuerySimulation {
 	const { active, families } = simulation;
-	if (active === undefined) return simulation;
+	// Anything but an entry is left for the schema to judge.
+	if (typeof active !== 'object' || active === null) return simulation;
 	// The schema trims an identifier before it compares two.
 	const sameId = (a: unknown, b: unknown) =>
 		typeof a === 'string' && typeof b === 'string' && a.trim() === b.trim();
@@ -2257,9 +2293,11 @@ const identitySession = fitObject<Tools['identitySession']>({
 			error: longText,
 		}),
 	),
+	// The contract does not say which end is newest, and the reference device
+	// lists the newest session first, so rank by when a session started.
 	history: fitList(
 		LIMITS.identityHistory,
-		'newest',
+		latestBy<Item<Tools['identitySession']['history']>>((row) => row.startedAt),
 		fitObject<Item<Tools['identitySession']['history']>>({
 			id: identifier,
 			startedAt: timestamp,
@@ -2284,7 +2322,7 @@ const identitySession = fitObject<Tools['identitySession']>({
 const fps = fitNumber(finiteRange(0, NUMBERS.fps));
 const optionalFps = fitOptionalNumber(finiteRange(0, NUMBERS.fps));
 
-const performanceReview = fitObject<Tools['performance']>({
+const performanceFields = fitObject<Tools['performance']>({
 	isActive: keepAsIs,
 	startedAt: fitNullableNumber(TIMESTAMP),
 	stoppedAt: fitNullableNumber(TIMESTAMP),
@@ -2318,6 +2356,39 @@ const performanceReview = fitObject<Tools['performance']>({
 		longFrameCount: count,
 	}),
 });
+
+/**
+ * The performance panel says samples were dropped only when its counter is
+ * above zero, so a cut that removes samples raises the counter by that many.
+ */
+const performanceReview: FitRule<Tools['performance']> = (label) => {
+	const fit = performanceFields(label);
+	return (value, trace) => {
+		const fitted = fit(value, trace);
+		if (
+			fitted === value ||
+			typeof value !== 'object' ||
+			value === null ||
+			!Array.isArray(value.samples) ||
+			!Array.isArray(fitted.samples) ||
+			typeof fitted.droppedSampleCount !== 'number'
+		) {
+			return fitted;
+		}
+		const removed = value.samples.length - fitted.samples.length;
+		if (removed <= 0) return fitted;
+		trace.add(
+			`${label ? `${label}.` : ''}droppedSampleCount raised by ${removed}`,
+		);
+		return {
+			...fitted,
+			droppedSampleCount: Math.min(
+				Number.MAX_SAFE_INTEGER,
+				fitted.droppedSampleCount + removed,
+			),
+		};
+	};
+};
 
 const coordinate = fitNumber(
 	finiteRange(Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY),

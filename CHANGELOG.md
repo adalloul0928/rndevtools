@@ -218,8 +218,8 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
-- The desktop client fits every snapshot to everything the desktop validates
-  before it sends it, with the new `fitDesktopSnapshot` of
+- The desktop client fits every snapshot to every size and range bound the
+  desktop validates before it sends it, with the new `fitDesktopSnapshot` of
   `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
   lists of `RNDEVTOOLS_SNAPSHOT_LIMITS`, so a nested list (10 of its 30 limits
   are nested, such as a component's `sourceFiles`), a text or a number over
@@ -231,9 +231,13 @@
   clamped into its range, and a map keeps its first fields. A query
   simulation's active entry, a camera fixture, a scenario variable default or
   a persona identifier that disagrees with the rest, which the schema would
-  reject, is dropped or reset. One text over its limit no longer keeps a
-  snapshot from being sent. The client's warning names the first six changes
-  and counts the rest. The bounds the schema applies beyond
+  reject, is dropped or reset. The identity history keeps the sessions that
+  started latest, whichever end of the list a host puts them at, and a cut of
+  performance samples raises `droppedSampleCount` by the samples removed, so
+  the performance panel says that samples were dropped. A value of the wrong
+  shape, such as an empty identifier, is still left to the schema. One text
+  over its limit no longer keeps a snapshot from being sent. The client's
+  warning names the first six changes and counts the rest. The bounds the schema applies beyond
   `RNDEVTOOLS_SNAPSHOT_LIMITS` are exported as
   `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`, `RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS` and
   `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.

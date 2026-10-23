@@ -1266,7 +1266,14 @@ describe('list limits', () => {
 			expect(issuePaths(parseWire(over))).toContain(path);
 
 			const fitted = fitDesktopSnapshot(over);
-			expect(fitted.trimmed).toEqual([`${path} to ${limit} rows`]);
+			// Samples the fit cuts count as dropped, which is what the performance
+			// panel reads to say so.
+			expect(fitted.trimmed).toEqual([
+				`${path} to ${limit} rows`,
+				...(path === 'performance.samples'
+					? ['performance.droppedSampleCount raised by 1']
+					: []),
+			]);
 			const kept = read(fitted.tools, path) as unknown[];
 			expect(kept).toHaveLength(limit);
 			expect(kept[0]).toBe(keeps === 'newest' ? rows[1] : rows[0]);

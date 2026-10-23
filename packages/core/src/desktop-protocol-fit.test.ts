@@ -357,10 +357,93 @@ describe('fitDesktopSnapshot', () => {
 			expect(fitted.tools.scenarioRuntime.active?.warnings).toEqual(
 				warnings.slice(0, 100),
 			);
+			// The performance panel only says samples were dropped when this is
+			// above zero.
+			expect(fitted.tools.performance.droppedSampleCount).toBe(8_500);
 			expect(fitted.trimmed).toEqual([
 				'scenarioRuntime.active.warnings to 100 rows',
 				'performance.samples to 1500 rows',
+				'performance.droppedSampleCount raised by 8500',
 			]);
+		});
+
+		it('add the samples it cut to the dropped count the host reported', () => {
+			const samples = Array.from({ length: 1_600 }, (_, index) => ({
+				id: `sample-${index}`,
+				at: 1_700_000_000_000 + index,
+				jsFps: 60,
+				eventLoopLagMs: 1,
+				longFrames: 0,
+				maxFrameMs: 16,
+			}));
+			const performance = (droppedSampleCount: number) => ({
+				...createEmptyDesktopToolsSnapshot().performance,
+				droppedSampleCount,
+				samples,
+			});
+
+			expect(
+				fit({ performance: performance(3) }).tools.performance
+					.droppedSampleCount,
+			).toBe(103);
+			// The schema takes a safe integer at most.
+			expect(
+				fit({ performance: performance(Number.MAX_SAFE_INTEGER) }).tools
+					.performance.droppedSampleCount,
+			).toBe(Number.MAX_SAFE_INTEGER);
+		});
+
+		it('leave the dropped count alone when no sample is cut', () => {
+			const tools = deepFreeze(
+				snapshot({
+					performance: {
+						...createEmptyDesktopToolsSnapshot().performance,
+						droppedSampleCount: 4,
+					},
+				}),
+			);
+			expect(fitDesktopSnapshot(tools).tools).toBe(tools);
+		});
+	});
+
+	describe('the identity history', () => {
+		const session = (index: number) => ({
+			id: `session-${index}`,
+			startedAt: 1_700_000_000_000 + index * 1_000,
+			actor: { kind: 'account' as const, label: 'Alex' },
+			target: { kind: 'account' as const, label: 'Sam' },
+			status: 'stopped' as const,
+		});
+		const sessions = (count: number) =>
+			Array.from({ length: count }, (_, index) => session(index));
+		const fitHistory = (history: unknown[]) =>
+			fit({
+				identitySession: { running: false, history, personas: [] },
+			} as Partial<DesktopDeviceToolsSnapshot>);
+		const idsOf = (fitted: ReturnType<typeof fit>) =>
+			fitted.tools.identitySession.history.map((row) => row.id);
+
+		it('keeps the sessions that started latest when the host lists the newest first', () => {
+			// As the reference device does: a new session goes at the front.
+			const rows = sessions(25).reverse();
+			const fitted = fitHistory(rows);
+
+			expect(idsOf(fitted)).toEqual(rows.slice(0, 20).map((row) => row.id));
+			expect(fitted.trimmed).toEqual([
+				`identitySession.history to ${LIMITS.identityHistory} rows`,
+			]);
+		});
+
+		it('keeps them too when the host lists the oldest first', () => {
+			const rows = sessions(25);
+			expect(idsOf(fitHistory(rows))).toEqual(
+				rows.slice(5).map((row) => row.id),
+			);
+		});
+
+		it('ranks a session without a start time last', () => {
+			const rows: unknown[] = [{ id: 'unstarted' }, ...sessions(20)];
+			expect(idsOf(fitHistory(rows))).not.toContain('unstarted');
 		});
 	});
 
@@ -1202,6 +1285,7 @@ describe('fitDesktopSnapshot', () => {
 				{ performance: null },
 				{ performance: { samples: 'many' } },
 				{ querySimulation: { active: { familyId: 'a' } } },
+				{ querySimulation: { families: [{}], active: null } },
 				{ querySimulation: { families: 'a', active: {} } },
 				{ cameraFixture: null },
 				{ cameraFixture: [] },

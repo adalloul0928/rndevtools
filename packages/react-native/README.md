@@ -100,8 +100,13 @@ the broker's contract itself:
   clamped, an integer's fraction is cut off, and one that is not finite is
   dropped from an optional field, written as `null` in a nullable one and made
   the lower bound of its range in a required one. A map of headers keeps its
-  first fields and loses a field whose name is too long. The desktop still
-  redacts and validates what arrives; the client only bounds.
+  first fields and loses a field whose name is too long. The identity history
+  keeps the sessions that started latest, whichever end of the list a host
+  puts them at, and a cut of performance samples raises `droppedSampleCount`
+  by the samples removed, which is what the desktop's performance panel reads
+  to say that samples were dropped. The desktop still redacts and validates
+  what arrives; the client only bounds, so a value of the wrong shape, such as
+  an empty identifier, still reaches the schema.
 
 Authorization is checked again while an action runs. When the host passes
 `subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`), a
