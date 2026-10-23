@@ -4466,12 +4466,70 @@ describe('network presentation model', () => {
 
 		await expect(pendingClear).resolves.toEqual(
 			expect.objectContaining({
-				status: 'failed',
-				error: expect.stringContaining('requests changed'),
+				status: 'succeeded',
 			}),
 		);
-		expect(diagnostics.getEvents()).toHaveLength(2);
+		expect(diagnostics.getEvents().map((event) => event.url)).toEqual([
+			'https://example.test/arrived-during-confirmation',
+		]);
 		dispose?.();
+	});
+
+	it('keeps a later body reader alive when clearing the confirmed requests', async () => {
+		let confirm = (_value: boolean) => {};
+		const confirmation = new Promise<boolean>((resolve) => {
+			confirm = resolve;
+		});
+		const diagnostics = createNetworkPlugin({
+			captureBody: true,
+			actionCoordinator: createDevToolsActionCoordinator({
+				confirm: () => confirmation,
+			}),
+		});
+		const dispose = diagnostics.plugin.install?.();
+		const firstCancel = jest.fn(async () => {});
+		const laterCancel = jest.fn(async () => {});
+		const stalled = (cancel: () => Promise<void>) =>
+			({
+				status: 200,
+				headers: new Headers({
+					'content-length': '1',
+					'content-type': 'text/plain',
+				}),
+				clone: () => ({
+					body: {
+						getReader: () => ({
+							read: () => new Promise<never>(() => {}),
+							cancel,
+						}),
+					},
+				}),
+			}) as unknown as Response;
+		const fetch = diagnostics.instrumentFetch(
+			jest
+				.fn()
+				.mockResolvedValueOnce(stalled(firstCancel))
+				.mockResolvedValueOnce(stalled(laterCancel)),
+		);
+		try {
+			await fetch('https://example.com/confirmed');
+			await flushCapture();
+			const clearing = diagnostics.requestClear('clear-subset-readers');
+			await fetch('https://example.com/later');
+			await flushCapture();
+			confirm(true);
+			await expect(clearing).resolves.toMatchObject({ status: 'succeeded' });
+			await flushCapture();
+			expect(firstCancel).toHaveBeenCalledTimes(1);
+			expect(laterCancel).not.toHaveBeenCalled();
+			expect(diagnostics.getEvents().map((event) => event.url)).toEqual([
+				'https://example.com/later',
+			]);
+		} finally {
+			dispose?.();
+		}
+		await flushCapture();
+		expect(laterCancel).toHaveBeenCalledTimes(1);
 	});
 
 	it('does not let a stale clear confirmation erase a replacement session', async () => {

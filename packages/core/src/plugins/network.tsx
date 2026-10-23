@@ -3189,17 +3189,9 @@ export function createNetworkPlugin(
 		) {
 			throw new Error('The network tools session changed before clear ran.');
 		}
-		const currentIds = store.getSnapshot().map(networkEventResourceId);
-		if (
-			currentIds.length !== confirmedIds.length ||
-			currentIds.some((id, index) => id !== confirmedIds[index])
-		) {
-			throw new Error(
-				'Captured network requests changed before clear ran. Review and confirm the current requests again.',
-			);
-		}
-		cancelActiveBodyCaptures();
-		store.clear();
+		const confirmed = new Set(confirmedIds);
+		store.remove((event) => confirmed.has(networkEventResourceId(event)));
+		cancelUnretainedBodyCaptures();
 		clearTimelineEvents(confirmedIds);
 	};
 	const requestClear = (requestId?: string): Promise<DevToolsActionReceipt> => {
