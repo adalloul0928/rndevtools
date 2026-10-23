@@ -1,3 +1,4 @@
+import { desktopActionAcknowledgementTimeoutMs } from '@rndevtools/core/desktop-protocol';
 import { redactDiagnosticText } from '@rndevtools/core/redact';
 import { truncateText } from '@rndevtools/core/serialize';
 import { WebSocket } from 'ws';
@@ -11,8 +12,6 @@ import {
 } from '../shared/protocol';
 import { safeBrokerErrorText } from './broker-inbound';
 
-const ACTION_TIMEOUT_MS = 8_000;
-const LONG_ACTION_TIMEOUT_MS = 30_000;
 const MAX_ACTION_ERROR_BYTES = 8 * 1024;
 
 export type BrokerActionSession = {
@@ -36,14 +35,14 @@ export type BrokerActionRouterOptions = {
 	emit: () => void;
 };
 
+/**
+ * How long the desktop waits for the device to answer: as long as the device
+ * may spend on the command, which its client enforces, plus time for the
+ * result to arrive. Giving up sooner reports an action unknown while the
+ * device is still entitled to be running it.
+ */
 function actionTimeout(action: DesktopAction): number {
-	if (
-		action.tool === 'restore' ||
-		(action.tool === 'query' && action.command === 'refetch')
-	) {
-		return LONG_ACTION_TIMEOUT_MS;
-	}
-	return ACTION_TIMEOUT_MS;
+	return desktopActionAcknowledgementTimeoutMs(action.tool, action.command);
 }
 
 /** Owns remote-action policy, per-device serialization, and acknowledgements. */

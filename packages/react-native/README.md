@@ -71,13 +71,19 @@ the broker's contract itself:
 - It runs an action only when the action's `deviceId` is the `id` that
   `createDeviceInfo()` returned and its capability is in that info's
   `capabilities`. Any other action is refused and the connection is closed.
-- Each action has `actionTimeoutMs` to settle, 45 seconds unless you pass
-  `startDesktopClient` another positive number of milliseconds that a timer
-  can hold; any other value throws. When an action runs out of time, the
-  desktop is told it timed out and that its outcome is unknown, the action's
-  `signal` aborts, and the next queued action runs. A host that holds an
-  on-device prompt for an action, such as a confirmation sheet, should
-  dismiss it and reject when the signal aborts.
+- Each action has a time to settle that depends on its command.
+  `desktopActionTimeoutMs` (from `@rndevtools/core/desktop-protocol`) gives
+  10 seconds to a local state change, 30 to work that waits on the network, a
+  restore or a person, and 5 minutes to a scenario run or undo. The desktop
+  waits that long plus a few seconds for the result, so it never gives up on
+  an action the device may still run. `actionTimeoutMs` is an optional
+  ceiling that can only shorten these: pass `startDesktopClient` a positive
+  number of milliseconds that a timer can hold, because any other value
+  throws. When an action runs out of time, the desktop is told it timed out
+  and that its outcome is unknown, the action's `signal` aborts, and the next
+  queued action runs. A host that holds an on-device prompt for an action,
+  such as a confirmation sheet, should dismiss it and reject when the signal
+  aborts.
 - Outgoing frames are paced under the broker's per-connection rate limit.
   Action results go first, and snapshots coalesce, so the next one sent
   carries the latest state.
