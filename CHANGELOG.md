@@ -245,3 +245,10 @@
   runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
   missing verification in a notice and job summary. Desktop changes must
   pass the full local quality gate before merging when it skips.
+- A local Supabase stack whose first start is still running when RN Devtools
+  quits is now recorded before the CLI is spawned. When the restarted app
+  adopts that start, it checks that the stack listens on 127.0.0.1 only and
+  stops it if not, and stops it after the usual linger once nothing holds it,
+  as for any other stack; a first start that failed meanwhile is marked
+  interrupted, like a cancelled one. Before, the stack ran with no record, no
+  loopback check and no automatic stop.
