@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- A replacement desktop client stops the earlier owner of its device ID, including
+  across Fast Refresh. Broker-replaced clients stop reconnecting.
+
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 

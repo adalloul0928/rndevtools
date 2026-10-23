@@ -571,6 +571,16 @@ export type DesktopClientOptions = {
 	actionTimeoutMs?: number;
 };
 
+// Survives Fast Refresh so a new module instance retires the previous client.
+const CLIENT_OWNERS = Symbol.for('@rndevtools/desktop/client-owners');
+function clientOwners(): Map<string, DesktopClientHandle> {
+	const runtime = globalThis as typeof globalThis & {
+		[CLIENT_OWNERS]?: Map<string, DesktopClientHandle>;
+	};
+	runtime[CLIENT_OWNERS] ??= new Map();
+	return runtime[CLIENT_OWNERS];
+}
+
 export function startDesktopClient(
 	options: DesktopClientOptions,
 ): DesktopClientHandle {
@@ -1256,6 +1266,13 @@ export function startDesktopClient(
 			clearConnectionTimers();
 			socket = undefined;
 			if (!active) return;
+			if (
+				event?.code === 1008 &&
+				event.reason === 'replaced by a newer connection'
+			) {
+				client.stop();
+				return;
+			}
 			if (opened) {
 				// 1008 and 1009 mean the broker rejected what this device sent.
 				// Reconnecting at the usual pace would only repeat the rejection, so
@@ -1286,6 +1303,37 @@ export function startDesktopClient(
 		};
 	};
 
+	const owners = clientOwners();
+	const client: DesktopClientHandle = {
+		stop: () => {
+			if (!active) return;
+			active = false;
+			if (owners.get(deviceId) === client) owners.delete(deviceId);
+			cancelActiveAction();
+			const unsubscribe = unsubscribeAuthorization;
+			unsubscribeAuthorization = undefined;
+			try {
+				unsubscribe?.();
+			} catch {
+				// A listener the host cannot remove stays inert: `active` is false.
+			}
+			if (reconnectTimer) clearTimeout(reconnectTimer);
+			reconnectTimer = undefined;
+			clearConnectionTimers();
+			const activeSocket = socket;
+			socket = undefined;
+			if (activeSocket && activeSocket.readyState < 2) {
+				try {
+					activeSocket.close(1000, 'Devtools unmounted');
+				} catch {
+					// Stopping diagnostics must never interrupt app teardown.
+				}
+			}
+		},
+	};
+	owners.get(deviceId)?.stop();
+	owners.set(deviceId, client);
+
 	try {
 		const unsubscribe = host.subscribeToAuthorization?.(onAuthorizationChange);
 		unsubscribeAuthorization =
@@ -1309,29 +1357,5 @@ export function startDesktopClient(
 		connect();
 	}
 
-	return {
-		stop: () => {
-			active = false;
-			cancelActiveAction();
-			const unsubscribe = unsubscribeAuthorization;
-			unsubscribeAuthorization = undefined;
-			try {
-				unsubscribe?.();
-			} catch {
-				// A listener the host cannot remove stays inert: `active` is false.
-			}
-			if (reconnectTimer) clearTimeout(reconnectTimer);
-			reconnectTimer = undefined;
-			clearConnectionTimers();
-			const activeSocket = socket;
-			socket = undefined;
-			if (activeSocket && activeSocket.readyState < 2) {
-				try {
-					activeSocket.close(1000, 'Devtools unmounted');
-				} catch {
-					// Stopping diagnostics must never interrupt app teardown.
-				}
-			}
-		},
-	};
+	return client;
 }
