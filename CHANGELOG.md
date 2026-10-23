@@ -343,6 +343,9 @@
 - Failed claim saves preserve device ownership. Concurrent claims and releases
   persist in order, and unreadable claims cannot be silently overwritten.
 
+- Session-end identity recovery checks process start times, bounds its cache, and
+  keeps the latest session when discoveries occur at the same timestamp.
+
 - Failed lane starts report unverified Metro cleanup with its PID and port,
   retaining an existing record until the verified stop succeeds.
 

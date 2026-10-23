@@ -958,7 +958,11 @@ describe('AgentService.identify', () => {
 	} as const;
 
 	function entry(pid: number, ppid: number) {
-		return { pid, ppid } satisfies ProcessTableEntry;
+		return {
+			pid,
+			ppid,
+			startedAt: 'Fri Oct 23 08:00:00 2026',
+		} satisfies ProcessTableEntry;
 	}
 
 	/**
@@ -1253,6 +1257,48 @@ describe('AgentService.identify', () => {
 		// SessionEnd hook on a normal exit, and its process outlives the hook.
 		const sessionEnd = () =>
 			service.identify({ claimed: claudeA, peerPid: 111 });
+
+		it('does not verify a remembered session after its PID is reused', async () => {
+			table = baseTable.map((process) => ({
+				...process,
+				startedAt: 'Fri Oct 23 08:00:00 2026',
+			}));
+			await service.refresh();
+			discovered = [];
+			await service.refresh();
+			table = table.map((process) =>
+				process.pid === CLAUDE_A_PID
+					? { ...process, startedAt: 'Fri Oct 23 08:00:30 2026' }
+					: process
+			);
+			await expect(sessionEnd()).resolves.toEqual(noSession);
+		});
+
+		it('requires a process start time to reuse a remembered identity', async () => {
+			table = baseTable.map((process) => ({
+				...process,
+				startedAt: 'Fri Oct 23 08:00:00 2026',
+			}));
+			await service.refresh();
+			discovered = [];
+			await service.refresh();
+			table = baseTable.map(({ pid, ppid }) => ({ pid, ppid }));
+			await expect(sessionEnd()).resolves.toEqual(noSession);
+		});
+
+		it('keeps the latest session on a PID when two discoveries share a timestamp', async () => {
+			const cleared = {
+				kind: 'claude',
+				sessionId: 'claude-a-cleared',
+			} as const;
+			discovered = [live('claude', cleared.sessionId, CLAUDE_A_PID)];
+			await service.refresh();
+			discovered = [];
+			await service.refresh();
+			await expect(
+				service.identify({ claimed: cleared, peerPid: 111 })
+			).resolves.toMatchObject({ status: 'verified', agent: cleared });
+		});
 
 		it('still verifies the hook by its process for a minute after discovery last listed the session', async () => {
 			discovered = [];

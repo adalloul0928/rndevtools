@@ -32,6 +32,7 @@ import {
 	resolveHolderLiveness,
 } from '../shared/device-hold';
 import {
+	type ProcessTableEntry,
 	type ProcessTableReader,
 	processAncestry,
 	readProcessTable,
@@ -43,15 +44,9 @@ import {
 import { isMissing, writeFileAtomic } from './private-files';
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
-/**
- * How long a session with a process stays matchable by `identify` after
- * discovery last listed it. Claude Code deletes its registry file before it
- * runs the SessionEnd hook on a normal exit, while its process still lives,
- * so a hook that arrives after the next poll would find no session to be
- * under. The trade-off: a pid that the system reuses for an unrelated process
- * inside this window is taken for the session it belonged to.
- */
+// SessionEnd runs after Claude Code removes its registry file.
 export const RECENT_SESSION_MS = 60_000;
+const MAX_RECENT_SESSIONS = 200;
 const MAX_CLAIMS = 200;
 const MAX_TOUCHES = 1_000;
 const EVERY_AGENT_KIND: ReadonlySet<AgentKind> = new Set([
@@ -220,15 +215,10 @@ export class AgentService {
 	 * with how long each had run when it paused.
 	 */
 	readonly #pausedClocks = new Map<string, number>();
-	/**
-	 * Sessions with a process (a pid above 1) that discovery listed within the
-	 * last RECENT_SESSION_MS, by `agentSessionKey`, with when it last did. Only
-	 * `identify` reads them, to match a sender's ancestry: holds, liveness, the
-	 * state and the mismatch test all go by the current `#sessions`.
-	 */
+	// Identity recovery only; these entries never extend a holder's liveness.
 	readonly #recentSessions = new Map<
-		string,
-		{ session: AgentSession; seenAt: number }
+		number,
+		{ session: AgentSession; seenAt: number; startedAt: string }
 	>();
 	#sessions: AgentSession[] = [];
 	#discovery: AgentState['discovery'] = { claude: 'ok', codex: 'ok' };
@@ -331,33 +321,6 @@ export class AgentService {
 		});
 	}
 
-	/**
-	 * Resolves who sent a request, from the connection rather than the
-	 * envelope. `claimed` is the session the envelope names and `peerPid` the
-	 * process that sent it, given only once the CLI service has proven that it
-	 * owns the connection. The rules, in order:
-	 *
-	 * 1. No claim: `anonymous`, whoever sent it.
-	 * 2. A claim without a proven sender is `unverified` (`no-proof`), and so is
-	 *    one whose sender cannot be traced because the process table cannot be
-	 *    read (`no-process-table`).
-	 * 3. The sender, or an ancestor of it (nearest first), is the process of a
-	 *    session S (see `#sessionOfProcess`): the process proves S, so the
-	 *    identity is S, `verified` by `process`. The claim only has to not
-	 *    contradict that. A claim of exactly S agrees. One that names a
-	 *    different session that is live right now is a `mismatch`. Any other is
-	 *    ignored: the id a /clear replaced (an MCP server keeps the id it started
-	 *    with), a synthetic `mcp-*` id, another agent's variable that leaked into
-	 *    a Claude tree, an id no live session has. A claim that S does not
-	 *    confirm is checked again after discovering sessions afresh, once: a
-	 *    session that started, or took a new id, since the last poll is not in
-	 *    the list yet, and its own requests must not read as another's.
-	 * 4. No session in the ancestry: never promote the claim into an identity.
-	 *    A claim that names a live session with a process is a `mismatch`: its
-	 *    id, presented by a process that does not run under it. Any other claim
-	 *    is `unverified` (`no-session`): Codex threads share one process, and
-	 *    other agents and ended sessions have no process to match.
-	 */
 	async identify({
 		claimed,
 		peerPid,
@@ -373,9 +336,9 @@ export class AgentService {
 				reason: UNVERIFIED_REASONS['no-proof'],
 			};
 		}
-		let ancestry: number[];
+		let table: readonly ProcessTableEntry[];
 		try {
-			ancestry = processAncestry(await this.#processTable(), peerPid);
+			table = await this.#processTable();
 		} catch {
 			return {
 				status: 'unverified',
@@ -384,11 +347,13 @@ export class AgentService {
 			};
 		}
 		const key = agentSessionKey(claimed);
+		const ancestry = processAncestry(table, peerPid);
+		const starts = new Map(table.map(({ pid, startedAt }) => [pid, startedAt]));
 		this.#forgetStaleSessions();
-		let owner = this.#sessionOfProcess(ancestry);
+		let owner = this.#sessionOfProcess(ancestry, starts);
 		if (!owner || agentSessionKey(owner) !== key) {
 			await this.refresh();
-			owner = this.#sessionOfProcess(ancestry);
+			owner = this.#sessionOfProcess(ancestry, starts);
 		}
 		const named = this.#sessions.find(
 			(session) => agentSessionKey(session) === key
@@ -413,43 +378,46 @@ export class AgentService {
 		};
 	}
 
-	/**
-	 * The session whose process comes first in `ancestry`, which runs from the
-	 * sender up, if any: a session in the current discovery, else the one that
-	 * was listed last of those recently seen. Where several sessions share a
-	 * pid (a /clear gives a session a new id, in the same process) the current
-	 * one is the process's own. A pid of 1 or below never matches: launchd is
-	 * the ancestor of every orphaned process, so a registry entry that names it
-	 * would otherwise vouch for all of them.
-	 */
-	#sessionOfProcess(ancestry: readonly number[]): AgentSession | undefined {
+	#sessionOfProcess(
+		ancestry: readonly number[],
+		starts: ReadonlyMap<number, string | undefined>
+	): AgentSession | undefined {
 		for (const pid of ancestry) {
+			// launchd adopts unrelated orphaned processes.
 			if (pid <= 1) continue;
 			const current = this.#sessions.find((candidate) => candidate.pid === pid);
 			if (current) return current;
-			let recent: { session: AgentSession; seenAt: number } | undefined;
-			for (const entry of this.#recentSessions.values()) {
-				if (
-					entry.session.pid === pid &&
-					(recent === undefined || entry.seenAt > recent.seenAt)
-				) {
-					recent = entry;
-				}
+			const recent = this.#recentSessions.get(pid);
+			if (recent && recent.startedAt === starts.get(pid)) {
+				return recent.session;
 			}
-			if (recent) return recent.session;
 		}
 		return undefined;
 	}
 
-	/** Remembers the sessions discovery just listed that have a process to match. */
-	#rememberSessions(): void {
+	async #rememberSessions(): Promise<void> {
 		const seenAt = this.#now();
-		for (const session of this.#sessions) {
-			if (session.pid !== undefined && session.pid > 1) {
-				this.#recentSessions.set(agentSessionKey(session), { session, seenAt });
+		const sessions = this.#sessions.filter(
+			({ pid }) => pid !== undefined && pid > 1
+		);
+		if (sessions.length > 0) {
+			const table = await this.#processTable().catch(() => []);
+			const starts = new Map(
+				table.map(({ pid, startedAt }) => [pid, startedAt])
+			);
+			for (const session of sessions) {
+				const pid = session.pid;
+				const startedAt = pid === undefined ? undefined : starts.get(pid);
+				if (pid === undefined || !startedAt) continue;
+				this.#recentSessions.delete(pid);
+				this.#recentSessions.set(pid, { session, seenAt, startedAt });
 			}
 		}
 		this.#forgetStaleSessions();
+		for (const pid of this.#recentSessions.keys()) {
+			if (this.#recentSessions.size <= MAX_RECENT_SESSIONS) break;
+			this.#recentSessions.delete(pid);
+		}
 	}
 
 	/** Drops the sessions that discovery has not listed for RECENT_SESSION_MS. */
@@ -597,7 +565,7 @@ export class AgentService {
 		}
 		try {
 			this.#sessions = result.sessions.slice(0, 200);
-			this.#rememberSessions();
+			await this.#rememberSessions();
 			this.#discovery = {
 				claude: result.claude,
 				codex: result.codex,

@@ -201,23 +201,20 @@ describe('peerOwnsConnection', () => {
 });
 
 describe('parseProcessTable', () => {
-	it('reads pid and parent, and skips a line of any other shape', () => {
+	it('reads process birth times and skips incomplete or malformed rows', () => {
 		expect(
 			parseProcessTable(
 				[
-					'    1     0',
-					'  100     1',
+					'  1  0 Fri Oct  2 08:00:00 2026',
+					'100  1 Fri Oct 23 08:01:00 2026',
 					'12345 100',
-					'not a process line',
-					'12 abc',
+					'12 abc Fri Oct 23 08:01:00 2026',
 					'7 8 /bin/with-a-command',
-					'',
 				].join('\n')
 			)
 		).toEqual([
-			{ pid: 1, ppid: 0 },
-			{ pid: 100, ppid: 1 },
-			{ pid: 12_345, ppid: 100 },
+			{ pid: 1, ppid: 0, startedAt: 'Fri Oct 2 08:00:00 2026' },
+			{ pid: 100, ppid: 1, startedAt: 'Fri Oct 23 08:01:00 2026' },
 		]);
 	});
 });
@@ -342,6 +339,7 @@ describe.skipIf(process.platform !== 'darwin')('on this Mac', () => {
 		expect(table.find((entry) => entry.pid === process.pid)).toMatchObject({
 			pid: process.pid,
 			ppid: process.ppid,
+			startedAt: expect.stringMatching(/\d{2}:\d{2}:\d{2} \d{4}$/),
 		});
 		expect(processAncestry(table, process.pid).slice(0, 2)).toEqual([
 			process.pid,
