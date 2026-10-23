@@ -318,6 +318,9 @@
 
 ### Desktop app
 
+- Local ad-hoc macOS packages launch without team-based library validation;
+  Developer ID release signing keeps hardened runtime and its existing gates.
+
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
