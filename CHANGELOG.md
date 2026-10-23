@@ -7,6 +7,9 @@
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
+
+- Recognize Expo fetch cancellation wrappers and preserved abort causes without
+  inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
   of returning cleanup after applying. Failed applies are undone immediately;
   failed cleanup stays available for an explicit retry. See the core README's

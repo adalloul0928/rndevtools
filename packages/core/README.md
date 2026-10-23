@@ -430,3 +430,9 @@ checkpoint after preflight.
 evidence, but a missing focus observation never turns a commit into a failure.
 Only requests that never commit time out. `navigate()` passes the original
 route to the host callback; routes stored in diagnostic history stay redacted.
+
+## Fetch cancellations
+
+Expo fetch cancellation wrappers are recorded as aborted when they carry a known
+cancellation message or preserve the safely captured signal reason as their cause.
+Unrelated transport failures remain errors, even if the caller aborts later.
