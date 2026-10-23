@@ -42,6 +42,7 @@ export function createConsoleMethodSource(
 	const active = options.enabled === true && options.development === true;
 	const now = options.now ?? Date.now;
 	let emitting = false;
+	let generation = 0;
 
 	const emit = (level: ConsoleLogLevel, args: readonly unknown[]): void => {
 		// A listener that logs, or React warning about an update the listener
@@ -84,6 +85,7 @@ export function createConsoleMethodSource(
 	};
 
 	const restore = (): void => {
+		generation += 1;
 		for (const [name, wrapper] of wrappers) {
 			try {
 				if (options.target[name] === wrapper) {
@@ -99,6 +101,7 @@ export function createConsoleMethodSource(
 
 	const install = (): void => {
 		if (!active || wrappers.size > 0) return;
+		const installedGeneration = ++generation;
 		try {
 			for (const name of Object.keys(
 				CONSOLE_METHOD_LEVELS,
@@ -110,7 +113,9 @@ export function createConsoleMethodSource(
 					...args: readonly unknown[]
 				): unknown {
 					const result = Reflect.apply(original, this, args);
-					emit(CONSOLE_METHOD_LEVELS[name], args);
+					if (installedGeneration === generation) {
+						emit(CONSOLE_METHOD_LEVELS[name], args);
+					}
 					return result;
 				};
 				originals.set(name, original);
