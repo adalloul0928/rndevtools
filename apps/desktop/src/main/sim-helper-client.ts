@@ -675,6 +675,12 @@ export class SimHelperClient {
 		);
 	}
 
+	/**
+	 * Reads one Simulator's managed state without ever booting it. A shut-down
+	 * Simulator comes back with empty managed sets, which means it was not
+	 * inspected, not that it is clean; a profile preview inspects it through a
+	 * temporary boot.
+	 */
 	async simulatorStatus(
 		simulatorId: string,
 		signal?: AbortSignal

@@ -2756,7 +2756,7 @@ const supabaseAgentTargetSchema = z.union([
 
 /**
  * What an agent asked for, after the TS agent CLI layer parsed the command.
- * The agent's identity comes from the request envelope, never from here.
+ * The agent's identity comes from the verified connection, never from here.
  * `destroy` only files a request for the user.
  */
 export const supabaseAgentOperationSchema = z.discriminatedUnion('operation', [

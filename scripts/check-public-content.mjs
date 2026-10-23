@@ -2,6 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+	CLOUD_ACCESS_KEY_SOURCE,
+	PRIVATE_KEY_LABEL_SOURCE,
+	PROVIDER_TOKEN_SOURCE,
+} from '../packages/core/src/core/secret-patterns.ts';
 
 const fixtureUsers = new Set([
 	'example',
@@ -64,17 +69,18 @@ function signedJwt(value) {
 const rules = [
 	{
 		code: 'private-key',
-		pattern:
-			/-----BEGIN ((?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY)-----\s*([A-Za-z0-9+/=\s]{64,})-----END \1-----/g,
+		pattern: new RegExp(
+			`-----BEGIN (${PRIVATE_KEY_LABEL_SOURCE})-----\\s*([A-Za-z0-9+/=\\s]{64,})-----END \\1-----`,
+			'g',
+		),
 	},
 	{
 		code: 'provider-token',
-		pattern:
-			/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|npm_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-proj-[A-Za-z0-9_-]{30,}|sk_live_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]{20,})\b/g,
+		pattern: new RegExp(PROVIDER_TOKEN_SOURCE, 'g'),
 	},
 	{
 		code: 'cloud-access-key',
-		pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+		pattern: new RegExp(CLOUD_ACCESS_KEY_SOURCE, 'g'),
 	},
 	{
 		code: 'credential-url',

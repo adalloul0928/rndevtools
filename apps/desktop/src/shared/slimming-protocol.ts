@@ -305,7 +305,6 @@ const slimmingRequesterSchema = z.strictObject({
 	kind: z.enum(['claude', 'codex', 'other']),
 	sessionId: identifierSchema,
 });
-export type SlimmingRequester = z.infer<typeof slimmingRequesterSchema>;
 
 const actionBase = {
 	actionId: identifierSchema,

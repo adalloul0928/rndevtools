@@ -172,7 +172,6 @@ describe('agent CLI protocol', () => {
 					operation: 'up',
 					worktreePath: '/Users/dev/app',
 					udid: UDID,
-					agent: { kind: 'codex', sessionId: 'thread-1' },
 				})
 			).success
 		).toBe(true);
@@ -237,6 +236,70 @@ describe('agent CLI protocol', () => {
 				})
 			).success
 		).toBe(false);
+	});
+
+	it('takes no agent on a lane command: who is asking comes from the connection', () => {
+		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
+		const agent = { kind: 'codex', sessionId: 'thread-1' };
+		for (const command of [
+			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app', agent },
+			{ kind: 'lane', operation: 'launch', laneId, agent },
+			{ kind: 'lane', operation: 'down', laneId, agent },
+			{ kind: 'lane', operation: 'ls', agent },
+			{ kind: 'lane', operation: 'log', laneId, agent },
+		]) {
+			expect(agentCliRequestSchema.safeParse(request(command)).success).toBe(
+				false
+			);
+		}
+	});
+
+	it('reads the envelope agent as a claim and the peer as the sending process', () => {
+		const claim = { kind: 'claude', sessionId: 'session-1' };
+		const parsed = agentCliRequestSchema.parse({
+			...request({ kind: 'agents' }),
+			agent: claim,
+			peer: { pid: 4_242 },
+		});
+		expect(parsed.agent).toEqual(claim);
+		expect(parsed.peer).toEqual({ pid: 4_242 });
+		// Both are optional: a request from a terminal names no session, and an
+		// older CLI sends no pid.
+		expect(
+			agentCliRequestSchema.safeParse(request({ kind: 'agents' })).success
+		).toBe(true);
+		expect(
+			agentCliRequestSchema.safeParse({
+				...request({ kind: 'agents' }),
+				agent: claim,
+			}).success
+		).toBe(true);
+	});
+
+	it('bounds the peer pid and refuses anything else on the peer', () => {
+		const withPeer = (peer: unknown) =>
+			agentCliRequestSchema.safeParse({
+				...request({ kind: 'agents' }),
+				peer,
+			}).success;
+		expect(withPeer({ pid: 1 })).toBe(true);
+		expect(withPeer({ pid: 99_999 })).toBe(true);
+		expect(withPeer({ pid: 4_194_304 })).toBe(true);
+		for (const peer of [
+			{ pid: 0 },
+			{ pid: -7 },
+			{ pid: 1.5 },
+			{ pid: '4242' },
+			{ pid: Number.NaN },
+			{ pid: 4_194_305 },
+			{},
+			{ pid: 4_242, uid: 501 },
+			4_242,
+			'4242',
+			null,
+		]) {
+			expect(withPeer(peer)).toBe(false);
+		}
 	});
 
 	it('lets lane up omit the udid and says so when a lane command is malformed', () => {

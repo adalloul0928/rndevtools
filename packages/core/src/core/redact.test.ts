@@ -24,6 +24,105 @@ const STACK_ID =
 	'64616c83912c48442ec266f86ee2d7f004d2be5c8b7f31a6d6b4c2634f82145f';
 
 describe('redactDiagnosticText', () => {
+	it('redacts common provider and cloud keys even under unrelated names', () => {
+		const tokens = [
+			`ghp_${'a'.repeat(36)}`,
+			`github_pat_${'b'.repeat(50)}`,
+			`npm_${'c'.repeat(36)}`,
+			`xoxb-${'d'.repeat(32)}`,
+			`sk-proj-${'e'.repeat(40)}`,
+			`sk_live_${'f'.repeat(32)}`,
+			`AKIA${'A'.repeat(16)}`,
+		];
+		for (const token of tokens) {
+			expect(redactDiagnosticText(`value=${token}`)).not.toContain(token);
+			expect(
+				JSON.stringify(sanitizeDiagnosticValue({ value: token })),
+			).not.toContain(token);
+		}
+	});
+
+	it('redacts Unicode-escaped credential keys without changing their spelling', () => {
+		for (const key of [
+			String.raw`\u0074oken`,
+			String.raw`api\u005fkey`,
+			String.raw`pass\u0077ord`,
+			String.raw`\u0041uthorization`,
+			String.raw`account\u005fpin`,
+			`${'field'.repeat(100)}${String.raw`\u0074oken`}`,
+		]) {
+			const source = `{"${key}":"private-value"}`;
+			expect(redactDiagnosticText(source)).toBe(`{"${key}":"[REDACTED]"}`);
+			expect(isSensitiveDiagnosticKey(key)).toBe(true);
+		}
+	});
+
+	it('redacts complete and truncated private keys', () => {
+		const begin = '-----BEGIN ' + 'PRIVATE KEY-----';
+		const end = '-----END ' + 'PRIVATE KEY-----';
+		const body = 'a'.repeat(100);
+		expect(
+			redactDiagnosticText(`${begin}
+${body}
+${end}`),
+		).not.toContain(body);
+		expect(
+			redactDiagnosticText(`${begin}
+${body}`),
+		).not.toContain(body);
+	});
+
+	it('redacts credential aliases and password confirmations', () => {
+		for (const key of [
+			'pwd',
+			'passwd',
+			'pin',
+			'otp',
+			'cvv',
+			'cvc',
+			'card_number',
+			'iban',
+			'private_key',
+			'credentials',
+			'credential',
+			'auth',
+			'passwordConfirmation',
+		]) {
+			expect(redactDiagnosticText(`${key}=private-value`)).toBe(
+				`${key}=[REDACTED]`,
+			);
+			expect(isSensitiveDiagnosticKey(key)).toBe(true);
+			expect(sanitizeDiagnosticValue({ [key]: 'private-value' })).toEqual({
+				[key]: '[REDACTED]',
+			});
+		}
+		for (const key of ['spin', 'shipping']) {
+			expect(redactDiagnosticText(`${key}=visible`)).toBe(`${key}=visible`);
+			expect(isSensitiveDiagnosticKey(key)).toBe(false);
+		}
+	});
+
+	it('redacts escaped PEM newlines and preserves text after a complete key', () => {
+		const begin = '-----BEGIN ' + 'RSA PRIVATE KEY-----';
+		const end = '-----END ' + 'RSA PRIVATE KEY-----';
+		const text = JSON.stringify({
+			value: `${begin}\nProc-Type: 4,ENCRYPTED\n${'a'.repeat(100)}\n${end}`,
+			next: 'visible',
+		});
+		expect(redactDiagnosticText(text)).toBe(
+			'{"value":"[REDACTED PRIVATE KEY]","next":"visible"}',
+		);
+	});
+
+	it('keeps redaction idempotent and scans long escaped names and token-like text', () => {
+		const token = `AIza${'A'.repeat(35)}`;
+		const source = `${'xoxb-'.repeat(20000)} ${String.raw`\u0074`.repeat(20000)} {"${String.raw`\u0070in`}":"1234"} ${token}`;
+		const redacted = redactDiagnosticText(source);
+		expect(redacted).not.toContain(token);
+		expect(redacted).not.toContain('1234');
+		expect(redactDiagnosticText(redacted)).toBe(redacted);
+	});
+
 	it('redacts quoted JSON credentials and URL-style assignments', () => {
 		expect(
 			redactDiagnosticText(

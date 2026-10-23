@@ -71,20 +71,42 @@ the broker's contract itself:
 - It runs an action only when the action's `deviceId` is the `id` that
   `createDeviceInfo()` returned and its capability is in that info's
   `capabilities`. Any other action is refused and the connection is closed.
-- Each action has `actionTimeoutMs` to settle, 45 seconds unless you pass
-  `startDesktopClient` another positive number of milliseconds that a timer
-  can hold; any other value throws. When an action runs out of time, the
-  desktop is told it timed out and that its outcome is unknown, the action's
-  `signal` aborts, and the next queued action runs. A host that holds an
-  on-device prompt for an action, such as a confirmation sheet, should
-  dismiss it and reject when the signal aborts.
+- Each action has a time to settle that depends on its command.
+  `desktopActionTimeoutMs` (from `@rndevtools/core/desktop-protocol`) gives
+  10 seconds to a local state change, 30 to work that waits on the network, a
+  restore or a person, and 5 minutes to a scenario run or undo. The desktop
+  waits that long plus a few seconds for the result, so it never gives up on
+  an action the device may still run. `actionTimeoutMs` is an optional
+  ceiling that can only shorten these: pass `startDesktopClient` a positive
+  number of milliseconds that a timer can hold, because any other value
+  throws. When an action runs out of time, the desktop is told it timed out
+  and that its outcome is unknown, the action's `signal` aborts, and the next
+  queued action runs. A host that holds an on-device prompt for an action,
+  such as a confirmation sheet, should dismiss it and reject when the signal
+  aborts.
 - Outgoing frames are paced under the broker's per-connection rate limit.
   Action results go first, and snapshots coalesce, so the next one sent
   carries the latest state.
-- A snapshot collection with more rows than its limit in
-  `RNDEVTOOLS_SNAPSHOT_LIMITS` (from `@rndevtools/core/desktop-protocol`) is
-  trimmed to its newest rows, and the client records a warning in its
-  diagnostics. The broker rejects a whole snapshot that is over any limit.
+- The broker rejects a whole snapshot that is over any bound it validates, so
+  the client fits each one before it sends it, with `fitDesktopSnapshot` from
+  `@rndevtools/core/desktop-protocol`, and records a warning in its
+  diagnostics that names what it changed. A top-level list over its cap keeps
+  its last rows. A list inside a row keeps its newest rows if it is
+  chronological, such as samples, and its first rows if it is ordered, such as
+  keys, sources, variables, steps and files; the caps are in `RNDEVTOOLS_SNAPSHOT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`. A text over its limit
+  (`RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS`) is cut without splitting a surrogate
+  pair. A number outside its range (`RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`) is
+  clamped, an integer's fraction is cut off, and one that is not finite is
+  dropped from an optional field, written as `null` in a nullable one and made
+  the lower bound of its range in a required one. A map of headers keeps its
+  first fields and loses a field whose name is too long. The identity history
+  keeps the sessions that started latest, whichever end of the list a host
+  puts them at, and a cut of performance samples raises `droppedSampleCount`
+  by the samples removed, which is what the desktop's performance panel reads
+  to say that samples were dropped. The desktop still redacts and validates
+  what arrives; the client only bounds, so a value of the wrong shape, such as
+  an empty identifier, still reaches the schema.
 
 Authorization is checked again while an action runs. When the host passes
 `subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`), a

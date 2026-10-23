@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
+  tokens, and complete or truncated private-key blocks in diagnostic capture.
+  Runtime token patterns now share one source with the public-content check.
+
 - **Breaking:** the image overlay no longer reads
   `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` or `EXPO_PUBLIC_SUPABASE_URL`. Pass the
   hosts it may download from to `configureImageOverlay({ allowedRemoteHosts })`
@@ -54,9 +58,11 @@
 - The desktop client runs only the actions the device advertises, addressed to
   its own `deviceId`. It paces its frames under the broker's limit, trims a
   collection over the desktop's row limit to its newest rows, and backs off
-  after repeated broker policy closes. A new `actionTimeoutMs` option bounds
-  each host action, and `runAction` receives an `AbortSignal` that aborts when
-  the client stops waiting.
+  after repeated broker policy closes. Each host action is bounded by its
+  command's limit, `desktopActionTimeoutMs`, which the desktop outwaits by a
+  short grace; an optional `actionTimeoutMs` can only shorten that.
+  `runAction` receives an `AbortSignal` that aborts when the client stops
+  waiting.
 - While an owner source is bound, an authorization grant applies only when it
   names that source's live owner. A source that cannot be subscribed to
   revokes authorization and refuses grants until a working one is bound.
@@ -228,14 +234,70 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- The desktop client fits every snapshot to every size and range bound the
+  desktop validates before it sends it, with the new `fitDesktopSnapshot` of
+  `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
+  lists of `RNDEVTOOLS_SNAPSHOT_LIMITS`, so a nested list (10 of its 30 limits
+  are nested, such as a component's `sourceFiles`), a text or a number over
+  its bound made the broker close the socket and the device reconnect in a
+  loop. Core keeps up to 10,000 performance samples where the desktop takes
+  1,500, and does not cap a scenario's warnings where it takes 100. A
+  top-level list over its cap keeps its last rows, and a list inside a row
+  keeps its newest rows if it is chronological and its first if it is
+  ordered. A text is cut without splitting a surrogate pair, a number is
+  clamped into its range, and a map keeps its first fields. A query
+  simulation's active entry, a camera fixture, a scenario variable default or
+  a persona identifier that disagrees with the rest, which the schema would
+  reject, is dropped or reset. The identity history keeps the sessions that
+  started latest, whichever end of the list a host puts them at, and a cut of
+  performance samples raises `droppedSampleCount` by the samples removed, so
+  the performance panel says that samples were dropped. A value of the wrong
+  shape, such as an empty identifier, is still left to the schema. One text
+  over its limit no longer keeps a snapshot from being sent. The client's
+  warning names the first six changes and counts the rest. The bounds the schema applies beyond
+  `RNDEVTOOLS_SNAPSHOT_LIMITS` are exported as
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`, `RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
+- Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
+- The broker waits for a device's answer to an action as long as the device may
+  spend on that command, plus five seconds, from one table in
+  `@rndevtools/core/desktop-protocol`. It used to give up after 8 seconds (30
+  for restores and refetches) while the device client allowed 45, so a long
+  scenario was reported as unacknowledged while the device finished it.
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- The device snapshot schema reads its text, number and item bounds from
+  `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
+  holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
+  of a snapshot past its bound, then requires the schema to reject the
+  snapshot as it stands and accept it fitted. No bound changed.
+- Agent requests over the local socket now prove which process sent them. The
+  CLI, its MCP server and its session-end hook send their own pid, the desktop
+  checks that the process owns the connection, and it follows the process's
+  parents to the Claude Code session that spawned it. A request that names
+  another live session is refused with `agent_identity_mismatch`. Before, the
+  session was whatever the request said it was, and a request that named none
+  counted as the person at the desktop: `rndevtools lane up --udid` on a
+  Simulator another agent had claimed took the claim over, and setting another
+  session's id let `release --all` stop its lanes. Requests with no identity,
+  may now use free Simulators only and cannot claim, release or take over a
+  hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
+  Codex threads, synthetic MCP identities and ended sessions, cannot perform
+  ownership-changing operations. Lane commands no longer accept an `agent` field.
+- Background SimSlim status checks now take a Simulator's lease and skip one
+  with a running job, never boot a shut-down Simulator (it shows as not
+  inspected, not as clean), and update each Simulator's status on its own. A
+  check could previously restart a Simulator that an apply, an erase or a lane
+  had just shut down, and one that finished after an apply replaced the status
+  the apply recorded, so disabling slimming soon afterwards could skip the
+  restore.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
@@ -244,3 +306,10 @@
   runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
   missing verification in a notice and job summary. Desktop changes must
   pass the full local quality gate before merging when it skips.
+- A local Supabase stack whose first start is still running when RN Devtools
+  quits is now recorded before the CLI is spawned. When the restarted app
+  adopts that start, it checks that the stack listens on 127.0.0.1 only and
+  stops it if not, and stops it after the usual linger once nothing holds it,
+  as for any other stack; a first start that failed meanwhile is marked
+  interrupted, like a cancelled one. Before, the stack ran with no record, no
+  loopback check and no automatic stop.
