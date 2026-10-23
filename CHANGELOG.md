@@ -405,6 +405,8 @@
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
+- Consolidate Simulator label casing into its original CSS rules, removing
+  redundant uppercase declarations and later overrides without changing appearance.
 - Refresh demo-only desktop screenshots after the shared controls, status styling
   and responsive Connected App panel updates.
 - Added light and dark themes plus a persistent System / Light / Dark appearance
