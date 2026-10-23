@@ -4,6 +4,11 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- **Breaking:** query simulation modes now register `{ apply, release }` instead
+  of returning cleanup after applying. Failed applies are undone immediately;
+  failed cleanup stays available for an explicit retry. See the core README's
+  migration example.
+
 - Preserve app writes made during asynchronous Zustand patch validation.
   A stale or rejected edit no longer restores an old state before its own
   mutation has started. Validators must not mutate the store.

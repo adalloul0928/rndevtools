@@ -77,6 +77,7 @@ export {
 	type QuerySimulationFamilySnapshot,
 	type QuerySimulationLease,
 	type QuerySimulationMode,
+	type QuerySimulationOperation,
 	type QuerySimulationSnapshot,
 } from './query-simulation';
 
