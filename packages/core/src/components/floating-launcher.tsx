@@ -19,7 +19,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 import type { DevToolsPosition } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { SystemIcon } from './system-icon';
 
 const SIZE = 56;
@@ -45,6 +45,7 @@ export function FloatingLauncher({
 	onPositionChange,
 	bottomObstructionInset = 0,
 }: FloatingLauncherProps) {
+	const { colors, styles } = useStyles();
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
 	const minimumX = insets.left + EDGE_MARGIN;
@@ -199,49 +200,51 @@ export function FloatingLauncher({
 	);
 }
 
-const styles = StyleSheet.create({
-	androidIcon: {
-		alignItems: 'center',
-		height: SIZE,
-		justifyContent: 'center',
-		width: SIZE,
-	},
-	androidSurface: {
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: SIZE / 2,
-		borderWidth: StyleSheet.hairlineWidth,
-		elevation: 6,
-		height: SIZE,
-		overflow: 'hidden',
-		width: SIZE,
-	},
-	positioner: {
-		left: 0,
-		position: 'absolute',
-		top: 0,
-		zIndex: 10_000,
-	},
-	// A floating control, not an accent disc: a card-coloured circle carries
-	// the tinted glyph. Untinted glass alone disappears over a light screen.
-	fallbackSurface: {
-		backgroundColor: PlatformColor('secondarySystemGroupedBackgroundColor'),
-		borderColor: PlatformColor('separatorColor'),
-		borderRadius: SIZE / 2,
-		borderWidth: StyleSheet.hairlineWidth,
-		height: SIZE,
-		overflow: 'hidden',
-		shadowColor: PlatformColor('blackColor'),
-		shadowOffset: { width: 0, height: 6 },
-		shadowOpacity: 0.2,
-		shadowRadius: 14,
-		width: SIZE,
-	},
-	liquidGlassSurface: {
-		shadowOpacity: 0.16,
-	},
-	host: {
-		height: SIZE,
-		width: SIZE,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		androidIcon: {
+			alignItems: 'center',
+			height: SIZE,
+			justifyContent: 'center',
+			width: SIZE,
+		},
+		androidSurface: {
+			backgroundColor: colors.card,
+			borderColor: colors.separator,
+			borderRadius: SIZE / 2,
+			borderWidth: StyleSheet.hairlineWidth,
+			elevation: 6,
+			height: SIZE,
+			overflow: 'hidden',
+			width: SIZE,
+		},
+		positioner: {
+			left: 0,
+			position: 'absolute',
+			top: 0,
+			zIndex: 10_000,
+		},
+		// A floating control, not an accent disc: a card-coloured circle carries
+		// the tinted glyph. Untinted glass alone disappears over a light screen.
+		fallbackSurface: {
+			backgroundColor: PlatformColor('secondarySystemGroupedBackgroundColor'),
+			borderColor: PlatformColor('separatorColor'),
+			borderRadius: SIZE / 2,
+			borderWidth: StyleSheet.hairlineWidth,
+			height: SIZE,
+			overflow: 'hidden',
+			shadowColor: PlatformColor('blackColor'),
+			shadowOffset: { width: 0, height: 6 },
+			shadowOpacity: 0.2,
+			shadowRadius: 14,
+			width: SIZE,
+		},
+		liquidGlassSurface: {
+			shadowOpacity: 0.16,
+		},
+		host: {
+			height: SIZE,
+			width: SIZE,
+		},
+	}),
+);
