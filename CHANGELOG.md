@@ -46,6 +46,11 @@
   app's container, so a host can report `simulatorUdid` and the desktop can
   link the session to its Simulator and lane. It returns `undefined` outside
   an iOS Simulator.
+- The desktop client connects from an Android emulator. React Native's Android
+  transport sent `Origin: http://10.0.2.2:<port>` to the emulator's host alias,
+  and the broker refuses a non-loopback origin without a token, so every
+  emulator was refused with a 403. The client now names `http://127.0.0.1:<port>`
+  as the origin when it dials that alias.
 - The desktop client runs only the actions the device advertises, addressed to
   its own `deviceId`. It paces its frames under the broker's limit, trims a
   collection over the desktop's row limit to its newest rows, and backs off
