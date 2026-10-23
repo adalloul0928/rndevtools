@@ -6,11 +6,16 @@ import {
 	VALUE_OMITTED,
 	VALUE_UNITS,
 } from './bounded-redaction';
+import {
+	CLOUD_ACCESS_KEY_SOURCE,
+	PRIVATE_KEY_LABEL_SOURCE,
+	PROVIDER_TOKEN_SOURCE,
+} from './secret-patterns';
 
 // Some secrets have no shape a value rule can recognize (root keys and S3
 // signatures are bare hex), so their names alone mark them as sensitive.
 const SENSITIVE_KEY =
-	/(?:authorization|cookie|csrf|jwt|token|secret|password|passcode|session|api[-_]?key|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]?amz[-_]?(?:credential|signature)|email|phone|user[-_]?id)/i;
+	/(?:authorization|cookie|csrf|jwt|token|secret|password|passcode|passwd|credentials?|private[-_]?key|card[-_]?number|iban|(?:^|[-_])(?:auth|pwd|pin|otp|cvv|cvc)(?:$|[-_])|session|api[-_]?key|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]?amz[-_]?(?:credential|signature)|email|phone|user[-_]?id)/i;
 // Starts only where a run of address characters begins, so a long run with no
 // `@`, such as base64url or dotted ids, is scanned once instead of from every
 // word boundary inside it, which took time quadratic in its length. The group
@@ -33,6 +38,14 @@ const JWT = /\beyJ[A-Za-z\d_-]+(\.[A-Za-z\d_-]+\.[A-Za-z\d_-]*)?/g;
 // Supabase secret API keys, under any name and inside encoded text. There is
 // deliberately no rule for bare 64-hex values: stack ids have that shape.
 const SECRET_API_KEY = /sb_secret_[A-Za-z\d_-]+/g;
+const PROVIDER_TOKEN = new RegExp(PROVIDER_TOKEN_SOURCE, 'g');
+const CLOUD_ACCESS_KEY = new RegExp(CLOUD_ACCESS_KEY_SOURCE, 'g');
+// Search from each BEGIN to its matching END, advancing past everything
+// consumed. Missing END consumes the remaining bounded capture as well.
+const PRIVATE_KEY_START = new RegExp(
+	`-----BEGIN (${PRIVATE_KEY_LABEL_SOURCE})-----`,
+	'g',
+);
 // Keeps the user and the address. The password runs to the last `@` of the
 // authority, because unencoded `@` in passwords is common, but never past a
 // quote, so it cannot swallow the rest of a JSON document. The user may hold
@@ -59,12 +72,17 @@ const CREDENTIAL_PARAMETER = new RegExp(
 // names whose sensitive word is followed by more of the name, such as
 // SECRET_KEY or SERVICE_ROLE_KEY.
 const SENSITIVE_NAME =
-	'(?:authorization|cookie|csrf|jwt|(?:access|refresh|id)[-_]?token|token(?:[-_]?hash)?|client[-_]?secret|secret(?:[-_]?(?:access[-_]?)?key)?|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]amz[-_](?:credential|signature)|password|passcode|session(?:[-_]?id)?|api[-_]?key|email|phone|user[-_]?id)';
-// A name and what separates it from its value.
-function assignment(name: string): string {
-	return `(["']?${name}["']?\\s*[=:]\\s*)`;
+	'(?:authorization|cookie|csrf|jwt|(?:access|refresh|id)[-_]?token|token(?:[-_]?hash)?|client[-_]?secret|secret(?:[-_]?(?:access[-_]?)?key)?|service[-_]?role[-_]?key|root[-_]?key|db[-_]?url|x[-_]amz[-_](?:credential|signature)|password(?:[-_]?confirmation)?|passcode|passwd|card[-_]?number|iban|private[-_]?key|credentials?|session(?:[-_]?id)?|api[-_]?key|email|phone|user[-_]?id)';
+// Short names cannot start in the middle of an identifier ("spin" is not
+// a PIN field). Existing compound credential names still match their suffix.
+function assignment(name: string, shortNames?: string): string {
+	const names = shortNames ? `(?:${name}|(?<![A-Z\\d])${shortNames})` : name;
+	return `(["']?${names}["']?\\s*[=:]\\s*)`;
 }
-const SECRET_ASSIGNMENT = assignment(SENSITIVE_NAME);
+const SECRET_ASSIGNMENT = assignment(
+	SENSITIVE_NAME,
+	'(?:pwd|pin|otp|cvv|cvc|auth)',
+);
 // A quoted value is runs with no quote or backslash, joined by escapes. An
 // escape may be a backslash and a line terminator, and a value cut right after
 // a backslash ends at the end of the text. A run of one character class does
@@ -208,7 +226,12 @@ function normalizedKey(value: string): string {
 }
 
 export function isSensitiveDiagnosticKey(value: string): boolean {
-	return SENSITIVE_KEY.test(value) || SENSITIVE_KEY.test(normalizedKey(value));
+	const decoded = value.replace(/\\u([a-f\d]{4})/gi, (_escape, hex: string) =>
+		String.fromCharCode(Number.parseInt(hex, 16)),
+	);
+	return (
+		SENSITIVE_KEY.test(decoded) || SENSITIVE_KEY.test(normalizedKey(decoded))
+	);
 }
 
 /** Replaces every address in one pass, including runs of adjacent ones. */
@@ -274,11 +297,89 @@ function redactQuotedSecrets(
 	return parts.join('');
 }
 
+function redactPrivateKeys(value: string): string {
+	const parts: string[] = [];
+	let copied = 0;
+	PRIVATE_KEY_START.lastIndex = 0;
+	for (
+		let match = PRIVATE_KEY_START.exec(value);
+		match;
+		match = PRIVATE_KEY_START.exec(value)
+	) {
+		const terminator = `-----END ${match[1]}-----`;
+		const end = value.indexOf(terminator, PRIVATE_KEY_START.lastIndex);
+		parts.push(value.slice(copied, match.index), '[REDACTED PRIVATE KEY]');
+		copied = end < 0 ? value.length : end + terminator.length;
+		PRIVATE_KEY_START.lastIndex = copied;
+	}
+	if (copied === 0) return value;
+	parts.push(value.slice(copied));
+	return parts.join('');
+}
+
+// Scan escaped keys in bounded steps instead of expanding every letter of
+// each credential regexp into alternatives. Long keys remain covered and
+// no body is decoded. A match advances past its value before scanning again.
+const KEY_QUOTE = /["']/g;
+const DOUBLE_KEY_STEP = /[^"\\]*(?:\\u[a-f\d]{4}[^"\\]*){0,1024}/iy;
+const SINGLE_KEY_STEP = /[^'\\]*(?:\\u[a-f\d]{4}[^'\\]*){0,1024}/iy;
+const KEY_SEPARATOR = /\s*[=:]\s*/y;
+const UNQUOTED_VALUE = /[^&,}\s]+/y;
+
+function redactEscapedKeys(text: string): string {
+	if (!text.includes('\\u')) return text;
+	const parts: string[] = [];
+	let copied = 0;
+	KEY_QUOTE.lastIndex = 0;
+	for (let match = KEY_QUOTE.exec(text); match; match = KEY_QUOTE.exec(text)) {
+		const keyQuote = match[0];
+		const keyStart = KEY_QUOTE.lastIndex;
+		const keyStep = keyQuote === '"' ? DOUBLE_KEY_STEP : SINGLE_KEY_STEP;
+		let keyEnd = keyStart;
+		while (keyEnd < text.length) {
+			keyStep.lastIndex = keyEnd;
+			if (!keyStep.test(text) || keyStep.lastIndex === keyEnd) break;
+			keyEnd = keyStep.lastIndex;
+			if (text[keyEnd] === keyQuote) break;
+		}
+		KEY_QUOTE.lastIndex = Math.max(keyStart, keyEnd + 1);
+		if (text[keyEnd] !== keyQuote) continue;
+		KEY_SEPARATOR.lastIndex = keyEnd + 1;
+		if (!KEY_SEPARATOR.test(text)) continue;
+		const key = text.slice(keyStart, keyEnd);
+		if (!key.includes('\\u') || !isSensitiveDiagnosticKey(key)) continue;
+		const start = KEY_SEPARATOR.lastIndex;
+		const quote = text[start];
+		let end = start;
+		if (quote === '"' || quote === "'") {
+			const step =
+				quote === '"' ? DOUBLE_QUOTED_VALUE_STEP : SINGLE_QUOTED_VALUE_STEP;
+			end += 1;
+			do {
+				step.lastIndex = end;
+				end = step.test(text) ? step.lastIndex : text.length;
+			} while (end < text.length - 1 && text[end] !== quote);
+			end = Math.min(end + 1, text.length);
+			parts.push(text.slice(copied, start), quote, '[REDACTED]', quote);
+		} else {
+			UNQUOTED_VALUE.lastIndex = start;
+			if (!UNQUOTED_VALUE.test(text)) continue;
+			end = UNQUOTED_VALUE.lastIndex;
+			parts.push(text.slice(copied, start), '[REDACTED]');
+		}
+		copied = end;
+		KEY_QUOTE.lastIndex = end;
+	}
+	if (copied === 0) return text;
+	parts.push(text.slice(copied));
+	return parts.join('');
+}
+
 export function redactDiagnosticText(value: string): string {
 	return redactEmails(
 		redactQuotedSecrets(
 			redactQuotedSecrets(
-				value,
+				redactEscapedKeys(redactPrivateKeys(value)),
 				DOUBLE_QUOTED_SECRET_START,
 				DOUBLE_QUOTED_VALUE_STEP,
 				'"',
@@ -293,6 +394,8 @@ export function redactDiagnosticText(value: string): string {
 			.replace(URL_PASSWORD, '$1:[REDACTED]@')
 			.replace(BEARER, 'Bearer [REDACTED]')
 			.replace(SECRET_API_KEY, '[REDACTED SECRET KEY]')
+			.replace(PROVIDER_TOKEN, '[REDACTED SECRET KEY]')
+			.replace(CLOUD_ACCESS_KEY, '[REDACTED SECRET KEY]')
 			.replace(JWT, (run: string, claims: string | undefined) =>
 				claims === undefined ? run : '[REDACTED JWT]',
 			),

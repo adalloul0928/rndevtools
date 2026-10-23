@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
+  tokens, and complete or truncated private-key blocks in diagnostic capture.
+  Runtime token patterns now share one source with the public-content check.
+
 - **Breaking:** the image overlay no longer reads
   `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` or `EXPO_PUBLIC_SUPABASE_URL`. Pass the
   hosts it may download from to `configureImageOverlay({ allowedRemoteHosts })`
