@@ -749,6 +749,7 @@ describe('RecipeService', () => {
 					status: 'failed',
 					message:
 						'No connected app instance matched the exact Simulator UDID.',
+					cleanup: { status: 'not-started', completedSteps: 0 },
 				},
 			],
 		});
@@ -917,6 +918,47 @@ describe('RecipeService', () => {
 		]);
 	});
 
+	it('does not tear down queued targets the cancelled recipe never started', async () => {
+		const { broker, service } = await serviceFixture(
+			definition(
+				[
+					{
+						id: 'activate',
+						kind: 'semantic',
+						action: { action: 'activate', componentId: 'button' },
+					},
+				],
+				[{ id: 'clear-network', kind: 'network', operation: 'clear' }],
+				1
+			)
+		);
+		const entered = deferred();
+		const release = deferred();
+		broker.duringDispatch = async (action) => {
+			if (action.command === 'activate') {
+				entered.resolve();
+				await release.promise;
+			}
+		};
+		const receipt = await service.runRecipe({
+			actionId: 'cancel-queued',
+			recipeId: 'service-test',
+			targetUdids: [UDID_ONE, UDID_TWO],
+			concurrency: 1,
+		});
+		await entered.promise;
+		service.cancelRun(receipt.runId ?? '');
+		release.resolve();
+		const run = await waitForTerminal(service, receipt.runId ?? '');
+		expect(
+			broker.actions.filter((action) => action.command === 'clearProfile')
+		).toEqual([{ deviceId: 'device-0', command: 'clearProfile' }]);
+		expect(run.targets[1]).toMatchObject({
+			status: 'cancelled',
+			cleanup: { status: 'not-started', completedSteps: 0 },
+		});
+	});
+
 	it('cancels active work but still completes teardown', async () => {
 		const { broker, service } = await serviceFixture(
 			definition(
@@ -929,6 +971,14 @@ describe('RecipeService', () => {
 			recipeId: 'service-test',
 			targetUdids: [UDID_ONE],
 		});
+		await vi.waitFor(
+			() =>
+				expect(
+					service.getState().runs.find((run) => run.id === receipt.runId)
+						?.targets[0]?.currentStepId
+				).toBe('pause'),
+			{ timeout: 10_000 }
+		);
 		expect(service.cancelRun(receipt.runId ?? '')).toBe(true);
 		const run = await waitForTerminal(service, receipt.runId ?? '');
 		expect(run).toMatchObject({
