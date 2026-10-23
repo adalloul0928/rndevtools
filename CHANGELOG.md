@@ -321,6 +321,9 @@
 
 ### Desktop app
 
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
