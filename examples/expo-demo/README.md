@@ -31,6 +31,12 @@ wiring with empty tool projections and no privileged capabilities; populate
 data. Its constant `getToolsRevision` avoids rebuilding that empty snapshot;
 a real projection must advance its revision whenever its data changes.
 
+The floating launcher opens the on-device panels; no shake gesture is installed.
+The one demo health request sends its declared `x-demo-request-id` header. Its
+explicit wrapper opts into inspecting the app-owned request and native response;
+body limits and redaction still apply. Native identifiers use `com.example.app`;
+change them before installing alongside another example with the same identifier.
+
 ## Run several branches at once
 
 Lanes in the desktop app (or `rndevtools lane --operation up`) run one worktree

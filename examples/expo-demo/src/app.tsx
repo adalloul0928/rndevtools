@@ -16,7 +16,7 @@ export function App() {
 					<View style={styles.content}>
 						<Text style={styles.title}>RN Devtools demo</Text>
 						<Text style={styles.body}>
-							Shake the device or tap the floating launcher to open the panels.
+							Tap the floating launcher to open the panels.
 						</Text>
 					</View>
 					<DevtoolsHost queryClient={queryClient} />

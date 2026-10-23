@@ -22,6 +22,10 @@
   keeping clocks and refresh arrows out of the shield icon and shipping boxes
   out of the pin icon.
 
+- The Expo example uses neutral native identifiers, sends its declared request
+  correlation header, and enables inspection only for its own fetch wrapper.
+  Integration docs identify host-owned projection functions and launcher behavior.
+
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.

@@ -49,7 +49,11 @@ export function createDemoDevtools(queryClient: QueryClient): {
 
 	// Only requests made through this wrapper are captured. Global fetch is left
 	// alone unless a host explicitly opts in with `patchGlobalFetch`.
-	const instrumentedFetch = network.instrumentFetch(fetch);
+	// This demo owns the plain request inputs and the native fetch implementation.
+	const instrumentedFetch = network.instrumentFetch(fetch, {
+		trustedRequest: true,
+		trustedResponse: true,
+	});
 
 	return { plugins, instrumentedFetch };
 }
