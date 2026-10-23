@@ -15,7 +15,7 @@ import (
 
 // EvaluateShellCommand applies the steering rules to one shell command line.
 func EvaluateShellCommand(command string) HookDecision {
-	return evaluateShellCall(shellCall{command: command})
+	return evaluateShellCallWith(shellCall{command: command}, quietSupabaseEnvironment())
 }
 
 func TestHookBlocksMutatingSimctlAndHandStartedMetro(t *testing.T) {
@@ -449,7 +449,7 @@ func TestHookReadsThePayloadCwd(t *testing.T) {
 	if !ok || call.cwd != "/Users/dev/app" || call.command != "rndevtools doctor; expo start" {
 		t.Fatalf("call %+v ok %v", call, ok)
 	}
-	if !EvaluateClaudePreToolUse(strings.NewReader(payload)).Block {
+	if !evaluateClaudePreToolUseWith(strings.NewReader(payload), quietSupabaseEnvironment()).Block {
 		t.Fatal("the payload's command must still be judged segment by segment")
 	}
 	if _, ok := readPreToolUse(strings.NewReader(`{"tool_name":"Read","cwd":"/w","tool_input":{"file_path":"/w/a"}}`)); ok {
@@ -458,7 +458,7 @@ func TestHookReadsThePayloadCwd(t *testing.T) {
 }
 
 func TestHookReadsClaudePayloadAndFailsOpen(t *testing.T) {
-	blocked := EvaluateClaudePreToolUse(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44"}}`))
+	blocked := evaluateClaudePreToolUseWith(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"xcrun simctl boot 727CE7B2-CCBA-47A5-8803-1D61DCEBCF44"}}`), quietSupabaseEnvironment())
 	if !blocked.Block {
 		t.Fatal("Bash simctl boot must be blocked")
 	}
@@ -467,7 +467,7 @@ func TestHookReadsClaudePayloadAndFailsOpen(t *testing.T) {
 		`not json at all`,
 		``,
 	} {
-		if decision := EvaluateClaudePreToolUse(strings.NewReader(payload)); decision.Block {
+		if decision := EvaluateClaudePreToolUse(strings.NewReader(payload), ""); decision.Block {
 			t.Fatalf("%q must fail open", payload)
 		}
 	}
@@ -1031,12 +1031,12 @@ func TestHookFollowsScriptsOnlyUpToTheCapAndRunningAFileDoesNotSpendIt(t *testin
 	fixture.expect(t, fixture.legacy, "bash <<'EOF'\n"+past+"supabase stop --all\nEOF")
 }
 
-// quietSupabaseEnvironment is a Mac whose local Supabase is off: none of the
-// Supabase rules applies.
+// quietSupabaseEnvironment is a reachable desktop with local Supabase off:
+// Simulator steering applies but none of the Supabase rules applies.
 func quietSupabaseEnvironment() supabaseEnvironment {
 	return supabaseEnvironment{
 		steering:  func() (steeringState, bool) { return steeringState{}, false },
-		reachable: func() bool { return false },
+		reachable: func() bool { return true },
 		now:       time.Now,
 		home:      func() string { return "/Users/example" },
 		getenv:    func(string) string { return "" },
@@ -1905,5 +1905,24 @@ func TestSupabaseRulesFailOpen(t *testing.T) {
 		"supabase-cli start", "supabase.sh start",
 	} {
 		fixture.expect(t, fixture.linked, command)
+	}
+}
+
+func TestSimulatorAndMetroSteeringRequiresAReachableDesktop(t *testing.T) {
+	for _, command := range []string{"xcrun simctl boot booted", "pnpm exec expo start"} {
+		for _, reachable := range []bool{false, true} {
+			environment := quietSupabaseEnvironment()
+			probes := 0
+			environment.reachable = func() bool { probes++; return reachable }
+			decision := evaluateShellCallWith(shellCall{command: command}, environment)
+			if decision.Block != reachable || probes != 1 {
+				t.Errorf("command=%q reachable=%v decision=%+v probes=%d", command, reachable, decision, probes)
+			}
+		}
+	}
+	environment := quietSupabaseEnvironment()
+	environment.reachable = func() bool { t.Fatal("unrelated command must not probe desktop"); return false }
+	if evaluateShellCallWith(shellCall{command: "git status"}, environment).Block {
+		t.Fatal("unrelated command blocked")
 	}
 }
