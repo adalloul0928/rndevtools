@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
+  including socket-construction failures, and resets after a connection opens.
+
 - Recognize Expo fetch cancellation wrappers and preserved abort causes without
   inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
@@ -289,6 +292,11 @@
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
+- The CLI still reads and validates a buffered reply if the desktop closes
+  just before the client half-closes its request, avoiding a spurious transport error.
+
+- Every agent-requested Supabase reset requires operator confirmation, even for
+  a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
 

@@ -350,7 +350,7 @@ func TestSupabaseToolFollowsLaneAndSpeaksTheWireContract(t *testing.T) {
 		t.Fatalf("supabase must be listed right after lane: %v, %v", tools[0].Name, tools[1].Name)
 	}
 	supabase := tools[1]
-	if supabase.Annotations["readOnlyHint"] != false || supabase.Annotations["destructiveHint"] != false {
+	if supabase.Annotations["readOnlyHint"] != false || supabase.Annotations["destructiveHint"] != true {
 		t.Fatalf("supabase annotations: %v", supabase.Annotations)
 	}
 	if required, _ := supabase.InputSchema["required"].([]string); len(required) != 1 || required[0] != "operation" {
@@ -743,4 +743,13 @@ func TestClaimIsDescribedAsTheHoldTheDesktopEnforces(t *testing.T) {
 		return
 	}
 	t.Fatal("no claim tool is listed")
+}
+
+func TestMutatingToolsAdvertisePossibleDestruction(t *testing.T) {
+	for _, tool := range Tools() {
+		readOnly := tool.Annotations["readOnlyHint"] == true
+		if tool.Annotations["destructiveHint"] != !readOnly {
+			t.Errorf("%s destructive hint must conservatively cover every operation: %v", tool.Name, tool.Annotations)
+		}
+	}
 }
