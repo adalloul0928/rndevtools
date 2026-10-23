@@ -129,6 +129,10 @@
 		--signal: var(--brand);
 		/* Secondary performance series, kept apart from the brand green. */
 		--chart-cpu: light-dark(#16a34a, #4ade80);
+		--chart-cpu-text: light-dark(#167b38, #4ade80);
+		--selected-edge: light-dark(#767676, #8d8d8d);
+		--space-panel: 16px;
+		--space-section: 12px;
 		--chart-memory: light-dark(#7c3aed, #a78bfa);
 		/* Text, strongest to weakest. */
 		--text-1: var(--foreground);
@@ -5735,15 +5739,17 @@ select {
 	flex: 0 0 16px;
 	place-items: center;
 	border-radius: 6px;
-	color: #000;
-	background: color-mix(in oklab, var(--foreground) 68%, transparent);
+	color: var(--background);
+	background: var(--foreground);
 }
 
 .agent-glyph.is-claude {
+	color: var(--danger-foreground);
 	background: var(--danger);
 }
 
 .agent-glyph.is-codex {
+	color: light-dark(#fff, #000);
 	background: var(--info);
 }
 
@@ -6036,7 +6042,7 @@ select {
 	width: 100%;
 	height: 100%;
 	font-size: 11px;
-	color: #6f6f6f;
+	color: #a3a3a3;
 }
 
 .device-screen-spinner {
@@ -8968,4 +8974,50 @@ button.supabase-prune-row:hover {
 	border-width: 0 0 1px;
 	border-radius: 0;
 	background: transparent;
+}
+
+/* Connected diagnostics share the same compact hierarchy and neutral selection. */
+.connected-panel-body { padding: var(--space-panel); }
+.panel-label {
+	font-family: var(--font-sans);
+	font-size: var(--font-size-caption);
+	font-weight: 500;
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--text-3);
+}
+.connected-panel h2,
+.panel-detail-title {
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 24px;
+	letter-spacing: -0.01em;
+}
+.panel-section {
+	min-width: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--field-radius);
+	background: transparent;
+	box-shadow: none;
+}
+.panel-item {
+	width: 100%;
+	padding: var(--space-section);
+	border: 1px solid transparent;
+	border-bottom-color: var(--separator);
+	border-radius: var(--field-radius);
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+.panel-item:hover { background: color-mix(in oklab, var(--foreground) 4%, transparent); }
+.panel-item[aria-pressed='true'],
+.panel-section[data-selected='true'] {
+	border-color: var(--selected-edge);
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
+	box-shadow: inset 3px 0 var(--selected-edge);
+}
+.panel-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.desktop-grid .table__row[data-selected='true'] .table__cell:first-child {
+	box-shadow: inset 3px 0 var(--selected-edge);
 }

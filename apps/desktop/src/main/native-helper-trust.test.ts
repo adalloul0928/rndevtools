@@ -9,8 +9,14 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyAgentCli, verifySimulatorHelper } from './native-helper-trust';
+import { runSimulatorCommand } from './simulator-command-runner';
+
+vi.mock('./simulator-command-runner', () => ({ runSimulatorCommand: vi.fn() }));
+beforeEach(() => {
+	vi.mocked(runSimulatorCommand).mockReset();
+});
 
 const directories: string[] = [];
 
@@ -77,7 +83,7 @@ describe('native helper trust', () => {
 	it('verifies manifest identity, digest, executable type, and signature', async () => {
 		const { directory, executable } = await fixture();
 		const canonicalExecutable = await realpath(executable);
-		const signatureVerifier = vi.fn(async () => undefined);
+		const signatureVerifier = vi.fn(async () => 'ABCDE12345');
 		await expect(
 			verifySimulatorHelper({
 				resourceDirectory: directory,
@@ -87,13 +93,56 @@ describe('native helper trust', () => {
 				signatureVerifier,
 			})
 		).resolves.toMatchObject({ executablePath: canonicalExecutable });
-		expect(signatureVerifier).toHaveBeenCalledWith(canonicalExecutable);
+		expect(signatureVerifier).toHaveBeenCalledWith(canonicalExecutable, true);
+	});
+
+	it('requires the helper signature to match the verified Electron signing team', async () => {
+		const { directory, executable } = await fixture();
+		vi.mocked(runSimulatorCommand).mockResolvedValue({
+			stdout: '',
+			stderr: 'TeamIdentifier=ABCDE12345\n',
+			exitCode: 0,
+		});
+		const result = await verifySimulatorHelper({
+			resourceDirectory: directory,
+			appVersion: '0.1.0',
+			architecture: 'arm64',
+			platform: 'darwin',
+		});
+		expect(result).toMatchObject({ signingTeamIdentifier: 'ABCDE12345' });
+		expect(runSimulatorCommand).toHaveBeenCalledWith(
+			'/usr/bin/codesign',
+			expect.arrayContaining([
+				'--verify',
+				'-R',
+				'anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345"',
+				await realpath(executable),
+			]),
+			expect.anything()
+		);
+	});
+
+	it('refuses mutation helpers when Electron has an ad-hoc signature', async () => {
+		const { directory } = await fixture();
+		vi.mocked(runSimulatorCommand).mockResolvedValue({
+			stdout: '',
+			stderr: 'TeamIdentifier=not set\n',
+			exitCode: 0,
+		});
+		await expect(
+			verifySimulatorHelper({
+				resourceDirectory: directory,
+				appVersion: '0.1.0',
+				architecture: 'arm64',
+				platform: 'darwin',
+			})
+		).rejects.toMatchObject({ kind: 'untrusted' });
 	});
 
 	it('independently verifies the bundled local agent CLI', async () => {
 		const { directory } = await fixture();
 		const canonicalCli = await realpath(path.join(directory, 'rndevtools'));
-		const signatureVerifier = vi.fn(async () => undefined);
+		const signatureVerifier = vi.fn(async () => 'ABCDE12345');
 		await expect(
 			verifyAgentCli({
 				resourceDirectory: directory,
@@ -103,13 +152,13 @@ describe('native helper trust', () => {
 				signatureVerifier,
 			})
 		).resolves.toMatchObject({ executablePath: canonicalCli });
-		expect(signatureVerifier).toHaveBeenCalledWith(canonicalCli);
+		expect(signatureVerifier).toHaveBeenCalledWith(canonicalCli, false);
 	});
 
 	it('rejects digest changes before invoking a helper', async () => {
 		const { directory, executable } = await fixture();
 		await writeFile(executable, 'changed helper');
-		const signatureVerifier = vi.fn(async () => undefined);
+		const signatureVerifier = vi.fn(async () => 'ABCDE12345');
 		await expect(
 			verifySimulatorHelper({
 				resourceDirectory: directory,
