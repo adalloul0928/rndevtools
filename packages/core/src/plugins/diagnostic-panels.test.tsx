@@ -11,7 +11,9 @@ import { createStoragePlugin } from './storage';
 import { createZustandPlugin } from './zustand';
 
 jest.mock('@expo/ui/swift-ui', () => ({}));
-jest.mock('@expo/ui/swift-ui/modifiers', () => ({}));
+jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
+}));
 
 type MinimalQueryClient = Parameters<
 	typeof createQueryPlugin

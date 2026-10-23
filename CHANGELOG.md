@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
   and omitting undeclared fields instead of entering a broker rejection loop.
 
@@ -321,14 +323,16 @@
 
 ### Desktop app
 
-- Packaging rejects native manifests for another app version or architecture.
-  Release capability probes inspect the signed in-app host executable.
-
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 

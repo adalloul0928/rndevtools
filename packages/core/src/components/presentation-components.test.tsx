@@ -7,16 +7,30 @@ import type {
 import { FloatingLauncher } from './floating-launcher';
 import { FloatingWindow } from './floating-window';
 import { MiniPill } from './mini-pill';
+import { NavIconButton } from './nav-controls';
 import { PresentationSwitcher } from './presentation-switcher';
 
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
 	return {
-		Button: ({ label, onPress }: { label?: string; onPress?: () => void }) =>
+		Button: ({
+			label,
+			onPress,
+			modifiers,
+		}: {
+			label?: string;
+			onPress?: () => void;
+			modifiers?: Array<{ accessibilityLabel?: string }>;
+		}) =>
 			ReactRuntime.createElement(
 				Native.Pressable,
-				{ accessibilityLabel: label, onPress },
+				{
+					accessibilityLabel:
+						modifiers?.find((item) => item.accessibilityLabel)
+							?.accessibilityLabel ?? label,
+					onPress,
+				},
 				ReactRuntime.createElement(Native.Text, null, label),
 			),
 		Divider: () => ReactRuntime.createElement(Native.View),
@@ -70,7 +84,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
-	accessibilityLabel: (value: unknown) => value,
+	accessibilityLabel: (value: string) => ({ accessibilityLabel: value }),
 	buttonStyle: (value: unknown) => value,
 	controlSize: (value: unknown) => value,
 	disabled: (value: unknown) => value,
@@ -141,6 +155,19 @@ const plugin: DevToolsPlugin = {
 };
 
 describe('presentation components', () => {
+	it('labels the iOS icon button for assistive technology', async () => {
+		const onPress = jest.fn();
+		await render(
+			<NavIconButton
+				accessibilityLabel="Refresh diagnostics"
+				systemImage="arrow.clockwise"
+				onPress={onPress}
+			/>,
+		);
+		await fireEvent.press(screen.getByLabelText('Refresh diagnostics'));
+		expect(onPress).toHaveBeenCalledTimes(1);
+	});
+
 	it('opens from the draggable launcher', async () => {
 		const onOpen = jest.fn();
 		await render(

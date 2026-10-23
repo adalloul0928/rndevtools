@@ -4,7 +4,11 @@ import {
 	Icon as UniversalIcon,
 } from '@expo/ui';
 import { Button, Host, Image } from '@expo/ui/swift-ui';
-import { buttonStyle, tint } from '@expo/ui/swift-ui/modifiers';
+import {
+	buttonStyle,
+	accessibilityLabel as nativeAccessibilityLabel,
+	tint,
+} from '@expo/ui/swift-ui/modifiers';
 import { Platform, PlatformColor } from 'react-native';
 import type { DevToolsSystemImage } from '../types';
 import { colors } from './panel-ui';
@@ -51,6 +55,7 @@ export function NavIconButton({
 			<Button
 				modifiers={[
 					buttonStyle('plain'),
+					nativeAccessibilityLabel(accessibilityLabel),
 					tint(
 						destructive
 							? PlatformColor('systemRedColor')
