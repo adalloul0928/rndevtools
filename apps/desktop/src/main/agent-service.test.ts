@@ -1240,6 +1240,83 @@ describe('AgentService.identify', () => {
 			});
 		});
 
+		it('counts the minute from the last listing of a session that stayed listed for a long time', async () => {
+			// Listed by every poll for ten minutes, so its first listing is long
+			// past: the minute runs from the last one.
+			discovered = [live('claude', claudeA.sessionId, CLAUDE_A_PID)];
+			for (let elapsed = 0; elapsed <= 600_000; elapsed += 10_000) {
+				clock = now + elapsed;
+				await service.refresh();
+			}
+			// Claude Code deletes the registry file, then runs the hook a few
+			// seconds later.
+			discovered = [];
+			clock = now + 601_000;
+			await service.refresh();
+			clock = now + 605_000;
+			await expect(sessionEnd()).resolves.toEqual({
+				status: 'verified',
+				agent: claudeA,
+				basis: 'process',
+			});
+			clock = now + 600_000 + RECENT_SESSION_MS;
+			await expect(sessionEnd()).resolves.toMatchObject({
+				status: 'verified',
+			});
+			clock += 1;
+			await expect(sessionEnd()).resolves.toEqual(noSession);
+		});
+
+		it('places a process under the session listed last when a /clear left two on one pid', async () => {
+			const cleared = {
+				kind: 'claude',
+				sessionId: 'claude-a-cleared',
+			} as const;
+			// A /clear: the same process lists the old id, then the new one.
+			discovered = [live('claude', claudeA.sessionId, CLAUDE_A_PID)];
+			await service.refresh();
+			clock = now + 10_000;
+			discovered = [live('claude', cleared.sessionId, CLAUDE_A_PID)];
+			await service.refresh();
+			// The registry file is deleted on exit; the hook names the new id.
+			clock = now + 20_000;
+			discovered = [];
+			await service.refresh();
+			clock = now + 25_000;
+			await expect(
+				service.identify({ claimed: cleared, peerPid: 111 })
+			).resolves.toEqual({
+				status: 'verified',
+				agent: cleared,
+				basis: 'process',
+			});
+			// A late hook that still names the old id runs under the same process:
+			// the old id is live nowhere, so the claim is ignored.
+			await expect(sessionEnd()).resolves.toEqual({
+				status: 'verified',
+				agent: cleared,
+				basis: 'process',
+			});
+		});
+
+		it('refuses the hook of a remembered session that names another live session', async () => {
+			discovered = [
+				live('claude', claudeA.sessionId, CLAUDE_A_PID),
+				live('claude', claudeB.sessionId, CLAUDE_B_PID),
+			];
+			await service.refresh();
+			// A's file is deleted; B is still listed and live.
+			discovered = [live('claude', claudeB.sessionId, CLAUDE_B_PID)];
+			await service.refresh();
+			clock = now + 5_000;
+			await expect(
+				service.identify({ claimed: claudeB, peerPid: 111 })
+			).resolves.toMatchObject({ status: 'mismatch' });
+			await expect(sessionEnd()).resolves.toMatchObject({
+				status: 'verified',
+			});
+		});
+
 		it('verifies the hook of a real registry once its file is deleted', async () => {
 			const home = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-hook-'));
 			try {
