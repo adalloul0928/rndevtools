@@ -312,3 +312,9 @@ and restart the app before changing preferences.
 Supabase CLI selections are rechecked immediately before execution. If the file
 was replaced, redirected or made writable since validation, the call is refused;
 refresh the installation before retrying.
+
+Mutation helper availability requires the Electron app and its Simulator/native-host
+helpers to share a verified Apple signing team. Ad-hoc local packages can launch
+but cannot offer these native mutation capabilities; ordinary diagnostics and the
+local agent CLI remain available. The Simulator helper must also report the same
+team compiled from `APPLE_TEAM_ID`.

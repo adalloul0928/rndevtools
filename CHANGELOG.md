@@ -339,6 +339,10 @@
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
+- Mutation helpers must match the verified Electron signing team and compiled
+  handshake team. Unsigned local builds report them as untrusted before offering
+  controls that the native broker would refuse.
+
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 
