@@ -201,7 +201,11 @@ While a bundle is pruned, an import that resolves into any `@rndevtools/*`
 package without going through a `replace` entry fails the build, naming the
 import and the module that made it, instead of quietly adding the package to
 the bundle. A package is recognised by the `name` in its `package.json`, so a
-workspace or `link:` install counts too.
+workspace or `link:` install counts too. The serializer hook checks the finished
+graph as well, including updates, so replacing the resolver later cannot silently
+reintroduce a devtools package. Existing serializer hooks are preserved and their
+graph changes are checked before serialization. Keep the verifier as an independent
+check of the emitted artifact.
 
 Two options change the default. Both must be real booleans; an environment
 variable passed straight through is a string, and is refused.
@@ -211,9 +215,9 @@ variable passed straight through is a string, and is refused.
   pruning off.
 - `keepInReleaseBundles: true` turns pruning off, so release bundles keep their
   devtools. It exists for an internal build that deliberately ships the tools,
-  such as a preview for testers. Derive it from an exact match, for example
-  `keepInReleaseBundles: process.env.APP_VARIANT === 'preview'`, so that a
-  build which forgets the variable is still pruned.
+  such as a preview for testers. Enable it only for an explicitly selected internal
+  build. A store build must set it to `false`: an EAS production profile that
+  extends preview inherits preview environment values unless it overrides them.
 
 `projectRoot` and `replace` are checked on every config load, development
 included, unless `keepInReleaseBundles` is `true`.
@@ -225,6 +229,9 @@ The guarantee does not cover:
   store build inherit the setting.
 - A bundle built with `dev: true`, wherever it ends up. `expo export:embed` and
   `react-native bundle` build one unless they are given `--dev false`.
+- An Xcode archive whose configuration name contains `Debug`, such as
+  `Debug-Staging`: React Native treats it as `dev: true`. Use a release
+  configuration and verify the actual archive bundle before distribution.
 - Your own diagnostics that import nothing from `@rndevtools/*`. Only a
   `replace` entry cuts them out, and only a `--marker` finds them.
 

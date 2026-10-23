@@ -276,6 +276,8 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Metro pruning checks the finished dependency graph before serialization, catching
+  later resolver wrappers that bypass replacement. Artifact verification remains required.
 - Debug camera fixtures honor the image picker's string, array, and legacy enum
   media selections for both image and video flows.
 

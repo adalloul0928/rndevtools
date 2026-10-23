@@ -159,7 +159,7 @@ function switchOption(options, name) {
  * @param {boolean} [options.keepInReleaseBundles] `true` turns pruning off,
  *   so release bundles keep their devtools. Only for an internal build that
  *   deliberately ships them; `rndevtools-verify-bundle` fails on its bundle.
- * @returns {object} The same config, with `resolver.resolveRequest` wrapped.
+ * @returns {object} The same config, with resolver and finished-graph guards installed.
  */
 function withDevtoolsPruning(config, options) {
 	const settings = options ?? {};
@@ -317,6 +317,34 @@ function withDevtoolsPruning(config, options) {
 		return resolution;
 	};
 	config.resolver = resolver;
+	// Metro invokes this on both initial graphs and incremental updates, before
+	// its default or custom serializer. A later resolver can bypass replacement,
+	// but it cannot silently carry devtools through this independent graph check.
+	const serializer = config.serializer ?? {};
+	const previousHook = serializer.experimentalSerializerHook;
+	serializer.experimentalSerializerHook = function (graph, delta) {
+		const result = previousHook?.call(this, graph, delta);
+		if (always || graph?.transformOptions?.dev !== true) {
+			if (
+				!graph?.dependencies ||
+				typeof graph.dependencies.keys !== 'function'
+			) {
+				throw new Error(
+					'withDevtoolsPruning: the finished graph cannot be inspected.',
+				);
+			}
+			for (const file of graph.dependencies.keys()) {
+				const name = devtoolsPackageOf(file);
+				if (name) {
+					throw new Error(
+						`withDevtoolsPruning: the finished graph contains ${shown(file)} in ${name}. A later resolver or serializer hook bypassed pruning. Keep withDevtoolsPruning installed and run rndevtools-verify-bundle on the release output.`,
+					);
+				}
+			}
+		}
+		return result;
+	};
+	config.serializer = serializer;
 	return config;
 }
 
