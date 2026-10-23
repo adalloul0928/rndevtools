@@ -2,6 +2,7 @@ import {
 	type DesktopDeviceAction,
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
+	RNDEVTOOLS_ACTION_TIMEOUTS_MS,
 	RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS,
 	RNDEVTOOLS_SNAPSHOT_LIMITS,
 	RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS,
@@ -723,6 +724,120 @@ describe('desktop client', () => {
 		} finally {
 			client.stop();
 		}
+	});
+
+	describe('host action deadlines', () => {
+		const scenarioHost: DesktopClientHost = {
+			...testHost,
+			createDeviceInfo: () => ({
+				...testDevice,
+				capabilities: ['console.clear', 'scenarios.execute'],
+			}),
+		};
+		const scenarioExecute = (actionId: string) => ({
+			type: 'action',
+			action: {
+				actionId,
+				deviceId: 'device-1',
+				tool: 'scenarios',
+				command: 'execute',
+				payload: { id: 'scenario', version: 1, definitionToken: 'token' },
+			},
+		});
+		const timedOut = (actionId: string, ms: number) => ({
+			type: 'action-result',
+			actionId,
+			ok: false,
+			error: `Desktop action timed out after ${ms} ms; its outcome is unknown.`,
+		});
+
+		beforeEach(() => {
+			jest.useFakeTimers();
+			mockRunDesktopAction.mockImplementation(
+				() => new Promise<void>(() => undefined),
+			);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+		});
+
+		it('gives a quick command the time it is allowed, not a fixed longer one', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['console.clear'];
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('quick'));
+				await jest.advanceTimersByTimeAsync(allowance - 1);
+				expect(actionResults(socket)).toEqual([]);
+
+				await jest.advanceTimersByTimeAsync(1);
+				expect(actionResults(socket)).toEqual([timedOut('quick', allowance)]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('lets a scenario run take longer than any quick command', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['scenarios.execute'];
+			const client = startDesktopClient({
+				host: scenarioHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(scenarioExecute('long-scenario'));
+				await jest.advanceTimersByTimeAsync(allowance - 1);
+				expect(actionResults(socket)).toEqual([]);
+
+				await jest.advanceTimersByTimeAsync(1);
+				expect(actionResults(socket)).toEqual([
+					timedOut('long-scenario', allowance),
+				]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('treats actionTimeoutMs as a ceiling that shortens a command and never extends it', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['console.clear'];
+			const extended = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+				actionTimeoutMs: 60 * 60_000,
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('capped-above'));
+				await jest.advanceTimersByTimeAsync(allowance);
+				expect(actionResults(socket)).toEqual([
+					timedOut('capped-above', allowance),
+				]);
+			} finally {
+				extended.stop();
+			}
+
+			FakeWebSocket.instances = [];
+			const shortened = startDesktopClient({
+				host: scenarioHost,
+				candidates: [BROKER_URL],
+				actionTimeoutMs: 2_000,
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(scenarioExecute('capped-below'));
+				await jest.advanceTimersByTimeAsync(2_000);
+				expect(actionResults(socket)).toEqual([
+					timedOut('capped-below', 2_000),
+				]);
+			} finally {
+				shortened.stop();
+			}
+		});
 	});
 
 	it.each(['stop', 'disconnect'] as const)(

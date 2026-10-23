@@ -3,6 +3,7 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 	desktopActionCapability,
+	desktopActionTimeoutMs,
 	fitDesktopSnapshot,
 	parseDesktopActionEnvelope,
 	RNDEVTOOLS_PROTOCOL_VERSION,
@@ -83,9 +84,6 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 2_500;
 const MAX_RETRY_DELAY_MS = 30_000;
 const HEALTHY_CONNECTION_MS = 10_000;
-// Outlasts the broker's longest acknowledgement window (30 s), so the client
-// never gives up on an action the desktop is still waiting for.
-const DEFAULT_ACTION_TIMEOUT_MS = 45_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_DIAGNOSTICS = 200;
 const MAX_PROCESSED_ACTIONS = 200;
@@ -265,6 +263,19 @@ function utf8ByteLengthWithin(
 	if (text.length > maxBytes) return undefined;
 	const bytes = utf8ByteLength(text);
 	return bytes > maxBytes ? undefined : bytes;
+}
+
+/**
+ * How long the host gets for `action`: the limit its command is allowed, or the
+ * host's ceiling when that is shorter. The desktop waits this long plus a short
+ * grace for the result.
+ */
+function actionDeadlineMs(
+	action: DesktopDeviceAction,
+	ceilingMs: number | undefined,
+): number {
+	const limit = desktopActionTimeoutMs(action.tool, action.command);
+	return ceilingMs === undefined ? limit : Math.min(limit, ceilingMs);
 }
 
 /** Meters one connection's outgoing frames and their UTF-8 bytes. */
@@ -550,9 +561,12 @@ export type DesktopClientOptions = {
 	/** Explicit broker URLs. Defaults to the discovered loopback candidates. */
 	candidates?: readonly string[];
 	/**
-	 * How long one host action may run before the client tells the desktop it
-	 * timed out, aborts the action's signal, and moves on to the next queued
-	 * action. Defaults to 45 seconds.
+	 * A ceiling, in milliseconds, on how long any one host action may run
+	 * before the client tells the desktop it timed out, aborts the action's
+	 * signal, and moves on to the next queued action. Each command's own limit
+	 * is `desktopActionTimeoutMs`, and the desktop waits that long plus a short
+	 * grace for the answer. This can only shorten the limit. Defaults to no
+	 * ceiling.
 	 */
 	actionTimeoutMs?: number;
 };
@@ -560,15 +574,12 @@ export type DesktopClientOptions = {
 export function startDesktopClient(
 	options: DesktopClientOptions,
 ): DesktopClientHandle {
-	const {
-		host,
-		candidates,
-		actionTimeoutMs = DEFAULT_ACTION_TIMEOUT_MS,
-	} = options;
+	const { host, candidates, actionTimeoutMs } = options;
 	if (
-		!Number.isFinite(actionTimeoutMs) ||
-		actionTimeoutMs <= 0 ||
-		actionTimeoutMs > MAX_TIMER_DELAY_MS
+		actionTimeoutMs !== undefined &&
+		(!Number.isFinite(actionTimeoutMs) ||
+			actionTimeoutMs <= 0 ||
+			actionTimeoutMs > MAX_TIMER_DELAY_MS)
 	) {
 		throw new Error(
 			'actionTimeoutMs must be a positive number of milliseconds.',
@@ -842,7 +853,7 @@ export function startDesktopClient(
 		flushOutbox();
 	};
 
-	/** Runs one host action, giving up after `actionTimeoutMs`. */
+	/** Runs one host action, giving up after its deadline. */
 	const runHostAction = async (
 		action: DesktopDeviceAction,
 		expectedOwnerId: string | null,
@@ -871,10 +882,13 @@ export function startDesktopClient(
 					host.runAction(action, { signal: controller.signal }),
 				).then(() => 'completed' as const),
 				new Promise<'timed-out'>((resolve) => {
-					timer = setTimeout(() => {
-						resolve('timed-out');
-						controller.abort();
-					}, actionTimeoutMs);
+					timer = setTimeout(
+						() => {
+							resolve('timed-out');
+							controller.abort();
+						},
+						actionDeadlineMs(action, actionTimeoutMs),
+					);
 				}),
 			]);
 		} finally {
@@ -936,7 +950,7 @@ export function startDesktopClient(
 					type: 'action-result',
 					actionId: action.actionId,
 					ok: false,
-					error: `Desktop action timed out after ${actionTimeoutMs} ms; its outcome is unknown.`,
+					error: `Desktop action timed out after ${actionDeadlineMs(action, actionTimeoutMs)} ms; its outcome is unknown.`,
 				};
 			} else if (outcome === 'revoked' || !isAuthorizedOwner(expectedOwnerId)) {
 				// Without a subscription, or when the host settled before the

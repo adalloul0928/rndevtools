@@ -165,6 +165,106 @@ export const RNDEVTOOLS_ACTION_CAPABILITIES = [
 export type DesktopActionCapability =
 	(typeof RNDEVTOOLS_ACTION_CAPABILITIES)[number];
 
+/** Local state changes: in-memory work or one on-device write. */
+const QUICK_ACTION_TIMEOUT_MS = 10_000;
+/**
+ * Work that waits on the network, on the app settling (a component wait
+ * carries a payload timeout of up to 10 s), on a restore across up to 50
+ * sources, or on a person answering an on-device confirmation.
+ */
+const INTERACTIVE_ACTION_TIMEOUT_MS = 30_000;
+/**
+ * Scenario runs and undos. The engine bounds each precondition, preflight,
+ * rollback capture, apply and rollback at 30 s by default, and a scenario may
+ * have many steps, so these get the longest allowance.
+ */
+const SCENARIO_ACTION_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * How long the desktop keeps waiting after the device's own deadline for the
+ * result to arrive. Results go out before snapshots, so one waits at most for
+ * the oldest frame to leave the client's 1.5 s pacing window, plus transit and
+ * timer slack.
+ */
+export const RNDEVTOOLS_ACTION_ACKNOWLEDGEMENT_GRACE_MS = 5_000;
+
+/**
+ * How long the device may spend on each remotely invokable operation. The
+ * client gives up on a host action after this long, and the desktop waits this
+ * long plus `RNDEVTOOLS_ACTION_ACKNOWLEDGEMENT_GRACE_MS` for the result, so the
+ * desktop never reports an action unacknowledged while the device is still
+ * entitled to be running it. A capability without an entry here does not
+ * compile.
+ */
+export const RNDEVTOOLS_ACTION_TIMEOUTS_MS = {
+	'network.clear': QUICK_ACTION_TIMEOUT_MS,
+	'network.setProfile': QUICK_ACTION_TIMEOUT_MS,
+	'network.clearProfile': QUICK_ACTION_TIMEOUT_MS,
+	'console.clear': QUICK_ACTION_TIMEOUT_MS,
+	'storage.write': QUICK_ACTION_TIMEOUT_MS,
+	'storage.undo': QUICK_ACTION_TIMEOUT_MS,
+	'storage.bookmark': QUICK_ACTION_TIMEOUT_MS,
+	'query.refetch': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'query.invalidate': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'query.simulate': QUICK_ACTION_TIMEOUT_MS,
+	'query.clearSimulation': QUICK_ACTION_TIMEOUT_MS,
+	'routes.navigate': QUICK_ACTION_TIMEOUT_MS,
+	'zustand.refresh': QUICK_ACTION_TIMEOUT_MS,
+	'zustand.capture': QUICK_ACTION_TIMEOUT_MS,
+	'zustand.patch': QUICK_ACTION_TIMEOUT_MS,
+	'zustand.jump': QUICK_ACTION_TIMEOUT_MS,
+	'restore.capture': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'restore.restore': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'restore.resetBaseline': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'restore.rename': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'restore.duplicate': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'restore.remove': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'scenarios.execute': SCENARIO_ACTION_TIMEOUT_MS,
+	'scenarios.undo': SCENARIO_ACTION_TIMEOUT_MS,
+	'scenarios.discardRecovery': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'scenarios.import': QUICK_ACTION_TIMEOUT_MS,
+	'scenarios.remove': QUICK_ACTION_TIMEOUT_MS,
+	'identity.start': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'identity.stop': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'performance.review': QUICK_ACTION_TIMEOUT_MS,
+	'components.refresh': QUICK_ACTION_TIMEOUT_MS,
+	'components.highlight': QUICK_ACTION_TIMEOUT_MS,
+	'components.activate': QUICK_ACTION_TIMEOUT_MS,
+	'components.focus': QUICK_ACTION_TIMEOUT_MS,
+	'components.setText': QUICK_ACTION_TIMEOUT_MS,
+	'components.scroll': QUICK_ACTION_TIMEOUT_MS,
+	'components.waitForElement': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'components.waitForScreenChange': INTERACTIVE_ACTION_TIMEOUT_MS,
+	'camera.setFixture': QUICK_ACTION_TIMEOUT_MS,
+	'camera.clearFixture': QUICK_ACTION_TIMEOUT_MS,
+} as const satisfies Readonly<Record<DesktopActionCapability, number>>;
+
+/**
+ * How long the device may spend on `tool.command`. A command without a
+ * capability is refused by both sides before either starts a timer, so the
+ * quick bound is only a defensive fallback.
+ */
+export function desktopActionTimeoutMs(
+	tool: DesktopToolId,
+	command: string,
+): number {
+	const capability = desktopActionCapability(tool, command);
+	return capability
+		? RNDEVTOOLS_ACTION_TIMEOUTS_MS[capability]
+		: QUICK_ACTION_TIMEOUT_MS;
+}
+
+/** How long the desktop waits for the result of `tool.command`. */
+export function desktopActionAcknowledgementTimeoutMs(
+	tool: DesktopToolId,
+	command: string,
+): number {
+	return (
+		desktopActionTimeoutMs(tool, command) +
+		RNDEVTOOLS_ACTION_ACKNOWLEDGEMENT_GRACE_MS
+	);
+}
+
 export type DesktopDeviceAction = {
 	actionId: string;
 	deviceId: string;
