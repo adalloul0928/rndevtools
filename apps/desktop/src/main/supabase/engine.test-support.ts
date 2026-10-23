@@ -134,6 +134,7 @@ type FakeStack = {
 type FakeCliCall = Readonly<{
 	argv: readonly string[];
 	binaryPath: string;
+	expectedBinary: SupabaseCliRunRequest['expectedBinary'];
 	detached: boolean;
 	leasedPorts?: Readonly<Record<string, string>> | undefined;
 }>;
@@ -410,6 +411,7 @@ class FakeSupabaseCli {
 		this.calls.push({
 			argv: request.argv,
 			binaryPath: request.binaryPath,
+			expectedBinary: request.expectedBinary,
 			detached,
 			...(request.environment?.leasedPorts
 				? { leasedPorts: request.environment.leasedPorts }

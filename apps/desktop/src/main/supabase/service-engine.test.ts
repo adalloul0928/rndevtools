@@ -218,6 +218,18 @@ async function needsRecreateStack(h: EngineHarness, worktree: string) {
 }
 
 describe('SupabaseEngine while off', () => {
+	it('passes the validated binary identity to reads and lifecycle spawns', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		await h.engine.start();
+		await h.settle();
+		await startStack(h, repo);
+		expect(h.cli.calls.some((call) => call.detached)).toBe(true);
+		expect(h.cli.calls.some((call) => !call.detached)).toBe(true);
+		for (const call of h.cli.calls)
+			expect(call.expectedBinary).toEqual(fakeResolvedCli().fingerprint);
+	});
+
 	it('runs no process while local Supabase is off', async () => {
 		const h = await createEngineHarness({ start: false });
 		const repo = await h.repository('repo', { migrations: 1 });

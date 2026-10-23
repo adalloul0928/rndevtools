@@ -1885,6 +1885,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				if (refused) return { ok: false, error: refused };
 				const result = await this.runner.run({
 					binaryPath: cli.binaryPath,
+					expectedBinary: cli.fingerprint,
 					argv,
 					cwd: this.cwd,
 					timeoutMs: budget.timeoutMs,
@@ -1972,6 +1973,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				if (refused) return { ok: false, error: refused };
 				const handle = await this.runner.spawnDetached({
 					binaryPath: cli.binaryPath,
+					expectedBinary: cli.fingerprint,
 					argv,
 					cwd: this.cwd,
 					timeoutMs: budget.timeoutMs,

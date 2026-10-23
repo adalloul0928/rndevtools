@@ -304,3 +304,7 @@ that untouched target. Cleanup after an attempted step still runs on failure.
 If settings cannot be loaded, preference changes fail without overwriting the
 file. Repair or restore `settings-v1.json` in the Electron user-data directory
 and restart the app before changing preferences.
+
+Supabase CLI selections are rechecked immediately before execution. If the file
+was replaced, redirected or made writable since validation, the call is refused;
+refresh the installation before retrying.
