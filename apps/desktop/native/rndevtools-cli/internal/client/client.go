@@ -123,7 +123,7 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 			Cause: errors.New("connection is not a Unix-domain socket"),
 		}
 	}
-	if err := unixConnection.CloseWrite(); err != nil {
+	if err := finishRequest(unixConnection); err != nil {
 		return protocol.Response{}, failed("finish request", err)
 	}
 
@@ -153,6 +153,16 @@ func (c *Client) Do(ctx context.Context, request protocol.Request) (protocol.Res
 		return protocol.Response{}, &ClientError{Kind: ErrorProtocol, Op: "validate response", Cause: err}
 	}
 	return response, nil
+}
+
+// finishRequest signals EOF. A peer may already have sent its answer and
+// closed before this half-close; still read and validate that buffered answer.
+func finishRequest(connection interface{ CloseWrite() error }) error {
+	err := connection.CloseWrite()
+	if errors.Is(err, syscall.ENOTCONN) {
+		return nil
+	}
+	return err
 }
 
 // Reachable reports whether the desktop answers on socketPath within timeout:
