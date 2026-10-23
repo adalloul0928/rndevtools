@@ -2377,7 +2377,7 @@ export function createNetworkPlugin(
 				const id = nextEventId++;
 				const startedAt = Date.now();
 				let rawUrl = '[URL unavailable]';
-				let method = 'GET';
+				let method = 'UNKNOWN';
 				let methodComplete = false;
 				let capturedRequestHeaders: Record<string, string> =
 					Object.create(null);
@@ -2418,6 +2418,9 @@ export function createNetworkPlugin(
 					// Continue the real fetch even when its diagnostic projection is hostile.
 				}
 				try {
+					if (!initInspection.safeToRead || !canonicalInput) {
+						throw new TypeError('Request method was not inspected.');
+					}
 					const originalMethod =
 						diagnosticInit?.method ??
 						(canonicalInput &&
@@ -3844,7 +3847,11 @@ export function createNetworkPlugin(
 										key={insight.id}
 										label={insight.label}
 										value={insight.detail}
-										tone={insight.tone === 'info' ? 'default' : insight.tone}
+										tone={
+											insight.tone === 'info' || insight.tone === 'neutral'
+												? 'default'
+												: insight.tone
+										}
 									/>
 								))}
 							</AndroidPanelSection>
@@ -3864,7 +3871,11 @@ export function createNetworkPlugin(
 											label={`${event.method} ${networkEventLabel(event).label}`}
 											detail={networkRowSubtitle(event)}
 											onPress={() => openEvent(event)}
-											tone={status.tone === 'info' ? 'default' : status.tone}
+											tone={
+												status.tone === 'info' || status.tone === 'neutral'
+													? 'default'
+													: status.tone
+											}
 											value={`${status.text}${count > 1 ? ` ×${count}` : ''}`}
 										/>
 									);
