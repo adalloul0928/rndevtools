@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { RectButton, ScrollView } from 'react-native-gesture-handler';
 import { groupPlugins, hasPillQuickAction } from '../core/plugins';
 import type { DevToolsPlugin } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { SystemIcon } from './system-icon';
 
 type ToolListProps = {
@@ -19,6 +19,7 @@ export function ToolList({
 	pinnedPillQuickActionIds = [],
 	onQuickActionPinnedChange,
 }: ToolListProps) {
+	const { colors, styles } = useStyles();
 	const sections = groupPlugins(plugins);
 	const RowButton = Platform.OS === 'ios' ? RectButton : Pressable;
 	const renderRow = (
@@ -100,59 +101,61 @@ export function ToolList({
 	);
 }
 
-const styles = StyleSheet.create({
-	content: {
-		gap: 14,
-		paddingBottom: 20,
-		paddingHorizontal: 12,
-		paddingTop: 10,
-	},
-	section: {
-		gap: 7,
-	},
-	sectionTitle: {
-		color: colors.secondaryLabel,
-		fontSize: 13,
-		fontWeight: '600',
-		paddingHorizontal: 4,
-	},
-	group: {
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		overflow: 'hidden',
-	},
-	row: {
-		alignItems: 'center',
-		alignSelf: 'stretch',
-		flexDirection: 'row',
-		minHeight: 48,
-		paddingLeft: 13,
-		width: '100%',
-	},
-	iconSurface: {
-		alignItems: 'center',
-		height: 24,
-		justifyContent: 'center',
-		width: 22,
-	},
-	rowContent: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		marginLeft: 10,
-		minHeight: 48,
-		paddingRight: 14,
-	},
-	separator: {
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-	},
-	copy: {
-		flex: 1,
-	},
-	title: {
-		color: colors.label,
-		fontSize: 15,
-		fontWeight: '400',
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		content: {
+			gap: 14,
+			paddingBottom: 20,
+			paddingHorizontal: 12,
+			paddingTop: 10,
+		},
+		section: {
+			gap: 7,
+		},
+		sectionTitle: {
+			color: colors.secondaryLabel,
+			fontSize: 13,
+			fontWeight: '600',
+			paddingHorizontal: 4,
+		},
+		group: {
+			backgroundColor: colors.card,
+			borderRadius: 13,
+			overflow: 'hidden',
+		},
+		row: {
+			alignItems: 'center',
+			alignSelf: 'stretch',
+			flexDirection: 'row',
+			minHeight: 48,
+			paddingLeft: 13,
+			width: '100%',
+		},
+		iconSurface: {
+			alignItems: 'center',
+			height: 24,
+			justifyContent: 'center',
+			width: 22,
+		},
+		rowContent: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			marginLeft: 10,
+			minHeight: 48,
+			paddingRight: 14,
+		},
+		separator: {
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+		},
+		copy: {
+			flex: 1,
+		},
+		title: {
+			color: colors.label,
+			fontSize: 15,
+			fontWeight: '400',
+		},
+	}),
+);

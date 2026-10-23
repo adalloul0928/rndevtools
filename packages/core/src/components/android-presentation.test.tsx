@@ -1,11 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import * as Native from 'react-native';
 import { Platform, Text } from 'react-native';
 import type {
 	DevToolsPanelPlugin,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
+import {
+	AndroidPanelRow,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+} from './android-panel-ui';
 import { FloatingLauncher } from './floating-launcher';
 import { MiniPill } from './mini-pill';
+import { PanelShell } from './panel-shell';
 import { ToolsSheet } from './tools-sheet';
 
 jest.mock('@expo/ui', () => {
@@ -205,6 +212,37 @@ const plugin: DevToolsPanelPlugin = {
 const actions = { run: jest.fn(async () => true) };
 
 describe('Android presentation boundary', () => {
+	it('updates shell and panel colors when Android appearance changes', async () => {
+		const scheme = jest.spyOn(Native, 'useColorScheme').mockReturnValue('dark');
+		const content = () => (
+			<PanelShell title="Theme probe" onBack={jest.fn()}>
+				<AndroidPanelSection title="Section">
+					<AndroidPanelRow label="Field" value="Value" />
+				</AndroidPanelSection>
+				<AndroidPanelSearch
+					placeholder="Search probe"
+					value=""
+					onChangeText={jest.fn()}
+				/>
+			</PanelShell>
+		);
+		try {
+			await render(content());
+			expect(screen.getByText('Theme probe')).toHaveStyle({ color: '#E6E0E9' });
+			expect(screen.getByText('Field')).toHaveStyle({ color: '#E6E0E9' });
+			expect(screen.getByPlaceholderText('Search probe')).toHaveProp(
+				'placeholderTextColor',
+				'#CAC4D0',
+			);
+			scheme.mockReturnValue('light');
+			await screen.rerender(content());
+			expect(screen.getByText('Theme probe')).toHaveStyle({ color: '#1D1B20' });
+			expect(screen.getByText('Field')).toHaveStyle({ color: '#1D1B20' });
+		} finally {
+			scheme.mockRestore();
+		}
+	});
+
 	it('renders and opens the launcher without mounting SwiftUI', async () => {
 		const onOpen = jest.fn();
 		await render(<FloatingLauncher label="Open diagnostics" onOpen={onOpen} />);

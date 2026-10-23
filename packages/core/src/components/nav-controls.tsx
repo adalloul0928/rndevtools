@@ -11,7 +11,7 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import { Platform, PlatformColor } from 'react-native';
 import type { DevToolsSystemImage } from '../types';
-import { colors } from './panel-ui';
+import { usePanelColors } from './panel-ui';
 import { universalIconForSystemImage } from './system-icon';
 
 /**
@@ -32,6 +32,7 @@ export function NavIconButton({
 	onPress: () => void;
 	testID?: string;
 }) {
+	const colors = usePanelColors();
 	if (Platform.OS !== 'ios') {
 		return (
 			<UniversalHost matchContents testID={testID}>

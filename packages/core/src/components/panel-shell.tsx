@@ -7,6 +7,7 @@ import {
 	Text,
 	View,
 } from 'react-native';
+import { createPanelStyles } from './panel-ui';
 import { SystemIcon } from './system-icon';
 
 /**
@@ -26,6 +27,7 @@ export type PanelShellProps = PropsWithChildren<{
 export const iosColor = (name: string, fallback: string) =>
 	Platform.OS === 'ios' ? PlatformColor(name) : fallback;
 
+/** Legacy static tokens; built-in chrome follows the system appearance. */
 export const shellColors = {
 	background: iosColor('systemGroupedBackgroundColor', '#F2F2F7'),
 	label: iosColor('labelColor', '#000000'),
@@ -39,6 +41,7 @@ export function PanelShell({
 	trailing,
 	children,
 }: PanelShellProps) {
+	const { colors, styles } = useStyles();
 	return (
 		<View style={styles.screen}>
 			<View style={styles.nav}>
@@ -50,11 +53,7 @@ export function PanelShell({
 					style={styles.back}
 					testID="devtools-panel-back"
 				>
-					<SystemIcon
-						color={shellColors.tint}
-						size={17}
-						systemName="chevron.left"
-					/>
+					<SystemIcon color={colors.blue} size={17} systemName="chevron.left" />
 					<Text numberOfLines={1} style={styles.backLabel}>
 						{backLabel}
 					</Text>
@@ -71,50 +70,52 @@ export function PanelShell({
 	);
 }
 
-const styles = StyleSheet.create({
-	screen: {
-		backgroundColor: shellColors.background,
-		flex: 1,
-	},
-	nav: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		height: 48,
-		justifyContent: 'space-between',
-		paddingHorizontal: 16,
-	},
-	back: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		gap: 3,
-		minWidth: 70,
-	},
-	backLabel: {
-		color: shellColors.tint,
-		fontSize: 17,
-	},
-	titleWrap: {
-		alignItems: 'center',
-		bottom: 0,
-		justifyContent: 'center',
-		left: 70,
-		position: 'absolute',
-		right: 70,
-		top: 0,
-	},
-	title: {
-		color: shellColors.label,
-		fontSize: 17,
-		fontWeight: '600',
-	},
-	trailing: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		gap: 14,
-		justifyContent: 'flex-end',
-		minWidth: 70,
-	},
-	body: {
-		flex: 1,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		screen: {
+			backgroundColor: colors.background,
+			flex: 1,
+		},
+		nav: {
+			alignItems: 'center',
+			flexDirection: 'row',
+			height: 48,
+			justifyContent: 'space-between',
+			paddingHorizontal: 16,
+		},
+		back: {
+			alignItems: 'center',
+			flexDirection: 'row',
+			gap: 3,
+			minWidth: 70,
+		},
+		backLabel: {
+			color: colors.blue,
+			fontSize: 17,
+		},
+		titleWrap: {
+			alignItems: 'center',
+			bottom: 0,
+			justifyContent: 'center',
+			left: 70,
+			position: 'absolute',
+			right: 70,
+			top: 0,
+		},
+		title: {
+			color: colors.label,
+			fontSize: 17,
+			fontWeight: '600',
+		},
+		trailing: {
+			alignItems: 'center',
+			flexDirection: 'row',
+			gap: 14,
+			justifyContent: 'flex-end',
+			minWidth: 70,
+		},
+		body: {
+			flex: 1,
+		},
+	}),
+);
