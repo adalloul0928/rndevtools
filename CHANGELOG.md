@@ -278,6 +278,8 @@
   stack overflows.
 - Metro pruning checks the finished dependency graph before serialization, catching
   later resolver wrappers that bypass replacement. Artifact verification remains required.
+- Debug camera fixtures honor the image picker's string, array, and legacy enum
+  media selections for both image and video flows.
 
 - Desktop header projections redact names, omit accessors and oversized values,
   and bound total redaction work before storing the projection.
