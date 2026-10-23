@@ -44,6 +44,8 @@ jobs:
       # build does (production, minified, Hermes bytecode) with no app
       # variable set, because a release build must be pruned without being
       # told to, then fails if any devtools marker survives in the bytecode.
+      # It then exports an unpruned Android bundle and fails unless the
+      # verifier fails on it, so a verifier that finds nothing cannot pass.
       - name: Example release bundle
         run: pnpm --dir examples/expo-demo verify:bundle
 

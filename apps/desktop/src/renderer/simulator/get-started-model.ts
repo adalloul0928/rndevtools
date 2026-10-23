@@ -19,7 +19,10 @@ export type GetStartedTask = Readonly<{
 	tag?: string;
 }>;
 
-/** What the checklist reads from the runtimes; every task is derived, never stored. */
+/**
+ * What the checklist reads from the runtimes. Each task is derived from live
+ * state; `withRememberedCompletion` then keeps the ones finished before.
+ */
 export type GetStartedInput = Readonly<{
 	capability: Readonly<{
 		status: 'checking' | 'available' | 'unavailable';
@@ -27,6 +30,7 @@ export type GetStartedInput = Readonly<{
 		runtimeAvailability: Readonly<{ available: number }>;
 	}>;
 	repositories: readonly string[];
+	/** Worktrees of the first repository, the one the task names. */
 	worktreeCount: number;
 	bootedCount: number;
 	appSessionCount: number;
@@ -134,6 +138,23 @@ export function getStartedTasks(input: GetStartedInput): GetStartedTask[] {
 		}
 	);
 	return tasks;
+}
+
+/**
+ * Ticks the tasks that were finished before, so the checklist never goes
+ * backwards when a Simulator shuts down, the app disconnects or a stack stops.
+ * A task done right now keeps its live detail.
+ */
+export function withRememberedCompletion(
+	tasks: readonly GetStartedTask[],
+	completed: readonly string[]
+): GetStartedTask[] {
+	const remembered = new Set(completed);
+	return tasks.map((task) =>
+		task.done || !remembered.has(task.id)
+			? task
+			: { ...task, done: true, detail: 'Done' }
+	);
 }
 
 export function getStartedProgress(tasks: readonly GetStartedTask[]): {
