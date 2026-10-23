@@ -84,6 +84,11 @@ const PENDING_RECORD_MESSAGE =
 	'An interrupted mutation left a durable emergency restore point. Use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, for example after an Xcode, runtime, or helper update, forget the restore point.';
 const PENDING_RECORD_SHUTDOWN_MESSAGE =
 	'An interrupted mutation left a durable emergency restore point. Boot this Simulator so RN Devtools can reconcile it, or use Undo to restore it; other mutations are blocked. If Undo can no longer succeed, forget the restore point.';
+/** A status check never boots; preview and the mutations do, temporarily. */
+const SHUTDOWN_INSPECTION_MESSAGE =
+	'Preview or mutate to inspect this Shutdown Simulator through a temporary, automatically restored boot.';
+const TRANSIENT_INSPECTION_MESSAGE =
+	'Managed service inspection is unavailable while the Simulator changes state.';
 /**
  * Shown for a record that nothing can reconcile or undo: the inventory no
  * longer lists its Simulator, or the helper is away. Forgetting is the one
@@ -183,6 +188,13 @@ function mapDeviceState(
 		default:
 			return 'unknown';
 	}
+}
+
+/** Why a Simulator in this state has no managed services read. */
+function inspectionMessage(state: SlimmingSimulator['state']): string {
+	return state === 'shutdown'
+		? SHUTDOWN_INSPECTION_MESSAGE
+		: TRANSIENT_INSPECTION_MESSAGE;
 }
 
 function mutationOperation(
@@ -334,6 +346,14 @@ export class SlimmingService {
 	#queue: Promise<void> = Promise.resolve();
 	#mutationQueue: Promise<void> = Promise.resolve();
 	#refreshPromise: Promise<SlimmingState> | undefined;
+	/**
+	 * The refresh waiting for the one under way, with the leases of the callers
+	 * it serves. The one under way skipped the Simulators those callers hold,
+	 * so each needs a refresh that starts after it.
+	 */
+	#nextRefresh:
+		| { leases: SimulatorMutationLease[]; promise: Promise<SlimmingState> }
+		| undefined;
 	#pollingActive = true;
 	#pollTimer: NodeJS.Timeout | undefined;
 	#stopped = false;
@@ -477,12 +497,49 @@ export class SlimmingService {
 		this.#touch();
 	}
 
-	refresh(): Promise<SlimmingState> {
+	/**
+	 * Refreshes the helper's inventory, every Simulator's status, and the
+	 * pending records. Each status is probed under its Simulator's lease, and a
+	 * Simulator whose lease someone else holds keeps the status it has. A
+	 * caller that holds a lease passes it, as a lane or a recipe does right
+	 * after it boots the Simulator it is about to slim, so that Simulator is
+	 * probed under the lease it holds; the caller keeps the lease until the
+	 * returned promise settles. A refresh under way skipped that Simulator, so
+	 * the caller joins the next one instead, which starts when the one under
+	 * way ends and serves every holder waiting by then. The wait cannot
+	 * deadlock, because a refresh only ever tries a lease.
+	 */
+	refresh(mutationLease?: SimulatorMutationLease): Promise<SlimmingState> {
 		if (this.#jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.public.status))) {
 			return Promise.resolve(this.getState());
 		}
-		if (this.#refreshPromise) return this.#refreshPromise;
-		const refresh = this.#refreshInternal().finally(() => {
+		const next = this.#nextRefresh;
+		if (!mutationLease) {
+			return this.#refreshPromise ?? next?.promise ?? this.#startRefresh([]);
+		}
+		if (next) {
+			next.leases.push(mutationLease);
+			return next.promise;
+		}
+		const underWay = this.#refreshPromise;
+		if (!underWay) return this.#startRefresh([mutationLease]);
+		const leases = [mutationLease];
+		const promise = underWay
+			.catch(() => undefined)
+			.then(() => {
+				this.#nextRefresh = undefined;
+				// stop() ended the service while this refresh waited for its turn.
+				if (this.#stopped) return this.getState();
+				return this.#startRefresh(leases);
+			});
+		this.#nextRefresh = { leases, promise };
+		return promise;
+	}
+
+	#startRefresh(
+		leases: readonly SimulatorMutationLease[]
+	): Promise<SlimmingState> {
+		const refresh = this.#refreshInternal(leases).finally(() => {
 			if (this.#refreshPromise === refresh) this.#refreshPromise = undefined;
 		});
 		this.#refreshPromise = refresh;
@@ -1776,7 +1833,9 @@ export class SlimmingService {
 		this.#touch();
 	}
 
-	async #refreshInternal(): Promise<SlimmingState> {
+	async #refreshInternal(
+		leases: readonly SimulatorMutationLease[]
+	): Promise<SlimmingState> {
 		try {
 			const handshake = await this.#helper.handshake();
 			this.#handshake = handshake;
@@ -1826,7 +1885,7 @@ export class SlimmingService {
 				deviceTypeIdentifier: device.deviceTypeIdentifier,
 				isAvailable: device.available,
 			}));
-			await this.#refreshStatuses(devices.slice(0, 200));
+			await this.#refreshStatuses(devices.slice(0, 200), leases);
 			await this.#reconcilePendingMutations();
 		} catch (error) {
 			this.#handshake = undefined;
@@ -2226,67 +2285,165 @@ export class SlimmingService {
 		};
 	}
 
-	async #refreshStatuses(devices: SimHelperDevice[]): Promise<void> {
-		const next: Record<string, SlimmingSimulatorStatus> = {};
+	/**
+	 * Inspects the inventory snapshot four Simulators at a time and writes each
+	 * Simulator's status as soon as its own inspection ends, never the map as
+	 * a whole: a result that finishes after a mutation would replace the one
+	 * the mutation just recorded. A Simulator whose lease someone else holds,
+	 * or that has a job, keeps the status it has. Simulators that left the
+	 * inventory lose theirs, because the panel and the disable flow scan the
+	 * whole map, unless a pending record or a job still refers to them.
+	 */
+	async #refreshStatuses(
+		devices: SimHelperDevice[],
+		leases: readonly SimulatorMutationLease[]
+	): Promise<void> {
 		const probeProfileId = this.#state.profiles[0]?.id;
+		const leaseByUdid = new Map<string, SimulatorMutationLease>(
+			leases.map((lease) => [lease.simulatorUdid, lease])
+		);
 		for (let index = 0; index < devices.length; index += 4) {
-			const group = devices.slice(index, index + 4);
 			const results = await Promise.allSettled(
-				group.map(async (device) => {
-					if (mapDeviceState(device.state) !== 'booted') {
-						return { status: undefined, compatibility: undefined };
-					}
-					const status = await this.#helper.simulatorStatus(device.id);
-					const plan = probeProfileId
-						? await this.#helper
-								.previewProfile(device.id, probeProfileId)
-								.catch(() => undefined)
-						: undefined;
-					return { status, compatibility: plan?.compatibility };
-				})
+				devices
+					.slice(index, index + 4)
+					.map((device) =>
+						this.#refreshStatus(
+							device,
+							probeProfileId,
+							leaseByUdid.get(device.id.toUpperCase())
+						)
+					)
 			);
-			for (let offset = 0; offset < group.length; offset += 1) {
-				const device = group[offset];
-				const result = results[offset];
-				if (!device || !result) continue;
-				if (result.status === 'fulfilled' && result.value.status) {
-					next[device.id] = {
-						...this.#statusFromHelper(result.value.status),
-						...(result.value.compatibility
-							? {
-									compatibility: this.#publicCompatibility(
-										result.value.compatibility
-									),
-								}
-							: {}),
-					};
-				} else {
-					const previous = this.#state.statusBySimulator[device.id];
-					next[device.id] = {
-						simulatorUdid: device.id,
-						condition: 'unknown',
-						managedDisabledServiceIds: [],
-						managedDisabledCount: 0,
-						managedServiceCount: previous?.managedServiceCount ?? 0,
-						matchingProfileIds: [],
-						checkedAt: this.#now(),
-						checkpointAvailable:
-							this.#state.checkpointBySimulator[device.id] !== undefined ||
-							this.#persistence.pendingMutation(device.id) !== undefined,
-						...(previous?.compatibility
-							? { compatibility: previous.compatibility }
-							: {}),
-						message:
-							mapDeviceState(device.state) === 'shutdown'
-								? 'Preview or mutate to inspect this Shutdown Simulator through a temporary, automatically restored boot.'
-								: result.status === 'rejected'
-									? safeErrorText(result.reason)
-									: 'Managed service inspection is unavailable while the Simulator changes state.',
-					};
-				}
+			// A probe runs under a lease, which no probe may outlive, so a failure
+			// surfaces only once the whole group has ended.
+			for (const result of results) {
+				if (result.status === 'rejected') throw result.reason;
 			}
 		}
-		this.#state.statusBySimulator = next;
+		const inventory = new Set(devices.map((device) => device.id.toUpperCase()));
+		for (const simulatorUdid of Object.keys(this.#state.statusBySimulator)) {
+			if (
+				inventory.has(simulatorUdid.toUpperCase()) ||
+				this.#persistence.pendingMutation(simulatorUdid) ||
+				this.#hasActiveJob(simulatorUdid)
+			) {
+				continue;
+			}
+			delete this.#state.statusBySimulator[simulatorUdid];
+		}
+	}
+
+	/** Refreshes one Simulator of the snapshot; #refreshStatuses has the rules. */
+	async #refreshStatus(
+		device: SimHelperDevice,
+		probeProfileId: string | undefined,
+		mutationLease: SimulatorMutationLease | undefined
+	): Promise<void> {
+		const snapshotState = mapDeviceState(device.state);
+		if (this.#hasActiveJob(device.id)) return;
+		const probe = async () => {
+			// A job may have started before the lease was taken.
+			if (this.#hasActiveJob(device.id)) return;
+			if (snapshotState !== 'booted') {
+				// Even an uninspected status belongs under the lease: a stale
+				// shutdown row must not replace the state a mutation just wrote.
+				this.#state.statusBySimulator[device.id] = this.#uninspectedStatus(
+					device,
+					inspectionMessage(snapshotState)
+				);
+				return;
+			}
+			this.#state.statusBySimulator[device.id] = await this.#probeStatus(
+				device,
+				probeProfileId
+			);
+		};
+		try {
+			if (mutationLease) {
+				// The caller holds this Simulator's lease, so it is probed under it.
+				await this.#mutationCoordinator.runExclusive(
+					device.id,
+					this.#lifecycle.signal,
+					probe,
+					mutationLease
+				);
+			} else {
+				await this.#mutationCoordinator.tryRunExclusive(
+					device.id,
+					this.#lifecycle.signal,
+					probe
+				);
+			}
+		} catch (error) {
+			// stop() aborted the lifecycle before this probe took its lease; the
+			// status it would have replaced stays as it was.
+			if (this.#lifecycle.signal.aborted) return;
+			throw error;
+		}
+	}
+
+	/**
+	 * Reads one booted Simulator under its lease. One that shut down since the
+	 * snapshot is reported as uninspected, exactly as the snapshot would have
+	 * reported it, not as clean: the helper's status never boots, so it saw no
+	 * managed services at all. Its compatibility is not previewed either, since
+	 * a preview boots a shut-down Simulator.
+	 */
+	async #probeStatus(
+		device: SimHelperDevice,
+		probeProfileId: string | undefined
+	): Promise<SlimmingSimulatorStatus> {
+		let status: SimHelperStatus;
+		try {
+			status = await this.#helper.simulatorStatus(device.id);
+		} catch (error) {
+			return this.#uninspectedStatus(device, safeErrorText(error));
+		}
+		const probedState = mapDeviceState(status.device.state);
+		if (probedState !== 'booted') {
+			return this.#uninspectedStatus(
+				device,
+				inspectionMessage(probedState),
+				status.managedServiceCount
+			);
+		}
+		const plan = probeProfileId
+			? await this.#helper
+					.previewProfile(device.id, probeProfileId)
+					.catch(() => undefined)
+			: undefined;
+		return {
+			...this.#statusFromHelper(status),
+			...(plan?.compatibility
+				? { compatibility: this.#publicCompatibility(plan.compatibility) }
+				: {}),
+		};
+	}
+
+	/** The status of a Simulator whose managed services were not read. */
+	#uninspectedStatus(
+		device: SimHelperDevice,
+		message: string,
+		managedServiceCount?: number
+	): SlimmingSimulatorStatus {
+		const previous = this.#state.statusBySimulator[device.id];
+		return {
+			simulatorUdid: device.id,
+			condition: 'unknown',
+			managedDisabledServiceIds: [],
+			managedDisabledCount: 0,
+			managedServiceCount:
+				managedServiceCount ?? previous?.managedServiceCount ?? 0,
+			matchingProfileIds: [],
+			checkedAt: this.#now(),
+			checkpointAvailable:
+				this.#state.checkpointBySimulator[device.id] !== undefined ||
+				this.#persistence.pendingMutation(device.id) !== undefined,
+			...(previous?.compatibility
+				? { compatibility: previous.compatibility }
+				: {}),
+			message,
+		};
 	}
 
 	#statusFromHelper(status: SimHelperStatus): SlimmingSimulatorStatus {

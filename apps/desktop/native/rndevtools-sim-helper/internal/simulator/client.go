@@ -114,7 +114,10 @@ type Backend interface {
 	Clone(context.Context, string, string) (string, string, error)
 	PlanDiskCleanup(context.Context, string) (DiskCleanupPlan, error)
 	CleanDisk(context.Context, string, []string) (DiskCleanupResult, error)
+	// Status inspects a Simulator, booting a shut-down one temporarily to do
+	// so; ProbeStatus never boots and reports a shut-down one as uninspected.
 	Status(context.Context, string) (Status, error)
+	ProbeStatus(context.Context, string) (Status, error)
 	Compatibility(context.Context, string) (compatibility.Tuple, error)
 	PrepareMutation(context.Context, string) (MutationPreparation, error)
 	CaptureRunningServiceProcesses(context.Context, string, []string) ([]string, error)
@@ -244,7 +247,36 @@ func (client *Client) Status(ctx context.Context, simulatorID string) (Status, e
 		ManagedDisabledServiceIDs: preparation.State.ManagedDisabledServiceIDs,
 		ManagedDisabledCount:      preparation.State.Count,
 		ManagedServiceCount:       len(catalog.ManagedServiceIDs()),
+		// The desktop's schema requires an array here, and a nil slice encodes
+		// as JSON null.
+		MatchingProfileIDs: []string{},
 	}, nil
+}
+
+// ProbeStatus reads a booted Simulator's managed state in place and reports
+// a shut-down one as uninspected, with empty managed sets. It never boots:
+// the desktop's background status checks use it, and a check that booted a
+// Simulator would restart one that a mutation, an erase, or a lane had just
+// shut down.
+func (client *Client) ProbeStatus(ctx context.Context, simulatorID string) (Status, error) {
+	device, err := client.findDevice(ctx, simulatorID)
+	if err != nil {
+		return Status{}, err
+	}
+	switch device.State {
+	case "Booted":
+		return client.statusForBootedDevice(ctx, device)
+	case "Shutdown":
+		return Status{
+			Device:                    device,
+			ManagedDisabledServiceIDs: []string{},
+			ManagedDisabledCount:      0,
+			ManagedServiceCount:       len(catalog.ManagedServiceIDs()),
+			MatchingProfileIDs:        []string{},
+		}, nil
+	default:
+		return Status{}, fmt.Errorf("simulator is in transient state %s", device.State)
+	}
 }
 
 func (client *Client) Compatibility(ctx context.Context, simulatorID string) (compatibility.Tuple, error) {

@@ -54,9 +54,11 @@
 - The desktop client runs only the actions the device advertises, addressed to
   its own `deviceId`. It paces its frames under the broker's limit, trims a
   collection over the desktop's row limit to its newest rows, and backs off
-  after repeated broker policy closes. A new `actionTimeoutMs` option bounds
-  each host action, and `runAction` receives an `AbortSignal` that aborts when
-  the client stops waiting.
+  after repeated broker policy closes. Each host action is bounded by its
+  command's limit, `desktopActionTimeoutMs`, which the desktop outwaits by a
+  short grace; an optional `actionTimeoutMs` can only shorten that.
+  `runAction` receives an `AbortSignal` that aborts when the client stops
+  waiting.
 - While an owner source is bound, an authorization grant applies only when it
   names that source's live owner. A source that cannot be subscribed to
   revokes authorization and refuses grants until a working one is bound.
@@ -223,6 +225,11 @@
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
+- The broker waits for a device's answer to an action as long as the device may
+  spend on that command, plus five seconds, from one table in
+  `@rndevtools/core/desktop-protocol`. It used to give up after 8 seconds (30
+  for restores and refetches) while the device client allowed 45, so a long
+  scenario was reported as unacknowledged while the device finished it.
 - Playwright end-to-end harness and per-panel specs against the demo device.
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
@@ -237,6 +244,13 @@
   hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
   Codex threads, synthetic MCP identities and ended sessions, cannot perform
   ownership-changing operations. Lane commands no longer accept an `agent` field.
+- Background SimSlim status checks now take a Simulator's lease and skip one
+  with a running job, never boot a shut-down Simulator (it shows as not
+  inspected, not as clean), and update each Simulator's status on its own. A
+  check could previously restart a Simulator that an apply, an erase or a lane
+  had just shut down, and one that finished after an apply replaced the status
+  the apply recorded, so disabling slimming soon afterwards could skip the
+  restore.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
