@@ -70,7 +70,9 @@ so adding an application action does not restart unrelated collectors. Network
 collection wraps explicit fetch implementations by default. Broad global fetch
 capture is opt-in with `patchGlobalFetch: true`. Multiple collectors compose as
 layers, and disposal safely rebuilds or restores the global wrapper in either
-order.
+order. Capture continues when another library wraps and forwards to the active
+collector. Disposal leaves that outer wrapper intact and makes the removed
+collector passive; replay still requires ownership of the global fetch entry.
 
 Captured events are bounded by count and estimated UTF-8 byte size. Known-large
 and binary response bodies are omitted, and unknown-length bodies are omitted

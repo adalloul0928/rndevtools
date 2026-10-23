@@ -2454,6 +2454,36 @@ describe('createNetworkPlugin', () => {
 		}
 	});
 
+	it('keeps capture when another library wraps fetch and stays passive after disposal', async () => {
+		const previous = globalThis.fetch;
+		const transport = jest.fn(async () => response('{}'));
+		globalThis.fetch = transport;
+		const diagnostics = createNetworkPlugin({ patchGlobalFetch: true });
+		let dispose = diagnostics.plugin.install?.();
+		const captured = globalThis.fetch;
+		const outer: typeof fetch = (input, init) => captured(input, init);
+		globalThis.fetch = outer;
+		try {
+			await globalThis.fetch('https://example.com/wrapped');
+			expect(diagnostics.getEvents()).toHaveLength(1);
+			dispose?.();
+			expect(globalThis.fetch).toBe(outer);
+			await globalThis.fetch('https://example.com/disposed');
+			expect(diagnostics.getEvents()).toHaveLength(0);
+			dispose = diagnostics.plugin.install?.();
+			await globalThis.fetch('https://example.com/reinstalled');
+			expect(
+				diagnostics
+					.getEvents()
+					.filter((event) => event.url.endsWith('/reinstalled')),
+			).toHaveLength(1);
+			expect(transport).toHaveBeenCalledTimes(3);
+		} finally {
+			dispose?.();
+			globalThis.fetch = previous;
+		}
+	});
+
 	it('makes cached global wrappers passive after a layer rebuild', async () => {
 		const previousFetch = globalThis.fetch;
 		const baseFetch = jest

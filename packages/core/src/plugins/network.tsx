@@ -2224,8 +2224,7 @@ export function createNetworkPlugin(
 			if (
 				captureSessionResetting ||
 				(captureTransport === 'global-fetch' &&
-					(activeReplayLayer?.currentWrapperId() !== captureLayerId ||
-						activeReplayLayer?.isOwned() !== true))
+					activeReplayLayer?.currentWrapperId() !== captureLayerId)
 			) {
 				return fetchImplementation(input, init);
 			}
