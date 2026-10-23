@@ -16,13 +16,17 @@ licensed package is not hydrated, so the desktop typecheck and build fail on a
 missing module. The native helpers need Go, Swift, and `govulncheck`, and no
 license.
 
-Pull requests from forks cannot read repository secrets, so CI skips the
-Electron gate for them and says so in a notice. Everything else runs: both npm
-packages, the example app, the full Go helper gate and a Swift build. The Swift
-tests hang on GitHub's hosted runners, so they run locally
-(`pnpm --filter @rndevtools/desktop native:check:swift`) or in the manual
-"Swift tests" workflow. If your change touches the renderer under
-`apps/desktop`, say so in the PR and a maintainer will run that job.
+When `HEROUI_AUTH_TOKEN` is missing, including on pull requests from forks,
+CI skips the licensed desktop gate (the renderer typecheck and tests, the
+unused-devDependency check and the Electron build) and says so in a notice.
+Everything else runs: both npm packages, the example app, the desktop app's
+Biome, main-process, preload and shared typecheck and tests, knip without its
+unused-devDependency check, the script tests, the full Go helper gate and a
+Swift build. The Swift tests hang on GitHub's hosted runners, so they run
+locally (`pnpm --filter @rndevtools/desktop native:check:swift`) or in the
+manual "Swift tests" workflow. If your change touches the renderer, the build
+or the dependencies of `apps/desktop`, say so in the PR and a maintainer will
+run `pnpm --filter @rndevtools/desktop quality` locally before merging.
 
 ## Ground rules
 

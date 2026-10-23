@@ -219,3 +219,11 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- CI checks the desktop app on every pull request, forks included. A job that
+  needs no HeroUI Pro license runs Biome, the main, preload and shared
+  typecheck and tests, knip without its unused-devDependency check, and the
+  script tests. The job that runs the full `quality` gate with HeroUI Pro
+  (renderer typecheck and tests, the unused-devDependency check and the build)
+  runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
+  missing verification in a notice and job summary. Desktop changes must
+  pass the full local quality gate before merging when it skips.
