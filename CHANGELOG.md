@@ -318,6 +318,10 @@
 
 ### Desktop app
 
+- Mutation helpers must match the verified Electron signing team and compiled
+  handshake team. Unsigned local builds report them as untrusted before offering
+  controls that the native broker would refuse.
+
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before

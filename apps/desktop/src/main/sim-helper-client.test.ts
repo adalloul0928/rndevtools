@@ -13,6 +13,7 @@ function verified(): VerifiedSimulatorHelper {
 	return {
 		executablePath: '/signed/rndevtools-sim-helper',
 		verifiedAt: 1,
+		signingTeamIdentifier: 'ABCDE12345',
 		manifest: {
 			schemaVersion: 1,
 			platform: 'darwin',
@@ -59,6 +60,7 @@ function verified(): VerifiedSimulatorHelper {
 
 function handshakeResult() {
 	return {
+		signingTeamIdentifier: 'ABCDE12345',
 		helperVersion: '0.1.0',
 		buildCommit: 'a'.repeat(40),
 		protocolVersion: 2,
@@ -107,8 +109,8 @@ function handshakeResult() {
 }
 
 describe('sim helper client', () => {
-	it.each([undefined, '', 'ABCDE12345', 'malformed-team'])(
-		'validates optional compiled signing team metadata (%s)',
+	it.each([undefined, '', 'ABCDE12345', 'ZZZZZ12345', 'malformed-team'])(
+		'rejects compiled signing teams that do not match the signature (%s)',
 		async (signingTeamIdentifier) => {
 			const runner = vi.fn(async (_executable, _args, options) => {
 				const request = JSON.parse(options.stdin ?? '') as {
@@ -131,7 +133,7 @@ describe('sim helper client', () => {
 				runner,
 				trustVerifier: vi.fn(async () => verified()),
 			});
-			if (signingTeamIdentifier === 'malformed-team') {
+			if (signingTeamIdentifier !== 'ABCDE12345') {
 				await expect(client.handshake()).rejects.toThrow();
 			} else {
 				await expect(client.handshake()).resolves.toMatchObject({
