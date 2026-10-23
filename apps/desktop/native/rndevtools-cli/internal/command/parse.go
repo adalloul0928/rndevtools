@@ -169,11 +169,11 @@ var commandFields = map[protocol.Command][]fieldSpec{
 // a claim anyone can make by setting the variable, so it never rides inside a
 // command and grants nothing by itself. The desktop decides who is calling
 // from the process that sent the request: only a process under a running Claude
-// Code session can hold a Simulator or be attributed, and the claim has to
-// agree with it. A request that claims nothing may use free Simulators only; a
-// claim the desktop cannot tie to a running Claude Code session (a Codex
-// thread, another agent's id) is refused wherever the work holds or drives a
-// device.
+// Code session can hold a Simulator or be attributed, and a claim cannot
+// override that (one that names another live session is refused). A request
+// that claims nothing may use free Simulators only; a claim the desktop cannot
+// tie to a running Claude Code session (a Codex thread, another agent's id) is
+// refused wherever the work holds or drives a device.
 const (
 	envClaudeSession  = "CLAUDE_CODE_SESSION_ID"
 	envCodexThread    = "CODEX_THREAD_ID"

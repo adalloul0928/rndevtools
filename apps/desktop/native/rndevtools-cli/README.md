@@ -43,7 +43,8 @@ It is only a claim, since anyone can set a variable, so it never appears inside
 a command. `peer.pid` is the sending process's own pid. The desktop checks that
 this process holds the other end of the connection the request arrived on and
 follows its parent processes to a running Claude Code session. The process
-decides who is calling; the claim only has to agree with it.
+decides who is calling. A claim cannot override it, and one that names
+another live session is refused.
 
 Only a Claude Code session whose process the desktop can trace can hold, claim,
 release, start lanes, or be attributed. The desktop answers one of four ways:

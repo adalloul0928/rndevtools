@@ -155,10 +155,11 @@ export function AgentsView({
 					{backendsShown
 						? 'Live Claude Code and Codex sessions on this Mac and the Simulators and local Supabase stacks each one is attached to.'
 						: 'Live Claude Code and Codex sessions on this Mac and the Simulators each one is attached to.'}{' '}
-					Attribution comes from explicit claims, recent CLI commands, and lanes
-					whose worktree holds the session’s working directory. A claim is a
-					hold: until it is released, other agents can’t run lanes on, send
-					input to, install on, slim, or run recipes on the claimed Simulator.
+					Attribution comes from the claims and recent CLI commands of Claude
+					Code sessions the desktop can trace, and from lanes whose worktree
+					holds a session’s working directory. A claim is a hold: until it is
+					released, other agents can’t run lanes on, send input to, install on,
+					slim, or run recipes on the claimed Simulator.
 				</p>
 				<Button
 					aria-label="Refresh agents"
@@ -198,9 +199,9 @@ export function AgentsView({
 					<Bot className="h-5 w-5" />
 					<strong>No live agent sessions</strong>
 					<span>
-						Start Claude Code or Codex in a worktree, or run any{' '}
-						<code>rndevtools</code> command from inside one, and it appears here
-						with the Simulators it touches.
+						Start Claude Code or Codex in a worktree and it appears here. A
+						Claude Code session that runs an <code>rndevtools</code> command
+						from inside the worktree also shows the Simulators it touches.
 					</span>
 				</div>
 			) : (
