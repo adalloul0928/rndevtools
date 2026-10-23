@@ -318,6 +318,10 @@
 
 ### Desktop app
 
+- Connected App panels use shared section surfaces, sentence-case captions and
+  compact detail headings. Neutral selections have a visible edge; storage and
+  restore copy retain readable contrast, and performance uses chart tokens.
+
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
 

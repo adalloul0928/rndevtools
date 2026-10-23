@@ -62,7 +62,7 @@ export function RestorePanel() {
 		: '';
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Restore Points"
 				description="Persist, selectively restore, and roll back only state sources the app explicitly declares as safe."
@@ -143,7 +143,7 @@ export function RestorePanel() {
 						</div>
 					</div>
 					<div className="mb-2 flex items-center justify-between px-1">
-						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
+						<span className="text-xs panel-label text-(--text-3)">
 							Checkpoints
 						</span>
 						<span className="font-mono text-xs text-(--text-3)">
@@ -161,7 +161,7 @@ export function RestorePanel() {
 							{points.map((point) => (
 								<button
 									aria-pressed={selected?.id === point.id}
-									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === point.id ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
+									className="panel-item"
 									key={point.id}
 									type="button"
 									onClick={() => setSelectedId(point.id)}
@@ -198,7 +198,7 @@ export function RestorePanel() {
 											{formatRelativeTime(selected.createdAt)}
 										</span>
 									</div>
-									<h2 className="m-0 text-xl font-semibold tracking-[-0.035em] text-(--foreground)">
+									<h2 className="m-0 panel-detail-title text-(--foreground)">
 										{selected.label}
 									</h2>
 									<TextField
@@ -311,9 +311,9 @@ export function RestorePanel() {
 									</p>
 								);
 							})()}
-							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
+							<div className="mb-5 grid grid-cols-3 overflow-hidden panel-section">
 								<div className="min-w-0 border-r border-foreground/8 p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Sources
 									</p>
 									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
@@ -321,7 +321,7 @@ export function RestorePanel() {
 									</p>
 								</div>
 								<div className="min-w-0 border-r border-foreground/8 p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Size
 									</p>
 									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
@@ -329,7 +329,7 @@ export function RestorePanel() {
 									</p>
 								</div>
 								<div className="min-w-0 p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Lifetime
 									</p>
 									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
@@ -342,7 +342,8 @@ export function RestorePanel() {
 									const isSelected = selectedSourceIds.includes(source.id);
 									return (
 										<div
-											className={`rounded-lg border p-4 ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-foreground/8 bg-foreground/[0.02] opacity-60'}`}
+											className="panel-section p-4"
+											data-selected={isSelected}
 											key={source.id}
 										>
 											<div className="mb-3 flex items-center justify-between gap-3">

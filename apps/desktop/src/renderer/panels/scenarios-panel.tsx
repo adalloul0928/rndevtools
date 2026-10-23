@@ -161,7 +161,7 @@ export function ScenariosPanel() {
 					: executeReason;
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Scenarios"
 				description="Run bounded, versioned app-state transactions with full preflight, rollback capture, active-state visibility, and one-tap undo."
@@ -228,7 +228,7 @@ export function ScenariosPanel() {
 			<div className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)]">
 				<div className="panel-scroll border-r border-foreground/8 p-4">
 					<div className="mb-2 flex items-center justify-between px-1">
-						<span className="text-xs uppercase tracking-[0.08em] text-(--text-3)">
+						<span className="text-xs panel-label text-(--text-3)">
 							Available scenarios
 						</span>
 						<Badge>{scenarios.length}</Badge>
@@ -248,7 +248,7 @@ export function ScenariosPanel() {
 									<button
 										aria-current={isSelected ? 'true' : undefined}
 										aria-pressed={isSelected}
-										className={`w-full rounded-lg border p-3 text-left transition-colors ${isSelected ? 'border-(--brand-border) bg-(--brand-soft)' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
+										className="panel-item"
 										key={scenario.id}
 										type="button"
 										onClick={() => setSelectedId(scenario.id)}
@@ -340,7 +340,7 @@ export function ScenariosPanel() {
 							) : null}
 							<div className="mb-5 flex items-start justify-between gap-4">
 								<div>
-									<h2 className="m-0 text-xl font-semibold tracking-[-0.035em] text-(--foreground)">
+									<h2 className="m-0 panel-detail-title text-(--foreground)">
 										{selected.name}
 									</h2>
 									<p className="mb-0 mt-2 max-w-xl text-xs leading-5 text-(--muted)">
@@ -432,9 +432,9 @@ export function ScenariosPanel() {
 									) : null}
 								</SectionCard>
 							) : null}
-							<div className="grid grid-cols-3 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
+							<div className="grid grid-cols-3 overflow-hidden panel-section">
 								<div className="border-r border-foreground/8 p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Steps
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
@@ -442,7 +442,7 @@ export function ScenariosPanel() {
 									</p>
 								</div>
 								<div className="border-r border-foreground/8 p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Variables
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
@@ -450,7 +450,7 @@ export function ScenariosPanel() {
 									</p>
 								</div>
 								<div className="p-4">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Preconditions
 									</p>
 									<p className="mb-0 mt-1 font-mono text-lg tabular-nums text-(--foreground)">
@@ -461,7 +461,7 @@ export function ScenariosPanel() {
 							<div className="mt-5 space-y-2">
 								{selected.steps.map((step, index) => (
 									<div
-										className="flex items-center gap-3 rounded-lg border border-foreground/8 bg-foreground/[0.02] p-3"
+										className="flex items-center gap-3 panel-section p-3"
 										key={step.id}
 									>
 										<span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-foreground/10 font-mono text-xs tabular-nums text-(--muted)">
