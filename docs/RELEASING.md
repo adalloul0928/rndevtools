@@ -124,8 +124,15 @@ signing to version tags; a manual dispatch must select an existing `v*` tag.
 Dispatching from a branch skips signing and npm publication.
 
 Store `APPLE_TEAM_ID`, `MAC_CERTIFICATE_P12`, `MAC_CERTIFICATE_PASSWORD`,
-`APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD` in that environment, not as
+`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` in that environment, not as
 repository secrets. The P12 must hold a Developer ID Application identity.
+The notarization fields describe an App Store Connect team API key; store the
+P8 contents as the multiline key secret. CI writes a temporary owner-only key
+file, supplies only its path to notarytool, and removes it on success or failure.
+The key and signing credentials are not inherited by that subprocess. No
+app-specific password appears in process arguments. Existing local keychain
+profiles remain supported by the local release command.
+
 Those values are available only to the signing step, after installation and
 quality checks. `HEROUI_AUTH_TOKEN` is needed only by the install step; keep it
 in the environment or configure it separately for licensed CI checks.

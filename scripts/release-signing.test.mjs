@@ -63,3 +63,12 @@ test('publishing only consumes checked tarballs without dependency execution', (
 		new RegExp(`node-version: '${nodeVersion.replaceAll('.', '\\.')}'`),
 	);
 });
+
+test('notarization receives a private key file instead of a password argument', () => {
+	assert.doesNotMatch(
+		workflow,
+		/--password|secrets\.APPLE_APP_SPECIFIC_PASSWORD/,
+	);
+	assert.match(workflow, /secrets\.APPLE_API_KEY_P8/);
+	assert.match(workflow, /node scripts\/store-notary-credentials\.mjs/);
+});
