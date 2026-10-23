@@ -340,6 +340,9 @@
 
 ### Desktop app
 
+- Lane changes become visible only after a successful save. Failed reads preserve
+  the stored file, and the lane limit is enforced before writing.
+
 - Failed lane starts report unverified Metro cleanup with its PID and port,
   retaining an existing record until the verified stop succeeds.
 

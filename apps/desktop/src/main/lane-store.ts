@@ -11,7 +11,7 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 import { type Lane, laneSchema } from '../shared/lane-protocol';
-import { writeFileAtomic } from './private-files';
+import { isMissing, writeFileAtomic } from './private-files';
 
 const storedLanesSchema = z.strictObject({
 	version: z.literal(1),
@@ -20,24 +20,17 @@ const storedLanesSchema = z.strictObject({
 });
 type StoredLanes = z.infer<typeof storedLanesSchema>;
 
-/** The only file names log pruning may delete: what `logPathFor` creates. */
 const LANE_LOG_NAME =
 	/^lane-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.log$/i;
-/** How many directory entries one pruning pass looks at. */
 const MAX_LOG_PRUNE_ENTRIES = 2_048;
 
-/**
- * Durable lane leases. Metro processes are detached and outlive the desktop
- * app, so leases must survive a restart: on boot the service reads this file,
- * checks which Metro PIDs are still alive, and reclaims the rest. A JSON file
- * with an atomic rename is enough here; there is no query pattern that would
- * justify SQLite.
- */
+/** Detached Metro processes outlive the desktop, so their leases must persist. */
 export class LaneStore {
 	readonly #root: string;
 	readonly #file: string;
 	#data: StoredLanes = { version: 1, lanes: [], repositories: [] };
 	#writeQueue: Promise<void> = Promise.resolve();
+	#loaded = false;
 
 	constructor(root: string) {
 		this.#root = path.resolve(root);
@@ -49,6 +42,7 @@ export class LaneStore {
 	}
 
 	async start(): Promise<void> {
+		this.#loaded = false;
 		await mkdir(path.join(this.#root, 'logs'), {
 			recursive: true,
 			mode: 0o700,
@@ -58,27 +52,15 @@ export class LaneStore {
 			const raw = await readFile(this.#file, 'utf8');
 			const parsed = storedLanesSchema.safeParse(JSON.parse(raw));
 			if (parsed.success) this.#data = parsed.data;
-			// Valid JSON this build cannot read, such as a newer build's lane, is
-			// set aside like a corrupt file: starting empty and writing over it
-			// would orphan the detached Metros it describes.
 			else await this.#quarantine();
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-				// A corrupt file must not block the app; it is rebuilt from live
-				// state and the old copy is kept for inspection.
-				await this.#quarantine();
-			}
+			if (error instanceof SyntaxError) await this.#quarantine();
+			else if (!isMissing(error)) throw error;
 		}
+		this.#loaded = true;
 	}
 
-	/**
-	 * Deletes the Metro logs of lanes that no longer exist once they have sat
-	 * unwritten for `maxAgeMs`, and returns how many went. Only regular
-	 * `lane-<uuid>.log` files directly in the logs directory are candidates,
-	 * never a stored lane's own log, and one pass looks at a bounded number of
-	 * entries. A start still in flight writes its log as Metro runs, so a log
-	 * that young is never old enough to go.
-	 */
+	/** Prune old, unowned logs without following symlinks. */
 	async pruneLogs(maxAgeMs: number, now = Date.now()): Promise<number> {
 		const directory = path.join(this.#root, 'logs');
 		const current = new Set(
@@ -107,11 +89,11 @@ export class LaneStore {
 					await unlink(file);
 					removed += 1;
 				} catch {
-					// Already gone; nothing to delete.
+					// Pruning is best-effort.
 				}
 			}
 		} catch {
-			// No logs directory, so nothing to prune.
+			// Pruning is best-effort.
 		}
 		return removed;
 	}
@@ -135,54 +117,78 @@ export class LaneStore {
 
 	async upsert(lane: Lane): Promise<void> {
 		const validated = laneSchema.parse(lane);
-		const index = this.#data.lanes.findIndex(
-			(candidate) => candidate.id === validated.id
-		);
-		if (index === -1) this.#data.lanes.push(validated);
-		else this.#data.lanes[index] = validated;
-		await this.#persist();
+		await this.#update((data) => {
+			const found = data.lanes.some(
+				(candidate) => candidate.id === validated.id
+			);
+			return {
+				...data,
+				lanes: found
+					? data.lanes.map((candidate) =>
+							candidate.id === validated.id ? validated : candidate
+						)
+					: [...data.lanes, validated],
+			};
+		});
 	}
 
-	async remove(laneId: string): Promise<boolean> {
-		const before = this.#data.lanes.length;
-		this.#data.lanes = this.#data.lanes.filter((lane) => lane.id !== laneId);
-		if (this.#data.lanes.length === before) return false;
-		await this.#persist();
-		return true;
+	remove(laneId: string): Promise<boolean> {
+		return this.#update((data) => {
+			const lanes = data.lanes.filter((lane) => lane.id !== laneId);
+			return lanes.length === data.lanes.length
+				? undefined
+				: { ...data, lanes };
+		});
 	}
 
 	async addRepository(root: string): Promise<void> {
 		const resolved = path.resolve(root);
-		if (this.#data.repositories.includes(resolved)) return;
-		if (this.#data.repositories.length >= 32) {
-			throw new Error('At most 32 repositories can be tracked for lanes.');
-		}
-		this.#data.repositories.push(resolved);
-		await this.#persist();
+		await this.#update((data) => {
+			if (data.repositories.includes(resolved)) return undefined;
+			if (data.repositories.length >= 32) {
+				throw new Error('At most 32 repositories can be tracked for lanes.');
+			}
+			return { ...data, repositories: [...data.repositories, resolved] };
+		});
 	}
 
-	async removeRepository(root: string): Promise<boolean> {
+	removeRepository(root: string): Promise<boolean> {
 		const resolved = path.resolve(root);
-		const before = this.#data.repositories.length;
-		this.#data.repositories = this.#data.repositories.filter(
-			(candidate) => candidate !== resolved
-		);
-		if (this.#data.repositories.length === before) return false;
-		await this.#persist();
-		return true;
+		return this.#update((data) => {
+			const repositories = data.repositories.filter(
+				(entry) => entry !== resolved
+			);
+			return repositories.length === data.repositories.length
+				? undefined
+				: { ...data, repositories };
+		});
 	}
 
 	async #quarantine(): Promise<void> {
-		await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`).catch(
-			() => undefined
-		);
+		await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`);
 	}
 
-	#persist(): Promise<void> {
-		const snapshot = JSON.stringify(this.#data, null, '\t');
-		this.#writeQueue = this.#writeQueue
-			.catch(() => undefined)
-			.then(() => writeFileAtomic(this.#file, snapshot, 'lanes'));
-		return this.#writeQueue;
+	#update(
+		operation: (data: StoredLanes) => StoredLanes | undefined
+	): Promise<boolean> {
+		const write = this.#writeQueue.then(async () => {
+			if (!this.#loaded)
+				throw new Error('Lane storage must load successfully before writing.');
+			const next = operation(this.#data);
+			if (!next) return false;
+			const validated = storedLanesSchema.parse(next);
+			await writeFileAtomic(
+				this.#file,
+				JSON.stringify(validated, null, '\t'),
+				'lanes'
+			);
+			this.#data = validated;
+			return true;
+		});
+		this.#writeQueue = write.then(
+			() => undefined,
+			() => undefined
+		);
+		return write;
 	}
 }

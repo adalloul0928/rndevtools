@@ -3099,14 +3099,13 @@ describe('LaneService', () => {
 
 		it('reports plainly when the build has no slimming at all', async () => {
 			const bare = new LaneService({
-				store: new LaneStore(
-					await mkdtemp(path.join(os.tmpdir(), 'lane-bare-'))
-				),
+				store: new LaneStore(path.join(root, 'bare')),
 				simulator,
 				metro,
 				worktrees,
 				now: () => now,
 			});
+			await bare.start();
 			const receipt = await bare.runOperation({
 				actionId: 'op-bare',
 				kind: 'lane.start',
