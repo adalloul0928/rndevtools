@@ -426,6 +426,102 @@ describe('desktop client', () => {
 		jest.useRealTimers();
 	});
 
+	it('replaces an earlier client for the same device and leaves its old stop inert', async () => {
+		jest.useFakeTimers();
+		const unsubscribe = jest.fn();
+		const first = startDesktopClient({
+			host: { ...testHost, subscribeToAuthorization: () => unsubscribe },
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		firstSocket.open();
+		const second = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const secondSocket = latestSocket();
+		try {
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+			expect(unsubscribe).toHaveBeenCalledTimes(1);
+			secondSocket.open();
+			first.stop();
+			await jest.advanceTimersByTimeAsync(30_000);
+			expect(FakeWebSocket.instances).toHaveLength(2);
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+			const third = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				expect(secondSocket.close).toHaveBeenCalled();
+			} finally {
+				third.stop();
+			}
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('retires the previous module instance after Fast Refresh', () => {
+		const first = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		let refreshedStart = startDesktopClient;
+		jest.isolateModules(() => {
+			refreshedStart =
+				jest.requireActual<typeof import('./client')>(
+					'./client',
+				).startDesktopClient;
+		});
+		const second = refreshedStart({ host: testHost, candidates: [BROKER_URL] });
+		try {
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('keeps clients for different device ids independent', () => {
+		const first = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		const second = startDesktopClient({
+			host: {
+				...testHost,
+				createDeviceInfo: () => ({ ...testDevice, id: 'device-2' }),
+			},
+			candidates: [BROKER_URL],
+		});
+		try {
+			expect(firstSocket.close).not.toHaveBeenCalled();
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('retires after the broker replaces it instead of evicting the replacement', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			latestSocket().open();
+			latestSocket().serverClose(1008, 'replaced by a newer connection');
+			await jest.advanceTimersByTimeAsync(60_000);
+			expect(FakeWebSocket.instances).toHaveLength(1);
+		} finally {
+			client.stop();
+		}
+	});
+
 	it('skips unchanged host projections while keeping heartbeats and changed snapshots', async () => {
 		jest.useFakeTimers();
 		let revision = 0;

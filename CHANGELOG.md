@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- A replacement desktop client stops the earlier owner of its device ID, including
+  across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
@@ -274,6 +276,8 @@
 - Debug camera fixtures honor the image picker's string, array, and legacy enum
   media selections for both image and video flows.
 
+- Desktop header projections redact names, omit accessors and oversized values,
+  and bound total redaction work before storing the projection.
 - Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
   and serialization while retaining heartbeats and client diagnostic updates.
 
@@ -359,6 +363,8 @@
   holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
   of a snapshot past its bound, then requires the schema to reject the
   snapshot as it stands and accept it fitted. No bound changed.
+- The agent socket reserves bounded connection headroom to answer excess callers
+  with a retryable busy response while keeping the eight-handler limit.
 - The agent hook only redirects Simulator mutations and Metro starts while
   the desktop is reachable; unrelated shell commands never run a reachability probe.
 
