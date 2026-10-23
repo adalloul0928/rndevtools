@@ -2288,19 +2288,19 @@ export class SlimmingService {
 		mutationLease: SimulatorMutationLease | undefined
 	): Promise<void> {
 		const snapshotState = mapDeviceState(device.state);
-		if (snapshotState !== 'booted') {
-			// A status check never boots, so there is no helper call to keep out of
-			// a mutation's way and no lease to take.
-			this.#state.statusBySimulator[device.id] = this.#uninspectedStatus(
-				device,
-				inspectionMessage(snapshotState)
-			);
-			return;
-		}
 		if (this.#hasActiveJob(device.id)) return;
 		const probe = async () => {
 			// A job may have started before the lease was taken.
 			if (this.#hasActiveJob(device.id)) return;
+			if (snapshotState !== 'booted') {
+				// Even an uninspected status belongs under the lease: a stale
+				// shutdown row must not replace the state a mutation just wrote.
+				this.#state.statusBySimulator[device.id] = this.#uninspectedStatus(
+					device,
+					inspectionMessage(snapshotState)
+				);
+				return;
+			}
 			this.#state.statusBySimulator[device.id] = await this.#probeStatus(
 				device,
 				probeProfileId

@@ -6,6 +6,7 @@ import type { SimulatorCapability } from '../shared/simulator-protocol';
 import {
 	SLIMMING_CONFIRMATIONS,
 	type SlimmingAction,
+	type SlimmingJob,
 	slimmingActionSchema,
 } from '../shared/slimming-protocol';
 import {
@@ -484,23 +485,31 @@ async function createFleetService(
 	return { provider, service };
 }
 
-async function waitForJob(service: SlimmingService, jobId: string) {
-	const deadline = Date.now() + 2_000;
-	while (Date.now() < deadline) {
-		const job = service
-			.getState()
-			.jobs.find((candidate) => candidate.id === jobId);
-		if (
-			job &&
-			['complete', 'failed', 'needs-attention', 'cancelled'].includes(
-				job.status
+function waitForJob(
+	service: SlimmingService,
+	jobId: string
+): Promise<SlimmingJob> {
+	return new Promise((resolve) => {
+		let unsubscribe = () => {};
+		const check = () => {
+			const job = service
+				.getState()
+				.jobs.find((candidate) => candidate.id === jobId);
+			if (
+				!job ||
+				!['complete', 'failed', 'needs-attention', 'cancelled'].includes(
+					job.status
+				)
 			)
-		) {
-			return job;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-	throw new Error(`Job ${jobId} did not finish.`);
+				return;
+			unsubscribe();
+			resolve(job);
+		};
+		// Use the service notification instead of a short polling deadline.
+		// The enclosing test owns the timeout, including on a busy host.
+		unsubscribe = service.subscribe(check);
+		check();
+	});
 }
 
 async function waitForFleetJob(
@@ -891,7 +900,7 @@ describe('slimming service', () => {
 		expect(actionIds).not.toContain('preview-0');
 		expect(actionIds.at(-1)).toBe('preview-after');
 		await service.stop();
-	});
+	}, 30_000);
 
 	it('does not auto-boot shutdown targets during refresh but supports preview, acknowledgement, and mutation', async () => {
 		const helper = new FakeHelper();
@@ -1851,6 +1860,27 @@ describe('slimming service', () => {
 				});
 			}
 		);
+		await service.stop();
+	});
+
+	it('keeps the status of a shut-down inventory row while its Simulator lease is held', async () => {
+		const helper = new FakeHelper();
+		const coordinator = new SimulatorMutationCoordinator();
+		const { service } = await createService(helper, undefined, coordinator);
+		const previous = service.getState().statusBySimulator[UDID];
+		helper.deviceState = 'Shutdown';
+		await coordinator.runExclusive(
+			UDID,
+			new AbortController().signal,
+			async () => {
+				await service.refresh();
+				expect(service.getState().statusBySimulator[UDID]).toEqual(previous);
+			}
+		);
+		await service.refresh();
+		expect(service.getState().statusBySimulator[UDID]).toMatchObject({
+			condition: 'unknown',
+		});
 		await service.stop();
 	});
 
