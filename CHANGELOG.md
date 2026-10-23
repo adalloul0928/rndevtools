@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
+
 - Refused desktop actions keep read-only diagnostics connected. Authorization read
   failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
