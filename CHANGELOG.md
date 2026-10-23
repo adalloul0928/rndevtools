@@ -7,6 +7,8 @@
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
+- Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
+  including socket-construction failures, and resets after a connection opens.
 
 - Recognize Expo fetch cancellation wrappers and preserved abort causes without
   inspecting untrusted request inputs or relabeling unrelated failures.
@@ -290,6 +292,14 @@
   `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
+- The CLI still reads and validates a buffered reply if the desktop closes
+  just before the client half-closes its request, avoiding a spurious transport error.
+
+- Every agent-requested Supabase reset requires operator confirmation, even for
+  a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
+- Cancelled recipes leave queued Simulators untouched. Teardown runs only after
+  a target starts its steps and is never repeated after a persistence failure.
 
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
