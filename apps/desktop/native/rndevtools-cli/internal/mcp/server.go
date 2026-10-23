@@ -59,8 +59,9 @@ type Config struct {
 	Version   string
 	Transport Transport
 	// Lookup reads environment variables (os.Getenv). The session this server
-	// claims comes from it: Claude Code and Codex pass their session
-	// identifiers to the MCP servers they spawn.
+	// claims comes from it: Claude Code passes its session id to the MCP servers
+	// it spawns, once, when it connects them. Codex does not pass a thread id.
+	// The desktop treats the claim as a claim, never as the identity.
 	Lookup func(string) string
 	// ReadFile loads a capture for embedding; defaults to os.ReadFile.
 	ReadFile func(string) ([]byte, error)
@@ -514,29 +515,28 @@ func (server *Server) initialize(params json.RawMessage) (any, *rpcError) {
 // instructions is what the client shows its model about this server as a
 // whole. It carries the rules a tool description cannot: when to reach for
 // these tools at all, and what never to do instead.
-const instructions = `RN Devtools controls the iOS Simulators on this Mac and, when the user has ` +
-	`turned it on, each git worktree's local Supabase. Use these tools for anything involving a ` +
-	`Simulator: booting one for a git worktree or branch, starting Metro without colliding with ` +
-	`another agent, launching the dev client, reading or driving the running app, tapping or typing ` +
-	`on the device, taking screenshots, and cleaning up. Do not run xcrun simctl boot, shutdown, ` +
-	`openurl, install, launch, or io directly, and do not start Metro by hand: several agents share ` +
-	`these Simulators and the desktop app owns their ports and claims. A Simulator is free or held: ` +
-	`held while a lane runs on it or a session claimed it, and only the holder may run a lane on ` +
+const instructions = `RN Devtools controls the iOS Simulators on this Mac and, when the user has turned it on, each ` +
+	`git worktree's local Supabase. Use these tools for anything involving a Simulator: booting ` +
+	`one, starting Metro, launching the dev client, driving the app, screenshots, and cleanup. Do ` +
+	`not run xcrun simctl boot, shutdown, openurl, install, launch, or io, or start Metro by hand: ` +
+	`agents share these Simulators and the desktop owns their ports and claims. A Simulator is free ` +
+	`or held: while a lane runs on it or a session claimed it, only the holder may run a lane on ` +
 	`it, send it input, install on it, slim it, run a recipe on it, or cancel its jobs (anyone else ` +
-	`gets device_held, naming the holder), though a session can always stop or cancel a recording ` +
-	`it started itself; act and network are not gated, so a hold does not keep other sessions out ` +
-	`of the app itself. Start with lane ` +
-	`(operation "up") for a worktree; leave udid out and the desktop picks a free device, or parks a ` +
-	`deviceRequest for the user when none is free (then poll lane ls). For a worktree with ` +
-	`supabase/config.toml, get its own database with supabase (operation "up") or lane up, which ` +
-	`connects the app automatically; if RN Devtools says it is not managing that worktree, start ` +
-	`it yourself from the worktree with supabase start --runtime native (never without --runtime ` +
-	`native). Use the worktree's own supabase CLI with --local for migrations, resets, and types; ` +
-	`never start or stop a stack RN Devtools manages by hand, and never run supabase stop --all, ` +
-	`stack destroy, or kill postgres, which hit other agents' stacks. When your task is done, call ` +
-	`release with all=true so your devices go back to the pool and your stacks stop (data kept). ` +
-	`Errors carry "recovery" text and native plan carries a "recommendation"; follow them before ` +
-	`improvising.`
+	`gets device_held), though a session can always stop or cancel a recording it started itself; ` +
+	`act and network are not gated, so a hold does not keep other sessions out of the app. Only a ` +
+	`Claude Code session can hold a Simulator or a stack, claim or release, or start a lane; a ` +
+	`stale session id changes nothing, because the desktop goes by the calling process. Other ` +
+	`agents (Codex, Cursor, Kiro) get agent_identity_unverified from calls that hold or drive a ` +
+	`device or stack: they can read (simulators, agents, lane ls, screen, elements, capture) and ` +
+	`should ask the user to act in RN Devtools. A Claude Code session starts with lane (operation ` +
+	`"up"); leave udid out and the desktop picks a free device, or parks a deviceRequest for the ` +
+	`user when none is free (poll lane ls). For a worktree with supabase/config.toml use supabase ` +
+	`(operation "up") or lane up; if RN Devtools says it is not managing that worktree, start it ` +
+	`yourself with supabase start --runtime native (never without it). Never start or stop a ` +
+	`managed stack by hand, and never run supabase stop --all, stack destroy, or kill postgres, ` +
+	`which hit other agents' stacks. A Claude Code session that is done calls release with all=true ` +
+	`so its devices go back to the pool and its stacks stop (data kept). Errors carry "recovery" ` +
+	`text and native plan carries a "recommendation"; follow them before improvising.`
 
 // Tool is one MCP tool entry.
 type Tool struct {
@@ -646,9 +646,13 @@ func (server *Server) send(ctx context.Context, parsed command.Parsed) (protocol
 	return server.config.Transport(ctx, request, parsed.Timeout)
 }
 
-// agent is the coding-agent session this server claims to serve, the claim
-// the desktop verifies. The session variables win; failing those, the MCP
-// client's name identifies at least which agent product is calling.
+// agent is the coding-agent session this server claims to serve. The desktop
+// checks the claim against this process, which it traces to the Claude Code
+// session that spawned it, and takes that session as the caller whatever the
+// claim names. The session variables win; failing those, the MCP client's name
+// makes up `mcp-<client>`, an id no session has: under a Claude Code session
+// the desktop ignores it, and anywhere else it can never verify, so such a
+// server reads and holds nothing. A client that sent no name sends no claim.
 func (server *Server) agent() map[string]any {
 	if agent := command.AgentFromEnvironment(server.config.Lookup); agent != nil {
 		return agent

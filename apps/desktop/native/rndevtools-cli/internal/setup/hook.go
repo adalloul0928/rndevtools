@@ -223,9 +223,11 @@ func firstOperand(arguments []string) string {
 }
 
 // SessionEndPayload is what both agents send a SessionEnd hook on stdin. The
-// session id names whose lanes and claims to release; cwd, the session's
-// working directory, lets the desktop also release what that session holds
-// under an MCP identity it shares with other sessions.
+// session id is the claim the hook sends with its pid; the desktop releases
+// what the Claude Code session that process runs under holds. Cwd, the
+// session's working directory, lets the desktop also release what an older
+// build recorded for that session under an MCP identity shared with other
+// sessions.
 type SessionEndPayload struct {
 	SessionID string `json:"session_id"`
 	Cwd       string `json:"cwd"`

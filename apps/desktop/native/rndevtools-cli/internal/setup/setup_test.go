@@ -410,6 +410,65 @@ func TestAgentTextsAgreeOnAStartingBackendWithoutAJobId(t *testing.T) {
 	}
 }
 
+func TestSkillsSayOnlyAClaudeCodeSessionHoldsAndWhatEveryOtherAgentCanDo(t *testing.T) {
+	// The skills are installed for Claude Code, Codex, and Kiro alike. The
+	// desktop ties a request to a Claude Code session by the process that sent
+	// it, so the skills must say that a stale session id changes nothing, that
+	// a claim it cannot tie to a session is refused wherever a device is held
+	// or driven, and what Codex, Cursor, and Kiro can still do. They must not
+	// describe the shared MCP identity, matched by working directory and
+	// released at once, that the desktop no longer accepts.
+	flat := func(text string) string { return strings.Join(strings.Fields(text), " ") }
+	skill := func(name string) string {
+		content, err := skillFiles.ReadFile("skills/" + name + "/SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return flat(string(content))
+	}
+	lanes := skill("rndevtools-lanes")
+	for _, phrase := range []string{
+		"Only a Claude Code session can hold, claim, release, or start lanes",
+		"decides who is calling from the process that sent the request, not from the session id it names",
+		"a stale id changes nothing",
+		"a request that names another live session fails with `agent_identity_mismatch` before anything runs",
+		"A request that names no session may use free Simulators only",
+		"## If you are not a Claude Code session",
+		"fails with `agent_identity_unverified`",
+		"`env -u CODEX_THREAD_ID -u RNDEVTOOLS_AGENT_SESSION_ID rndevtools input …`",
+		"through MCP only the reads work",
+		"- **Ask the user.**",
+		"releases a Claude Code session's holds as it exits",
+	} {
+		if !strings.Contains(lanes, phrase) {
+			t.Errorf("the lanes skill lacks %q", phrase)
+		}
+	}
+	supabase := skill("rndevtools-supabase")
+	for _, phrase := range []string{"`agent_identity_unverified`", "`agent_identity_mismatch`", "`ls`, `status`, `env`, and `log` still work"} {
+		if !strings.Contains(supabase, phrase) {
+			t.Errorf("the supabase skill lacks %q", phrase)
+		}
+	}
+	// The block that goes into a project's AGENTS.md is read by every agent.
+	if block := flat(AgentsBlock("")); !strings.Contains(block, "Only a Claude Code session can hold a Simulator or start a lane; any other agent reads with the same tools and asks the user to act in RN Devtools.") {
+		t.Errorf("the AGENTS.md block must say who can hold a Simulator: %s", block)
+	}
+	for name, text := range map[string]string{"the lanes skill": lanes, "the supabase skill": supabase} {
+		for _, removed := range []string{
+			"Attribution is automatic",
+			"shared MCP",
+			"shared identity",
+			"releases it at once",
+			"forwards `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`",
+		} {
+			if strings.Contains(text, removed) {
+				t.Errorf("%s still says %q, which the desktop no longer does", name, removed)
+			}
+		}
+	}
+}
+
 func TestAgentsBlockAddsLocalSupabaseOnlyForSupabaseProjects(t *testing.T) {
 	home := t.TempDir()
 	plain := filepath.Join(home, "plain")

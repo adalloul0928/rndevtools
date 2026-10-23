@@ -100,7 +100,9 @@ var toolMeta = map[protocol.Command]meta{
 			"worktree's local Supabase and passes its URL and publishable key to Metro, so never start Supabase by hand " +
 			"for a lane; lane.backend reports ready, starting (the app launches when it is ready; if the result has a " +
 			"jobId, call wait (condition job), and without one call lane up again in a few seconds), skipped, " +
-			"shadowed (the app's own .env files override the injected URL), refused, or failed, with the reason.",
+			"shadowed (the app's own .env files override the injected URL), refused, or failed, with the reason. " +
+			"up, launch, and down hold or drive a device, so they need a Claude Code session: other agents get " +
+			"agent_identity_unverified, and ls and log work for any agent.",
 	},
 	protocol.CommandSupabase: {
 		title: "Run this worktree's local Supabase",
@@ -179,16 +181,16 @@ var toolMeta = map[protocol.Command]meta{
 	},
 	protocol.CommandAgents: {
 		title:       "List agent sessions and their Simulators",
-		description: "Show the coding-agent sessions RN Devtools knows about (Claude Code, Codex, others) and which Simulators each has claimed or recently driven. Check this before using a device another session may be working on.",
+		description: "Show the coding-agent sessions RN Devtools knows about (Claude Code, Codex, others) and which Simulators each has claimed or recently driven; only a Claude Code session can hold or drive one. Check this before using a device another session may be working on.",
 		readOnly:    true,
 	},
 	protocol.CommandClaim: {
 		title:       "Claim a Simulator for this session",
-		description: "Mark a Simulator as held by this agent session. A claim is a hold: claiming a device someone else holds fails with device_held, and while you hold it, other sessions' lane up, launch, and down, input, native install, slimming, recipe runs, and job or recording cancels on it fail with device_held too, except that a session can always stop or cancel a recording it started itself. act and network are not gated: any session can still act in the app on a held device or change its network profile. note explains why; release when finished.",
+		description: "Mark a Simulator as held by this agent session. A claim is a hold: claiming a device someone else holds fails with device_held, and while you hold it, other sessions' lane up, launch, and down, input, native install, slimming, recipe runs, and job or recording cancels on it fail with device_held too, except that a session can always stop or cancel a recording it started itself. act and network are not gated: any session can still act in the app on a held device or change its network profile. Only a Claude Code session can claim: other agents get agent_identity_unverified and should ask the user. note explains why; release when finished.",
 	},
 	protocol.CommandRelease: {
 		title:       "Release a claimed Simulator",
-		description: "Release a Simulator this session claimed (udid), or with all=true release everything this session holds: stop its lanes and drop its claims. Call it with all=true when you are done, so the devices go back to the pool at once.",
+		description: "Release a Simulator this session claimed (udid), or with all=true release everything this session holds: stop its lanes and drop its claims. A Claude Code session calls it with all=true when it is done, so the devices go back to the pool. Only a Claude Code session holds anything: other agents get agent_identity_unverified.",
 	},
 	protocol.CommandApps: {
 		title:       "List apps on a Simulator",

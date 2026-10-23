@@ -2293,3 +2293,7 @@ The fixes from a repo-wide review on 2026-10-17 changed these engine behaviours 
 - **Destroy budget** (Supabase CLI invocations). 2 min per stack, capped at the runner's 60-minute limit for one call.
 - **Progress files** (Handling CLI processes). A lifecycle child's progress file is removed once its result has been read, and `start()` prunes files that earlier runs left behind.
 - **Child adoption** (Handling CLI processes, Desktop restart). A surviving child is adopted only when its pid is alive and `ps -ww -o args=` matches the recorded command-line digest. The digest is checked only while the feature is on: while it is off nothing is spawned, so the pid check alone decides. A pid the liveness check answers with EPERM (another user's process) counts as not ours.
+
+The agent identity fix (CHANGELOG, 0.2.0) changed one more thing the sections above describe.
+
+- **Who can hold** (Agent surface, Holds, Prerequisite fixes P0-2). The desktop verifies only a Claude Code session, by the process that sends the request, so a shared `mcp-*` identity (Codex over MCP) can no longer hold a lane or a stack, and `supabase` `up`, `down`, `reset` and `destroy` are refused for a claim the desktop cannot tie to a running Claude Code session. The worktree holds and the `release.sessionCwd` matching that this design adds for synthetic callers stay in the engine only for holds an older desktop recorded.

@@ -159,4 +159,6 @@ per agent, one day. The fixture app cannot actually be run (no dev client, no
 cache), so "task completed" was not scored; adoption and leakage were. The
 Codex MCP attribution shows `mcp-codex-mcp-client` because Codex does not pass
 `CODEX_THREAD_ID` to the MCP servers it spawns; claims and touches from Codex
-over MCP therefore attribute to the client, not the thread.
+over MCP therefore attribute to the client, not the thread. (The desktop has
+since stopped accepting that identity: only a Claude Code session whose
+process it can trace holds or is attributed.)
