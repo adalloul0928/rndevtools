@@ -403,3 +403,7 @@ being asked; pass those variables here to keep that behaviour.
 ## License
 
 MIT
+
+Desktop discovery waits 2.5, 5, 10, 20, then at most 30 seconds between
+unsuccessful candidate sweeps. Candidates within a sweep still advance promptly.
+A successful connection resets discovery backoff; `stop()` cancels pending retries.

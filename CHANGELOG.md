@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
+  including socket-construction failures, and resets after a connection opens.
+
 - Recognize Expo fetch cancellation wrappers and preserved abort causes without
   inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
