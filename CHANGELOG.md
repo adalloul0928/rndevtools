@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Symbol fallback matching treats lock, clock and pin as complete name segments,
+  keeping clocks and refresh arrows out of the shield icon and shipping boxes
+  out of the pin icon.
+
 - Validate and detach device hello fields before connecting, redacting display text
   and omitting undeclared fields instead of entering a broker rejection loop.
 
