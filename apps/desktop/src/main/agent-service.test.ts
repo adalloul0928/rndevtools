@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -278,6 +286,96 @@ describe('AgentService', () => {
 			simulatorUdid: A,
 		});
 		expect(released.claims).toEqual([]);
+	});
+
+	it('keeps claims and holds unchanged when persistence fails, then accepts a retry', async () => {
+		const agent = { kind: 'claude' as const, sessionId: 'claude-1' };
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent,
+		});
+		const claims = service.getState().claims;
+		const file = path.join(root, 'claims.json');
+		await rename(file, `${file}.backup`);
+		await mkdir(file);
+
+		await expect(
+			service.runOperation({ kind: 'agent.release', simulatorUdid: B, agent })
+		).rejects.toThrow();
+		expect(service.getState().claims).toEqual(claims);
+		expect(service.access(B, 'anonymous').allowed).toBe(false);
+		await expect(
+			service.runOperation({
+				kind: 'agent.claim',
+				simulatorUdid: B,
+				agent,
+				note: 'unsaved',
+			})
+		).rejects.toThrow();
+		expect(service.getState().claims).toEqual(claims);
+
+		await rm(file, { recursive: true });
+		await rename(`${file}.backup`, file);
+		await service.runOperation({
+			kind: 'agent.release',
+			simulatorUdid: B,
+			agent,
+		});
+		expect(service.getState().claims).toEqual([]);
+		expect(JSON.parse(await readFile(file, 'utf8')).claims).toEqual([]);
+		await rename(file, `${file}.backup`);
+		await mkdir(file);
+		await expect(
+			service.runOperation({ kind: 'agent.claim', simulatorUdid: B, agent })
+		).rejects.toThrow();
+		expect(service.getState().claims).toEqual([]);
+		expect(service.access(B, 'anonymous').allowed).toBe(true);
+	});
+
+	it('refuses to start or write after a claims read failure', async () => {
+		await service.stop();
+		const file = path.join(root, 'claims.json');
+		await mkdir(file);
+		await writeFile(path.join(file, 'keep'), 'saved data');
+		service = new AgentService({
+			directory: root,
+			lanes: () => [],
+			discover: async () => ({ sessions, claude: 'ok', codex: 'ok' }),
+		});
+		await expect(service.start()).rejects.toThrow();
+		await expect(
+			service.runOperation({
+				kind: 'agent.claim',
+				simulatorUdid: B,
+				agent: { kind: 'claude', sessionId: 'claude-1' },
+			})
+		).rejects.toThrow();
+		expect(await readFile(path.join(file, 'keep'), 'utf8')).toBe('saved data');
+	});
+
+	it('preserves malformed claims in quarantine before accepting fresh claims', async () => {
+		await service.stop();
+		const file = path.join(root, 'claims.json');
+		await writeFile(file, '{broken json');
+		service = new AgentService({
+			directory: root,
+			lanes: () => [],
+			discover: async () => ({ sessions, claude: 'ok', codex: 'ok' }),
+		});
+		await service.start();
+		await service.runOperation({
+			kind: 'agent.claim',
+			simulatorUdid: B,
+			agent: { kind: 'claude', sessionId: 'claude-1' },
+		});
+		const quarantined = (await readdir(root)).find((name) =>
+			name.startsWith('claims.json.corrupt-')
+		);
+		expect(quarantined).toBeDefined();
+		expect(
+			await readFile(path.join(root, quarantined ?? 'missing'), 'utf8')
+		).toBe('{broken json');
 	});
 
 	it('drops a claim once its session has been gone for the hold grace period, not before', async () => {

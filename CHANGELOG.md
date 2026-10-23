@@ -340,6 +340,9 @@
 
 ### Desktop app
 
+- Failed claim saves preserve device ownership. Concurrent claims and releases
+  persist in order, and unreadable claims cannot be silently overwritten.
+
 - Failed lane starts report unverified Metro cleanup with its PID and port,
   retaining an existing record until the verified stop succeeds.
 
