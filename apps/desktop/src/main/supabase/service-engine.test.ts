@@ -3550,6 +3550,37 @@ describe('SupabaseEngine adoption', () => {
 		expect(record?.lastStartedAt).toBe(h.clock.now);
 	});
 
+	it('starts the unheld linger when a create ends, not when its stack came up', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		await h.engine.start();
+		await h.engine.settle();
+		const facts = await h.engine.worktreeFacts(repo);
+		if (!facts) throw new Error('The worktree has no facts.');
+		const stackId = await h.identity(repo);
+		const release = h.cli.hold('stack start');
+		// Neither pinned nor attached: nothing holds the stack this create makes.
+		const ensure = h.engine.ensureStack(facts, FOLLOW);
+		await h.cli.waitForCall('stack start');
+		// The CLI registered the stack and its owner is up, but the create has
+		// not reported back: the provisional record is live, and nothing holds it.
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		// The create outlasts the 60 s unheld linger.
+		await h.advance(90_000);
+		expect(h.engine.activeJobFor(stackId)?.kind).toBe('create');
+		expect(h.cli.count('stack stop')).toBe(0);
+		release();
+		await expect(ensure).resolves.toMatchObject({ kind: 'ready', stackId });
+		await h.settle();
+		// The linger counts from the end of the create, not from the first tick
+		// that saw its owner while the job still ran.
+		await h.advance(30_000);
+		expect(h.cli.count('stack stop')).toBe(0);
+		await h.advance(60_000);
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+	});
+
 	it('records, exposure-checks and auto-stops a create a previous desktop left running', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');

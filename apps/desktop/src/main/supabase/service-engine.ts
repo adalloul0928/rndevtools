@@ -2722,7 +2722,14 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				if (!sameSupabaseClocks(result.clocks, record.clocks)) {
 					await this.stackStore.setClocks(record.id, result.clocks);
 				}
-				if (result.release !== undefined) {
+				// A create's owner is up before its CLI reports back, so a stack with
+				// a job running can be live and unheld. Its linger counts from the
+				// end of the job, which the next reconcile stamps: a stamp now would
+				// stop the stack the moment a job longer than the linger ended.
+				if (
+					result.release !== undefined &&
+					(result.release === 'clear' || !this.#jobActive(record.id))
+				) {
 					await this.stackStore.applyRelease(record.id, result.release);
 				}
 				this.#holds.set(record.id, result);
