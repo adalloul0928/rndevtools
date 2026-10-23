@@ -20,3 +20,14 @@ it('uses Hugeicons for content while preserving native toolbar symbols', async (
 	expect(universalIconForSystemImage('chevron.left')).toBe('chevron.left');
 	expect(universalIconForSystemImage('xmark')).toBe('xmark');
 });
+
+it.each([
+	['clock.fill', 'timer'],
+	['arrow.clockwise', 'arrow.clockwise'],
+	['arrow.counterclockwise', 'arrow.clockwise'],
+	['shippingbox.fill', 'wrench.and.screwdriver.fill'],
+	['lock.shield', 'lock.shield'],
+	['pin.fill', 'pin'],
+] as const)('maps %s by symbol segment', (symbol, expected) => {
+	expect(universalIconForSystemImage(symbol)).toBe(expected);
+});

@@ -93,7 +93,7 @@ export function RoutesPanel() {
 	);
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Routes"
 				description="See the current Expo Router stack, browse the generated sitemap, and navigate to explicit static routes."
@@ -142,7 +142,7 @@ export function RoutesPanel() {
 									<button
 										aria-current={isSelected ? 'true' : undefined}
 										aria-pressed={isSelected}
-										className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-transparent hover:border-foreground/8 hover:bg-foreground/[0.035]'}`}
+										className="panel-item group flex items-center gap-3"
 										key={route.id}
 										type="button"
 										onClick={() => setSelectedId(route.id)}
@@ -177,7 +177,7 @@ export function RoutesPanel() {
 						<>
 							<div className="mb-4 flex items-start justify-between gap-3">
 								<div>
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Route descriptor
 									</p>
 									<h2 className="mb-0 mt-1 text-sm font-semibold text-(--foreground)">
@@ -249,7 +249,7 @@ export function RoutesPanel() {
 						/>
 					)}
 					<div className="mt-6 border-t border-foreground/8 pt-4">
-						<div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+						<div className="mb-3 flex items-center gap-2 text-xs panel-label text-(--text-3)">
 							<History className="h-3.5 w-3.5" /> Recent navigation
 						</div>
 						{events.length === 0 ? (

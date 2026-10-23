@@ -256,7 +256,7 @@ export function CodePreview({
 	return (
 		<div className="overflow-hidden rounded-md border border-foreground/8 bg-background/35">
 			{label ? (
-				<div className="flex h-8 items-center justify-between border-b border-foreground/8 px-3 font-mono text-xs uppercase tracking-[0.06em] text-(--text-3)">
+				<div className="flex h-8 items-center justify-between border-b border-foreground/8 px-3 panel-label text-(--text-3)">
 					<span>{label}</span>
 					<span className="flex items-center gap-2 normal-case tracking-normal">
 						{actions}

@@ -118,7 +118,7 @@ export function EnvironmentPanel() {
 	const traffic = useAppTraffic();
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Environment"
 				description="Declared build, update, device, backend, and observability values with explicit validation results."
@@ -158,8 +158,8 @@ export function EnvironmentPanel() {
 					the first {MAX_RENDERED_ENVIRONMENT_VALUES}.
 				</PanelNotice>
 			) : null}
-			<div className="panel-scroll p-5">
-				<div className="mb-5 grid grid-cols-[220px_1fr] overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
+			<div className="panel-scroll connected-panel-body">
+				<div className="mb-5 grid grid-cols-[220px_1fr] overflow-hidden panel-section">
 					<div className="grid place-items-center border-r border-foreground/8 p-5">
 						<div
 							className="relative grid h-28 w-28 place-items-center rounded-full bg-[conic-gradient(var(--signal)_0deg,var(--signal)_calc(var(--score)*3.6deg),color-mix(in_oklab,var(--foreground)_8%,transparent)_calc(var(--score)*3.6deg))] p-1.5"
@@ -170,7 +170,7 @@ export function EnvironmentPanel() {
 									<div className="font-mono text-2xl font-semibold tabular-nums tracking-[-0.04em] text-(--foreground)">
 										{hasChecks ? `${score}%` : '—'}
 									</div>
-									<div className="mt-0.5 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<div className="mt-0.5 text-xs panel-label text-(--text-3)">
 										Health
 									</div>
 								</div>
@@ -205,12 +205,12 @@ export function EnvironmentPanel() {
 					<div className="grid grid-cols-2 gap-4 max-[1100px]:grid-cols-1">
 						{sections.map((section) => (
 							<Card
-								className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-0 shadow-none"
+								className="panel-section p-0 shadow-none"
 								key={section.title}
 								variant="secondary"
 							>
-								<Card.Header className="flex h-11 items-center justify-between border-b border-foreground/8 px-4">
-									<Card.Title className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
+								<Card.Header className="flex h-11 flex-row items-center justify-between border-b border-foreground/8 px-4">
+									<Card.Title className="m-0 text-xs font-medium panel-label text-(--muted)">
 										{section.title}
 									</Card.Title>
 									<span className="font-mono text-xs tabular-nums text-(--text-3)">
@@ -279,12 +279,12 @@ function LocalSupabaseChecks({
 	return (
 		<section
 			aria-label="Local Supabase checks"
-			className="mb-5 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]"
+			className="mb-5 overflow-hidden panel-section"
 		>
 			<header className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-foreground/8 px-4 py-2">
 				<div className="flex min-w-0 items-center gap-2">
 					<DatabaseZap className="h-3.5 w-3.5 shrink-0 text-(--muted)" />
-					<h2 className="m-0 text-xs font-medium uppercase tracking-[0.07em] text-(--muted)">
+					<h2 className="m-0 text-xs font-medium panel-label text-(--muted)">
 						Local Supabase
 					</h2>
 					<span className="truncate text-xs text-(--text-3)">

@@ -564,6 +564,8 @@ export class SimHelperClient {
 			handshake.capabilities.compatibilityStates
 		);
 		if (
+			!verified.signingTeamIdentifier ||
+			handshake.signingTeamIdentifier !== verified.signingTeamIdentifier ||
 			handshake.helperVersion !== manifest.appVersion ||
 			handshake.buildCommit !== manifest.buildCommit ||
 			handshake.architecture !== manifest.architecture ||
