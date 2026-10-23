@@ -287,6 +287,9 @@
 
 ### Desktop app
 
+- Uncaught main-process exceptions and unhandled rejections write a private,
+  bounded, redacted diagnostic log before exiting with a failure status.
+
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 

@@ -292,3 +292,8 @@ sidebar Simulator dot follows the selected device state.
 
 The README screenshots use the connected demo device and synthetic Simulator
 and Supabase fixtures. They do not depict this machine's Simulator inventory.
+
+Fatal main-process exceptions and unhandled rejections exit with status 1 after
+writing a redacted summary to `diagnostics/main-process-errors.log` beneath the
+Electron user-data directory. The private log is capped at 64 KiB and resets
+when full. A logging failure still exits; failed main-process state is not resumed.
