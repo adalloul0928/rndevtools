@@ -3235,6 +3235,55 @@ describe('LaneService', () => {
 			return { starting, releaseBoot: () => releaseBoot.resolve(undefined) };
 		}
 
+		it.each(['use', 'clone'] as const)(
+			'holds a parked request device during %s preparation before worktree lookup',
+			async (decision) => {
+				const wired = await wire();
+				const devices = simulator.state.devices;
+				simulator.state = { ...simulator.state, devices: [] };
+				const parked = await wired.lanes.runOperation({
+					actionId: 'park-before-hold',
+					kind: 'lane.start',
+					worktreePath: WORKTREE,
+					environment: 'development',
+					launch: false,
+					agent: LANE_AGENT,
+				});
+				expect(parked.deviceRequest?.status).toBe('pending');
+				simulator.state = { ...simulator.state, devices };
+				const entered = deferred<void>();
+				const release = deferred<void>();
+				const originalRoot = worktrees.repositoryRoot;
+				worktrees.repositoryRoot = async (value) => {
+					entered.resolve(undefined);
+					await release.promise;
+					return originalRoot(value);
+				};
+				const starting = wired.lanes.runOperation({
+					actionId: 'provide-before-hold',
+					kind: 'lane.provide-device',
+					requestId: parked.deviceRequest?.id ?? '',
+					decision,
+					simulatorUdid: UDID,
+				});
+				await entered.promise;
+				try {
+					const chosen = decision === 'clone' ? CLONE_UDID : UDID;
+					expect(wired.agents.access(chosen, OTHER_AGENT)).toMatchObject({
+						allowed: false,
+					});
+					expect(wired.agents.holds().get(chosen)).toMatchObject({
+						holder: LANE_AGENT,
+						via: 'lane',
+					});
+				} finally {
+					release.resolve(undefined);
+					await starting;
+				}
+				expect((await starting).completed).toBe(true);
+			}
+		);
+
 		it('refuses a claim on the Simulator a start is booting, and the lane keeps it', async () => {
 			const wired = await wire();
 			const { starting, releaseBoot } = await startHeldInBoot(wired.lanes);

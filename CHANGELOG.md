@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android on-device chrome and panels follow system light/dark appearance changes,
+  including text, surfaces, controls and status tones. iOS retains native colors.
 - Floating controls and windows stay inside horizontal safe areas after rotation;
   the Android sheet respects side and bottom insets in landscape.
 - Android Back returns from a tool panel to the tool list before closing the sheet.
@@ -333,8 +335,15 @@
 
 ### Desktop app
 
+- A Simulator chosen for a parked lane request becomes an agent-visible hold
+  before worktree preparation; newly created clones are held as soon as discovered.
+
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
+- Package release verification and packing run without publishing credentials.
+  A separate runner publishes checked tarballs with lifecycle scripts disabled
+  and npm trusted publishing; long-lived npm tokens are no longer used.
+
 - Desktop dev and build verify the licensed HeroUI Pro payload against reviewed
   content hashes, including additions, removals, metadata changes and symlinks.
 
