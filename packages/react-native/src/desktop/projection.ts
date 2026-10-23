@@ -5,6 +5,7 @@ import {
 import { truncateText, utf8ByteLength } from '@rndevtools/core/serialize';
 
 const MAX_HEADER_COUNT = 200;
+const MAX_HEADER_WORK_UNITS = 2 * 1024 * 1024;
 const MAX_HEADER_NAME_BYTES = 256;
 const MAX_LONG_TEXT_BYTES = 512 * 1024;
 const SAFE_QUERY_FAMILY = /^[a-z][a-z0-9._:-]{0,127}$/i;
@@ -29,17 +30,37 @@ export function projectDesktopHeaders(
 ): Record<string, string> | undefined {
 	if (!headers) return undefined;
 	const projected = Object.create(null) as Record<string, string>;
-	let projectedCount = 0;
+	let inspectedCount = 0;
+	let remainingUnits = MAX_HEADER_WORK_UNITS;
 	for (const name of Object.keys(headers)) {
-		if (projectedCount >= MAX_HEADER_COUNT) break;
-		if (!name || utf8ByteLength(name) > MAX_HEADER_NAME_BYTES) continue;
-		const value = headers[name];
+		if (inspectedCount >= MAX_HEADER_COUNT || remainingUnits <= 0) break;
+		inspectedCount += 1;
+		if (
+			!name ||
+			name.length > MAX_HEADER_NAME_BYTES ||
+			utf8ByteLength(name) > MAX_HEADER_NAME_BYTES
+		)
+			continue;
+		const descriptor = Object.getOwnPropertyDescriptor(headers, name);
+		const value =
+			descriptor && 'value' in descriptor ? descriptor.value : undefined;
 		if (typeof value !== 'string') continue;
-		const safeValue = isSensitiveDiagnosticKey(name)
-			? '[REDACTED]'
-			: redactDiagnosticText(value);
-		projected[name] = truncateText(safeValue, MAX_LONG_TEXT_BYTES).text;
-		projectedCount += 1;
+		const safeName = truncateText(
+			redactDiagnosticText(name),
+			MAX_HEADER_NAME_BYTES,
+		).text;
+		remainingUnits -= name.length;
+		let safeValue = '[OMITTED]';
+		if (isSensitiveDiagnosticKey(name)) {
+			safeValue = '[REDACTED]';
+		} else if (
+			value.length <= MAX_LONG_TEXT_BYTES &&
+			value.length <= remainingUnits
+		) {
+			remainingUnits -= value.length;
+			safeValue = redactDiagnosticText(value);
+		}
+		projected[safeName] = truncateText(safeValue, MAX_LONG_TEXT_BYTES).text;
 	}
 	return projected;
 }

@@ -269,6 +269,9 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Desktop header projections redact names, omit accessors and oversized values,
+  and bound total redaction work before storing the projection.
+
 - The desktop client fits every snapshot to every size and range bound the
   desktop validates before it sends it, with the new `fitDesktopSnapshot` of
   `@rndevtools/core/desktop-protocol`. It used to trim only the top-level

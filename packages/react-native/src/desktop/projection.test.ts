@@ -67,6 +67,24 @@ describe('desktop diagnostic projections', () => {
 		}
 	});
 
+	it('redacts captured header names and never invokes header accessors', () => {
+		const getter = jest.fn(() => 'do not inspect');
+		const headers: Record<string, string> = {
+			'password=header-secret': 'value',
+			['ghp_' + 'q'.repeat(40)]: 'opaque',
+			normal: 'visible',
+		};
+		Object.defineProperty(headers, 'accessor', {
+			enumerable: true,
+			get: getter,
+		});
+		const projected = projectDesktopHeaders(headers);
+		expect(JSON.stringify(projected)).not.toContain('header-secret');
+		expect(JSON.stringify(projected)).not.toContain('q'.repeat(40));
+		expect(getter).not.toHaveBeenCalled();
+		expect(projected?.normal).toBe('visible');
+	});
+
 	it('omits sensitive query-key parameters from desktop metadata', () => {
 		const projected = projectDesktopQueryKey(
 			[
