@@ -43,7 +43,7 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
   startDesktopClient({
     host: {
       // Project your registered diagnostics into a snapshot payload.
-      captureTools: (diagnostics) => buildToolsSnapshot(diagnostics),
+      captureTools: () => captureRegisteredTools(),
       // Optional: a cheap revision of every value in that projection.
       getToolsRevision: () => diagnosticsRevision,
       // Identify this device and build, and list the actions it accepts.
@@ -60,6 +60,13 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
   });
 }
 ```
+
+`captureRegisteredTools`, `buildDeviceInfo`, `diagnosticsRevision` and `applyAction`
+are host-owned implementations in this sketch, not exports from these packages.
+There is no automatic `buildToolsSnapshot` adapter. Start with
+`createEmptyDesktopToolsSnapshot` from `@rndevtools/core/desktop-protocol`, then
+replace only the fields your app collects and advertise only implemented actions.
+The example app shows connection-only wiring with empty projections.
 
 `shouldStartDesktopClient` stays false under Jest and honours the
 `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED` kill switch. Pass
