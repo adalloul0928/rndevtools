@@ -1046,3 +1046,33 @@ func request(operation protocol.Operation, payload string) protocol.Request {
 		Payload:         json.RawMessage(payload),
 	}
 }
+
+func TestVerificationEvidenceKeepsEmptyProcessArraysOnTheWire(t *testing.T) {
+	cases := map[string]simulator.Verification{
+		"empty":       emptyVerification(nil),
+		"zero result": verificationEvidence(nil, simulator.Verification{}),
+		"failure":     verificationEvidence(&simulator.VerificationError{Evidence: simulator.Verification{}}, simulator.Verification{}),
+	}
+	for name, evidence := range cases {
+		t.Run(name, func(t *testing.T) {
+			encoded, err := json.Marshal(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &object); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"checkedObservedProcessNames", "presentObservedProcessNames", "currentManagedDisabledServiceIds", "desiredManagedDisabledServiceIds", "missingDisabledServiceIds", "unexpectedDisabledServiceIds", "registeredDisabledLaunchdJobIds"} {
+				if string(object[field]) != "[]" {
+					t.Errorf("%s must be an empty array: %s", field, encoded)
+				}
+			}
+		})
+	}
+	wanted := simulator.Verification{CheckedObservedProcessNames: []string{"observed"}, PresentObservedProcessNames: []string{"present"}}
+	actual := verificationEvidence(nil, wanted)
+	if !slices.Equal(actual.CheckedObservedProcessNames, wanted.CheckedObservedProcessNames) || !slices.Equal(actual.PresentObservedProcessNames, wanted.PresentObservedProcessNames) {
+		t.Fatal("nonempty evidence changed")
+	}
+}

@@ -290,6 +290,8 @@
 
 ### Desktop app
 
+- SimSlim verification serializes absent observed-process evidence as empty arrays,
+  including preparation and failure responses, so desktop validation accepts it.
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 
