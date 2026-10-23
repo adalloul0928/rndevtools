@@ -6,6 +6,8 @@
 
 - Android Back returns from a tool panel to the tool list before closing the sheet.
   iOS icon navigation buttons expose their supplied accessibility labels.
+- Validate and detach device hello fields before connecting, redacting display text
+  and omitting undeclared fields instead of entering a broker rejection loop.
 
 - Refused desktop actions keep read-only diagnostics connected. Authorization read
   failures also refuse safely; replies remain paced, bounded and rate-limited.
@@ -320,6 +322,9 @@
   `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
+- Local ad-hoc macOS packages launch without team-based library validation;
+  Developer ID release signing keeps hardened runtime and its existing gates.
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
