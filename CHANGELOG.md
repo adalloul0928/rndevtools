@@ -343,6 +343,9 @@
 - Failed claim saves preserve device ownership. Concurrent claims and releases
   persist in order, and unreadable claims cannot be silently overwritten.
 
+- Lane changes become visible only after a successful save. Failed reads preserve
+  the stored file, and the lane limit is enforced before writing.
+
 - Session-end identity recovery checks process start times, bounds its cache, and
   keeps the latest session when discoveries occur at the same timestamp.
 
