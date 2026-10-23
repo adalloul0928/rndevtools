@@ -346,6 +346,8 @@
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Development startup rejects stale native helper manifests and mismatched host
+  handshakes with a rebuild command, while allowing diagnostics without helpers.
 - Packaging rejects native manifests for another app version or architecture.
   Release capability probes inspect the signed in-app host executable.
 
