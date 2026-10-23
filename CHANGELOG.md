@@ -327,6 +327,9 @@
 
 ### Desktop app
 
+- A Simulator chosen for a parked lane request becomes an agent-visible hold
+  before worktree preparation; newly created clones are held as soon as discovered.
+
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
