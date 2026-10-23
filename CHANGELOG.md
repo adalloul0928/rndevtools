@@ -367,6 +367,9 @@
   had just shut down, and one that finished after an apply replaced the status
   the apply recorded, so disabling slimming soon afterwards could skip the
   restore.
+- Uncaught main-process exceptions and unhandled rejections write a private,
+  bounded, redacted diagnostic log before exiting with a failure status.
+
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the

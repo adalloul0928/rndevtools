@@ -83,6 +83,7 @@ import { LaneStore } from './lane-store';
 import { verifyAgentCli } from './native-helper-trust';
 import { NativeHostClient } from './native-host-client';
 import { runNativePlan } from './native-plan';
+import { installProcessErrorHandlers } from './process-errors';
 import { stopForQuit } from './quit-sequence';
 import { createRecipeIpcHandlers } from './recipe-ipc';
 import {
@@ -138,6 +139,16 @@ import {
 	createSupabaseStatePublisher,
 	supabaseInterestKey,
 } from './supabase-ipc';
+
+installProcessErrorHandlers({
+	logPath: () =>
+		path.join(
+			app.getPath('userData'),
+			'diagnostics',
+			'main-process-errors.log'
+		),
+	exit: (code) => app.exit(code),
+});
 
 protocol.registerSchemesAsPrivileged([
 	{
