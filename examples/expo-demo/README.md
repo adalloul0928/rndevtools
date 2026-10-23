@@ -87,10 +87,14 @@ pnpm --dir examples/expo-demo verify:bundle
 
 The command exports the iOS and Android release bundles the way a store build
 does (production, minified, Hermes bytecode) with no app variable set, and
-asserts no devtools markers survived. CI runs it on every change. It is the
-check worth copying into your own CI: it reads the bundle itself, so it still
-fails if the Metro config stops pruning, for example after
-`keepInReleaseBundles: true` is set or `withDevtoolsPruning` is removed.
+asserts no devtools markers survived. It then exports the Android bundle again
+with `RNDEVTOOLS_DEMO_KEEP_DEVTOOLS=1`, which `metro.config.js` turns into
+`keepInReleaseBundles: true`, and asserts that the verifier fails on it and
+names a marker. Without that second export, a verifier that finds nothing would
+pass the first. CI runs it on every change. It is the check worth copying into
+your own CI: it reads the bundle itself, so it still fails if the Metro config
+stops pruning, for example after `keepInReleaseBundles: true` is set or
+`withDevtoolsPruning` is removed.
 
 ## Notes
 
