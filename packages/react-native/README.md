@@ -87,10 +87,26 @@ the broker's contract itself:
 - Outgoing frames are paced under the broker's per-connection rate limit.
   Action results go first, and snapshots coalesce, so the next one sent
   carries the latest state.
-- A snapshot collection with more rows than its limit in
-  `RNDEVTOOLS_SNAPSHOT_LIMITS` (from `@rndevtools/core/desktop-protocol`) is
-  trimmed to its newest rows, and the client records a warning in its
-  diagnostics. The broker rejects a whole snapshot that is over any limit.
+- The broker rejects a whole snapshot that is over any bound it validates, so
+  the client fits each one before it sends it, with `fitDesktopSnapshot` from
+  `@rndevtools/core/desktop-protocol`, and records a warning in its
+  diagnostics that names what it changed. A top-level list over its cap keeps
+  its last rows. A list inside a row keeps its newest rows if it is
+  chronological, such as samples, and its first rows if it is ordered, such as
+  keys, sources, variables, steps and files; the caps are in `RNDEVTOOLS_SNAPSHOT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`. A text over its limit
+  (`RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS`) is cut without splitting a surrogate
+  pair. A number outside its range (`RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`) is
+  clamped, an integer's fraction is cut off, and one that is not finite is
+  dropped from an optional field, written as `null` in a nullable one and made
+  the lower bound of its range in a required one. A map of headers keeps its
+  first fields and loses a field whose name is too long. The identity history
+  keeps the sessions that started latest, whichever end of the list a host
+  puts them at, and a cut of performance samples raises `droppedSampleCount`
+  by the samples removed, which is what the desktop's performance panel reads
+  to say that samples were dropped. The desktop still redacts and validates
+  what arrives; the client only bounds, so a value of the wrong shape, such as
+  an empty identifier, still reaches the schema.
 
 Authorization is checked again while an action runs. When the host passes
 `subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`), a
