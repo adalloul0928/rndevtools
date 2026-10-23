@@ -417,6 +417,12 @@ Desktop discovery waits 2.5, 5, 10, 20, then at most 30 seconds between
 unsuccessful candidate sweeps. Candidates within a sweep still advance promptly.
 A successful connection resets discovery backoff; `stop()` cancels pending retries.
 
+Each device ID has one active desktop client per JavaScript runtime, including
+Fast Refresh. Starting a replacement stops the earlier client; an old handle
+cannot stop the replacement. Always call the returned `stop()` from your
+host effect cleanup. Use distinct IDs for distinct devices. A client replaced
+by the broker retires rather than reconnecting and evicting its replacement.
+
 `getToolsRevision` is an optional nonnegative safe integer covering all data your
 `captureTools` projects. Advance it whenever that data changes. An unchanged
 revision avoids rebuilding and serializing the snapshot; client diagnostics still

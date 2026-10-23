@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- A replacement desktop client stops the earlier owner of its device ID, including
+  across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
@@ -263,6 +265,9 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Restore sources reject identifiers outside the persisted ASCII alphabet during
+  registration, before a capture can fail to save.
+
 - Capability registry notifications isolate failing listeners, so healthy observers
   still receive the committed capability state.
 - Reinstalled console capture leaves forwarded wrappers from old subscriptions
@@ -274,6 +279,8 @@
 - Metro pruning checks the finished dependency graph before serialization, catching
   later resolver wrappers that bypass replacement. Artifact verification remains required.
 
+- Desktop header projections redact names, omit accessors and oversized values,
+  and bound total redaction work before storing the projection.
 - Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
   and serialization while retaining heartbeats and client diagnostic updates.
 
@@ -314,6 +321,9 @@
   a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
+
+- Resuming a saved Supabase stack now checks capacity. Config reloads recheck HEAD
+  inside the lock and before each start, including automatic CLI restarts.
 
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
@@ -359,6 +369,8 @@
   holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
   of a snapshot past its bound, then requires the schema to reject the
   snapshot as it stands and accept it fitted. No bound changed.
+- The agent socket reserves bounded connection headroom to answer excess callers
+  with a retryable busy response while keeping the eight-handler limit.
 - The agent hook only redirects Simulator mutations and Metro starts while
   the desktop is reachable; unrelated shell commands never run a reachability probe.
 

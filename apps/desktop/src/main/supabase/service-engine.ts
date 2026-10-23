@@ -3047,6 +3047,7 @@ export class SupabaseEngine implements SupabaseServiceApi {
 								stackId: view.id,
 								mode: 'resume',
 								exclusions: this.exclusionsFor(view.id),
+								precondition: () => this.stillOnBranch(view),
 							},
 							job
 						);
@@ -5168,7 +5169,9 @@ export class SupabaseEngine implements SupabaseServiceApi {
 						!active.stackIds.includes(stackId) &&
 						(active.kind === 'create' ||
 							active.kind === 'resume' ||
-							active.kind === 'recreate')
+							active.kind === 'recreate' ||
+							(active.kind === 'restart' &&
+								!this.isLive(active.stackIds[0] ?? '')))
 				).length;
 			const sysv = this.#sysv;
 			const { cap } = supabaseRunningCap({
