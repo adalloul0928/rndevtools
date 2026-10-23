@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Recognize Expo fetch cancellation wrappers and preserved abort causes without
+  inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
   of returning cleanup after applying. Failed applies are undone immediately;
   failed cleanup stays available for an explicit retry. See the core README's
