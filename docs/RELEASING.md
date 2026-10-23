@@ -117,20 +117,24 @@ desktop-only preview.
 
 ### Combined desktop and npm releases
 
-Configure and validate every required repository secret before using this path.
-The Release workflow requires `HEROUI_AUTH_TOKEN`, `APPLE_TEAM_ID`,
-`MAC_CERTIFICATE_P12`, `MAC_CERTIFICATE_PASSWORD`, `APPLE_ID` and
-`APPLE_APP_SPECIFIC_PASSWORD` as repository secrets. The P12 must hold a
-Developer ID Application identity, not an Apple Development identity. The
-workflow validates and stores notarization credentials in its ephemeral
-runner's Keychain, runs the checks, and retains the verified DMG, manifest and
-checksums as Actions artifacts.
+The `desktop-app` job uses the `release-signing` GitHub environment. Configure
+its deployment policy to allow **tags matching `v*` only**, with no branch
+policies. Both the workflow condition and the environment policy restrict
+signing to version tags; a manual dispatch must select an existing `v*` tag.
+Dispatching from a branch skips signing and npm publication.
 
-Manual dispatch builds review artifacts only. A matching version tag also
-prepares a **draft** GitHub release. Review the actual artifacts and clean-Mac
-installation before explicitly publishing that draft. Tag runs retain the
-existing npm publication job, after the desktop gate succeeds; it additionally
-requires `NPM_TOKEN`. Manual dispatch does not publish npm packages.
+Store `APPLE_TEAM_ID`, `MAC_CERTIFICATE_P12`, `MAC_CERTIFICATE_PASSWORD`,
+`APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD` in that environment, not as
+repository secrets. The P12 must hold a Developer ID Application identity.
+Those values are available only to the signing step, after installation and
+quality checks. `HEROUI_AUTH_TOKEN` is needed only by the install step; keep it
+in the environment or configure it separately for licensed CI checks.
+
+A version tag prepares a **draft** GitHub release. Review the verified DMG,
+manifest, checksums and clean-Mac installation before publishing the draft.
+Tag runs retain the npm publication job after the desktop gate succeeds; it
+additionally requires `NPM_TOKEN`. This repository currently has no release
+secrets, so configuring the environment alone does not enable a release.
 
 ## Local development candidate
 
