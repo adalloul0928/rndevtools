@@ -50,6 +50,12 @@ export type DesktopClientHost = {
 	captureTools: (
 		diagnostics: readonly DesktopDiagnostic[],
 	) => DesktopDeviceToolsSnapshot;
+	/**
+	 * Optional cheap revision of every value captureTools projects. Advance this
+	 * nonnegative safe integer whenever that data changes. Unchanged revisions
+	 * skip capture and serialization; absent, invalid or failed reads keep polling.
+	 */
+	getToolsRevision?: () => number;
 	/** Identifies this device and build to the desktop. */
 	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
 	/**
@@ -333,6 +339,8 @@ type DesktopOutbox = {
 	snapshotDue: boolean;
 	lastSnapshotAt: number;
 	lastSnapshotBytes: number;
+	lastToolsRevision: number | undefined;
+	lastDiagnosticSequence: number;
 	flushTimer: ReturnType<typeof setTimeout> | undefined;
 };
 
@@ -756,6 +764,20 @@ export function startDesktopClient(
 		);
 	};
 
+	const toolsRevision = (): number | undefined => {
+		try {
+			const value = host.getToolsRevision?.();
+			return typeof value === 'number' &&
+				Number.isSafeInteger(value) &&
+				value >= 0
+				? value
+				: undefined;
+		} catch {
+			// A revision source is only an optimization; keep capturing if it fails.
+			return undefined;
+		}
+	};
+
 	const serializeSnapshot = (
 		target: WebSocket,
 	): { serialized: string; bytes: number } | undefined => {
@@ -835,6 +857,16 @@ export function startDesktopClient(
 			// Capture only once there is room, so a deferred snapshot carries the
 			// latest state rather than the state when it was requested.
 			if (!budget.fits(current.lastSnapshotBytes)) break;
+			const revision = toolsRevision();
+			const diagnosticRevision = diagnosticSequence;
+			if (
+				revision !== undefined &&
+				revision === current.lastToolsRevision &&
+				diagnosticRevision === current.lastDiagnosticSequence
+			) {
+				current.snapshotDue = false;
+				return;
+			}
 			const snapshot = serializeSnapshot(target);
 			if (!snapshot) {
 				current.snapshotDue = false;
@@ -846,6 +878,8 @@ export function startDesktopClient(
 			if (sendSerialized(snapshot.serialized, target)) {
 				sequence += 1;
 				current.lastSnapshotAt = Date.now();
+				current.lastToolsRevision = revision;
+				current.lastDiagnosticSequence = diagnosticRevision;
 			}
 			return;
 		}
@@ -1127,6 +1161,8 @@ export function startDesktopClient(
 				snapshotDue: false,
 				lastSnapshotAt: 0,
 				lastSnapshotBytes: 0,
+				lastToolsRevision: undefined,
+				lastDiagnosticSequence: -1,
 				flushTimer: undefined,
 			};
 			const sentHello = sendWithinBudget(

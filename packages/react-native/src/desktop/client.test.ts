@@ -522,6 +522,55 @@ describe('desktop client', () => {
 		}
 	});
 
+	it('skips unchanged host projections while keeping heartbeats and changed snapshots', async () => {
+		jest.useFakeTimers();
+		let revision = 0;
+		const client = startDesktopClient({
+			host: { ...testHost, getToolsRevision: () => revision },
+			candidates: [BROKER_URL],
+		});
+		const socket = latestSocket();
+		try {
+			socket.open();
+			await jest.advanceTimersByTimeAsync(10_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(1);
+			expect(
+				sentMessages(socket).some((message) => message.type === 'heartbeat'),
+			).toBe(true);
+			revision += 1;
+			await jest.advanceTimersByTimeAsync(1_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(2);
+			await jest.advanceTimersByTimeAsync(5_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(2);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			socket.receive(consoleClear('unchanged-revision-action'));
+			await flushPromises();
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(3);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('falls back to polling if the optional revision callback fails', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: {
+				...testHost,
+				getToolsRevision: () => {
+					throw new Error('unavailable');
+				},
+			},
+			candidates: [BROKER_URL],
+		});
+		try {
+			latestSocket().open();
+			await jest.advanceTimersByTimeAsync(2_000);
+			expect(mockCaptureDesktopTools.mock.calls.length).toBeGreaterThan(1);
+		} finally {
+			client.stop();
+		}
+	});
+
 	it('opens a loopback candidate with the default connection options', () => {
 		const client = startDesktopClient({
 			host: testHost,

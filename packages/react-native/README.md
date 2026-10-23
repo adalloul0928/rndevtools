@@ -44,6 +44,8 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
     host: {
       // Project your registered diagnostics into a snapshot payload.
       captureTools: (diagnostics) => buildToolsSnapshot(diagnostics),
+      // Optional: a cheap revision of every value in that projection.
+      getToolsRevision: () => diagnosticsRevision,
       // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
       // Apply one desktop-issued action. Throw to reject it. `signal` aborts
@@ -413,3 +415,9 @@ Fast Refresh. Starting a replacement stops the earlier client; an old handle
 cannot stop the replacement. Always call the returned `stop()` from your
 host effect cleanup. Use distinct IDs for distinct devices. A client replaced
 by the broker retires rather than reconnecting and evicting its replacement.
+
+`getToolsRevision` is an optional nonnegative safe integer covering all data your
+`captureTools` projects. Advance it whenever that data changes. An unchanged
+revision avoids rebuilding and serializing the snapshot; client diagnostics still
+trigger updates and heartbeats continue. Hosts without a revision source, or with
+a failed/invalid revision read, retain the once-per-second capture fallback.
