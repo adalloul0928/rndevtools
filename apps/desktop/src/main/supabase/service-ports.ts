@@ -56,11 +56,12 @@ export type SupabaseOperationContext = Readonly<{
 }>;
 
 /**
- * An agent's `supabase` call, with the identity from its request envelope.
+ * An agent's `supabase` call, with the identity the desktop verified for the
+ * connection it arrived on.
  */
 export type SupabaseAgentContext = Readonly<{
 	requestId: string;
-	/** Absent when the CLI could not tell which session it runs in. */
+	/** Absent for a request that claims no session. */
 	holder?: DeviceHolder | undefined;
 	synthetic: boolean;
 	/** Where the session works; how a synthetic holder is matched. */

@@ -14,6 +14,7 @@ import type {
 } from '../shared/agent-protocol';
 import {
 	type DeviceAccessDecision,
+	type DeviceRequester,
 	isPathInside,
 	isSyntheticHolder,
 } from '../shared/device-hold';
@@ -68,7 +69,11 @@ import {
 	supabaseBranchLabel,
 	supabaseDoctorInfoSchema,
 } from '../shared/supabase-protocol';
-import { AgentCliError, type AgentCliHandler } from './agent-cli-service';
+import {
+	AgentCliError,
+	type AgentCliHandler,
+	type AgentCliHandlerContext,
+} from './agent-cli-service';
 import { TERMINAL_JOB_STATUSES, waitForJob } from './job-wait';
 import { NativeHostResponseError } from './native-host-client';
 import type { NativePlanResult } from './native-plan';
@@ -169,7 +174,13 @@ type LanePort = {
 	refresh: () => Promise<LaneState>;
 	runOperation: (
 		operation: LaneOperation,
-		signal: AbortSignal
+		signal: AbortSignal,
+		/**
+		 * `anonymous` for a start from a request with no verified identity, so
+		 * the lane service holds it to free devices when its turn comes, and
+		 * does not read its absent agent as the operator.
+		 */
+		options?: { requester?: 'anonymous' }
 	) => Promise<LaneOperationReceipt>;
 };
 
@@ -186,14 +197,16 @@ type AgentPort = {
 	 * it, send it input, install on it, slim it (apply, undo or restore), run a
 	 * recipe on it, cancel its jobs, or stop its recordings. A device is free
 	 * or held (by a lane or a claim); on a held one only the holder may, and an
-	 * abandoned hold is still enforced until its releaseAt. The router does not
-	 * ask when a session stops or cancels a recording it started, which it may
-	 * always do, even on a device another session holds. Not gated at all: act,
-	 * network set and clear, record start, recipe cancel, and the reads.
+	 * abandoned hold is still enforced until its releaseAt. An anonymous
+	 * request (no verified identity) may use free devices only. The router
+	 * does not ask when a session stops or cancels a recording it started,
+	 * which it may always do, even on a device another session holds. Not
+	 * gated at all: act, network set and clear, record start, recipe cancel,
+	 * and the reads.
 	 */
 	access?: (
 		simulatorUdid: string,
-		requester: { kind: AgentKind; sessionId: string } | undefined
+		requester: DeviceRequester
 	) => DeviceAccessDecision;
 };
 
@@ -758,6 +771,18 @@ async function releaseEverything(
 const MUTATING_SLIMMING_OPERATIONS = new Set(['apply', 'undo', 'restore']);
 
 /**
+ * The Supabase operations that act for a holder: `up` adds the caller's hold,
+ * `down` drops it, and `reset` and `destroy` depend on whether the caller
+ * holds the stack. The other operations only read.
+ */
+const SUPABASE_OPERATIONS_FOR_HOLDER: ReadonlySet<string> = new Set([
+	'up',
+	'down',
+	'reset',
+	'destroy',
+]);
+
+/**
  * Builds the slimming action for a CLI command. Mutations carry the exact
  * confirmation literal the schema demands (the CLI is a trusted local peer
  * acting for a named session; the confirmation protects against stray payloads,
@@ -824,17 +849,39 @@ function slimmingActionFor(
 }
 
 /**
- * Refuses an agent's request to touch a Simulator another holder has. The
- * operator (no agent on the request) is never refused here; the lane and
- * slimming services keep their own structural rules.
+ * Refuses a request that names an agent session the desktop could not verify:
+ * a CLI that sent no pid, or one that did not prove it owns the connection.
+ * Such a caller can neither act as the session it names nor pass as nobody,
+ * so it gets no hold, claim or release and no device-gated work. A verified
+ * caller passes, and so does an anonymous one (no claim at all), which is
+ * unprivileged where the work is gated.
+ */
+function refuseUnverifiedClaim(context: AgentCliHandlerContext): void {
+	if (context.identity.status !== 'unverified') return;
+	throw new AgentCliError({
+		code: 'agent_identity_unverified',
+		message: context.identity.reason,
+		retryable: false,
+		recovery:
+			'Update the rndevtools CLI and run it from inside the agent session, so RN Devtools can verify which process sent the request.',
+	});
+}
+
+/**
+ * Refuses a request to touch a Simulator another holder has. A verified
+ * session is judged as itself, an anonymous request as nobody (free devices
+ * only), and an unverified claim is refused outright. The operator never
+ * comes through here; the lane and slimming services keep their own
+ * structural rules.
  */
 function assertDeviceAccess(
 	agents: AgentPort | undefined,
 	simulatorUdid: string,
-	requester: { kind: AgentKind; sessionId: string } | undefined
+	context: AgentCliHandlerContext
 ): void {
-	if (!agents?.access || !requester) return;
-	const decision = agents.access(simulatorUdid, requester);
+	refuseUnverifiedClaim(context);
+	if (!agents?.access) return;
+	const decision = agents.access(simulatorUdid, context.agent ?? 'anonymous');
 	if (decision.allowed) return;
 	throw new AgentCliError({
 		code: 'device_held',
@@ -1453,8 +1500,14 @@ function createRoutes({
 				const mapped = supabaseAgentOperationFromCommand(command);
 				if (!mapped.ok) required(mapped.message);
 				assertSupabaseManaged(supabase.getState());
-				// Identity comes from the envelope only. A shared MCP identity is
-				// matched by worktree, so it carries no session directory.
+				// up, down, reset and destroy act for a holder, so a claim the
+				// desktop could not verify gets none of them. The reads name no
+				// holder, and a request that claims nothing runs as no one. A
+				// shared MCP identity is matched by worktree, so it carries no
+				// session directory.
+				if (SUPABASE_OPERATIONS_FOR_HOLDER.has(mapped.operation.operation)) {
+					refuseUnverifiedClaim(context);
+				}
 				const holder = context.agent;
 				const sessionCwd = sessionCwdOf(agents, holder);
 				let result: SupabaseAgentResult;
@@ -1496,7 +1549,7 @@ function createRoutes({
 							'Boot it (rndevtools lane up, or the desktop app) and retry.',
 					});
 				}
-				assertDeviceAccess(agents, target.udid, context.agent);
+				assertDeviceAccess(agents, target.udid, context);
 				try {
 					return await simulatorInput(
 						{ ...command.input, udid: target.udid },
@@ -1555,6 +1608,9 @@ function createRoutes({
 						'Update RN Devtools and retry.'
 					);
 				}
+				// A claim or release is a session's own: a claim the desktop could
+				// not verify gets neither, and a request with none is nobody's.
+				refuseUnverifiedClaim(context);
 				if (!context.agent) {
 					throw new AgentCliError({
 						code: 'no_agent_session',
@@ -1582,7 +1638,7 @@ function createRoutes({
 				// Nothing is awaited between this check and the claim, so two
 				// sessions racing for a free device cannot both get it.
 				if (command.kind === 'claim') {
-					assertDeviceAccess(agents, target.udid, context.agent);
+					assertDeviceAccess(agents, target.udid, context);
 				}
 				const state = await agents.runOperation(
 					command.kind === 'claim'
@@ -1673,7 +1729,7 @@ function createRoutes({
 				if (!target) required('native install requires udid.');
 				// Installing can replace the dev client a lane runs, so only the
 				// device's holder may.
-				assertDeviceAccess(agents, target.udid, context.agent);
+				assertDeviceAccess(agents, target.udid, context);
 				if (installed) {
 					return {
 						...plan,
@@ -1956,7 +2012,7 @@ function createRoutes({
 				// A session may always stop a recording it started. Anyone else's
 				// recording on a held device is for the holder to stop.
 				if (!recordings.startedBy(job.id, context.agent)) {
-					assertDeviceAccess(agents, target.udid, context.agent);
+					assertDeviceAccess(agents, target.udid, context);
 				}
 				if (!simulator.cancelJob(job.id))
 					required('The recording is no longer active.');
@@ -2040,7 +2096,7 @@ function createRoutes({
 						slimming.getState(),
 						command.jobId
 					)) {
-						assertDeviceAccess(agents, udid, context.agent);
+						assertDeviceAccess(agents, udid, context);
 					}
 				}
 				return {
@@ -2071,7 +2127,7 @@ function createRoutes({
 					// here first gives the agent the typed device_held error with its
 					// recovery text instead of a generic action_rejected.
 					for (const udid of canonicalUdids) {
-						assertDeviceAccess(agents, udid, context.agent);
+						assertDeviceAccess(agents, udid, context);
 					}
 				}
 				const job = ensureComplete(
@@ -2118,7 +2174,7 @@ function createRoutes({
 						// A recipe can shut down, boot, relaunch, and reconfigure every
 						// target, so each must be free or the caller's.
 						for (const udid of targetUdids) {
-							assertDeviceAccess(agents, udid, context.agent);
+							assertDeviceAccess(agents, udid, context);
 						}
 						return await recipes.run(recipeId, targetUdids);
 					}
@@ -2140,11 +2196,10 @@ function createRoutes({
 					);
 				}
 				const operationId = actionId(context.requestId);
-				// The CLI fills `agent` from the session variables. Over MCP, Codex
-				// passes none, and the envelope's synthetic `mcp-*` id is all there
-				// is; without it the lane would belong to the operator and refuse
-				// the very session that started it.
-				const laneAgent = command.agent ?? context.agent;
+				// The lane's holder is the identity the connection verified, which
+				// for a Codex MCP caller is the envelope's synthetic `mcp-*` id. A
+				// request with none starts a lane that belongs to the operator.
+				const laneAgent = context.agent;
 				switch (command.operation) {
 					case 'ls': {
 						const state = await lanes.refresh();
@@ -2160,6 +2215,9 @@ function createRoutes({
 						const worktreePath =
 							command.worktreePath ??
 							required('lane up requires worktreePath.');
+						// A lane is a hold, so an unverified claim starts none, whether or
+						// not it names a device.
+						refuseUnverifiedClaim(context);
 						// A device another agent holds is refused before anything boots:
 						// the named one or, without a udid, the device of the app's
 						// existing lane, which the lane service resumes. With neither,
@@ -2173,7 +2231,7 @@ function createRoutes({
 								.getState()
 								.lanes.find((lane) => laneAppDirectory(lane) === appDirectory)
 								?.simulatorUdid;
-						if (udid) assertDeviceAccess(agents, udid, laneAgent);
+						if (udid) assertDeviceAccess(agents, udid, context);
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
@@ -2191,7 +2249,10 @@ function createRoutes({
 								...(command.backend ? { backend: command.backend } : {}),
 								...(laneAgent ? { agent: laneAgent } : {}),
 							},
-							context.signal
+							context.signal,
+							context.identity.status === 'anonymous'
+								? { requester: 'anonymous' }
+								: undefined
 						);
 						if (receipt.completed && receipt.deviceRequest) {
 							return {
@@ -2204,7 +2265,7 @@ function createRoutes({
 					case 'launch': {
 						const lane = laneForTarget(lanes.getState(), command);
 						// Launching drives the lane's device, so only its holder may.
-						assertDeviceAccess(agents, lane.simulatorUdid, laneAgent);
+						assertDeviceAccess(agents, lane.simulatorUdid, context);
 						const receipt = await lanes.runOperation(
 							{
 								actionId: operationId,
@@ -2219,7 +2280,7 @@ function createRoutes({
 					}
 					case 'down': {
 						const lane = laneForTarget(lanes.getState(), command);
-						assertDeviceAccess(agents, lane.simulatorUdid, context.agent);
+						assertDeviceAccess(agents, lane.simulatorUdid, context);
 						const receipt = await lanes.runOperation(
 							{ actionId: operationId, kind: 'lane.stop', laneId: lane.id },
 							context.signal
