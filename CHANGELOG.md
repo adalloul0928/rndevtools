@@ -316,6 +316,9 @@
 
 ### Desktop app
 
+- Local ad-hoc macOS packages launch without team-based library validation;
+  Developer ID release signing keeps hardened runtime and its existing gates.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 
