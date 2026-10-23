@@ -43,6 +43,16 @@ const MAX_TITLE_BYTES = 4 * 1024;
 const ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+/** The ASCII identifier alphabet and byte limit persisted source records accept. */
+export function isRestoreSourceId(value: unknown): value is string {
+	return (
+		typeof value === 'string' &&
+		value.length > 0 &&
+		value.length <= MAX_ID_BYTES &&
+		ID_PATTERN.test(value)
+	);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -107,7 +117,7 @@ function parseSnapshot(
 		'Restore source id',
 		MAX_ID_BYTES,
 	);
-	if (!ID_PATTERN.test(sourceId))
+	if (!isRestoreSourceId(sourceId))
 		throw new Error('Restore source id is invalid.');
 	const sourceTitle = boundedText(
 		value.sourceTitle,

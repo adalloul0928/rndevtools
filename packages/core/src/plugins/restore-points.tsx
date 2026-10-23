@@ -38,6 +38,7 @@ import type {
 import {
 	DEFAULT_RESTORE_POINTS_KEY,
 	estimateRestorePointBytes,
+	isRestoreSourceId,
 	RestorePointRepository,
 	type RestorePointStorage,
 } from './restore-repository';
@@ -405,6 +406,11 @@ function validateSources(
 		}
 		if (sourceId.length > 256) {
 			throw new Error('Restore-point source ids cannot exceed 256 characters.');
+		}
+		if (!isRestoreSourceId(sourceId)) {
+			throw new Error(
+				'Restore-point source ids may contain only ASCII letters, numbers, periods, underscores, colons, and hyphens.',
+			);
 		}
 		if (
 			typeof sourceTitle !== 'string' ||

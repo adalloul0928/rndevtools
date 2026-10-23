@@ -265,6 +265,9 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Restore sources reject identifiers outside the persisted ASCII alphabet during
+  registration, before a capture can fail to save.
+
 - Capability registry notifications isolate failing listeners, so healthy observers
   still receive the committed capability state.
 - Reinstalled console capture leaves forwarded wrappers from old subscriptions
