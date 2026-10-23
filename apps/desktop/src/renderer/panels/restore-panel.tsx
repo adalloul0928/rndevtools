@@ -312,27 +312,27 @@ export function RestorePanel() {
 								);
 							})()}
 							<div className="mb-5 grid grid-cols-3 overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025]">
-								<div className="border-r border-foreground/8 p-4">
+								<div className="min-w-0 border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Sources
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
 										{selected.sources.length}
 									</p>
 								</div>
-								<div className="border-r border-foreground/8 p-4">
+								<div className="min-w-0 border-r border-foreground/8 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Size
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
 										{formatBytes(selected.estimatedBytes)}
 									</p>
 								</div>
-								<div className="p-4">
+								<div className="min-w-0 p-4">
 									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
 										Lifetime
 									</p>
-									<p className="mb-0 mt-1 font-mono text-lg text-(--foreground)">
+									<p className="mb-0 mt-1 truncate font-mono text-base text-(--foreground)">
 										Persistent
 									</p>
 								</div>

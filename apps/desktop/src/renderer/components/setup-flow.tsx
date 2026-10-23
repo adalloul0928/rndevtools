@@ -16,7 +16,7 @@ import {
 import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { ProgressBar, useGetStarted } from '@/components/get-started';
 import { TargetStatePill } from '@/components/simulator-ui';
-import { CodePreview } from '@/components/ui';
+import { CodePreview, ConfirmAction } from '@/components/ui';
 import {
 	adjacentSetupStep,
 	closeSetup,
@@ -24,6 +24,8 @@ import {
 	SETUP_STEPS,
 	type SetupStep,
 	setSetupStep,
+	setupActionError,
+	shouldOpenSetup,
 	useOnboarding,
 } from '@/lib/onboarding';
 import { shortPath } from '@/simulator/fleet-model';
@@ -80,6 +82,13 @@ const STEP_ICONS: Partial<
 	extras: Layers3,
 };
 
+/**
+ * What Set up coding agents changes on this Mac, shown before it runs. Kept in
+ * step with the Local agent CLI section in Settings.
+ */
+const AGENT_SETUP_DISCLOSURE =
+	'Registers the bundled rndevtools CLI as an MCP server with Claude Code, Codex, Cursor and Kiro, installs the lanes skill where each discovers skills, links the CLI into ~/.local/bin, and adds a user-level Claude Code hook that steers raw simctl and Metro commands back to RN Devtools in every project. Existing configuration is preserved.';
+
 const CLIENT_SNIPPET = `import {
   shouldStartDesktopClient,
   startDesktopClient,
@@ -109,17 +118,21 @@ export function SetupFlow() {
 	const lanes = useLaneRuntime();
 	const decided = useRef(false);
 	useEffect(() => {
-		if (decided.current || lanes.isLoading) return;
+		// A failed read leaves `hasLoaded` false, so an existing user whose
+		// lane state could not be read is not shown first-run setup.
+		if (decided.current || !lanes.hasLoaded) return;
 		decided.current = true;
 		if (
-			!setupDone &&
-			lanes.state.repositories.length === 0 &&
-			lanes.state.lanes.length === 0
+			shouldOpenSetup({
+				setupDone,
+				repositories: lanes.state.repositories.length,
+				lanes: lanes.state.lanes.length,
+			})
 		) {
 			openSetup();
 		}
 	}, [
-		lanes.isLoading,
+		lanes.hasLoaded,
 		lanes.state.lanes.length,
 		lanes.state.repositories.length,
 		setupDone,
@@ -194,16 +207,23 @@ function SetupWindow({ step }: { step: SetupStep }) {
 					) : (
 						<img alt="" className="setup-app-icon" src={appIcon} />
 					)}
-					<div className="setup-text">
+					{/* Focus stays on the same primary button from step to step, so
+					    nothing would announce a new step without a live region. */}
+					<div aria-atomic="true" aria-live="polite" className="setup-text">
 						<h1 id="setup-title">{copy.title}</h1>
 						<p>{copy.body}</p>
 					</div>
 					<SetupAside step={step} />
 				</div>
 				<div className="setup-stage">
-					<div className="setup-stage-card">
+					<section
+						aria-label={`${copy.title}: details`}
+						className="setup-stage-card"
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: the step's details scroll when they overflow (many worktrees, long snippets), and a scrolling region must be reachable from the keyboard
+						tabIndex={0}
+					>
 						<SetupStage step={step} />
-					</div>
+					</section>
 				</div>
 			</div>
 			<footer className="setup-footer">
@@ -253,6 +273,7 @@ function SetupWindow({ step }: { step: SetupStep }) {
 function SetupAside({ step }: { step: SetupStep }) {
 	const lanes = useLaneRuntime();
 	const simulator = useSimulatorRuntime();
+	const [repositoryError, setRepositoryError] = useState<string | null>(null);
 	if (step === 'welcome') {
 		return (
 			<p className="setup-note">
@@ -276,15 +297,29 @@ function SetupAside({ step }: { step: SetupStep }) {
 					}
 					size="sm"
 					variant="secondary"
-					onPress={() =>
-						void lanes.runOperation({ kind: 'lane.add-repository' })
-					}
+					onPress={async () => {
+						setRepositoryError(null);
+						const receipt = await lanes.runOperation({
+							kind: 'lane.add-repository',
+						});
+						setRepositoryError(
+							setupActionError(
+								receipt,
+								'The repository could not be added. Try again, or add it from Lanes.'
+							)
+						);
+					}}
 				>
 					<FolderGit2 className="h-3.5 w-3.5" />
 					{lanes.state.repositories.length > 0
 						? 'Add another repository…'
 						: 'Choose a repository…'}
 				</Button>
+				{repositoryError ? (
+					<p className="setup-error" role="alert">
+						{repositoryError}
+					</p>
+				) : null}
 				<p className="setup-note">
 					RN Devtools reads each worktree's app.json and never starts a native
 					build.
@@ -380,43 +415,58 @@ const CHECK_LABELS: Record<MacCheck['state'], string> = {
 function MacStage() {
 	const { state, isBridgeAvailable, runOnboardingOperation } =
 		useSimulatorRuntime();
+	const [xcodeError, setXcodeError] = useState<string | null>(null);
 	const checks = macChecks({
 		capability: state.capability,
 		runtimes: state.runtimes,
 		native: state.native,
 	});
 	return (
-		<ul className="setup-checks">
-			{checks.map((check) => {
-				const Icon = CHECK_ICONS[check.state];
-				return (
-					<li className={`setup-check is-${check.state}`} key={check.id}>
-						<Icon aria-hidden="true" className="setup-check-icon" />
-						<span className="setup-row-copy">
-							<strong>{check.name}</strong>
-							<span>{check.detail}</span>
-						</span>
-						<span className="setup-check-state">
-							{CHECK_LABELS[check.state]}
-						</span>
-						{check.fix === 'select-xcode' ? (
-							<Button
-								isDisabled={!isBridgeAvailable}
-								size="sm"
-								variant="secondary"
-								onPress={() =>
-									void runOnboardingOperation({
-										kind: 'toolchain.selectXcode',
-									})
-								}
-							>
-								Select Xcode…
-							</Button>
-						) : null}
-					</li>
-				);
-			})}
-		</ul>
+		<>
+			<ul className="setup-checks">
+				{checks.map((check) => {
+					const Icon = CHECK_ICONS[check.state];
+					return (
+						<li className={`setup-check is-${check.state}`} key={check.id}>
+							<Icon aria-hidden="true" className="setup-check-icon" />
+							<span className="setup-row-copy">
+								<strong>{check.name}</strong>
+								<span>{check.detail}</span>
+							</span>
+							<span className="setup-check-state">
+								{CHECK_LABELS[check.state]}
+							</span>
+							{check.fix === 'select-xcode' ? (
+								<Button
+									isDisabled={!isBridgeAvailable}
+									size="sm"
+									variant="secondary"
+									onPress={async () => {
+										setXcodeError(null);
+										const receipt = await runOnboardingOperation({
+											kind: 'toolchain.selectXcode',
+										});
+										setXcodeError(
+											setupActionError(
+												receipt,
+												'Xcode could not be selected. Try again from Settings.'
+											)
+										);
+									}}
+								>
+									Select Xcode…
+								</Button>
+							) : null}
+						</li>
+					);
+				})}
+			</ul>
+			{xcodeError ? (
+				<p className="setup-error" role="alert">
+					{xcodeError}
+				</p>
+			) : null}
+		</>
 	);
 }
 
@@ -596,11 +646,17 @@ function ExtrasStage() {
 							</ul>
 						) : null}
 					</span>
-					<Button
+					{/* It edits files outside this app for every project on the Mac,
+					    so it says what it changes before it runs, as Settings does. */}
+					<ConfirmAction
+						confirmLabel="Set up coding agents"
+						description={AGENT_SETUP_DISCLOSURE}
 						isDisabled={!isBridgeAvailable || agents.busy}
-						size="sm"
-						variant="secondary"
-						onPress={async () => {
+						title="Set up coding agents?"
+						tone="warning"
+						triggerLabel={agents.busy ? 'Setting up…' : 'Set up'}
+						triggerVariant="secondary"
+						onConfirm={async () => {
 							setAgents({ busy: true, lines: [] });
 							const receipt = await runOnboardingOperation({
 								kind: 'agentCli.setup',
@@ -612,9 +668,7 @@ function ExtrasStage() {
 									: [receipt.error ?? 'Setup failed.'],
 							});
 						}}
-					>
-						{agents.busy ? 'Setting up…' : 'Set up'}
-					</Button>
+					/>
 				</li>
 			</ul>
 			<p className="setup-stage-foot">

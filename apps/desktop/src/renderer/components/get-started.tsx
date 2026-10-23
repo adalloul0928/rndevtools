@@ -11,13 +11,20 @@ import {
 	TerminalSquare,
 	Waypoints,
 } from 'lucide-react';
-import { type ComponentType, useMemo, useState } from 'react';
-import { openSetup, setChecklistHidden, useOnboarding } from '@/lib/onboarding';
+import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import {
+	openSetup,
+	rememberCompletedTasks,
+	requestBootSimulator,
+	setChecklistHidden,
+	useOnboarding,
+} from '@/lib/onboarding';
 import {
 	type GetStartedTask,
 	type GetStartedTaskId,
 	getStartedProgress,
 	getStartedTasks,
+	withRememberedCompletion,
 } from '@/simulator/get-started-model';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import { useLaneRuntime } from '@/state/lane-runtime';
@@ -52,6 +59,9 @@ function runTask(id: GetStartedTaskId): void {
 			openSetup('app');
 			return;
 		case 'boot-simulator':
+			// Setting the hash alone did nothing when Simulators was already open;
+			// the panel now selects one to boot, or opens the create form.
+			requestBootSimulator();
 			window.location.hash = 'simulator/fleet';
 			return;
 		case 'start-lane':
@@ -69,19 +79,26 @@ function runTask(id: GetStartedTaskId): void {
 	}
 }
 
-/** The checklist, read from the runtimes: nothing is ticked by hand. */
+/**
+ * The checklist, read from the runtimes: nothing is ticked by hand. A task
+ * done once stays ticked, so it does not go backwards after a relaunch.
+ */
 export function useGetStarted() {
 	const simulator = useSimulatorRuntime();
 	const lanes = useLaneRuntime();
 	const desktop = useDesktopRuntime();
 	const { state: supabase } = useSupabaseState();
 	const recipe = useRecipeRuntime();
-	const tasks = useMemo(
+	const { completedTasks } = useOnboarding();
+	const live = useMemo(
 		() =>
 			getStartedTasks({
 				capability: simulator.state.capability,
 				repositories: lanes.state.repositories,
-				worktreeCount: lanes.state.worktrees.length,
+				// The task names the first repository, so count only its worktrees.
+				worktreeCount: lanes.state.worktrees.filter(
+					(worktree) => worktree.repositoryRoot === lanes.state.repositories[0]
+				).length,
 				bootedCount: simulator.state.devices.filter(
 					(device) => device.state === 'booted'
 				).length,
@@ -89,9 +106,8 @@ export function useGetStarted() {
 				// preview's in-memory device is not an app of yours, and the broker
 				// keeps offline sessions around for a day.
 				appSessionCount:
-					desktop.state?.devices.filter(
-						(device) => device.status === 'online'
-					).length ?? 0,
+					desktop.state?.devices.filter((device) => device.status === 'online')
+						.length ?? 0,
 				laneCount: lanes.state.lanes.length,
 				supabase: supabase.availability.platform.supported
 					? { running: supabase.capacity.running }
@@ -104,13 +120,22 @@ export function useGetStarted() {
 			simulator.state.devices,
 			simulator.state.captures.length,
 			lanes.state.repositories,
-			lanes.state.worktrees.length,
+			lanes.state.worktrees,
 			lanes.state.lanes.length,
 			desktop.state?.devices,
 			supabase.availability.platform.supported,
 			supabase.capacity.running,
 			recipe.state.recipes.length,
 		]
+	);
+	useEffect(() => {
+		rememberCompletedTasks(
+			live.filter((task) => task.done).map((task) => task.id)
+		);
+	}, [live]);
+	const tasks = useMemo(
+		() => withRememberedCompletion(live, completedTasks),
+		[live, completedTasks]
 	);
 	return { tasks, progress: getStartedProgress(tasks) };
 }
@@ -241,6 +266,15 @@ export function GetStartedChecklist({
 					onPress={() => {
 						setChecklistHidden(true);
 						onRun?.();
+						// This button and the card that opened it both unmount, which
+						// would drop focus to the page; hand it to the current tool.
+						requestAnimationFrame(() =>
+							document
+								.querySelector<HTMLElement>(
+									'.desktop-sidebar [aria-current="page"]'
+								)
+								?.focus()
+						);
 					}}
 				>
 					Hide Get started
@@ -251,6 +285,16 @@ export function GetStartedChecklist({
 }
 
 /** The sidebar's progress card; it opens the checklist until every task is done. */
+/**
+ * Keeps the checklist popover below the titlebar: bounded by the whole
+ * window, it grew to 683 of 700 px at the minimum size and covered the
+ * workspace switch. React Aria then limits its height to fit.
+ */
+function popoverBoundary(): { boundaryElement?: Element } {
+	const body = document.querySelector('.desktop-body');
+	return body ? { boundaryElement: body } : {};
+}
+
 export function GetStartedCard() {
 	const { checklistHidden } = useOnboarding();
 	const { progress } = useGetStarted();
@@ -277,7 +321,11 @@ export function GetStartedCard() {
 					</span>
 				) : null}
 			</Button>
-			<Popover.Content className="get-started-popover" placement="right bottom">
+			<Popover.Content
+				{...popoverBoundary()}
+				className="get-started-popover"
+				placement="right bottom"
+			>
 				<Popover.Dialog aria-label="Get started">
 					<GetStartedChecklist onRun={() => setOpen(false)} />
 				</Popover.Dialog>

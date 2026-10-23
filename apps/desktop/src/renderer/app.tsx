@@ -304,6 +304,17 @@ function isEditableTarget(target: EventTarget | null): boolean {
 	);
 }
 
+/**
+ * Whether a dialog, alert or popover is open. The window shortcuts switch
+ * tools and workspaces underneath an open overlay otherwise, so first-run
+ * setup could end up over a panel it never meant to show.
+ */
+function hasOpenOverlay(): boolean {
+	return (
+		document.querySelector('[role="dialog"], [role="alertdialog"]') !== null
+	);
+}
+
 export function App() {
 	const desktop = useDesktopRuntime();
 	const recipe = useRecipeRuntime();
@@ -313,6 +324,14 @@ export function App() {
 	const supabase = useSupabaseActions();
 	const [route, setRoute] = useState<WorkspaceRoute>(routeFromHash);
 	const [sidebarOpen, setSidebarOpen] = useState(true);
+	// At the minimum window size the tool list scrolls, and a tool opened by
+	// its shortcut or a link could sit below the fold; keep it in view.
+	useEffect(() => {
+		if (!sidebarOpen) return;
+		document
+			.querySelector<HTMLElement>('.desktop-sidebar [aria-current="page"]')
+			?.scrollIntoView({ block: 'nearest' });
+	}, [route.workspace, route.simulatorTool, route.connectedTool, sidebarOpen]);
 	const [statusOrder] = useState(createActionStatusOrder);
 	const [successTimers] = useState(createSuccessNoticeTimers);
 	// Every runtime that reports an actionStatus. Which of them the active tool
@@ -354,7 +373,8 @@ export function App() {
 				event.defaultPrevented ||
 				event.repeat ||
 				event.altKey ||
-				isEditableTarget(event.target)
+				isEditableTarget(event.target) ||
+				hasOpenOverlay()
 			) {
 				return;
 			}
@@ -1046,12 +1066,15 @@ function SimulatorContent({
 	const { state } = useSimulatorRuntime();
 	const { checklistHidden } = useOnboarding();
 	const { progress } = useGetStarted();
-	// While Get started shows in the sidebar it already says what is left.
-	const checklistShown = !checklistHidden && !progress.complete;
+	// The banner stays quiet while the first scan runs, and while the Get
+	// started card is already pointing at the Mac check. A remembered tick
+	// elsewhere in the checklist must not hide a Mac that stopped working.
+	const checklistCoversMac =
+		!checklistHidden && !progress.complete && progress.next?.id === 'check-mac';
 	return (
 		<>
-			{state.capability.status !== 'available' &&
-			!checklistShown &&
+			{state.capability.status === 'unavailable' &&
+			!checklistCoversMac &&
 			!TOOLS_WITHOUT_SETUP_BANNER.has(activeTool) ? (
 				<button
 					aria-label="Simulator setup needs attention · open Settings"
