@@ -145,6 +145,7 @@ export class DesktopHarness {
 		const userDataDir = mkdtempSync(join(tmpdir(), 'rndevtools-e2e-'));
 		const brokerPort = await freeLoopbackPort();
 		const app = await electron.launch({
+			timeout: 180_000,
 			// Playwright otherwise emulates `prefers-color-scheme: light`, which
 			// pinned every screenshot to the light theme. Null lets the window
 			// follow the appearance preference main sets on `nativeTheme`, as
@@ -167,7 +168,7 @@ export class DesktopHarness {
 				NODE_ENV: 'production',
 			},
 		});
-		const window = await app.firstWindow();
+		const window = await app.firstWindow({ timeout: 180_000 });
 		await window.waitForLoadState('domcontentloaded');
 		await window.waitForSelector('.desktop-provider', { timeout: 30_000 });
 		// A fresh profile would open first-run setup over the panels under test.
