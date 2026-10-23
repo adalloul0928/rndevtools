@@ -290,6 +290,8 @@
 
 ### Desktop app
 
+- Every agent-requested Supabase reset requires operator confirmation, even for
+  a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
 
