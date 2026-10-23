@@ -260,6 +260,9 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Capability registry notifications isolate failing listeners, so healthy observers
+  still receive the committed capability state.
+
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
