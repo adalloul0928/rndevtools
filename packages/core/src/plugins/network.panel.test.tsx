@@ -213,6 +213,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
 	autocorrectionDisabled: () => 'autocorrectionDisabled',
 	badge: (value: unknown) => ({ badge: value }),
 	buttonStyle: (value: unknown) => value,

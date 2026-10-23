@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
   and omitting undeclared fields instead of entering a broker rejection loop.
 
