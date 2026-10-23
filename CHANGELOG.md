@@ -327,6 +327,9 @@
 
 ### Desktop app
 
+- CI notarization uses a temporary owner-only API key file, with cleanup on
+  failure, instead of placing an app-specific password in process arguments.
+
 - Package release verification and packing run without publishing credentials.
   A separate runner publishes checked tarballs with lifecycle scripts disabled
   and npm trusted publishing; long-lived npm tokens are no longer used.
