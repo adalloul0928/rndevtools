@@ -36,6 +36,7 @@ import {
   getDevtoolsAuthorization,
   shouldStartDesktopClient,
   startDesktopClient,
+  subscribeToDevtoolsAuthorization,
 } from '@rndevtools/react-native';
 
 if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
@@ -46,10 +47,13 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
       // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
       // Apply one desktop-issued action. Throw to reject it. `signal` aborts
-      // when the client stops waiting for the action.
+      // when the client stops waiting for the action, or authorization changes.
       runAction: async (action, { signal }) => applyAction(action, signal),
       // The client refuses actions while this reports disabled.
       getAuthorization: getDevtoolsAuthorization,
+      // Optional: lets the client abort an action the moment its grant is
+      // revoked, rather than when the action settles.
+      subscribeToAuthorization: subscribeToDevtoolsAuthorization,
     },
   });
 }
@@ -92,6 +96,15 @@ the broker's contract itself:
   the lower bound of its range in a required one. A map of headers keeps its
   first fields and loses a field whose name is too long. The desktop still
   redacts and validates what arrives; the client only bounds.
+
+Authorization is checked again while an action runs. When the host passes
+`subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`), a
+revocation or an owner change aborts the action's `signal` at that moment, so a
+host holding a prompt can dismiss it and a host that can stop and roll back the
+work should. The desktop is told the action failed and its outcome is unknown,
+and the next queued action is refused. Without the subscription, the client can
+only compare the grant when the action settles, so signing out and back in as
+the same user during an action goes unnoticed.
 
 The root barrel imported above also loads the camera provider and the image
 overlay, and with them the optional `expo-file-system` peer. A headless host
@@ -231,7 +244,16 @@ verifier is what still catches a config that stopped pruning. The `--marker`
 flag adds strings specific to your own panels;
 `verifyPrunedBundle(root, markers)` from
 `@rndevtools/react-native/verify-bundle` checks the built-in markers as well
-as the ones you pass.
+as the ones you pass. A Hermes bytecode file (`.hbc`, and the `.bundle` and
+`.jsbundle` files that Xcode and Gradle embed) is searched as bytes, in both of
+the encodings Hermes stores a string literal in: 8-bit when every character is
+ASCII, and UTF-16 otherwise. A marker with a non-ASCII character, or an ASCII
+marker inside a literal that has one, is found either way. Hermes keeps its
+literals back to back, so the two opt-in checks below read that text without
+literal boundaries: a bare loopback URL with no port or path, followed directly
+by another literal's first character, is missed. A minifier may also write a
+non-ASCII character in a text bundle as an escape such as `\xe9`, which
+`--marker` does not match; the same marker compiled to bytecode is found.
 
 Two opt-in checks catch a release bundle that was built against a developer's
 machine, for example after a local backend's URL and keys were copied into a

@@ -8,10 +8,13 @@ import {
 	RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import { utf8ByteLength } from '@rndevtools/core/serialize';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 import {
 	disableDevtoolsAuthorization,
 	getDevtoolsAuthorization,
 	setDevtoolsAuthorization,
+	subscribeToDevtoolsAuthorization,
 } from '../authorization';
 import type {
 	DesktopClientHandle,
@@ -95,7 +98,14 @@ class FakeWebSocket {
 		this.onclose?.({ code: code ?? 1005, reason: reason ?? '' });
 	});
 
-	constructor(readonly url: string) {
+	/** Every argument after the URL, exactly as the client passed them. */
+	readonly connectionArguments: readonly unknown[];
+
+	constructor(
+		readonly url: string,
+		...connectionArguments: unknown[]
+	) {
+		this.connectionArguments = connectionArguments;
 		FakeWebSocket.instances.push(this);
 	}
 
@@ -415,6 +425,80 @@ describe('desktop client', () => {
 		jest.useRealTimers();
 	});
 
+	it('opens a loopback candidate with the default connection options', () => {
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			expect(latestSocket().url).toBe(BROKER_URL);
+			expect(latestSocket().connectionArguments).toEqual([]);
+		} finally {
+			client.stop();
+		}
+	});
+
+	describe('on an Android emulator', () => {
+		// Discovery sweeps 10.0.2.2 only on an Android emulator, and the client
+		// keeps it only when it discovered the candidates itself, so the alias is
+		// reached through the defaults rather than an explicit candidate list.
+		let replaced: { restore(): void }[] = [];
+
+		beforeEach(() => {
+			replaced = [
+				jest.replaceProperty(Platform, 'OS', 'android'),
+				jest.replaceProperty(Device, 'isDevice', false),
+			];
+		});
+
+		afterEach(() => {
+			for (const property of replaced) property.restore();
+		});
+
+		it('leaves an explicit candidate on the alias with the default options', () => {
+			// An explicit URL is not the alias the client discovered itself; it
+			// carries a token, which the broker checks instead of the origin.
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: ['wss://10.0.2.2:47931/device?token=0123456789abcdef'],
+			});
+			try {
+				expect(latestSocket().url).toBe(
+					'wss://10.0.2.2:47931/device?token=0123456789abcdef',
+				);
+				expect(latestSocket().connectionArguments).toEqual([]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('presents a loopback origin to the broker behind the host alias', async () => {
+			jest.useFakeTimers();
+			const client = startDesktopClient({ host: testHost });
+			try {
+				const alias = latestSocket();
+				expect(alias.url).toBe('ws://10.0.2.2:47931/device');
+				// React Native's third constructor argument. Without it the Android
+				// transport sends `Origin: http://10.0.2.2:47931`, which the broker
+				// refuses with 403 while it has no token.
+				expect(alias.connectionArguments).toEqual([
+					undefined,
+					{ headers: { origin: 'http://127.0.0.1:47931' } },
+				]);
+
+				// The next candidate is the emulator's own loopback, where React
+				// Native's default origin is already a loopback one.
+				alias.serverClose(1006, '');
+				await reconnectDelayMs();
+				const loopback = latestSocket();
+				expect(loopback.url).toBe('ws://127.0.0.1:47931/device');
+				expect(loopback.connectionArguments).toEqual([]);
+			} finally {
+				client.stop();
+			}
+		});
+	});
+
 	it('rechecks the authorized owner before queued actions execute', async () => {
 		let finishFirstAction: (() => void) | undefined;
 		mockRunDesktopAction.mockImplementationOnce(
@@ -672,6 +756,362 @@ describe('desktop client', () => {
 			expect(jest.getTimerCount()).toBe(0);
 		},
 	);
+
+	describe('when authorization is revoked while an action runs', () => {
+		const REVOKED_ERROR =
+			'Internal tools authorization changed during execution; its outcome is unknown.';
+		const REVOKED_DIAGNOSTIC =
+			'Desktop action revoked: clear; internal tools authorization changed during execution.';
+		const subscribingHost: DesktopClientHost = {
+			...testHost,
+			subscribeToAuthorization: subscribeToDevtoolsAuthorization,
+		};
+
+		it.each([
+			['signs out', () => disableDevtoolsAuthorization()],
+			[
+				'changes owner',
+				() => setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-b' }),
+			],
+		])(
+			'aborts the action and reports an unknown outcome when the user %s',
+			async (_change, revoke) => {
+				jest.useFakeTimers();
+				let signal: AbortSignal | undefined;
+				let finish: (() => void) | undefined;
+				mockRunDesktopAction.mockImplementationOnce((_action, context) => {
+					signal = context.signal;
+					return new Promise<void>((resolve) => {
+						finish = resolve;
+					});
+				});
+				setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+				const client = startDesktopClient({
+					host: subscribingHost,
+					candidates: [BROKER_URL],
+					actionTimeoutMs: 1_000,
+				});
+				try {
+					const socket = latestSocket();
+					socket.open();
+					socket.receive(consoleClear('running'));
+					socket.receive(consoleClear('queued'));
+					await flushPromises();
+					expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
+					expect(signal?.aborted).toBe(false);
+
+					revoke();
+					// The abort is synchronous with the host's notification.
+					expect(signal?.aborted).toBe(true);
+					await flushPromises();
+					// A host that finishes anyway changes nothing.
+					finish?.();
+					await flushPromises();
+
+					expect(actionResults(socket)).toEqual([
+						{
+							type: 'action-result',
+							actionId: 'running',
+							ok: false,
+							error: REVOKED_ERROR,
+						},
+						{
+							type: 'action-result',
+							actionId: 'queued',
+							ok: false,
+							error: 'Internal tools authorization changed before execution.',
+						},
+					]);
+					expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
+					expect(clientDiagnosticMessages()).toContain(REVOKED_DIAGNOSTIC);
+					// The deadline was cleared, so waiting past it sends nothing more.
+					await jest.advanceTimersByTimeAsync(2_000);
+					expect(actionResults(socket)).toHaveLength(2);
+				} finally {
+					client.stop();
+				}
+			},
+		);
+
+		it('reports a host that completes after revocation without a subscription', async () => {
+			let signal: AbortSignal | undefined;
+			let finish: (() => void) | undefined;
+			mockRunDesktopAction.mockImplementationOnce((_action, context) => {
+				signal = context.signal;
+				return new Promise<void>((resolve) => {
+					finish = resolve;
+				});
+			});
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('running'));
+				await flushPromises();
+
+				disableDevtoolsAuthorization();
+				// Nothing told the client, so the signal stays live until it settles.
+				expect(signal?.aborted).toBe(false);
+				finish?.();
+				await flushPromises();
+
+				expect(actionResults(socket)).toEqual([
+					{
+						type: 'action-result',
+						actionId: 'running',
+						ok: false,
+						error: REVOKED_ERROR,
+					},
+				]);
+				expect(clientDiagnosticMessages()).toContain(REVOKED_DIAGNOSTIC);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('replays the revoked answer for a repeated action identifier', async () => {
+			let finish: (() => void) | undefined;
+			mockRunDesktopAction.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						finish = resolve;
+					}),
+			);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			const client = startDesktopClient({
+				host: subscribingHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('running'));
+				await flushPromises();
+				disableDevtoolsAuthorization();
+				finish?.();
+				await flushPromises();
+				// The user signs back in, and the desktop sends the same action again.
+				setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+				socket.receive(consoleClear('running'));
+				await flushPromises();
+
+				const revoked = {
+					type: 'action-result',
+					actionId: 'running',
+					ok: false,
+					error: REVOKED_ERROR,
+				};
+				expect(actionResults(socket)).toEqual([revoked, revoked]);
+				expect(mockRunDesktopAction).toHaveBeenCalledTimes(1);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('answers revocation even when the host rejects from its abort listener', async () => {
+			mockRunDesktopAction.mockImplementationOnce(
+				(_action, { signal }) =>
+					new Promise<void>((_resolve, reject) => {
+						signal.addEventListener('abort', () =>
+							reject(new Error('Prompt dismissed.')),
+						);
+					}),
+			);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			const client = startDesktopClient({
+				host: subscribingHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('prompt'));
+				await flushPromises();
+
+				disableDevtoolsAuthorization();
+				await flushPromises();
+
+				// One result, and it is the revocation, not the host's rejection.
+				expect(actionResults(socket)).toEqual([
+					{
+						type: 'action-result',
+						actionId: 'prompt',
+						ok: false,
+						error: REVOKED_ERROR,
+					},
+				]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('keeps running an action when the host reports a change that leaves its grant intact', async () => {
+			let notify: (() => void) | undefined;
+			let signal: AbortSignal | undefined;
+			let finish: (() => void) | undefined;
+			mockRunDesktopAction.mockImplementationOnce((_action, context) => {
+				signal = context.signal;
+				return new Promise<void>((resolve) => {
+					finish = resolve;
+				});
+			});
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			const client = startDesktopClient({
+				host: {
+					...testHost,
+					subscribeToAuthorization: (listener) => {
+						notify = listener;
+						return () => undefined;
+					},
+				},
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('steady'));
+				await flushPromises();
+
+				notify?.();
+				expect(signal?.aborted).toBe(false);
+				finish?.();
+				await flushPromises();
+
+				expect(actionResults(socket)).toEqual([
+					{ type: 'action-result', actionId: 'steady', ok: true },
+				]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('treats a failed authorization read as a revocation', async () => {
+			let signal: AbortSignal | undefined;
+			mockRunDesktopAction.mockImplementationOnce((_action, context) => {
+				signal = context.signal;
+				return new Promise<void>(() => undefined);
+			});
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			let readFails = false;
+			let notify: (() => void) | undefined;
+			const client = startDesktopClient({
+				host: {
+					...testHost,
+					getAuthorization: () => {
+						if (readFails) throw new Error('Owner read failed.');
+						return getDevtoolsAuthorization();
+					},
+					subscribeToAuthorization: (listener) => {
+						notify = listener;
+						return () => undefined;
+					},
+				},
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('running'));
+				await flushPromises();
+
+				readFails = true;
+				notify?.();
+				await flushPromises();
+
+				expect(signal?.aborted).toBe(true);
+				expect(actionResults(socket)).toEqual([
+					{
+						type: 'action-result',
+						actionId: 'running',
+						ok: false,
+						error: REVOKED_ERROR,
+					},
+				]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it.each(['stop', 'disconnect'] as const)(
+			'neither answers nor forgets an action that %s aborts under a subscribing host',
+			async (reason) => {
+				jest.useFakeTimers();
+				mockRunDesktopAction
+					.mockImplementationOnce(() => new Promise<void>(() => undefined))
+					.mockResolvedValueOnce(undefined);
+				setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+				const client = startDesktopClient({
+					host: subscribingHost,
+					candidates: [BROKER_URL],
+				});
+				try {
+					const first = latestSocket();
+					first.open();
+					first.receive(consoleClear('interrupted'));
+					await flushPromises();
+
+					if (reason === 'disconnect') first.serverClose(1000, 'Broker closed');
+					else client.stop();
+					await flushPromises();
+
+					// Authorization never changed, so this is not a revocation.
+					expect(actionResults(first)).toEqual([]);
+					expect(clientDiagnosticMessages()).not.toContain(REVOKED_DIAGNOSTIC);
+					if (reason === 'stop') return;
+
+					// Nothing was remembered, so the same action sent on the next
+					// connection runs again instead of replaying a revoked answer.
+					await reconnectDelayMs();
+					const second = latestSocket();
+					second.open();
+					second.receive(consoleClear('interrupted'));
+					await flushPromises();
+					expect(mockRunDesktopAction).toHaveBeenCalledTimes(2);
+					expect(actionResults(second)).toEqual([
+						{ type: 'action-result', actionId: 'interrupted', ok: true },
+					]);
+				} finally {
+					client.stop();
+				}
+			},
+		);
+
+		it('unsubscribes when stopped and tolerates a subscription that throws', async () => {
+			const unsubscribe = jest.fn();
+			const subscribe = jest.fn(() => unsubscribe);
+			const subscribed = startDesktopClient({
+				host: { ...testHost, subscribeToAuthorization: subscribe },
+				candidates: [BROKER_URL],
+			});
+			expect(subscribe).toHaveBeenCalledTimes(1);
+			subscribed.stop();
+			subscribed.stop();
+			expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+			FakeWebSocket.instances = [];
+			const unavailable = startDesktopClient({
+				host: {
+					...testHost,
+					subscribeToAuthorization: () => {
+						throw new Error('Authorization events are unavailable.');
+					},
+				},
+				candidates: [BROKER_URL],
+			});
+			try {
+				latestSocket().open();
+				expect(clientDiagnosticMessages()).toContain(
+					'Could not subscribe to authorization changes (Authorization events are unavailable.); a change during an action is detected when it settles.',
+				);
+			} finally {
+				unavailable.stop();
+			}
+		});
+	});
 
 	it('rejects an action timeout a timer cannot represent', () => {
 		let client: DesktopClientHandle | undefined;
