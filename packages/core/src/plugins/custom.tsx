@@ -7,7 +7,7 @@ import {
 } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { PanelShell } from '../components/panel-shell';
-import { colors } from '../components/panel-ui';
+import { usePanelColors } from '../components/panel-ui';
 import type {
 	DevToolsActionConfirmation,
 	DevToolsActionContext,
@@ -61,6 +61,7 @@ export function createLazyCustomPlugin({
 	...metadata
 }: LazyCustomPluginOptions): DevToolsPanelPlugin {
 	function LazyCustomPanel(props: DevToolsPanelProps) {
+		const colors = usePanelColors();
 		// Create the lazy type per mounted panel. The renderer's Retry action
 		// remounts this component, allowing a rejected dynamic import to run again.
 		const [LazyPanel] = useState(() =>

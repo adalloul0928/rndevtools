@@ -18,7 +18,7 @@ import type {
 	DevToolsPluginWithPillQuickAction,
 	DevToolsPosition,
 } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { PillQuickActionMenu } from './pill-quick-action-menu';
 import { SystemIcon } from './system-icon';
 
@@ -55,6 +55,7 @@ export function MiniPill({
 	onQuickActionPinnedChange,
 	onOpenPlugin,
 }: MiniPillProps) {
+	const { colors, styles } = useStyles();
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
 	const pillWidth = Math.min(
@@ -194,44 +195,46 @@ export function MiniPill({
 	);
 }
 
-const styles = StyleSheet.create({
-	positioner: {
-		height: HEIGHT,
-		left: 0,
-		position: 'absolute',
-		shadowColor: colors.shadow,
-		shadowOffset: { width: 0, height: 7 },
-		shadowOpacity: 0.22,
-		shadowRadius: 18,
-		top: 0,
-		zIndex: 10_002,
-	},
-	pill: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: HEIGHT / 2,
-		borderWidth: StyleSheet.hairlineWidth,
-		flex: 1,
-		flexDirection: 'row',
-		overflow: 'hidden',
-		paddingLeft: 5,
-		paddingRight: 5,
-	},
-	restoreArea: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		height: '100%',
-		justifyContent: 'center',
-		width: 48,
-	},
-	// Tinted glyph on a system fill, matching the sheet header's controls.
-	iconSurface: {
-		alignItems: 'center',
-		backgroundColor: colors.fill,
-		borderRadius: 17,
-		height: 34,
-		justifyContent: 'center',
-		width: 34,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		positioner: {
+			height: HEIGHT,
+			left: 0,
+			position: 'absolute',
+			shadowColor: colors.shadow,
+			shadowOffset: { width: 0, height: 7 },
+			shadowOpacity: 0.22,
+			shadowRadius: 18,
+			top: 0,
+			zIndex: 10_002,
+		},
+		pill: {
+			alignItems: 'center',
+			backgroundColor: colors.card,
+			borderColor: colors.separator,
+			borderRadius: HEIGHT / 2,
+			borderWidth: StyleSheet.hairlineWidth,
+			flex: 1,
+			flexDirection: 'row',
+			overflow: 'hidden',
+			paddingLeft: 5,
+			paddingRight: 5,
+		},
+		restoreArea: {
+			alignItems: 'center',
+			flexDirection: 'row',
+			height: '100%',
+			justifyContent: 'center',
+			width: 48,
+		},
+		// Tinted glyph on a system fill, matching the sheet header's controls.
+		iconSurface: {
+			alignItems: 'center',
+			backgroundColor: colors.fill,
+			borderRadius: 17,
+			height: 34,
+			justifyContent: 'center',
+			width: 34,
+		},
+	}),
+);

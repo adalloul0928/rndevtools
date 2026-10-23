@@ -7,9 +7,10 @@ import {
 	TextInput,
 	View,
 } from 'react-native';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 
 export function AndroidPanelScroll({ children }: PropsWithChildren) {
+	const { styles } = useStyles();
 	return (
 		<ScrollView
 			contentContainerStyle={styles.content}
@@ -26,6 +27,7 @@ export function AndroidPanelSection({
 	footer,
 	children,
 }: PropsWithChildren<{ title?: string; footer?: string }>) {
+	const { styles } = useStyles();
 	return (
 		<View style={styles.section}>
 			{title ? <Text style={styles.sectionTitle}>{title}</Text> : null}
@@ -50,6 +52,7 @@ export function AndroidPanelRow({
 	tone?: 'default' | 'danger' | 'success' | 'warning';
 	trailing?: ReactNode;
 }) {
+	const { styles } = useStyles();
 	const content = (
 		<>
 			<View style={styles.rowCopy}>
@@ -96,6 +99,7 @@ export function AndroidPanelTextBlock({
 	value: string;
 	tone?: 'default' | 'danger' | 'warning';
 }) {
+	const { styles } = useStyles();
 	return (
 		<View style={styles.textBlock}>
 			<Text style={styles.textBlockLabel}>{label}</Text>
@@ -124,6 +128,7 @@ export function AndroidPanelSearch({
 	onChangeText: (value: string) => void;
 	secureTextEntry?: boolean;
 }) {
+	const { colors, styles } = useStyles();
 	return (
 		<TextInput
 			autoCapitalize="none"
@@ -147,6 +152,7 @@ export function AndroidPanelTabs<T extends string>({
 	selected: T;
 	onSelect: (value: T) => void;
 }) {
+	const { styles } = useStyles();
 	return (
 		<View style={styles.tabs}>
 			{options.map((option) => (
@@ -171,81 +177,87 @@ export function AndroidPanelTabs<T extends string>({
 	);
 }
 
-const styles = StyleSheet.create({
-	content: { gap: 14, padding: 12, paddingBottom: 32 },
-	section: { gap: 6 },
-	sectionTitle: {
-		color: colors.secondaryLabel,
-		fontSize: 13,
-		fontWeight: '600',
-		paddingHorizontal: 4,
-	},
-	group: {
-		backgroundColor: colors.card,
-		borderRadius: 13,
-		overflow: 'hidden',
-	},
-	footer: { color: colors.secondaryLabel, fontSize: 12, paddingHorizontal: 4 },
-	row: {
-		alignItems: 'center',
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		gap: 12,
-		minHeight: 52,
-		paddingHorizontal: 14,
-		paddingVertical: 10,
-	},
-	pressed: { backgroundColor: colors.fill },
-	rowCopy: { flex: 1, gap: 2 },
-	rowLabel: { color: colors.label, fontSize: 15 },
-	detail: { color: colors.secondaryLabel, fontSize: 12 },
-	value: {
-		color: colors.secondaryLabel,
-		fontSize: 13,
-		maxWidth: '48%',
-		textAlign: 'right',
-	},
-	textBlock: { gap: 6, paddingHorizontal: 14, paddingVertical: 12 },
-	textBlockLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		fontWeight: '600',
-	},
-	textBlockValue: {
-		color: colors.label,
-		fontFamily: 'monospace',
-		fontSize: 12,
-		lineHeight: 17,
-	},
-	danger: { color: '#D70015' },
-	success: { color: '#1D8A3E' },
-	warning: { color: '#C45A00' },
-	search: {
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: 12,
-		borderWidth: StyleSheet.hairlineWidth,
-		color: colors.label,
-		fontSize: 15,
-		height: 48,
-		paddingHorizontal: 14,
-	},
-	tabs: {
-		backgroundColor: colors.fill,
-		borderRadius: 10,
-		flexDirection: 'row',
-		padding: 3,
-	},
-	tab: {
-		alignItems: 'center',
-		borderRadius: 8,
-		flex: 1,
-		justifyContent: 'center',
-		minHeight: 36,
-		paddingHorizontal: 6,
-	},
-	selectedTab: { backgroundColor: colors.card },
-	tabText: { color: colors.secondaryLabel, fontSize: 12, fontWeight: '600' },
-	selectedTabText: { color: colors.label },
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		content: { gap: 14, padding: 12, paddingBottom: 32 },
+		section: { gap: 6 },
+		sectionTitle: {
+			color: colors.secondaryLabel,
+			fontSize: 13,
+			fontWeight: '600',
+			paddingHorizontal: 4,
+		},
+		group: {
+			backgroundColor: colors.card,
+			borderRadius: 13,
+			overflow: 'hidden',
+		},
+		footer: {
+			color: colors.secondaryLabel,
+			fontSize: 12,
+			paddingHorizontal: 4,
+		},
+		row: {
+			alignItems: 'center',
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			gap: 12,
+			minHeight: 52,
+			paddingHorizontal: 14,
+			paddingVertical: 10,
+		},
+		pressed: { backgroundColor: colors.fill },
+		rowCopy: { flex: 1, gap: 2 },
+		rowLabel: { color: colors.label, fontSize: 15 },
+		detail: { color: colors.secondaryLabel, fontSize: 12 },
+		value: {
+			color: colors.secondaryLabel,
+			fontSize: 13,
+			maxWidth: '48%',
+			textAlign: 'right',
+		},
+		textBlock: { gap: 6, paddingHorizontal: 14, paddingVertical: 12 },
+		textBlockLabel: {
+			color: colors.secondaryLabel,
+			fontSize: 12,
+			fontWeight: '600',
+		},
+		textBlockValue: {
+			color: colors.label,
+			fontFamily: 'monospace',
+			fontSize: 12,
+			lineHeight: 17,
+		},
+		danger: { color: '#D70015' },
+		success: { color: '#1D8A3E' },
+		warning: { color: '#C45A00' },
+		search: {
+			backgroundColor: colors.card,
+			borderColor: colors.separator,
+			borderRadius: 12,
+			borderWidth: StyleSheet.hairlineWidth,
+			color: colors.label,
+			fontSize: 15,
+			height: 48,
+			paddingHorizontal: 14,
+		},
+		tabs: {
+			backgroundColor: colors.fill,
+			borderRadius: 10,
+			flexDirection: 'row',
+			padding: 3,
+		},
+		tab: {
+			alignItems: 'center',
+			borderRadius: 8,
+			flex: 1,
+			justifyContent: 'center',
+			minHeight: 36,
+			paddingHorizontal: 6,
+		},
+		selectedTab: { backgroundColor: colors.card },
+		tabText: { color: colors.secondaryLabel, fontSize: 12, fontWeight: '600' },
+		selectedTabText: { color: colors.label },
+	}),
+);

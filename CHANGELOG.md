@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android on-device chrome and panels follow system light/dark appearance changes,
+  including text, surfaces, controls and status tones. iOS retains native colors.
 - Floating controls and windows stay inside horizontal safe areas after rotation;
   the Android sheet respects side and bottom insets in landscape.
 - Android Back returns from a tool panel to the tool list before closing the sheet.
@@ -334,9 +336,9 @@
 
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
-- CI notarization uses a temporary owner-only API key file, with cleanup on
-  failure, instead of placing an app-specific password in process arguments.
-
+- Release notarization uses a temporary private key file with owner-only permissions,
+  removes it after storing the keychain profile, and keeps credentials out of child
+  process arguments and inherited environments.
 - Package release verification and packing run without publishing credentials.
   A separate runner publishes checked tarballs with lifecycle scripts disabled
   and npm trusted publishing; long-lived npm tokens are no longer used.

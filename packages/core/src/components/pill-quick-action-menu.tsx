@@ -16,7 +16,7 @@ import type {
 	DevToolsPillQuickActionOption,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { SystemIcon } from './system-icon';
 
 const SLOT_WIDTH = 38;
@@ -66,6 +66,7 @@ export function PillQuickActionMenu({
 	onUnpin,
 	onOpenPanel,
 }: PillQuickActionMenuProps) {
+	const { colors, styles } = useStyles();
 	const { pillQuickAction } = plugin;
 	const [snapshot, setSnapshot] = useState(() =>
 		readQuickActionSnapshot(pillQuickAction),
@@ -218,31 +219,33 @@ export function PillQuickActionMenu({
 	);
 }
 
-const styles = StyleSheet.create({
-	androidTrigger: {
-		alignItems: 'center',
-		height: SLOT_HEIGHT,
-		justifyContent: 'center',
-		width: SLOT_WIDTH,
-	},
-	container: {
-		borderLeftColor: colors.separator,
-		borderLeftWidth: StyleSheet.hairlineWidth,
-		height: SLOT_HEIGHT,
-		width: SLOT_WIDTH,
-	},
-	host: {
-		flex: 1,
-	},
-	dot: {
-		backgroundColor: colors.orange,
-		borderColor: colors.card,
-		borderRadius: 5,
-		borderWidth: 1.5,
-		height: 10,
-		position: 'absolute',
-		right: 3,
-		top: 5,
-		width: 10,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		androidTrigger: {
+			alignItems: 'center',
+			height: SLOT_HEIGHT,
+			justifyContent: 'center',
+			width: SLOT_WIDTH,
+		},
+		container: {
+			borderLeftColor: colors.separator,
+			borderLeftWidth: StyleSheet.hairlineWidth,
+			height: SLOT_HEIGHT,
+			width: SLOT_WIDTH,
+		},
+		host: {
+			flex: 1,
+		},
+		dot: {
+			backgroundColor: colors.orange,
+			borderColor: colors.card,
+			borderRadius: 5,
+			borderWidth: 1.5,
+			height: 10,
+			position: 'absolute',
+			right: 3,
+			top: 5,
+			width: 10,
+		},
+	}),
+);
