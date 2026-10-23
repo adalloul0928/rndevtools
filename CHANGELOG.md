@@ -332,6 +332,9 @@
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
+- Setup keeps its scrolling details edge inside the dialog, with room for a
+  visible scrollbar and keyboard scrolling at the minimum window size.
+
 - Connected App panels use shared section surfaces, sentence-case captions and
   compact detail headings. Neutral selections have a visible edge; storage and
   restore copy retain readable contrast, and performance uses chart tokens.

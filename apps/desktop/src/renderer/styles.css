@@ -4997,9 +4997,8 @@ select {
 
 .setup-stage-card {
 	height: 100%;
-	margin-right: -48px;
-	padding-right: 48px;
 	overflow: auto;
+	scrollbar-gutter: stable;
 	border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
 	border-right: 0;
 	border-bottom: 0;
@@ -5008,7 +5007,7 @@ select {
 	box-shadow: 0 12px 32px light-dark(rgb(0 0 0 / 8%), rgb(0 0 0 / 50%));
 }
 
-/* The card bleeds past the right edge, so its focus ring is drawn inside. */
+/* Keep the focus ring inside the clipped stage surface. */
 .setup-stage-card:focus-visible {
 	outline: 2px solid var(--focus);
 	outline-offset: -2px;
