@@ -111,7 +111,7 @@ limitations before publishing. This path does not publish npm packages.
 
 `desktop-v*` does not match the Release workflow's `v*` trigger. The current
 preview uses local signing and notarization credentials; repository CI release
-credentials and `NPM_TOKEN` are not configured. Publishing its reviewed local
+credentials and npm trusted publishers are not configured. Publishing its reviewed local
 artifacts does not require those CI secrets. Do not use a `v*` tag for a
 desktop-only preview.
 
@@ -132,9 +132,21 @@ in the environment or configure it separately for licensed CI checks.
 
 A version tag prepares a **draft** GitHub release. Review the verified DMG,
 manifest, checksums and clean-Mac installation before publishing the draft.
-Tag runs retain the npm publication job after the desktop gate succeeds; it
-additionally requires `NPM_TOKEN`. This repository currently has no release
-secrets, so configuring the environment alone does not enable a release.
+Package quality gates and `pnpm pack` run in a separate job with read-only
+permissions and no npm identity. A fresh publishing runner waits for both that
+job and the desktop gate, downloads only the checked tarballs, verifies their
+hashes, and runs `npm publish --ignore-scripts`. It performs no checkout,
+dependency installation or build. The publishing job uses npm OIDC trusted
+publishing; there is no `NPM_TOKEN` fallback.
+
+Before a combined release, configure a trusted publisher for **each** npm package:
+GitHub owner `adalloul0928`, repository `rndevtools`, workflow `release.yml`,
+environment `release-signing`, with direct publication allowed. See the
+[npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/).
+Both packages are currently unpublished: first publication and npm account/scope
+setup require a separate owner-approved release action. No package was published
+or npm setting changed during this cleanup. This repository also has no release
+secrets, so configuring the GitHub environment alone does not enable a release.
 
 ## Local development candidate
 

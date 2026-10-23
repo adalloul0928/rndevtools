@@ -27,7 +27,7 @@ import type {
 	DevToolsPresentationMode,
 	DevToolsSize,
 } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
 import { PresentationSwitcher } from './presentation-switcher';
 import { SystemIcon } from './system-icon';
@@ -82,6 +82,7 @@ export function FloatingWindow({
 	homeStatus = [],
 	onOpenPlugin,
 }: FloatingWindowProps) {
+	const { colors, styles } = useStyles();
 	const [query, setQuery] = useState('');
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
@@ -461,146 +462,148 @@ export function FloatingWindow({
 	);
 }
 
-const styles = StyleSheet.create({
-	positioner: {
-		left: 0,
-		position: 'absolute',
-		shadowColor: colors.shadow,
-		shadowOffset: { width: 0, height: 14 },
-		shadowOpacity: 0.28,
-		shadowRadius: 30,
-		top: 0,
-		zIndex: 10_001,
-	},
-	window: {
-		backgroundColor: colors.background,
-		borderColor: colors.separator,
-		borderRadius: 22,
-		borderWidth: StyleSheet.hairlineWidth,
-		flex: 1,
-		overflow: 'hidden',
-	},
-	header: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		height: 52,
-		paddingLeft: 14,
-		paddingRight: 4,
-	},
-	dragArea: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		height: '100%',
-	},
-	headerCopy: {
-		flex: 1,
-	},
-	headerTitle: {
-		color: colors.label,
-		fontSize: 15,
-		fontWeight: '600',
-	},
-	closeButton: {
-		alignItems: 'center',
-		backgroundColor: colors.fill,
-		borderRadius: 22,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
-	},
-	switcher: {
-		backgroundColor: colors.card,
-		paddingBottom: 7,
-		paddingHorizontal: 12,
-	},
-	content: {
-		flex: 1,
-	},
-	home: {
-		flex: 1,
-	},
-	search: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: 11,
-		borderWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		marginHorizontal: 12,
-		marginTop: 10,
-		paddingHorizontal: 10,
-	},
-	searchInput: {
-		color: colors.label,
-		flex: 1,
-		fontSize: 14,
-		height: 40,
-		paddingHorizontal: 8,
-	},
-	statusGroup: {
-		backgroundColor: colors.card,
-		borderRadius: 11,
-		marginHorizontal: 12,
-		marginTop: 10,
-		overflow: 'hidden',
-	},
-	statusRow: {
-		alignItems: 'center',
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		gap: 8,
-		minHeight: 36,
-		paddingHorizontal: 11,
-	},
-	statusLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-	},
-	statusValueWrap: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		gap: 6,
-		justifyContent: 'flex-end',
-	},
-	statusBadge: {
-		color: colors.orange,
-		fontSize: 10,
-		fontWeight: '700',
-	},
-	statusValue: {
-		color: colors.label,
-		fontSize: 12,
-		maxWidth: '70%',
-	},
-	toolList: {
-		flex: 1,
-	},
-	resizeHandle: {
-		alignItems: 'flex-end',
-		bottom: 0,
-		height: 44,
-		justifyContent: 'flex-end',
-		paddingBottom: 8,
-		paddingRight: 8,
-		position: 'absolute',
-		right: 0,
-		width: 44,
-		zIndex: 4,
-	},
-	resizeCurve: {
-		borderBottomColor: colors.secondaryLabel,
-		borderBottomRightRadius: 9,
-		borderBottomWidth: 2,
-		borderRightColor: colors.secondaryLabel,
-		borderRightWidth: 2,
-		height: 15,
-		opacity: 0.65,
-		width: 15,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		positioner: {
+			left: 0,
+			position: 'absolute',
+			shadowColor: colors.shadow,
+			shadowOffset: { width: 0, height: 14 },
+			shadowOpacity: 0.28,
+			shadowRadius: 30,
+			top: 0,
+			zIndex: 10_001,
+		},
+		window: {
+			backgroundColor: colors.background,
+			borderColor: colors.separator,
+			borderRadius: 22,
+			borderWidth: StyleSheet.hairlineWidth,
+			flex: 1,
+			overflow: 'hidden',
+		},
+		header: {
+			alignItems: 'center',
+			backgroundColor: colors.card,
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			height: 52,
+			paddingLeft: 14,
+			paddingRight: 4,
+		},
+		dragArea: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			height: '100%',
+		},
+		headerCopy: {
+			flex: 1,
+		},
+		headerTitle: {
+			color: colors.label,
+			fontSize: 15,
+			fontWeight: '600',
+		},
+		closeButton: {
+			alignItems: 'center',
+			backgroundColor: colors.fill,
+			borderRadius: 22,
+			height: 44,
+			justifyContent: 'center',
+			width: 44,
+		},
+		switcher: {
+			backgroundColor: colors.card,
+			paddingBottom: 7,
+			paddingHorizontal: 12,
+		},
+		content: {
+			flex: 1,
+		},
+		home: {
+			flex: 1,
+		},
+		search: {
+			alignItems: 'center',
+			backgroundColor: colors.card,
+			borderColor: colors.separator,
+			borderRadius: 11,
+			borderWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			marginHorizontal: 12,
+			marginTop: 10,
+			paddingHorizontal: 10,
+		},
+		searchInput: {
+			color: colors.label,
+			flex: 1,
+			fontSize: 14,
+			height: 40,
+			paddingHorizontal: 8,
+		},
+		statusGroup: {
+			backgroundColor: colors.card,
+			borderRadius: 11,
+			marginHorizontal: 12,
+			marginTop: 10,
+			overflow: 'hidden',
+		},
+		statusRow: {
+			alignItems: 'center',
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			gap: 8,
+			minHeight: 36,
+			paddingHorizontal: 11,
+		},
+		statusLabel: {
+			color: colors.secondaryLabel,
+			fontSize: 12,
+		},
+		statusValueWrap: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			gap: 6,
+			justifyContent: 'flex-end',
+		},
+		statusBadge: {
+			color: colors.orange,
+			fontSize: 10,
+			fontWeight: '700',
+		},
+		statusValue: {
+			color: colors.label,
+			fontSize: 12,
+			maxWidth: '70%',
+		},
+		toolList: {
+			flex: 1,
+		},
+		resizeHandle: {
+			alignItems: 'flex-end',
+			bottom: 0,
+			height: 44,
+			justifyContent: 'flex-end',
+			paddingBottom: 8,
+			paddingRight: 8,
+			position: 'absolute',
+			right: 0,
+			width: 44,
+			zIndex: 4,
+		},
+		resizeCurve: {
+			borderBottomColor: colors.secondaryLabel,
+			borderBottomRightRadius: 9,
+			borderBottomWidth: 2,
+			borderRightColor: colors.secondaryLabel,
+			borderRightWidth: 2,
+			height: 15,
+			opacity: 0.65,
+			width: 15,
+		},
+	}),
+);
