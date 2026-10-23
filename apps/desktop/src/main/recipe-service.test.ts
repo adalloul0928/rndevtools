@@ -123,6 +123,7 @@ class FakeBroker implements RecipeBrokerPort {
 	active = 0;
 	maxActive = 0;
 	beforeDispatch: (() => Promise<void>) | undefined;
+	duringDispatch: ((action: DesktopAction) => Promise<void>) | undefined;
 
 	getState = () => this.state;
 
@@ -146,7 +147,8 @@ class FakeBroker implements RecipeBrokerPort {
 		}
 		this.active += 1;
 		this.maxActive = Math.max(this.maxActive, this.active);
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		if (this.duringDispatch) await this.duringDispatch(action);
+		else await new Promise((resolve) => setTimeout(resolve, 100));
 		this.active -= 1;
 		return { actionId: action.actionId, ok: true };
 	};
@@ -566,6 +568,19 @@ describe('RecipeService', () => {
 				},
 			])
 		);
+		let release = () => {};
+		const bothEntered = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const activeDevices = new Set<string>();
+		broker.duringDispatch = async (action) => {
+			expect(activeDevices.has(action.deviceId)).toBe(false);
+			activeDevices.add(action.deviceId);
+			if (activeDevices.size === 2) release();
+			await bothEntered;
+			activeDevices.delete(action.deviceId);
+		};
+
 		const receipt = await service.runRecipe({
 			actionId: 'concurrent-run',
 			recipeId: 'service-test',
