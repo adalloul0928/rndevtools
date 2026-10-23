@@ -266,3 +266,8 @@
   as for any other stack; a first start that failed meanwhile is marked
   interrupted, like a cancelled one. Before, the stack ran with no record, no
   loopback check and no automatic stop.
+- An unheld local Supabase stack now gets its stop linger from the end of the
+  job that started it, not from the moment its owner came up, so a long first
+  start is no longer stopped as it ends. A start that RN Devtools adopts after
+  a restart is still checked for 127.0.0.1 only when its record cannot be
+  saved, and its job then fails with that error instead of passing as verified.
