@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Scenario preflight results are normalized, validated and detached before any
+  mutation, so durable recovery checkpoints can be loaded after restart.
+
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21

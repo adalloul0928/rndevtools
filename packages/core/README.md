@@ -376,3 +376,9 @@ JSON credential names, and recognizable provider/cloud tokens. Provider-token
 patterns are shared with the repository public-content check. Private-key
 blocks are omitted even when capture truncates the closing marker; the normal
 capture size and traversal budgets still apply.
+
+Scenario adapters return a nonempty preflight summary, boolean safety flags,
+and at most 100 nonempty warnings. The engine trims summary/warning text,
+checks the recovery bounds, and copies only the supported fields before any
+rollback capture or mutation. Adapter-owned objects cannot change a saved
+checkpoint after preflight.
