@@ -10,11 +10,11 @@ import {
 } from 'lucide-react';
 import { useMemo } from 'react';
 import {
+	Chip,
 	InfoPopover,
 	PanelHeader,
 	PanelNotice,
 	SectionCard,
-	StatusPill,
 } from '@/components/ui';
 import { formatDuration, formatPercent } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -181,11 +181,11 @@ export function PerformancePanel() {
 				title="Performance"
 				description="Record interactions to inspect JavaScript responsiveness. The app supplies the overall grade, including severe stalls that averages can hide. CPU and memory appear only when a native sampler reports them. Use a release build for representative measurements."
 				meta={
-					<StatusPill tone={gradeTone(summary?.grade ?? 'idle')} dot>
+					<Chip tone={gradeTone(summary?.grade ?? 'idle')} dot>
 						{summary?.grade === 'needsAttention'
 							? 'Needs attention'
 							: (summary?.grade ?? 'idle')}
-					</StatusPill>
+					</Chip>
 				}
 				actions={
 					review?.isActive ? (

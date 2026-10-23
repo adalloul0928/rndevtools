@@ -35,13 +35,13 @@ import {
 } from '@/components/supabase-ui';
 import {
 	Badge,
+	Chip,
 	DisabledReason,
 	Disclosure,
 	EmptyPanel,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import {
@@ -1130,7 +1130,7 @@ function SupabaseActivity({
 									{[row.detail, row.elapsed].filter(Boolean).join(' · ')}
 								</span>
 							</div>
-							<StatusPill tone={row.tone}>{row.label}</StatusPill>
+							<Chip tone={row.tone}>{row.label}</Chip>
 							{row.cancel ? (
 								<CancelJobButton
 									busy={isPending(`job:${row.cancel.jobId}`)}

@@ -2,7 +2,7 @@ import { Button } from '@heroui/react/button';
 import { Check, CircleX, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-type Tone = 'default' | 'success' | 'warning' | 'danger' | 'info';
+import type { StatusTone as Tone } from '../../shared/status-presentation';
 
 export const statusToneClassName: Record<Tone, string> = {
 	default: 'border-foreground/10 bg-foreground/[0.045] text-(--muted)',
@@ -12,10 +12,10 @@ export const statusToneClassName: Record<Tone, string> = {
 	info: 'border-info/25 bg-info/10 text-info-text',
 };
 
-export function StatusPill({
+export function Chip({
 	children,
 	tone = 'default',
-	dot = false,
+	dot = true,
 	className = '',
 }: {
 	children: ReactNode;
@@ -24,12 +24,32 @@ export function StatusPill({
 	className?: string;
 }) {
 	return (
-		<span
-			className={`inline-flex h-6 items-center gap-1.5 rounded-md border px-2 font-mono text-xs font-medium uppercase tracking-[0.04em] ${statusToneClassName[tone]} ${className}`}
-		>
-			{dot ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : null}
+		<span className={`ui-badge status-chip is-${tone} ${className}`}>
+			{dot ? <StatusDot tone={tone} /> : null}
 			{children}
 		</span>
+	);
+}
+
+/**
+ * The one status dot. It never carries meaning alone: a word always sits
+ * beside it, so the dot is hidden from assistive technology.
+ */
+export function StatusDot({
+	tone = 'default',
+	hollow = false,
+	className = '',
+}: {
+	tone?: 'default' | 'success' | 'info' | 'warning' | 'danger';
+	/** An outline only, for something that does not exist yet. */
+	hollow?: boolean;
+	className?: string;
+}) {
+	return (
+		<span
+			aria-hidden="true"
+			className={`status-dot is-${tone} ${hollow ? 'is-hollow' : ''} ${className}`}
+		/>
 	);
 }
 
