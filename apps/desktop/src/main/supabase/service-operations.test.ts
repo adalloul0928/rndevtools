@@ -487,7 +487,7 @@ describe('database operations', () => {
 		});
 	});
 
-	it("tells an agent its queued reset didn't run once the worktree moved", async () => {
+	it('keeps an approved agent reset from running after the worktree moved', async () => {
 		const { h, repo, stackId } = await setup();
 		h.agents.sessions = [fakeSession('session-a', '/Users/example/elsewhere')];
 		await h.engine.runAgentOperation(
@@ -500,21 +500,30 @@ describe('database operations', () => {
 		const release = h.cli.hold('stack restart');
 		await run(h, { kind: 'restart', stackId });
 		await h.cli.waitForCall('stack restart');
-		const reset = h.engine.runAgentOperation(
+		const filed = await h.engine.runAgentOperation(
 			{ operation: 'reset', target: { stackId }, seed: true },
 			{ requestId: 'request-2', holder: CLAUDE, synthetic: false },
 			SIGNAL
 		);
-		await h.until(() =>
-			h.engine.jobStore.activeJobs().some((job) => job.kind === 'reset')
+		const reset = await run(
+			h,
+			{
+				kind: 'request.approve',
+				requestId: (filed as { requestId: string }).requestId,
+			},
+			CONFIRMED
 		);
 		await h.checkout(repo, 'feat-x');
 		release();
-		await expect(reset).rejects.toMatchObject({ code: 'branch_moved' });
+		await h.engine.waitForJob(reset.jobId ?? '', 10_000);
+		expect(jobOf(h, reset.jobId)).toMatchObject({
+			status: 'failed',
+			error: { title: 'Worktree switched branches' },
+		});
 		expect(h.cli.count('db reset')).toBe(0);
 	});
 
-	it('tells an agent its queued reset was called off once turned off', async () => {
+	it('calls off an approved agent reset once the feature is turned off', async () => {
 		const { h, repo, stackId } = await setup();
 		h.agents.sessions = [fakeSession('session-a', '/Users/example/elsewhere')];
 		await h.engine.runAgentOperation(
@@ -527,13 +536,18 @@ describe('database operations', () => {
 		const release = h.cli.hold('stack restart');
 		await run(h, { kind: 'restart', stackId });
 		await h.cli.waitForCall('stack restart');
-		const reset = h.engine.runAgentOperation(
+		const filed = await h.engine.runAgentOperation(
 			{ operation: 'reset', target: { stackId }, seed: true },
 			{ requestId: 'request-2', holder: CLAUDE, synthetic: false },
 			SIGNAL
 		);
-		await h.until(() =>
-			h.engine.jobStore.activeJobs().some((job) => job.kind === 'reset')
+		const reset = await run(
+			h,
+			{
+				kind: 'request.approve',
+				requestId: (filed as { requestId: string }).requestId,
+			},
+			CONFIRMED
 		);
 		await run(
 			h,
@@ -541,7 +555,11 @@ describe('database operations', () => {
 			CONFIRMED
 		);
 		release();
-		await expect(reset).rejects.toMatchObject({ code: 'supabase_disabled' });
+		await h.engine.waitForJob(reset.jobId ?? '', 10_000);
+		expect(jobOf(h, reset.jobId)).toMatchObject({
+			status: 'cancelled',
+			error: { code: 'feature_off' },
+		});
 		expect(h.cli.count('db reset')).toBe(0);
 	});
 
@@ -810,6 +828,46 @@ describe('values main resolves', () => {
 });
 
 describe('requests', () => {
+	it('requires the dialog before approving a sole-holder reset request', async () => {
+		const { h, repo } = await setup();
+		h.agents.sessions = [fakeSession('session-a', '/Users/example/elsewhere')];
+		await h.engine.runAgentOperation(
+			{ operation: 'up', target: { worktreePath: repo }, waitMs: 45_000 },
+			{ requestId: 'request-up', holder: CLAUDE, synthetic: false },
+			SIGNAL
+		);
+		await h.settle();
+		const filed = await h.engine.runAgentOperation(
+			{ operation: 'reset', target: { worktreePath: repo }, seed: false },
+			{ requestId: 'request-1', holder: CLAUDE, synthetic: false },
+			SIGNAL
+		);
+		expect(filed).toMatchObject({ operation: 'reset', status: 'requested' });
+		const requestId = (filed as { requestId: string }).requestId;
+		const facts = await h.engine.describeConfirmation(
+			op({ kind: 'request.approve', requestId })
+		);
+		expect(facts).toBeTruthy();
+		const refused = await run(h, { kind: 'request.approve', requestId });
+		expect(refused).toMatchObject({
+			completed: false,
+			error: { code: 'confirmation_required' },
+		});
+		expect(h.cli.count('db reset')).toBe(0);
+		const approved = await runToEnd(
+			h,
+			{ kind: 'request.approve', requestId },
+			CONFIRMED
+		);
+		await h.settle();
+		expect(approved.jobId).toEqual(expect.any(String));
+		expect(jobOf(h, approved.jobId)?.status).toBe('complete');
+		expect(h.cli.callsOf('db reset')[0]?.argv).toEqual(
+			expect.arrayContaining(['--local', '--workdir', repo, '--no-seed'])
+		);
+		expect(h.engine.stackStore.request(requestId)?.status).toBe('approved');
+	});
+
 	it('approves an agent destroy request with the operator dialog', async () => {
 		const { h, repo, stackId } = await started();
 		h.agents.sessions = [fakeSession('session-a', '/Users/example/elsewhere')];

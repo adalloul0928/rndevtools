@@ -649,42 +649,9 @@ export class RecipeService {
 					? 'Recipe target cancelled before execution.'
 					: safeErrorText(error),
 			});
-			const cleanupController = new AbortController();
-			try {
-				await this.#mutationCoordinator.runExclusive(
-					target.udid,
-					cleanupController.signal,
-					async (mutationLease) => {
-						const connected = exactConnectedDevice(
-							this.#broker.getState(),
-							target.udid
-						);
-						await this.#runTeardown(
-							record,
-							{
-								index,
-								udid: target.udid,
-								restorePointIds: new Map(),
-								diagnosticBaseline: diagnosticIds(
-									this.#broker.getState(),
-									connected?.info.id
-								),
-								mutationLease,
-								...(connected ? { connectedDeviceId: connected.info.id } : {}),
-							},
-							recipe.teardown
-						);
-					}
-				);
-			} catch (cleanupError) {
-				this.#updateCleanup(record, index, {
-					status: 'failed',
-					failures: [
-						safeErrorText(cleanupError).slice(0, MAX_CLEANUP_FAILURE_LENGTH),
-					],
-					message: 'Teardown could not acquire the simulator mutation lease.',
-				});
-			}
+			// The callback either never acquired its lease or already performed its
+			// own cleanup. Reacquiring here could mutate an untouched target or
+			// repeat destructive teardown after an evidence write failed.
 			record.evidence.targets[index] = {
 				...evidenceTarget(record, index),
 				status: runTarget(record, index).status,
@@ -713,6 +680,7 @@ export class RecipeService {
 			diagnosticBaseline: diagnosticIds(this.#broker.getState()),
 			mutationLease,
 		};
+		let stepsStarted = false;
 		try {
 			connected = exactConnectedDevice(this.#broker.getState(), target.udid);
 			if (connectedRequired && !connected) {
@@ -739,6 +707,7 @@ export class RecipeService {
 
 			for (const step of recipe.steps) {
 				if (runSignal.aborted) throw new Error('Recipe run cancelled.');
+				stepsStarted = true;
 				await this.#executeRecordedStep(
 					record,
 					context,
@@ -767,14 +736,15 @@ export class RecipeService {
 					: safeErrorText(error),
 			});
 		} finally {
-			if (!context.connectedDeviceId) {
+			if (stepsStarted && !context.connectedDeviceId) {
 				const teardownDevice = exactConnectedDevice(
 					this.#broker.getState(),
 					target.udid
 				);
 				if (teardownDevice) context.connectedDeviceId = teardownDevice.info.id;
 			}
-			await this.#runTeardown(record, context, recipe.teardown);
+			if (stepsStarted)
+				await this.#runTeardown(record, context, recipe.teardown);
 			const targetStatus = runTarget(record, index).status;
 			record.evidence.targets[index] = {
 				...evidenceTarget(record, index),
