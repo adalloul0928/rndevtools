@@ -366,6 +366,90 @@ describe('ScenarioEngine', () => {
 		expect(stored).toBeUndefined();
 	});
 
+	it('persists a detached canonical preflight that can be recovered after restart', async () => {
+		let stored: string | undefined;
+		const recoveryStorage = {
+			load: () => stored,
+			save: (value: string) => {
+				stored = value;
+			},
+			clear: () => {
+				stored = undefined;
+			},
+		};
+		const preflight = {
+			summary: '  Override mode  ',
+			reversible: true,
+			warnings: ['  Temporary override  '],
+			extension: 'not part of the checkpoint',
+		};
+		const rollback = jest.fn();
+		const adapter: ScenarioActionAdapter = {
+			type: 'developer-overrides',
+			recoveryVersion: 1,
+			preflight: () => preflight,
+			captureRollback: () => 'before',
+			rollback,
+			apply: () => {
+				preflight.summary = 'changed after validation';
+				preflight.warnings.push('');
+			},
+		};
+		const options = {
+			stepAdapters: [adapter],
+			recoveryStorage,
+			recoveryCompatibilityId: TEST_RECOVERY_COMPATIBILITY_ID,
+		};
+		const first = new ScenarioEngine(options);
+		const receipt = await first.execute(
+			scenario([step('override', 'developer-overrides')]),
+		);
+		expect(receipt.status).toBe('complete');
+		expect(JSON.parse(stored ?? '{}').steps[0].preflight).toEqual({
+			summary: 'Override mode',
+			reversible: true,
+			warnings: ['Temporary override'],
+		});
+		const restarted = new ScenarioEngine(options);
+		expect(restarted.getSnapshot().recoveryError).toBeUndefined();
+		expect((await restarted.undo(receipt.id)).status).toBe('complete');
+		expect(rollback).toHaveBeenCalledTimes(1);
+		expect(stored).toBeUndefined();
+	});
+
+	it.each(['', '   ', 'x'.repeat(4097)])(
+		'rejects an unrecoverable summary before capturing or applying',
+		async (summary) => {
+			const apply = jest.fn();
+			const captureRollback = jest.fn(() => 'before');
+			const save = jest.fn();
+			const engine = new ScenarioEngine({
+				stepAdapters: [
+					{
+						type: 'developer-overrides',
+						recoveryVersion: 1,
+						preflight: () => ({ summary, reversible: true }),
+						captureRollback,
+						apply,
+						rollback: () => {},
+					},
+				],
+				recoveryStorage: { load: () => undefined, save, clear: () => {} },
+				recoveryCompatibilityId: TEST_RECOVERY_COMPATIBILITY_ID,
+			});
+			expect(
+				(
+					await engine.execute(
+						scenario([step('override', 'developer-overrides')]),
+					)
+				).status,
+			).toBe('preflight-failed');
+			expect(captureRollback).not.toHaveBeenCalled();
+			expect(apply).not.toHaveBeenCalled();
+			expect(save).not.toHaveBeenCalled();
+		},
+	);
+
 	it('blocks recovery across app or adapter compatibility changes', async () => {
 		let stored: string | undefined;
 		const recoveryStorage = {

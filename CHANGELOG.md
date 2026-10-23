@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Scenario preflight results are normalized, validated and detached before any
+  mutation, so durable recovery checkpoints can be loaded after restart.
+
 - Offline now blocks instrumented requests with untrusted init dictionaries
   without inspecting them. Other profiles report unsupported request boundaries
   instead of silently bypassing the selected conditions.

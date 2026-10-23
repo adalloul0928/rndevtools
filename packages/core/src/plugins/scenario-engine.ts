@@ -243,13 +243,44 @@ function boundedRecoveryText(
 	return value;
 }
 
-function recoveryWarnings(value: unknown): readonly string[] {
-	if (!Array.isArray(value) || value.length > 100) {
-		throw new Error('Scenario recovery warnings are invalid.');
+/** Detach adapter output into the same bounded shape accepted on restart. */
+function normalizedPreflight(
+	value: unknown,
+	trimText = true,
+): ScenarioPreflightResult {
+	if (!isRecord(value)) throw new Error('Scenario preflight is invalid.');
+	const { summary, reversible, privileged, warnings } = value;
+	if (
+		typeof reversible !== 'boolean' ||
+		(privileged !== undefined && typeof privileged !== 'boolean')
+	) {
+		throw new Error('Scenario preflight flags are invalid.');
 	}
-	return value.map((warning, index) =>
-		boundedRecoveryText(warning, `Scenario recovery warning ${index + 1}`),
-	);
+	const text = (candidate: unknown, label: string): string =>
+		boundedRecoveryText(
+			trimText && typeof candidate === 'string' ? candidate.trim() : candidate,
+			label,
+		);
+	if (
+		warnings !== undefined &&
+		(!Array.isArray(warnings) || warnings.length > 100)
+	) {
+		throw new Error('Scenario preflight warnings are invalid.');
+	}
+	return Object.freeze({
+		summary: text(summary, 'Scenario preflight summary'),
+		reversible,
+		...(privileged === undefined ? {} : { privileged }),
+		...(warnings === undefined
+			? {}
+			: {
+					warnings: Object.freeze(
+						warnings.map((warning, index) =>
+							text(warning, `Scenario preflight warning ${index + 1}`),
+						),
+					),
+				}),
+	});
 }
 
 function recoveryValue(
@@ -687,9 +718,11 @@ export class ScenarioEngine {
 					const input = resolveTemplate(step.input, variables) as Readonly<
 						Record<string, ScenarioResolvedValue>
 					>;
-					const preflight = await this.#runBounded(
-						(signal) => adapter.preflight({ step, input, context, signal }),
-						options,
+					const preflight = normalizedPreflight(
+						await this.#runBounded(
+							(signal) => adapter.preflight({ step, input, context, signal }),
+							options,
+						),
 					);
 					if (
 						preflight.reversible &&
@@ -1361,19 +1394,7 @@ export class ScenarioEngine {
 				['summary', 'reversible', 'privileged', 'warnings'],
 				`Scenario recovery preflight ${index + 1}`,
 			);
-			const summary = boundedRecoveryText(
-				storedStep.preflight.summary,
-				`Scenario recovery summary ${index + 1}`,
-			);
-			if (typeof storedStep.preflight.reversible !== 'boolean') {
-				throw new Error(`Scenario recovery step ${index + 1} is invalid.`);
-			}
-			if (
-				storedStep.preflight.privileged !== undefined &&
-				typeof storedStep.preflight.privileged !== 'boolean'
-			) {
-				throw new Error(`Scenario recovery step ${index + 1} is invalid.`);
-			}
+			const preflight = normalizedPreflight(storedStep.preflight, false);
 			const adapter = this.#stepAdapters.get(step.type);
 			if (!adapter) {
 				throw new Error(
@@ -1388,7 +1409,7 @@ export class ScenarioEngine {
 					`Recovered step ${step.type} has an incompatible adapter recovery version.`,
 				);
 			}
-			const reversible = storedStep.preflight.reversible;
+			const reversible = preflight.reversible;
 			if (reversible && (!adapter.captureRollback || !adapter.rollback)) {
 				throw new Error(`Recovered step ${step.type} has no rollback support.`);
 			}
@@ -1407,16 +1428,7 @@ export class ScenarioEngine {
 					Record<string, ScenarioResolvedValue>
 				>,
 				adapter,
-				preflight: {
-					summary,
-					reversible,
-					...(typeof storedStep.preflight.privileged === 'boolean'
-						? { privileged: storedStep.preflight.privileged }
-						: {}),
-					...(storedStep.preflight.warnings === undefined
-						? {}
-						: { warnings: recoveryWarnings(storedStep.preflight.warnings) }),
-				},
+				preflight,
 			};
 		});
 		const warnings = prepared.flatMap(
