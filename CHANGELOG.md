@@ -4,10 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
-- Symbol fallback matching treats lock, clock and pin as complete name segments,
-  keeping clocks and refresh arrows out of the shield icon and shipping boxes
-  out of the pin icon.
-
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
   and omitting undeclared fields instead of entering a broker rejection loop.
 
@@ -15,6 +13,10 @@
   failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
+
+- Symbol fallback matching treats lock, clock and pin as complete name segments,
+  keeping clocks and refresh arrows out of the shield icon and shipping boxes
+  out of the pin icon.
 
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
@@ -325,6 +327,8 @@
 
 ### Desktop app
 
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
