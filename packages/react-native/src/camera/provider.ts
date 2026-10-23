@@ -198,8 +198,20 @@ function getDebugFixtureSnapshot(): DesktopCameraFixtureSnapshot {
 	};
 }
 
-function acceptsVideo(options: ImagePickerOptions | undefined): boolean {
-	return options?.mediaTypes?.includes('videos') ?? false;
+function acceptsMedia(
+	options: ImagePickerOptions | undefined,
+	kind: 'images' | 'videos',
+): boolean {
+	const types = options?.mediaTypes;
+	if (types === undefined) return kind === 'images';
+	if (typeof types === 'string') {
+		return (
+			types === 'All' ||
+			types === kind ||
+			types === (kind === 'images' ? 'Images' : 'Videos')
+		);
+	}
+	return types.includes(kind);
 }
 
 async function fixtureAsset(
@@ -210,16 +222,12 @@ async function fixtureAsset(
 		throw new Error('The debug camera fixture is no longer available.');
 	}
 	const video = fixture.kind === 'video';
-	if (video && !acceptsVideo(options)) {
+	if (video && !acceptsMedia(options, 'videos')) {
 		throw new Error(
 			'The active debug camera fixture is a video, but this camera flow accepts images only.',
 		);
 	}
-	if (
-		!video &&
-		options?.mediaTypes?.length === 1 &&
-		options.mediaTypes[0] === 'videos'
-	) {
+	if (!video && !acceptsMedia(options, 'images')) {
 		throw new Error(
 			'The active debug camera fixture is an image, but this camera flow accepts videos only.',
 		);

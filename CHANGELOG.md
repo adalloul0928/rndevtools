@@ -265,6 +265,9 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Restore sources reject identifiers outside the persisted ASCII alphabet during
+  registration, before a capture can fail to save.
+
 - Capability registry notifications isolate failing listeners, so healthy observers
   still receive the committed capability state.
 - Reinstalled console capture leaves forwarded wrappers from old subscriptions
@@ -273,6 +276,9 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Debug camera fixtures honor the image picker's string, array, and legacy enum
+  media selections for both image and video flows.
+
 - Desktop header projections redact names, omit accessors and oversized values,
   and bound total redaction work before storing the projection.
 - Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
@@ -318,6 +324,9 @@
   a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
+
+- Resuming a saved Supabase stack now checks capacity. Config reloads recheck HEAD
+  inside the lock and before each start, including automatic CLI restarts.
 
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
