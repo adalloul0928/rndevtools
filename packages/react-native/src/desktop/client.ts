@@ -17,6 +17,7 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import type { DevtoolsAuthorization } from '../authorization';
+import { validatedDeviceInfo } from './device-info';
 import { desktopProjectionId } from './projection';
 
 // A headless host can build its device info and snapshot projections from this
@@ -640,7 +641,7 @@ export function startDesktopClient(
 	const diagnostics: DesktopDiagnostic[] = [];
 	const processedActions = new DesktopActionReplayCache();
 	const actionAdmission = new DesktopActionAdmissionController();
-	const device = host.createDeviceInfo();
+	const device = validatedDeviceInfo(host.createDeviceInfo());
 	// The broker keys this session by the trimmed identifier, and the action
 	// parser trims too, so actions for this device carry the trimmed form.
 	const deviceId = typeof device.id === 'string' ? device.id.trim() : '';
