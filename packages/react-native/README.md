@@ -435,3 +435,7 @@ by the broker retires rather than reconnecting and evicting its replacement.
 revision avoids rebuilding and serializing the snapshot; client diagnostics still
 trigger updates and heartbeats continue. Hosts without a revision source, or with
 a failed/invalid revision read, retain the once-per-second capture fallback.
+
+`startDesktopClient` validates `createDeviceInfo()` before opening a socket. Invalid
+identifiers, capabilities, numeric fields or accessors throw a value-free error.
+Supported fields are detached, display text is redacted, and extra fields are omitted.

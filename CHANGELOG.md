@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Validate and detach device hello fields before connecting, redacting display text
+  and omitting undeclared fields instead of entering a broker rejection loop.
+
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
 

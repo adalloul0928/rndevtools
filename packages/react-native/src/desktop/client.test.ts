@@ -426,6 +426,71 @@ describe('desktop client', () => {
 		jest.useRealTimers();
 	});
 
+	it.each([
+		{ id: ' ' },
+		{ id: 'x'.repeat(257) },
+		{ platform: 'unsupported' },
+		{ capabilities: ['custom.execute'] },
+		{ processId: Number.POSITIVE_INFINITY },
+		{ viewport: { width: 0, height: 10 } },
+		{ model: 123 },
+		{ bundleIdentifier: 'bad/id' },
+	])('rejects an invalid hello before opening a socket (%j)', (fields) => {
+		expect(() => {
+			const client = startDesktopClient({
+				host: {
+					...testHost,
+					createDeviceInfo: () =>
+						({ ...testDevice, ...fields }) as DesktopDeviceInfoSnapshot,
+				},
+				candidates: [BROKER_URL],
+			});
+			client.stop();
+		}).toThrow('Invalid desktop device info');
+		expect(FakeWebSocket.instances).toHaveLength(0);
+	});
+
+	it('detaches the hello from host mutations and omits undeclared fields', () => {
+		const info = {
+			...testDevice,
+			capabilities: [...testDevice.capabilities],
+			name: 'token=secret-example',
+			extra: 'private host data',
+		};
+		const client = startDesktopClient({
+			host: { ...testHost, createDeviceInfo: () => info },
+			candidates: [BROKER_URL],
+		});
+		try {
+			info.name = 'changed';
+			info.capabilities.length = 0;
+			latestSocket().open();
+			const device = sentMessages(latestSocket())[0]?.device as Record<
+				string,
+				unknown
+			>;
+			expect(device.name).not.toContain('secret-example');
+			expect(device.name).not.toBe('changed');
+			expect(device.capabilities).toEqual(['console.clear']);
+			expect(device).not.toHaveProperty('extra');
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('refuses a hello accessor without invoking it', () => {
+		const getter = jest.fn(() => 'private host data');
+		const info = { ...testDevice };
+		Object.defineProperty(info, 'model', { get: getter });
+		expect(() =>
+			startDesktopClient({
+				host: { ...testHost, createDeviceInfo: () => info },
+				candidates: [BROKER_URL],
+			}),
+		).toThrow('Invalid desktop device info');
+		expect(getter).not.toHaveBeenCalled();
+	});
+
 	it('replaces an earlier client for the same device and leaves its old stop inert', async () => {
 		jest.useFakeTimers();
 		const unsubscribe = jest.fn();
