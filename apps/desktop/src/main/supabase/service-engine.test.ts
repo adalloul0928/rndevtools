@@ -10,6 +10,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	attentionItems,
+	type SupabaseJob,
 	type SupabaseOperation,
 	stackStatus,
 	supabaseActionAvailability,
@@ -26,7 +27,11 @@ import {
 	fakeResolvedCli,
 	fakeSession,
 } from './engine.test-support';
-import { SupabaseJobStore, supabaseArgvDigest } from './job-store';
+import {
+	initialSupabaseJobSteps,
+	SupabaseJobStore,
+	supabaseArgvDigest,
+} from './job-store';
 import type { SupabaseOperationContext } from './service-ports';
 import { SupabaseStackStore } from './stack-store';
 
@@ -3545,6 +3550,37 @@ describe('SupabaseEngine adoption', () => {
 		expect(record?.lastStartedAt).toBe(h.clock.now);
 	});
 
+	it('starts the unheld linger when a create ends, not when its stack came up', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		await h.engine.start();
+		await h.engine.settle();
+		const facts = await h.engine.worktreeFacts(repo);
+		if (!facts) throw new Error('The worktree has no facts.');
+		const stackId = await h.identity(repo);
+		const release = h.cli.hold('stack start');
+		// Neither pinned nor attached: nothing holds the stack this create makes.
+		const ensure = h.engine.ensureStack(facts, FOLLOW);
+		await h.cli.waitForCall('stack start');
+		// The CLI registered the stack and its owner is up, but the create has
+		// not reported back: the provisional record is live, and nothing holds it.
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		// The create outlasts the 60 s unheld linger.
+		await h.advance(90_000);
+		expect(h.engine.activeJobFor(stackId)?.kind).toBe('create');
+		expect(h.cli.count('stack stop')).toBe(0);
+		release();
+		await expect(ensure).resolves.toMatchObject({ kind: 'ready', stackId });
+		await h.settle();
+		// The linger counts from the end of the create, not from the first tick
+		// that saw its owner while the job still ran.
+		await h.advance(30_000);
+		expect(h.cli.count('stack stop')).toBe(0);
+		await h.advance(60_000);
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+	});
+
 	it('records, exposure-checks and auto-stops a create a previous desktop left running', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');
@@ -3709,6 +3745,69 @@ describe('SupabaseEngine adoption', () => {
 		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
 	});
 
+	it('stops an adopted stack that listens beyond loopback even when its record cannot be saved', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({
+			id: stackId,
+			projectRoot: repo,
+			running: true,
+			lanExposed: true,
+		});
+		await h.engine.start();
+		await h.settle();
+		failSettlingWrite(h);
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		// The check does not wait for the record, and the job tells the user
+		// what to act on: the exposure, not the store.
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+		const job = h.engine.job(previous.jobId);
+		expect(job?.status).toBe('failed');
+		expect(job?.error?.title).toBe('Stack listened on your network');
+		expect(verifyStep(job)).toMatchObject({
+			state: 'failed',
+			detail: 'Stack listened on your network',
+		});
+		expect(stateOf(h, stackId)?.exposure.verdict).toBe('lan-exposed');
+		expect(h.logs.join('\n')).toContain('could not record an adopted stack');
+		// The flag the failed write left is cleared once the job has ended.
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+	});
+
+	it('fails the job of an adopted stack that was verified but could not be recorded', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		await h.engine.start();
+		await h.settle();
+		failSettlingWrite(h);
+		const reads = h.cli.count('stack status');
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		const job = h.engine.job(previous.jobId);
+		expect(job?.status).toBe('failed');
+		expect(job?.error?.title).toBe('Stack record could not be saved');
+		// The stack was checked and read all the same, and keeps running.
+		expect(verifyStep(job)).toMatchObject({
+			state: 'done',
+			detail: '127.0.0.1 only',
+		});
+		expect(stateOf(h, stackId)?.exposure.verdict).toBe('loopback');
+		expect(stateOf(h, stackId)?.state).toBe('running');
+		expect(h.cli.count('stack status')).toBeGreaterThan(reads);
+		expect(h.cli.count('stack stop')).toBe(0);
+		expect(h.logs.join('\n')).toContain('could not record an adopted stack');
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+	});
+
 	it('clears the flag of a create that ends while the feature is off, probing nothing', async () => {
 		const h = await createEngineHarness({ enabled: false, start: false });
 		const repo = await h.repository('repo');
@@ -3752,6 +3851,7 @@ async function previousCreate(
 		stackIds: [stackId],
 		requestedBy: { kind: 'operator' },
 		cancellable: true,
+		steps: initialSupabaseJobSteps('create'),
 	});
 	previous.start(job.id);
 	const pid = options.pid ?? 4_242;
@@ -3809,6 +3909,34 @@ async function provisionalRecord(
 		studioEnabled: false,
 		flags: { starting: true },
 	});
+}
+
+/**
+ * Makes the first write that settles a provisional record, the one that drops
+ * its `starting` flag, fail as a store that cannot write does. Every other
+ * write goes through, such as the bookkeeping of a stop, so the failure does
+ * not depend on how many writes come before the settling one.
+ */
+function failSettlingWrite(h: EngineHarness): void {
+	const store = h.engine.stackStore;
+	const update = store.updateRecord.bind(store);
+	let failed = false;
+	vi.spyOn(store, 'updateRecord').mockImplementation((stackId, mutate) =>
+		update(stackId, (draft) => {
+			const starting = draft.flags.starting === true;
+			const next = mutate(draft) ?? draft;
+			if (!failed && starting && next.flags.starting !== true) {
+				failed = true;
+				throw new Error('The record could not be written.');
+			}
+			return next;
+		})
+	);
+}
+
+/** The verify step of a job, as the tab shows it. */
+function verifyStep(job: SupabaseJob | undefined) {
+	return job?.steps?.find((step) => step.id === 'verify');
 }
 
 describe('SupabaseEngine storage', () => {
