@@ -80,6 +80,25 @@ export class BoundedEventStore<T> {
 		if (!this.replace(predicate, event)) this.append(event);
 	}
 
+	/** Removes a confirmed subset in one notification, preserving admitted sizes. */
+	remove(predicate: (event: T) => boolean): void {
+		const events: T[] = [];
+		const sizes: number[] = [];
+		let bytes = 0;
+		this.#events.forEach((event, index) => {
+			if (predicate(event)) return;
+			const size = this.#sizes[index] ?? 0;
+			events.push(event);
+			sizes.push(size);
+			bytes += size;
+		});
+		if (events.length === this.#events.length) return;
+		this.#events = events;
+		this.#sizes = sizes;
+		this.#bytes = bytes;
+		this.#emit();
+	}
+
 	clear = (): void => {
 		if (this.#events.length === 0) return;
 		this.#events = [];
