@@ -5,6 +5,8 @@ import {
 	RNDEVTOOLS_SNAPSHOT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import { utf8ByteLength } from '@rndevtools/core/serialize';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 import {
 	disableDevtoolsAuthorization,
 	getDevtoolsAuthorization,
@@ -93,7 +95,14 @@ class FakeWebSocket {
 		this.onclose?.({ code: code ?? 1005, reason: reason ?? '' });
 	});
 
-	constructor(readonly url: string) {
+	/** Every argument after the URL, exactly as the client passed them. */
+	readonly connectionArguments: readonly unknown[];
+
+	constructor(
+		readonly url: string,
+		...connectionArguments: unknown[]
+	) {
+		this.connectionArguments = connectionArguments;
 		FakeWebSocket.instances.push(this);
 	}
 
@@ -411,6 +420,80 @@ describe('desktop client', () => {
 		disableDevtoolsAuthorization();
 		runtime.WebSocket = originalWebSocket;
 		jest.useRealTimers();
+	});
+
+	it('opens a loopback candidate with the default connection options', () => {
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			expect(latestSocket().url).toBe(BROKER_URL);
+			expect(latestSocket().connectionArguments).toEqual([]);
+		} finally {
+			client.stop();
+		}
+	});
+
+	describe('on an Android emulator', () => {
+		// Discovery sweeps 10.0.2.2 only on an Android emulator, and the client
+		// keeps it only when it discovered the candidates itself, so the alias is
+		// reached through the defaults rather than an explicit candidate list.
+		let replaced: { restore(): void }[] = [];
+
+		beforeEach(() => {
+			replaced = [
+				jest.replaceProperty(Platform, 'OS', 'android'),
+				jest.replaceProperty(Device, 'isDevice', false),
+			];
+		});
+
+		afterEach(() => {
+			for (const property of replaced) property.restore();
+		});
+
+		it('leaves an explicit candidate on the alias with the default options', () => {
+			// An explicit URL is not the alias the client discovered itself; it
+			// carries a token, which the broker checks instead of the origin.
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: ['wss://10.0.2.2:47931/device?token=0123456789abcdef'],
+			});
+			try {
+				expect(latestSocket().url).toBe(
+					'wss://10.0.2.2:47931/device?token=0123456789abcdef',
+				);
+				expect(latestSocket().connectionArguments).toEqual([]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('presents a loopback origin to the broker behind the host alias', async () => {
+			jest.useFakeTimers();
+			const client = startDesktopClient({ host: testHost });
+			try {
+				const alias = latestSocket();
+				expect(alias.url).toBe('ws://10.0.2.2:47931/device');
+				// React Native's third constructor argument. Without it the Android
+				// transport sends `Origin: http://10.0.2.2:47931`, which the broker
+				// refuses with 403 while it has no token.
+				expect(alias.connectionArguments).toEqual([
+					undefined,
+					{ headers: { origin: 'http://127.0.0.1:47931' } },
+				]);
+
+				// The next candidate is the emulator's own loopback, where React
+				// Native's default origin is already a loopback one.
+				alias.serverClose(1006, '');
+				await reconnectDelayMs();
+				const loopback = latestSocket();
+				expect(loopback.url).toBe('ws://127.0.0.1:47931/device');
+				expect(loopback.connectionArguments).toEqual([]);
+			} finally {
+				client.stop();
+			}
+		});
 	});
 
 	it('rechecks the authorized owner before queued actions execute', async () => {
