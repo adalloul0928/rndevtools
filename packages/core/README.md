@@ -79,6 +79,10 @@ reader is available. Header, URL, and body redaction runs before an event enters
 the store. Caller-supplied or custom fetch implementations remain untrusted and
 body-uninspectable unless the host explicitly vets that exact boundary; retained
 bodies are capped at 64 KB so admission matches the built-in redaction bound.
+An uninspected request method is shown as `UNKNOWN`; an unread or opaque response
+status is shown as a neutral `—`, never as an HTTP success. The fetch completing
+only records a transport outcome. Use the explicit trust options above when the
+host can vouch for its Request and Response boundary.
 
 Network condition profiles are an explicit, capability-gated opt-in. Offline,
 Edge, 3G, LTE, Wi-Fi, DSL, and Very Bad Network apply deterministic latency,

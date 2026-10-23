@@ -30,7 +30,12 @@ export type ClassifiableNetworkRequest = {
 	durationMs?: number | undefined;
 };
 
-export type NetworkStatusTone = 'success' | 'danger' | 'warning' | 'info';
+export type NetworkStatusTone =
+	| 'success'
+	| 'danger'
+	| 'warning'
+	| 'info'
+	| 'neutral';
 
 export type CollapsedNetworkEvent = {
 	event: NetworkEvent;
@@ -451,10 +456,13 @@ export function networkStatusPresentation(event: NetworkEvent): {
 			tone: 'danger',
 		};
 	}
-	const status = event.status ?? 0;
+	const status = event.status;
+	if (status === undefined || status === 0) {
+		return { text: '—', tone: 'neutral' };
+	}
 	if (status >= 500) return { text: String(status), tone: 'danger' };
 	if (status >= 400) return { text: String(status), tone: 'warning' };
-	return { text: event.status ? String(event.status) : 'OK', tone: 'success' };
+	return { text: String(status), tone: 'success' };
 }
 
 function hostToken(host: string): string | undefined {

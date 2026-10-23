@@ -4,6 +4,11 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Network capture labels uninspected request methods `UNKNOWN` and unread or
+  opaque response statuses with a neutral dash instead of inventing GET / OK.
+- Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
+  native-memory abort without dropping odd-offset marker or secret checks.
+
 - Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
   tokens, and complete or truncated private-key blocks in diagnostic capture.
   Runtime token patterns now share one source with the public-content check.

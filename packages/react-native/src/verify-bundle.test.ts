@@ -48,6 +48,7 @@ type Os = { tmpdir: () => string };
 type Url = { pathToFileURL: (p: string) => { href: string } };
 type SpawnResult = {
 	status: number | null;
+	signal?: string | null;
 	stdout: string;
 	stderr: string;
 	error?: { message: string };
@@ -96,9 +97,19 @@ function bundle(files: Record<string, string>): string {
 }
 
 function verify(...args: string[]): SpawnResult {
-	return spawnSync(process.execPath, [VERIFIER, ...args], {
+	const result = spawnSync(process.execPath, [VERIFIER, ...args], {
 		encoding: 'utf8',
 	});
+	if (result.status === null) {
+		throw new Error(
+			`Verifier did not exit normally: ${JSON.stringify({
+				signal: result.signal,
+				error: result.error?.message,
+				stderr: result.stderr,
+			})}`,
+		);
+	}
+	return result;
 }
 
 /** Runs `body` as an ES module that has imported the verifier's exports. */
