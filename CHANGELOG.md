@@ -30,6 +30,9 @@
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 
+- Console and Network panels render at most 100 event rows per page. Filters
+  search all retained events, and older pages remain available without expanding
+  the mounted row count.
 - Recognize Expo fetch cancellation wrappers and preserved abort causes without
   inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead

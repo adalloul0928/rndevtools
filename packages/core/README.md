@@ -436,3 +436,10 @@ route to the host callback; routes stored in diagnostic history stay redacted.
 Expo fetch cancellation wrappers are recorded as aborted when they carry a known
 cancellation message or preserve the safely captured signal reason as their cause.
 Unrelated transport failures remain errors, even if the caller aborts later.
+
+### Large captured histories
+
+The on-device Console and Network panels show up to 100 rows per page on iOS
+and Android. Previous/Next controls browse older retained events; search and
+filters still inspect the entire retained history, and exports keep their existing
+bounds. Filtering returns to the first page.

@@ -31,6 +31,7 @@ import {
 	AndroidPanelTabs,
 	AndroidPanelTextBlock,
 } from '../components/android-panel-ui';
+import { EventPageControls, useEventPage } from '../components/event-page';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import {
@@ -682,6 +683,7 @@ export function createConsolePlugin(
 					),
 			[events, filter, needle],
 		);
+		const page = useEventPage(visibleEvents, JSON.stringify([filter, needle]));
 		const shareEvents = () => {
 			shareDiagnosticContent({
 				title,
@@ -773,7 +775,7 @@ export function createConsolePlugin(
 										}
 									/>
 								) : (
-									visibleEvents.map((event) => (
+									page.items.map((event) => (
 										<DisclosureGroup
 											key={event.id}
 											label={`${bookmarked.has(event.id) ? '★ ' : ''}${event.level.toUpperCase()} — ${event.message}${event.repeatCount > 1 ? ` ×${event.repeatCount}` : ''}`}
@@ -838,6 +840,7 @@ export function createConsolePlugin(
 									))
 								)}
 							</Section>
+							<EventPageControls {...page} />
 							{events.length > 0 ? (
 								<Section>
 									<Button
@@ -882,7 +885,7 @@ export function createConsolePlugin(
 									}
 								/>
 							) : (
-								visibleEvents.map((event) => (
+								page.items.map((event) => (
 									<AndroidPanelTextBlock
 										key={event.id}
 										label={`${bookmarked.has(event.id) ? '★ · ' : ''}${event.level.toUpperCase()} · ${new Date(event.at).toLocaleTimeString()}${event.repeatCount > 1 ? ` · ×${event.repeatCount}` : ''}`}
@@ -898,6 +901,7 @@ export function createConsolePlugin(
 								))
 							)}
 						</AndroidPanelSection>
+						<EventPageControls {...page} />
 						{events.length > 0 ? (
 							<AndroidPanelSection title="Actions">
 								<AndroidPanelRow
