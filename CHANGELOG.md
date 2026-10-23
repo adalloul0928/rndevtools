@@ -338,6 +338,9 @@
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 

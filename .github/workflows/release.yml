@@ -105,7 +105,7 @@ jobs:
           node apps/desktop/scripts/release-macos.mjs --preflight
           pnpm --filter @rndevtools/desktop release:mac
       - name: Verify native capabilities
-        run: pnpm --filter @rndevtools/desktop native:verify:capabilities
+        run: pnpm --filter @rndevtools/desktop native:verify:capabilities 'release/public/mac-arm64/RN Devtools.app/Contents/Resources/native/rndevtools-native-host'
       - name: Verify packaged cold start
         run: pnpm --filter @rndevtools/desktop native:verify:cold-start 'release/public/mac-arm64/RN Devtools.app'
       - name: Retain verified artifacts for review

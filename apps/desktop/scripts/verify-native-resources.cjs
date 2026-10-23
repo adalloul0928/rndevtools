@@ -14,9 +14,23 @@ const expectedHelperFiles = Object.freeze({
 	cli: 'rndevtools',
 });
 
-function verifyNativeResources(resourcesDirectory) {
+function verifyNativeResources(
+	resourcesDirectory,
+	{
+		appVersion = require('../package.json').version,
+		architecture = process.arch,
+	} = {}
+) {
 	const resolvedDirectory = path.resolve(resourcesDirectory);
 	const manifest = readSupportedManifest(resolvedDirectory);
+	if (
+		manifest.appVersion !== appVersion ||
+		manifest.architecture !== architecture
+	) {
+		throw new Error(
+			'Native resources do not match the desktop build version and target architecture.'
+		);
+	}
 	for (const [key, expectedFile] of Object.entries(expectedHelperFiles)) {
 		const { data, stats } = inspectHelper(resolvedDirectory, key, expectedFile);
 		const helper = manifest.helpers[key];
