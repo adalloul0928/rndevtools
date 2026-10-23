@@ -239,7 +239,12 @@ export async function runSimulatorCommand(
 		};
 
 		const stop = (signal: NodeJS.Signals) => {
-			if (child.exitCode !== null || child.signalCode !== null) return;
+			if (child.exitCode !== null || child.signalCode !== null) {
+				// A descendant may still hold stdout/stderr after the direct child
+				// exits. Its inherited pipe cannot extend this command's deadline.
+				closeStreamsAndFinish();
+				return;
+			}
 			if (!requestGracefulCancellation()) {
 				try {
 					child.kill(signal);
@@ -256,6 +261,7 @@ export async function runSimulatorCommand(
 						// The child already exited.
 					}
 				}
+				closeStreamsAndFinish();
 			}, forceKillDelayMs);
 			forceKillTimer.unref();
 		};
@@ -307,7 +313,7 @@ export async function runSimulatorCommand(
 			);
 		});
 
-		child.once('close', (code) => {
+		const finish = (code: number | null) => {
 			if (settled) return;
 			settled = true;
 			cleanup();
@@ -361,7 +367,20 @@ export async function runSimulatorCommand(
 				return;
 			}
 			resolve({ stdout, stderr, exitCode: code });
-		});
+		};
+
+		function closeStreamsAndFinish(): void {
+			child.stdin.destroy();
+			child.stdout.destroy();
+			child.stderr.destroy();
+			controlPipe?.destroy();
+			// SIGKILL can remain pending on an OS-blocked child. It no longer
+			// owns a local pipe or a reason to keep the desktop process alive.
+			child.unref();
+			finish(child.exitCode);
+		}
+
+		child.once('close', finish);
 
 		if (options.stdin === undefined) {
 			child.stdin.end();

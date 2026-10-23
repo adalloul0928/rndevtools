@@ -4,6 +4,15 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Network capture labels uninspected request methods `UNKNOWN` and unread or
+  opaque response statuses with a neutral dash instead of inventing GET / OK.
+- Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
+  native-memory abort without dropping odd-offset marker or secret checks.
+
+- Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
+  tokens, and complete or truncated private-key blocks in diagnostic capture.
+  Runtime token patterns now share one source with the public-content check.
+
 - **Breaking:** the image overlay no longer reads
   `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` or `EXPO_PUBLIC_SUPABASE_URL`. Pass the
   hosts it may download from to `configureImageOverlay({ allowedRemoteHosts })`
@@ -91,6 +100,18 @@
 - `createAsyncStorageDevtoolsAdapter` and `createSecureStoreDevtoolsAdapter`
   throw a `TypeError` when given no store, instead of returning an adapter
   whose every read fails.
+- The restore-point and scenario repositories refuse to write while their
+  stored document could not be loaded. A failed `getItem` used to leave the
+  repository empty, and the next capture or save then replaced everything that
+  was stored with a document of one entry. Writes now reject with the load
+  error. `ScenarioRepository` reports it as `loadError` on its snapshot and
+  through `subscribeToLoadError()`, which fires with every change to the
+  repository, and `getLoadError()`. `reload()` reads the document again behind
+  any queued write. `discardStoredData()` deletes it on purpose, and only while
+  the load error still stands, so a confirmation given before a successful
+  retry cannot destroy what that retry loaded. The restore-points panel shows
+  the error with Retry and Discard controls, and the plugin exposes
+  `getLoadError()`, `reload()` and `discardStoredData()`.
 - `rndevtools-verify-bundle --forbid-loopback-urls` and
   `--preset supabase-local` fail a release bundle that still carries a
   loopback URL or a local Supabase key.
@@ -218,8 +239,34 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- The desktop client fits every snapshot to every size and range bound the
+  desktop validates before it sends it, with the new `fitDesktopSnapshot` of
+  `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
+  lists of `RNDEVTOOLS_SNAPSHOT_LIMITS`, so a nested list (10 of its 30 limits
+  are nested, such as a component's `sourceFiles`), a text or a number over
+  its bound made the broker close the socket and the device reconnect in a
+  loop. Core keeps up to 10,000 performance samples where the desktop takes
+  1,500, and does not cap a scenario's warnings where it takes 100. A
+  top-level list over its cap keeps its last rows, and a list inside a row
+  keeps its newest rows if it is chronological and its first if it is
+  ordered. A text is cut without splitting a surrogate pair, a number is
+  clamped into its range, and a map keeps its first fields. A query
+  simulation's active entry, a camera fixture, a scenario variable default or
+  a persona identifier that disagrees with the rest, which the schema would
+  reject, is dropped or reset. The identity history keeps the sessions that
+  started latest, whichever end of the list a host puts them at, and a cut of
+  performance samples raises `droppedSampleCount` by the samples removed, so
+  the performance panel says that samples were dropped. A value of the wrong
+  shape, such as an empty identifier, is still left to the schema. One text
+  over its limit no longer keeps a snapshot from being sent. The client's
+  warning names the first six changes and counts the rest. The bounds the schema applies beyond
+  `RNDEVTOOLS_SNAPSHOT_LIMITS` are exported as
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`, `RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
+- Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
@@ -231,6 +278,11 @@
   for restores and refetches) while the device client allowed 45, so a long
   scenario was reported as unacknowledged while the device finished it.
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- The device snapshot schema reads its text, number and item bounds from
+  `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
+  holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
+  of a snapshot past its bound, then requires the schema to reject the
+  snapshot as it stands and accept it fitted. No bound changed.
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
   checks that the process owns the connection, and it follows the process's
@@ -259,6 +311,15 @@
   runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
   missing verification in a notice and job summary. Desktop changes must
   pass the full local quality gate before merging when it skips.
+- Forget restore point now works for a restore point whose Simulator has been
+  deleted or whose helper is unavailable, so an interrupted SimSlim mutation
+  can no longer leave a Simulator permanently marked "Check required". The
+  SimSlim panel lists such restore points, each with its own Forget restore
+  point button, and the app no longer requires the helper or the Simulator
+  inventory for that one action; it still asks before running. Before, the
+  action was refused as long as the helper was unavailable or the Simulator
+  was missing from the inventory, and a restore point behind an unavailable
+  helper was not shown at all.
 - A local Supabase stack whose first start is still running when RN Devtools
   quits is now recorded before the CLI is spawned. When the restarted app
   adopts that start, it checks that the stack listens on 127.0.0.1 only and

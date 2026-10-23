@@ -50,6 +50,7 @@ import {
 } from './network-presentation';
 
 export function statusColor(tone: NetworkStatusTone) {
+	if (tone === 'neutral') return PlatformColor('secondaryLabelColor');
 	if (tone === 'success') return PlatformColor('systemGreenColor');
 	if (tone === 'danger') return PlatformColor('systemRedColor');
 	if (tone === 'warning') return PlatformColor('systemOrangeColor');
