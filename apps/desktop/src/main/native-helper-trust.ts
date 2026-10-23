@@ -59,6 +59,8 @@ export type VerifiedNativeHelper = {
 	executablePath: string;
 	manifest: NativeResourceManifest;
 	verifiedAt: number;
+	/** Present only after matching the Electron parent signing team. */
+	signingTeamIdentifier?: string;
 };
 export type VerifiedSimulatorHelper = VerifiedNativeHelper;
 export type VerifiedAgentCli = VerifiedNativeHelper;
@@ -77,14 +79,58 @@ export class NativeHelperTrustError extends Error {
 	}
 }
 
-type SignatureVerifier = (executablePath: string) => Promise<void>;
+type SignatureVerifier = (
+	executablePath: string,
+	requireParentTeam: boolean
+) => Promise<string | undefined>;
 
-async function verifyCodeSignature(executablePath: string): Promise<void> {
+async function verifyCodeSignature(
+	executablePath: string,
+	requireParentTeam: boolean
+): Promise<string | undefined> {
+	const options = { timeoutMs: 15_000, maxOutputBytes: 64 * 1024 };
+	let team: string | undefined;
+	if (requireParentTeam) {
+		// The mutation brokers already require this identity at commit time. Apply
+		// the same prerequisite before advertising mutation controls in the UI.
+		await runSimulatorCommand(
+			'/usr/bin/codesign',
+			[
+				'--verify',
+				'--strict',
+				'--all-architectures',
+				'-R',
+				'anchor apple generic',
+				process.execPath,
+			],
+			options
+		);
+		const metadata = await runSimulatorCommand(
+			'/usr/bin/codesign',
+			['--display', '--verbose=4', process.execPath],
+			options
+		);
+		team = /^TeamIdentifier=([A-Z0-9]{10})$/m.exec(metadata.stderr)?.[1];
+		if (!team)
+			throw new Error('The Electron parent has no verified signing team.');
+	}
 	await runSimulatorCommand(
 		'/usr/bin/codesign',
-		['--verify', '--strict', '--all-architectures', executablePath],
-		{ timeoutMs: 15_000, maxOutputBytes: 64 * 1024 }
+		[
+			'--verify',
+			'--strict',
+			'--all-architectures',
+			...(team
+				? [
+						'-R',
+						`anchor apple generic and certificate leaf[subject.OU] = "${team}"`,
+					]
+				: []),
+			executablePath,
+		],
+		options
 	);
+	return team;
 }
 
 async function sha256File(filePath: string): Promise<Buffer> {
@@ -217,7 +263,16 @@ async function verifyNativeHelper({
 		) {
 			throw new Error('helper digest mismatch');
 		}
-		await signatureVerifier(resolvedExecutable);
+		const signingTeamIdentifier = await signatureVerifier(
+			resolvedExecutable,
+			helperKind !== 'cli'
+		);
+		if (
+			helperKind !== 'cli' &&
+			!/^[A-Z0-9]{10}$/.test(signingTeamIdentifier ?? '')
+		) {
+			throw new Error('Mutation helper has no verified parent signing team.');
+		}
 		const after = await lstat(resolvedExecutable);
 		if (
 			before.dev !== after.dev ||
@@ -229,6 +284,7 @@ async function verifyNativeHelper({
 		}
 		return {
 			executablePath: resolvedExecutable,
+			...(signingTeamIdentifier ? { signingTeamIdentifier } : {}),
 			manifest,
 			verifiedAt: Date.now(),
 		};

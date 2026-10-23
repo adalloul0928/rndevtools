@@ -16,6 +16,10 @@
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
 
+- Symbol fallback matching treats lock, clock and pin as complete name segments,
+  keeping clocks and refresh arrows out of the shield icon and shipping boxes
+  out of the pin icon.
+
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
@@ -330,14 +334,25 @@
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
+- Connected App panels use shared section surfaces, sentence-case captions and
+  compact detail headings. Neutral selections have a visible edge; storage and
+  restore copy retain readable contrast, and performance uses chart tokens.
+
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 
 
+- Native helper packaging skips unsupported platforms before touching generated
+  sources and rejects malformed Apple team IDs before constructing linker flags.
+
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
+- Mutation helpers must match the verified Electron signing team and compiled
+  handshake team. Unsigned local builds report them as untrusted before offering
+  controls that the native broker would refuse.
+
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 

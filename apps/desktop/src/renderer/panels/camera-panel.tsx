@@ -92,7 +92,7 @@ export function CameraPanel() {
 	};
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				actions={
 					<Button
