@@ -4,6 +4,11 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
+- Validate and detach device hello fields before connecting, redacting display text
+  and omitting undeclared fields instead of entering a broker rejection loop.
+
 - Refused desktop actions keep read-only diagnostics connected. Authorization read
   failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
@@ -318,12 +323,14 @@
 
 ### Desktop app
 
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
+- Local ad-hoc macOS packages launch without team-based library validation;
+  Developer ID release signing keeps hardened runtime and its existing gates.
+
 - Connected App panels use shared section surfaces, sentence-case captions and
   compact detail headings. Neutral selections have a visible edge; storage and
   restore copy retain readable contrast, and performance uses chart tokens.
-
-- Shared 32px segmented controls and tabs support arrow, Home and End navigation
-  in Network, Query, Simulator layout and appearance settings.
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
