@@ -101,4 +101,12 @@ describe('sanitizeSupabaseText', () => {
 		expect(bounded.endsWith('a…')).toBe(true);
 		expect(line('short', 100)).toBe('short');
 	});
+
+	it('scans long scheme-like words once while still redacting adjacent URLs', () => {
+		const word = 'a.b-c+d'.repeat(4_000);
+		expect(line(word, 100)).toBe(`${word.slice(0, 99)}…`);
+		expect(
+			line(`${word} postgresql://postgres:private@127.0.0.1/db`, 40_000)
+		).toBe(`${word} postgresql://postgres:[REDACTED]@127.0.0.1/db`);
+	});
 });
