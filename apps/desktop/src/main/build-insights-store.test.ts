@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BuildInsightsStore } from './build-insights-store';
 
@@ -12,20 +13,20 @@ afterEach(async () => {
 	}
 });
 
-async function createStore(now: number): Promise<BuildInsightsStore> {
+async function createStore(now: number) {
 	const root = await mkdtemp(
 		path.join(tmpdir(), 'rndevtools-build-insights-store-')
 	);
 	temporaryRoots.push(root);
 	const store = new BuildInsightsStore(root, { now: () => now });
 	await store.start();
-	return store;
+	return { store, root };
 }
 
 describe('BuildInsightsStore', () => {
 	it('keeps source and artifact paths outside renderer state and deduplicates artifacts', async () => {
 		const now = Date.UTC(2026, 7, 30);
-		const store = await createStore(now);
+		const { store } = await createStore(now);
 		const source = store.upsertSource({
 			sourcePath: '/private/DerivedData/ExampleApp',
 			label: 'ExampleApp',
@@ -65,7 +66,7 @@ describe('BuildInsightsStore', () => {
 
 	it('prunes builds older than the twelve-month calendar window', async () => {
 		const now = Date.UTC(2026, 7, 30);
-		const store = await createStore(now);
+		const { store } = await createStore(now);
 		const source = store.upsertSource({
 			sourcePath: '/private/result.xcresult',
 			label: 'result.xcresult',
@@ -95,7 +96,7 @@ describe('BuildInsightsStore', () => {
 
 	it('updates a previously incomplete artifact and computes stats across all retained rows', async () => {
 		const now = Date.UTC(2026, 7, 30);
-		const store = await createStore(now);
+		const { store, root } = await createStore(now);
 		const source = store.upsertSource({
 			sourcePath: '/private/DerivedData/ExampleApp',
 			label: 'ExampleApp',
@@ -130,13 +131,29 @@ describe('BuildInsightsStore', () => {
 		).toBe(true);
 		expect(store.getState().builds[0]?.status).toBe('succeeded');
 
-		for (let index = 0; index < 2_000; index += 1) {
-			store.insertBuild(source, {
-				...base,
-				artifactPath: `/private/DerivedData/ExampleApp/${index}.xcresult`,
-				status: 'succeeded',
-			});
+		// This fixture tests retained-row statistics and the public row cap, not
+		// 2,000 separate durable writes. Seed the other rows atomically so a
+		// busy disk cannot turn the fixture setup into the test's deadline.
+		const seed = new DatabaseSync(path.join(root, 'build-insights.sqlite'));
+		try {
+			seed.exec(`
+				WITH RECURSIVE fixture(n) AS (
+					SELECT 0 UNION ALL SELECT n + 1 FROM fixture WHERE n < 1999
+				)
+				INSERT INTO builds
+				SELECT printf('build-00000000-0000-4000-8000-%012x', n), source_id,
+					'/private/DerivedData/ExampleApp/' || n || '.xcresult',
+					name, configuration, scheme, destination, created_at, started_at,
+					ended_at, duration_ms, status, classification,
+					classification_confidence, warnings, errors, analyzer_warnings,
+					xcode_version
+				FROM builds CROSS JOIN fixture
+				WHERE artifact_path = '/private/DerivedData/ExampleApp/incomplete.xcresult';
+			`);
+		} finally {
+			seed.close();
 		}
+
 		const state = store.getState();
 		expect(state.builds).toHaveLength(2_000);
 		expect(state.stats).toMatchObject({
@@ -145,5 +162,5 @@ describe('BuildInsightsStore', () => {
 			sevenDayAverageMs: 1_000,
 		});
 		store.stop();
-	}, 15_000);
+	});
 });
