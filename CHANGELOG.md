@@ -331,6 +331,9 @@
 
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
+- Desktop dev and build verify the licensed HeroUI Pro payload against reviewed
+  content hashes, including additions, removals, metadata changes and symlinks.
+
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
