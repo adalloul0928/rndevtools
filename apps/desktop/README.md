@@ -278,3 +278,17 @@ permissioned providers are available.
 The desktop unit suite uses at most two workers to leave room for native
 helpers and the app on a development machine. Dedicated runners may override
 that with `pnpm --filter @rndevtools/desktop test:run --maxWorkers=4`.
+
+## Appearance and first run
+
+Choose System, Light, or Dark in Settings. The preference is saved locally and
+applied before the window opens. First-run setup waits for repository discovery;
+Get started remembers completed tasks and can be hidden once it is no longer
+useful. Coding-agent setup discloses and confirms its configuration changes.
+
+The supported minimum window is 1040×700. Diagnostic grids hide secondary
+columns in narrow panes; the selected row's details retain those values. The
+sidebar Simulator dot follows the selected device state.
+
+The README screenshots use the connected demo device and synthetic Simulator
+and Supabase fixtures. They do not depict this machine's Simulator inventory.
