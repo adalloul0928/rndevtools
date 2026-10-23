@@ -332,6 +332,10 @@
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
+- Connected App panels use shared section surfaces, sentence-case captions and
+  compact detail headings. Neutral selections have a visible edge; storage and
+  restore copy retain readable contrast, and performance uses chart tokens.
+
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
 - Recheck Supabase CLI identity, permissions and canonical path immediately before

@@ -64,13 +64,13 @@ const SERIES = {
 	},
 	green: {
 		line: 'var(--chart-cpu)',
-		tint: 'bg-brand/10',
-		text: 'text-green-700 dark:text-green-300',
+		tint: 'bg-(--chart-cpu)/10',
+		text: 'text-(--chart-cpu-text)',
 	},
 	violet: {
 		line: 'var(--chart-memory)',
-		tint: 'bg-violet-400/10',
-		text: 'text-violet-700 dark:text-violet-300',
+		tint: 'bg-(--chart-memory)/10',
+		text: 'text-(--chart-memory)',
 	},
 } as const;
 
@@ -95,7 +95,7 @@ function MetricCard({
 }) {
 	const color = SERIES[tone];
 	return (
-		<div className="relative overflow-hidden rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4">
+		<div className="relative overflow-hidden panel-section p-4">
 			<div className="flex items-start justify-between gap-3">
 				<div>
 					<div className="flex items-center gap-1 text-xs text-(--text-3)">
@@ -176,7 +176,7 @@ export function PerformancePanel() {
 	}, [samples]);
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Performance"
 				description="Record interactions to inspect JavaScript responsiveness. The app supplies the overall grade, including severe stalls that averages can hide. CPU and memory appear only when a native sampler reports them. Use a release build for representative measurements."
@@ -237,7 +237,7 @@ export function PerformancePanel() {
 					the retained window only.
 				</PanelNotice>
 			) : null}
-			<div className="panel-scroll p-5">
+			<div className="panel-scroll connected-panel-body">
 				<div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
 					<MetricCard
 						label="JS FPS"
@@ -326,7 +326,7 @@ export function PerformancePanel() {
 								['Long frames', summary?.longFrameCount ?? '—'],
 							].map(([label, value]) => (
 								<div className="bg-surface p-3" key={label}>
-									<p className="m-0 text-xs uppercase tracking-[0.06em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										{label}
 									</p>
 									<p className="mb-0 mt-1 font-mono text-sm text-(--foreground)">
@@ -373,7 +373,7 @@ export function PerformancePanel() {
 					<SectionCard title="Latest samples" bodyClassName="p-0">
 						<div className="max-h-[340px] overflow-auto">
 							<table className="w-full border-collapse text-left">
-								<thead className="sticky top-0 bg-overlay text-xs uppercase tracking-[0.06em] text-(--text-3)">
+								<thead className="sticky top-0 bg-overlay text-xs panel-label text-(--text-3)">
 									<tr>
 										<th className="px-4 py-2 font-medium">JS FPS</th>
 										<th className="px-3 py-2 font-medium">Loop lag</th>
@@ -446,7 +446,7 @@ function PerformanceTrace({ samples }: { samples: PerformanceSample[] }) {
 	);
 	return (
 		<div>
-			<div className="mb-3 flex items-center gap-4 text-xs uppercase tracking-[0.06em] text-(--text-3)">
+			<div className="mb-3 flex items-center gap-4 text-xs panel-label text-(--text-3)">
 				<span className="flex items-center gap-1.5">
 					<span className="h-1.5 w-3 rounded-full bg-(--brand)" /> JS FPS
 				</span>

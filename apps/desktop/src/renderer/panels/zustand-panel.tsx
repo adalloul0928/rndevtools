@@ -75,7 +75,7 @@ export function ZustandPanel() {
 	const patchDraft = selected ? (patchDrafts[selected.id] ?? '{}') : '{}';
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Zustand"
 				description="Explicit privacy-safe projections, with validated reversible edits only for stores that opt in—never a blind global store crawl."
@@ -142,7 +142,7 @@ export function ZustandPanel() {
 							{filtered.map((store) => (
 								<button
 									aria-pressed={selected?.id === store.id}
-									className={`w-full rounded-lg border p-3 text-left transition-colors ${selected?.id === store.id ? 'border-foreground/18 bg-foreground/[0.07]' : 'border-foreground/[0.06] bg-foreground/[0.02] hover:border-foreground/12 hover:bg-foreground/[0.04]'}`}
+									className="panel-item"
 									key={store.id}
 									type="button"
 									onClick={() => setSelectedId(store.id)}
@@ -185,7 +185,7 @@ export function ZustandPanel() {
 						<>
 							<div className="mb-4 flex items-start justify-between gap-4">
 								<div>
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Store projection
 									</p>
 									<h2 className="mb-0 mt-1 text-base font-semibold tracking-[-0.02em] text-(--foreground)">
@@ -199,7 +199,7 @@ export function ZustandPanel() {
 										: 'Read only'}
 								</div>
 							</div>
-							<dl className="mb-4 rounded-lg border border-foreground/8 bg-foreground/[0.02] px-3">
+							<dl className="mb-4 panel-section px-3">
 								<KeyValue label="Registry id" value={selected.id} mono />
 								<KeyValue
 									label="Projected keys"
@@ -297,7 +297,7 @@ export function ZustandPanel() {
 										</div>
 										{selectedSnapshots.length > 0 ? (
 											<div className="mt-4 border-t border-(--separator) pt-3">
-												<p className="mb-2 mt-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+												<p className="mb-2 mt-0 text-xs panel-label text-(--text-3)">
 													Captured states
 												</p>
 												<div className="space-y-2">
@@ -358,7 +358,7 @@ export function ZustandPanel() {
 				</div>
 				<aside className="zustand-timeline panel-scroll p-4">
 					<div className="mb-4 flex items-center justify-between">
-						<div className="flex items-center gap-2 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+						<div className="flex items-center gap-2 text-xs panel-label text-(--text-3)">
 							<History className="h-3.5 w-3.5" /> Change timeline
 						</div>
 						<span className="font-mono text-xs text-(--text-3)">
@@ -372,10 +372,7 @@ export function ZustandPanel() {
 					) : (
 						<div className="space-y-2">
 							{selectedChanges.map((change) => (
-								<div
-									className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-3"
-									key={change.id}
-								>
+								<div className="panel-section p-3" key={change.id}>
 									<div className="flex items-center justify-between gap-2">
 										<span className="truncate text-xs font-medium text-(--foreground)">
 											{change.storeTitle}
@@ -404,15 +401,12 @@ export function ZustandPanel() {
 					)}
 					{selectedReceipts.length > 0 ? (
 						<div className="mt-5 border-t border-foreground/8 pt-4">
-							<div className="mb-3 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+							<div className="mb-3 text-xs panel-label text-(--text-3)">
 								Mutation receipts
 							</div>
 							<div className="space-y-2">
 								{selectedReceipts.map((receipt) => (
-									<div
-										className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-3"
-										key={receipt.id}
-									>
+									<div className="panel-section p-3" key={receipt.id}>
 										<div className="flex items-center justify-between gap-2">
 											<span className="text-xs font-medium text-(--foreground)">
 												{receipt.kind}

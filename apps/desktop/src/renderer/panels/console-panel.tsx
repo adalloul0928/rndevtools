@@ -200,7 +200,7 @@ export function ConsolePanel() {
 	}
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."

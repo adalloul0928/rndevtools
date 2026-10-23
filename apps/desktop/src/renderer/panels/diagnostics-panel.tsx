@@ -100,7 +100,7 @@ export function DiagnosticsPanel() {
 	);
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Diagnostics"
 				description="Desktop broker health, device transport, runtime versions, privacy guarantees, and internal diagnostic events in one place."
@@ -137,7 +137,7 @@ export function DiagnosticsPanel() {
 					is capped at 2 MB.
 				</PanelNotice>
 			) : null}
-			<div className="panel-scroll p-5">
+			<div className="panel-scroll connected-panel-body">
 				<div
 					className={`mb-4 grid gap-3 ${traffic.enabled ? 'grid-cols-5 max-[1180px]:grid-cols-3' : 'grid-cols-4 max-[1180px]:grid-cols-2'}`}
 				>
@@ -355,15 +355,10 @@ function HealthCard({
 		default: 'border-foreground/10 bg-foreground/[0.04] text-(--muted)',
 	}[tone];
 	return (
-		<Card
-			className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4 shadow-none"
-			variant="secondary"
-		>
+		<Card className="panel-section p-4 shadow-none" variant="secondary">
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
-					<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
-						{label}
-					</p>
+					<p className="m-0 text-xs panel-label text-(--text-3)">{label}</p>
 					<p
 						className={`mb-0 mt-2 truncate text-sm font-semibold text-(--foreground) ${capitalize ? 'capitalize' : ''}`}
 						title={value}
