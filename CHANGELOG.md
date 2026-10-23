@@ -334,6 +334,9 @@
   every execution, including version probes. A changed installation must be refreshed.
 
 
+- Native helper packaging skips unsupported platforms before touching generated
+  sources and rejects malformed Apple team IDs before constructing linker flags.
+
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
 - The CLI still reads and validates a buffered reply if the desktop closes
