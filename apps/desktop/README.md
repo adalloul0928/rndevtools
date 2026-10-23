@@ -296,3 +296,8 @@ and Supabase fixtures. They do not depict this machine's Simulator inventory.
 Recipe teardown runs only for targets whose steps started. Cancellation while
 queued for a Simulator lease, or a failed preflight, does not run cleanup on
 that untouched target. Cleanup after an attempted step still runs on failure.
+
+Resuming a saved local Supabase stack uses the same capacity admission as a new
+start. Operations that reload checkout configuration recheck its branch after
+waiting for the stack lock and before each start attempt. A branch change during
+the stop leaves the stack stopped and reports a recoverable refusal.

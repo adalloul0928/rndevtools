@@ -300,6 +300,9 @@
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
 
+- Resuming a saved Supabase stack now checks capacity. Config reloads recheck HEAD
+  inside the lock and before each start, including automatic CLI restarts.
+
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 
