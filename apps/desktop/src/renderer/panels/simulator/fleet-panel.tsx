@@ -50,13 +50,14 @@ import {
 	StatusPill,
 	Toolbar,
 } from '@/components/ui';
-import { useOnboarding } from '@/lib/onboarding';
+import { clearFleetRequest, useOnboarding } from '@/lib/onboarding';
 import {
 	defaultDiskCleanupCategoryIds,
 	diskInventorySelectionRevision,
 	sanitizeDiskCleanupCategoryIds,
 } from '@/simulator/disk-inventory-model';
 import {
+	bootTarget,
 	buildFleetRows,
 	connectedSessionsForSimulator,
 	type FleetRow,
@@ -181,9 +182,19 @@ function readStoredLiveScreenOpen(): boolean {
 	}
 }
 
+/**
+ * The stored wall tile size, or the default when none was stored yet:
+ * `Number(null)` is 0, which clamped to the smallest size.
+ */
+export function storedFleetTile(raw: string | null): number {
+	return raw === null || raw.trim() === ''
+		? FLEET_TILE_RANGE.default
+		: clampFleetTile(Number(raw));
+}
+
 function readStoredTile(): number {
 	try {
-		return clampFleetTile(Number(window.localStorage.getItem(FLEET_TILE_KEY)));
+		return storedFleetTile(window.localStorage.getItem(FLEET_TILE_KEY));
 	} catch {
 		return FLEET_TILE_RANGE.default;
 	}
@@ -214,6 +225,45 @@ export function FleetPanel() {
 	const [showCreate, setShowCreate] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
 	const [createdJobId, setCreatedJobId] = useState<string | null>(null);
+	const { fleetRequest } = useOnboarding();
+	const [focusOpenFor, setFocusOpenFor] = useState<string | null>(null);
+	// Get started's "Boot a Simulator": once discovery has listed the
+	// Simulators, select one to boot and focus its button, or open the
+	// create form when there is nothing to boot.
+	useEffect(() => {
+		if (fleetRequest !== 'boot-simulator') return;
+		const discovering =
+			isLoading ||
+			(isBridgeAvailable && state.capability.status === 'checking');
+		if (discovering) return;
+		clearFleetRequest();
+		const udid = bootTarget(state.devices, selectedDevice?.udid);
+		if (!udid) {
+			setShowCreate(true);
+			return;
+		}
+		setSelectedDeviceUdid(udid);
+		setFocusOpenFor(udid);
+	}, [
+		fleetRequest,
+		isLoading,
+		isBridgeAvailable,
+		state.capability,
+		state.devices,
+		selectedDevice?.udid,
+		setSelectedDeviceUdid,
+	]);
+	useEffect(() => {
+		if (!focusOpenFor || selectedDevice?.udid !== focusOpenFor) return;
+		setFocusOpenFor(null);
+		const focusOpenAction = () =>
+			document.querySelector<HTMLElement>('[data-fleet-open-action]')?.focus();
+		focusOpenAction();
+		// The Get started popover hands focus back to its trigger in a frame
+		// callback as it closes; take it again after that. Not cancelled on
+		// cleanup, since clearing `focusOpenFor` re-runs this effect at once.
+		requestAnimationFrame(focusOpenAction);
+	}, [focusOpenFor, selectedDevice?.udid]);
 	const recentJobs = state.jobs
 		.filter((job) => job.kind.startsWith('device.'))
 		.toReversed();
@@ -821,7 +871,9 @@ function DeviceWall({
 								{primaryAgent(row) ? (
 									<AgentGlyph kind={primaryAgent(row)?.kind ?? 'other'} />
 								) : null}
-								<strong className="device-tile-name">{row.device.name}</strong>
+								<strong className="device-tile-name" title={row.device.name}>
+									{row.device.name}
+								</strong>
 								<span
 									className={`device-tile-dot ${row.live ? 'is-live' : row.transitioning ? 'is-transitioning' : ''}`}
 									aria-hidden="true"
@@ -864,7 +916,11 @@ function FleetRowText({
 	return (
 		<div className="sim-list-copy">
 			<span className="fleet-row-line">
-				<strong className="fleet-row-name">{target.name}</strong>
+				{/* Names such as "iPad Air 11-inch (M4)" and "iPad Air 13-inch (M4)"
+				    truncate to the same text; the full name is on hover. */}
+				<strong className="fleet-row-name" title={target.name}>
+					{target.name}
+				</strong>
 				<span
 					className="fleet-row-meta"
 					title={
@@ -1183,6 +1239,7 @@ function TargetDetail({
 			</div>
 			<div className="sim-action-row">
 				<Button
+					data-fleet-open-action
 					isDisabled={!openPresentation.allowed}
 					size="sm"
 					variant="primary"

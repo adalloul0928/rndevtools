@@ -57,6 +57,15 @@
 - While an owner source is bound, an authorization grant applies only when it
   names that source's live owner. A source that cannot be subscribed to
   revokes authorization and refuses grants until a working one is bound.
+- The desktop client checks authorization again while an action runs, not only
+  before it starts. A host that passes the new optional
+  `subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`)
+  has the action's `signal` aborted when authorization is revoked or changes
+  owner, and the desktop is told the action failed with an unknown outcome.
+  Without it, the client compares the grant when the action settles and gives
+  the same answer if it changed, where a `storage.set` or `scenarios.execute`
+  that finished after sign-out was reported `ok`. Signing out and back in as
+  the same user during an action is only noticed with the subscription.
 - `rndevtools-verify-bundle` fails when it finds no bundle file, instead of
   passing an empty or mistyped directory. It also scans `.bundle`,
   `.jsbundle`, `.mjs` and `.cjs` files, accepts a single bundle file, and

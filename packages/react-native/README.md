@@ -36,6 +36,7 @@ import {
   getDevtoolsAuthorization,
   shouldStartDesktopClient,
   startDesktopClient,
+  subscribeToDevtoolsAuthorization,
 } from '@rndevtools/react-native';
 
 if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
@@ -46,10 +47,13 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
       // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
       // Apply one desktop-issued action. Throw to reject it. `signal` aborts
-      // when the client stops waiting for the action.
+      // when the client stops waiting for the action, or authorization changes.
       runAction: async (action, { signal }) => applyAction(action, signal),
       // The client refuses actions while this reports disabled.
       getAuthorization: getDevtoolsAuthorization,
+      // Optional: lets the client abort an action the moment its grant is
+      // revoked, rather than when the action settles.
+      subscribeToAuthorization: subscribeToDevtoolsAuthorization,
     },
   });
 }
@@ -87,6 +91,15 @@ the broker's contract itself:
   `RNDEVTOOLS_SNAPSHOT_LIMITS` (from `@rndevtools/core/desktop-protocol`) is
   trimmed to its newest rows, and the client records a warning in its
   diagnostics. The broker rejects a whole snapshot that is over any limit.
+
+Authorization is checked again while an action runs. When the host passes
+`subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`), a
+revocation or an owner change aborts the action's `signal` at that moment, so a
+host holding a prompt can dismiss it and a host that can stop and roll back the
+work should. The desktop is told the action failed and its outcome is unknown,
+and the next queued action is refused. Without the subscription, the client can
+only compare the grant when the action settles, so signing out and back in as
+the same user during an action goes unnoticed.
 
 The root barrel imported above also loads the camera provider and the image
 overlay, and with them the optional `expo-file-system` peer. A headless host
