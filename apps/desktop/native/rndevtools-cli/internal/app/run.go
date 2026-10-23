@@ -136,9 +136,12 @@ func Run(config Config) int {
 		Peer: &protocol.Peer{PID: os.Getpid()},
 	}
 	// The session variables ride on the envelope of every command as a claim
-	// and never inside a command: the desktop attributes touches and holds to a
-	// session only after it has verified the claim, so naming one here proves
-	// nothing, and omitting it makes the request unprivileged.
+	// and never inside a command. The desktop attributes touches and holds to
+	// the Claude Code session this process runs under, whatever the claim
+	// names, so naming one here proves nothing. Omitting it makes the request
+	// anonymous (free Simulators only); a claim the desktop cannot tie to a
+	// running Claude Code session is refused wherever the work holds or drives
+	// a device.
 	if agent := command.AgentFromEnvironment(config.lookup()); agent != nil {
 		request.Agent = agent
 	}

@@ -39,12 +39,14 @@ import type { SupabaseStoredHold } from './stack-store';
 /**
  * `rndevtools supabase --operation …` and the MCP tool `supabase`. Identity
  * is the one the desktop verified for the request's connection: a session
- * hold for an attributed caller, a worktree hold for a shared MCP identity,
- * and none for a request that claims no session. Results carry ports, never
- * URLs or keys, except `env`, which returns the public values only. Errors
- * are AgentCliError with a code from SUPABASE_AGENT_ERROR_CODES and the
- * recovery that names the next call. Destroy always becomes a request for
- * the user, as does every reset, including for the sole live holder.
+ * hold for the Claude Code session the caller runs under, and none for a
+ * request that claims no session. (A worktree hold for a shared MCP identity
+ * is what an older desktop recorded; no request verifies as one now.)
+ * Results carry ports, never URLs or keys, except `env`, which returns the
+ * public values only. Errors are AgentCliError with a code from
+ * SUPABASE_AGENT_ERROR_CODES and the recovery that names the next call.
+ * Destroy always becomes a request for the user, as does every reset,
+ * including for the sole live holder.
  */
 
 const REQUEST_TTL_MS = 30 * 60_000;

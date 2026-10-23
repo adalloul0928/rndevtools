@@ -186,7 +186,7 @@ describe('decideDeviceAccess', () => {
 			allowed: true,
 		});
 		const sentence =
-			'Requests without a verified agent identity may use free Simulators only.';
+			'A request that names no session may use free Simulators only.';
 		// A lane, a claim, and an operator-started lane are all someone's.
 		const byOwner = [
 			[A, 'claude session s1'],

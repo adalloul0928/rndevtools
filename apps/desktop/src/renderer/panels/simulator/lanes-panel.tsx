@@ -1333,9 +1333,9 @@ function LaneDetail({
 					</div>
 				) : (
 					<p className="sim-section-empty">
-						No coding agent has touched this lane. Agents are attributed from{' '}
-						<code>CLAUDE_CODE_SESSION_ID</code> or <code>CODEX_THREAD_ID</code>{' '}
-						when they use the CLI.
+						No coding agent has touched this lane. Only a Claude Code session
+						that RN Devtools can trace is attributed, when it uses the CLI or
+						its MCP server.
 					</p>
 				)}
 			</section>

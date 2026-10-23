@@ -286,7 +286,7 @@ export function describeSupabaseConfirmation(
 						'Each worktree and branch gets its own local Supabase on 127.0.0.1, run natively rather than in Docker as Supabase recommends for several projects: listeners stay on this Mac, but stacks are separate databases, not isolated tenants.',
 						'It assumes a single-user Mac: every stack trusts supabase_admin on loopback and accepts the public default keys.',
 						'Stacks RN Devtools starts run outside any agent sandbox.',
-						'Codex calls over MCP are attributed by worktree.',
+						'Only Claude Code sessions can hold a stack; other agents can read stacks and ask you to act here.',
 						'Supabase marks these stack commands experimental.',
 					],
 					choices: [{ label: 'Turn on' }],

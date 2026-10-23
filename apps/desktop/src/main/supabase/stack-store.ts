@@ -114,9 +114,10 @@ const agentSchema = z.strictObject({
 });
 
 /**
- * An agent's hold: `session` from an attributed `supabase up`, `worktree`
- * for a synthetic `mcp-*` caller that is live while a session of its kind
- * works inside the worktree.
+ * An agent's hold: `session` from the `supabase up` of a verified Claude Code
+ * session, `worktree` for a synthetic `mcp-*` caller that is live while a
+ * session of its kind works inside the worktree. Only an older desktop
+ * recorded a `worktree` hold: no request verifies as a synthetic caller now.
  */
 const storedHoldSchema = z.strictObject({
 	holder: z.enum(['session', 'worktree']),

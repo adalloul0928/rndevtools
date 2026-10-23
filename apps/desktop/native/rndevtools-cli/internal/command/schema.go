@@ -327,8 +327,11 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			Note *string `json:"note,omitempty"`
 			All  *bool   `json:"all,omitempty"`
 			// SessionCwd is the ending session's working directory, which the
-			// session-end hook sends with all so the desktop can release
-			// worktree holds recorded under a shared MCP identity.
+			// session-end hook sends with all. It is kept for older desktops,
+			// which released worktree holds recorded under a shared MCP
+			// identity by it, and for the hook of a verified Claude Code
+			// session, whose release also drops such holds an older build
+			// recorded in that directory.
 			SessionCwd *string `json:"sessionCwd,omitempty"`
 		}
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {

@@ -152,6 +152,8 @@ rndevtools release --all                                           # when the wh
 | `container_runtime` | Ask the user to destroy that stack in RN Devtools › Supabase, then call `up`. |
 | `supabase_capacity` | Call `down` for stacks you no longer need, or ask the user to raise the limit. |
 | `supabase_held` | Another session holds the stack. Ask the user. |
+| `agent_identity_unverified` | RN Devtools cannot tie you to a running Claude Code session, so it refuses `up`, `down`, `reset`, and `destroy`; `ls`, `status`, `env`, and `log` still work. Ask the user to act in RN Devtools. Retry only when the error says `retryable`. |
+| `agent_identity_mismatch` | The request names another live session. Run the tool from inside your own session, and reconnect an MCP server that predates a `/clear`. |
 | `cli_mismatch` | Call `up`: RN Devtools restarts the stack with this worktree's CLI and keeps its data. Never destroy it to fix this. |
 | `job_lost` | Call `up` again; it is idempotent. |
 | `branch_moved` | Call `up` to get the current branch's stack. |

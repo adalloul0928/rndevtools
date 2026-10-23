@@ -310,10 +310,11 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 	 * Claims make ownership explicit. The agent identity comes from the
 	 * connection, never from a flag or a field: the desktop proves that the
 	 * process sending the request owns the socket (`peer` on the envelope)
-	 * and maps it to the agent session that spawned it, and the envelope's
-	 * `agent` is a claim that must agree with that. A request without a
-	 * verified identity is unprivileged, not the operator: it may use free
-	 * Simulators only and can neither claim nor release.
+	 * and maps it to the Claude Code session that spawned it; the envelope's
+	 * `agent` is only a claim, and one that names another live session is
+	 * refused. A request that claims nothing is unprivileged, not the operator:
+	 * it may use free Simulators only and can neither claim nor release. A claim
+	 * that no running Claude Code session backs is refused outright.
 	 */
 	z.strictObject({
 		kind: z.literal('claim'),
@@ -332,8 +333,10 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 			all: z.boolean().optional(),
 			/**
 			 * Where the ending session worked, sent with `all` by the session-end
-			 * hook. Lanes and claims of a shared MCP identity (`mcp-*`) are matched
-			 * only by this directory lying inside them, never by the id alone.
+			 * hook. Kept for older CLIs and for the holds an older desktop recorded
+			 * under a shared MCP identity (`mcp-*`), which are released only when
+			 * this directory lies inside them, never by the id alone. A verified
+			 * session is a Claude Code session, which never holds under one.
 			 */
 			sessionCwd: absolutePathSchema.optional(),
 		})
@@ -494,16 +497,19 @@ export const agentCliRequestSchema = z.strictObject({
 	command: agentCliCommandSchema,
 	/**
 	 * The coding-agent session the CLI says it is running inside, read from
-	 * its session variables. A claim, not an identity: the desktop checks it
-	 * against the session it maps `peer` to, and records touches and holds
-	 * only for a verified one.
+	 * its session variables. A claim, not an identity: the desktop maps `peer`
+	 * to the session the sending process runs under and records touches and
+	 * holds only for that one. A claim that names no live session is ignored
+	 * when the sender runs under one (an MCP server keeps the id it started
+	 * with after a /clear), and a claim that names another live session is
+	 * refused.
 	 */
 	agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
 	/**
 	 * The process that sent the request, by its own pid. The desktop verifies
 	 * with lsof that this pid holds the other end of the connection the
-	 * request arrived on, and only then walks its process tree to the agent
-	 * session that spawned it; a pid it cannot prove leaves the identity
+	 * request arrived on, and only then walks its process tree to the Claude
+	 * Code session that spawned it; a pid it cannot prove leaves a claim
 	 * unverified. The bound is one no pid on a Mac reaches.
 	 */
 	peer: z
@@ -516,14 +522,32 @@ export type AgentCliRequest = z.infer<typeof agentCliRequestSchema>;
 export type AgentCliClaim = NonNullable<AgentCliRequest['agent']>;
 
 /**
- * Connection-bound identity. Only a sender that descends from the discovered
- * session it claims is verified. Missing proof, undiscovered sessions and
- * shared-process sessions stay unverified; a different discovered owner is a
- * mismatch. Anonymous requests claim no session and are unprivileged.
+ * Why a claim could not be verified, which decides what an agent can do about
+ * it. `no-proof`: the sender did not prove that it owns the connection (an
+ * older CLI names no pid, or the check failed or timed out). `no-process-table`:
+ * the process list could not be read, so the sender could not be traced.
+ * Both can pass on a retry. `no-session`: the sender runs under no Claude Code
+ * session the desktop knows, which a retry does not change: Codex threads
+ * share one process, and other agents and ended sessions have no process to
+ * match.
+ */
+export type AgentUnverifiedCause =
+	| 'no-proof'
+	| 'no-process-table'
+	| 'no-session';
+
+/**
+ * Connection-bound identity, decided from the process that sent a request
+ * rather than from what it says. A sender that runs under a discovered Claude
+ * Code session is that session (`verified`), whatever stale or foreign id it
+ * claims, unless it claims a different live session (`mismatch`). A sender
+ * under no session is `unverified`, unless it claims a live session with a
+ * process, which it does not run under (`mismatch`). A request that claims no
+ * session is `anonymous` and unprivileged.
  */
 export type AgentIdentityResolution =
 	| { status: 'anonymous' }
-	| { status: 'unverified'; reason: string }
+	| { status: 'unverified'; cause: AgentUnverifiedCause; reason: string }
 	| { status: 'verified'; agent: AgentCliClaim; basis: 'process' }
 	| { status: 'mismatch'; reason: string };
 

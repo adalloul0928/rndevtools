@@ -3188,13 +3188,14 @@ describe('SupabaseEngine lane holds', () => {
 		}
 	});
 
-	it('keeps a Codex-over-MCP lane hold live from the monorepo root', async () => {
+	it('keeps a lane hold an older desktop recorded under a shared MCP identity live from the monorepo root', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');
 		const app = path.join(repo, 'apps', 'mobile');
 		await mkdir(app, { recursive: true });
 		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
-		// Codex over MCP attributes the lane to its shared client identity.
+		// An older desktop attributed a Codex-over-MCP lane to its shared client
+		// identity.
 		const synthetic = {
 			kind: 'codex',
 			sessionId: 'mcp-codex-mcp-client',

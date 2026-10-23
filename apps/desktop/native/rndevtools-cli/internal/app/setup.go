@@ -32,9 +32,9 @@ for Simulators instead of raw simctl:
     (~/.codex/hooks.json): PreToolUse redirects simctl boot/shutdown/openurl/
     install/launch/io and hand-started Metro to rndevtools and, while local
     Supabase is turned on in RN Devtools, keeps hand-run supabase commands
-    native and off other agents' stacks; SessionEnd releases the session's
-    lanes, claims, and stacks. Codex runs new hooks only after you trust them
-    once with /hooks
+    native and off other agents' stacks; SessionEnd releases an ending Claude
+    Code session's lanes, claims, and stacks (a Codex session holds none).
+    Codex runs new hooks only after you trust them once with /hooks
   * with --project, also installs the skills into that repository and adds an
     "iOS Simulators" block to its AGENTS.md, plus a "Local Supabase"
     paragraph when the project has supabase/config.toml
@@ -215,9 +215,12 @@ JSON payload on stdin.
                  native (start without --runtime native, db start), and in a
                  worktree RN Devtools runs, redirects start and stop to
                  rndevtools supabase. Anything it cannot read runs.
-  session-end    Release everything the ending session holds: stop its lanes,
-                 drop its claims, release its stacks. Devices return to the
-                 pool at once instead of after the grace period.
+  session-end    Release everything the ending Claude Code session holds: stop
+                 its lanes, drop its claims, release its stacks. Devices return
+                 to the pool as the session exits instead of after the grace
+                 period. Only a Claude Code session can hold anything, so for
+                 any other agent the desktop refuses the release (the reason
+                 goes to stderr) and the exit status stays 0.
 
 Any other event exits 0 with a note on stderr: only a block exits 2.
 `
@@ -226,9 +229,11 @@ Any other event exits 0 with a note on stderr: only a block exits 2.
 const maxSessionCwdLength = 1024
 
 // sessionEndReleaseCommand is release --all, plus the ending session's working
-// directory when the payload carries an absolute one. The desktop uses it to
-// release what the session holds under an MCP identity shared with other
-// sessions (Codex over MCP), matching those holds by directory.
+// directory when the payload carries an absolute one. An older desktop used the
+// directory to release what the session held under an MCP identity shared with
+// other sessions (Codex over MCP), matching those holds by it. The current
+// desktop verifies only a Claude Code session, so it uses the directory only
+// for the holds an older build recorded under such an identity.
 func sessionEndReleaseCommand(cwd string) json.RawMessage {
 	command := struct {
 		Kind       string `json:"kind"`
@@ -248,8 +253,10 @@ func sessionEndReleaseCommand(cwd string) json.RawMessage {
 // runSessionEndHook releases the ending session's lanes and claims. The
 // session id comes from the payload (both agents send one); the environment
 // variables are a fallback. Either way it is only a claim: the request also
-// names this process's pid, which the desktop traces to the agent that ran the
-// hook, and it refuses an id that belongs to another live session. Nothing is
+// names this process's pid, which the desktop traces to the Claude Code session
+// that ran the hook. That session is released whatever the claim names, unless
+// it names another live session, which the desktop refuses. A Codex session
+// holds nothing and the desktop refuses its release as unverified. Nothing is
 // fatal here: a hook that fails loudly on exit helps nobody, so problems go to
 // stderr and the exit status stays 0.
 func runSessionEndHook(config Config) int {

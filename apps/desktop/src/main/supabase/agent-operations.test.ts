@@ -237,6 +237,9 @@ describe('supabase up', () => {
 		expect(h.cli.count('stack start')).toBe(2);
 	});
 
+	// The router builds no synthetic context now, since only a Claude Code
+	// session is verified; the engine still understands one for the holds an
+	// older desktop recorded.
 	it('gives a synthetic MCP caller a worktree hold', async () => {
 		const { h, repo, stackId } = await setup();
 		await agent(

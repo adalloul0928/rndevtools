@@ -73,6 +73,7 @@ import {
 	AgentCliError,
 	type AgentCliHandler,
 	type AgentCliHandlerContext,
+	identityRefusal,
 } from './agent-cli-service';
 import { TERMINAL_JOB_STATUSES, waitForJob } from './job-wait';
 import { NativeHostResponseError } from './native-host-client';
@@ -176,9 +177,9 @@ type LanePort = {
 		operation: LaneOperation,
 		signal: AbortSignal,
 		/**
-		 * `anonymous` for a start from a request with no verified identity, so
-		 * the lane service holds it to free devices when its turn comes, and
-		 * does not read its absent agent as the operator.
+		 * `anonymous` for a start from a request that names no session, so the
+		 * lane service holds it to free devices when its turn comes, and does
+		 * not read its absent agent as the operator.
 		 */
 		options?: { requester?: 'anonymous' }
 	) => Promise<LaneOperationReceipt>;
@@ -198,7 +199,7 @@ type AgentPort = {
 	 * recipe on it, cancel its jobs, or stop its recordings. A device is free
 	 * or held (by a lane or a claim); on a held one only the holder may, and an
 	 * abandoned hold is still enforced until its releaseAt. An anonymous
-	 * request (no verified identity) may use free devices only. The router
+	 * request (it names no session) may use free devices only. The router
 	 * does not ask when a session stops or cancels a recording it started,
 	 * which it may always do, even on a device another session holds. Not
 	 * gated at all: act, network set and clear, record start, recipe cancel,
@@ -506,14 +507,12 @@ type SessionIdentity = { kind: AgentKind; sessionId: string };
 
 /**
  * Which holds `release --all` may drop for `agent`. A session's own holds
- * match by id. A shared MCP identity (`mcp-*`) says nothing about which of
- * its sessions is asking, so its holds match only through a lane, when
- * `sessionCwd`, where the ending session worked, lies inside the lane's
+ * match by id. A shared MCP identity (`mcp-*`) names no one session, and an
+ * older desktop recorded holds under one, so those match only through a lane,
+ * when `sessionCwd`, where the ending session worked, lies inside the lane's
  * checkout and in the lane's app or above it. A session at a monorepo
  * checkout's root so releases every app lane in it, and one inside an app
  * only that app's, never a sibling app's that another session may be using.
- * That holds whether the caller is the shared id itself or, from the
- * session-end hook, the session's own id.
  */
 function releaseMatcher(agent: SessionIdentity, sessionCwd?: string) {
 	const cwd = sessionCwd === undefined ? undefined : posix.resolve(sessionCwd);
@@ -684,17 +683,15 @@ async function releaseEverything(
 ): Promise<AgentReleaseAllResult> {
 	const agent = context.agent;
 	if (!agent) {
-		throw new AgentCliError({
-			code: 'no_agent_session',
-			message: 'release --all needs an agent session to release on behalf of.',
-			retryable: false,
-			recovery:
-				'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
-		});
+		noAgentSession(
+			'release --all needs an agent session to release on behalf of.'
+		);
 	}
 	const deadline = Date.now() + RELEASE_STOP_BUDGET_MS;
-	// A shared MCP identity names no one session, so without the directory it
-	// worked in nothing of it is released, stack holds included.
+	// A verified caller is a discovered Claude Code session, never a shared MCP
+	// identity (`mcp-*`), which names no one session, so this holds only for a
+	// context built by hand. Such an identity releases nothing without the
+	// directory it worked in, stack holds included.
 	const unscoped = isSyntheticHolder(agent) && sessionCwd === undefined;
 	const stacks =
 		supabase && !unscoped
@@ -714,8 +711,9 @@ async function releaseEverything(
 
 	for (const claim of agents.getState().claims) {
 		const holder = { kind: claim.kind, sessionId: claim.sessionId };
-		// A claim has no directory of its own; a shared identity's claim goes
-		// with its lane on the same device, when it runs one.
+		// A claim has no directory of its own; a claim that an older desktop
+		// recorded under a shared identity goes with its lane on the same device,
+		// when it runs one.
 		const lane = laneList.find(
 			(candidate) =>
 				candidate.simulatorUdid.toUpperCase() ===
@@ -850,20 +848,30 @@ function slimmingActionFor(
 
 /**
  * Refuses a request that names an agent session the desktop could not verify:
- * a CLI that sent no pid, or one that did not prove it owns the connection.
- * Such a caller can neither act as the session it names nor pass as nobody,
- * so it gets no hold, claim or release and no device-gated work. A verified
- * caller passes, and so does an anonymous one (no claim at all), which is
- * unprivileged where the work is gated.
+ * one whose sender it could not confirm or trace, or that runs under no
+ * Claude Code session (a Codex thread, another agent, an ended session). Such
+ * a caller can neither act as the session it names nor pass as nobody, so it
+ * gets no hold, claim or release and no device-gated work. A verified caller
+ * passes, and so does an anonymous one (no claim at all), which is
+ * unprivileged where the work is gated. What the caller is told to do depends
+ * on why it could not be verified; see `identityRefusal`.
  */
 function refuseUnverifiedClaim(context: AgentCliHandlerContext): void {
 	if (context.identity.status !== 'unverified') return;
+	throw identityRefusal(context.identity);
+}
+
+/**
+ * Refuses a command that holds devices to a request that names no session.
+ * Only a Claude Code session can be verified, so that is the only one named.
+ */
+function noAgentSession(message: string): never {
 	throw new AgentCliError({
-		code: 'agent_identity_unverified',
-		message: context.identity.reason,
+		code: 'no_agent_session',
+		message,
 		retryable: false,
 		recovery:
-			'Update the rndevtools CLI and run it from inside the agent session, so RN Devtools can verify which process sent the request.',
+			'This command needs a running Claude Code session; Codex and other agents cannot hold devices yet.',
 	});
 }
 
@@ -897,9 +905,7 @@ function assertDeviceAccess(
  * stop it. Starting one needs no hold, since it only watches the screen, and
  * the device can be claimed or get another session's lane before the
  * recording ends, up to an hour later; the hold check that guards stopping
- * anyone else's recording would then strand it. A recording a shared MCP
- * identity started is any of its sessions' to stop: the identity cannot tell
- * them apart.
+ * anyone else's recording would then strand it.
  */
 function recordingStarters(simulator: SimulatorPort) {
 	const starters = new Map<string, SessionIdentity>();
@@ -1345,7 +1351,8 @@ function checkedSupabaseResult(
 
 /**
  * Where the calling session works, when discovery has seen it. A shared MCP
- * identity stands for several sessions, so it has no one directory.
+ * identity (`mcp-*`) stands for several sessions, so it has no one directory;
+ * a verified caller is never one, but a holder an older desktop recorded is.
  */
 function sessionCwdOf(
 	agents: AgentPort | undefined,
@@ -1381,7 +1388,8 @@ function followedSupabaseJob(
 /**
  * Every agent session's hold on a local Supabase stack, shaped like the
  * Simulator holds beside it: through a lane, a session's own `supabase up`,
- * or the worktree a shared MCP identity's sessions work in.
+ * or, for a hold an older desktop recorded, the worktree a shared MCP
+ * identity's sessions work in.
  */
 function supabaseHolds(state: Pick<SupabaseState, 'stacks'>) {
 	return state.stacks.flatMap((stack) => {
@@ -1502,9 +1510,9 @@ function createRoutes({
 				assertSupabaseManaged(supabase.getState());
 				// up, down, reset and destroy act for a holder, so a claim the
 				// desktop could not verify gets none of them. The reads name no
-				// holder, and a request that claims nothing runs as no one. A
-				// shared MCP identity is matched by worktree, so it carries no
-				// session directory.
+				// holder, and a request that claims nothing runs as no one. The
+				// holder is a discovered Claude Code session, and the service
+				// also gets the directory it works in when discovery has seen it.
 				if (SUPABASE_OPERATIONS_FOR_HOLDER.has(mapped.operation.operation)) {
 					refuseUnverifiedClaim(context);
 				}
@@ -1612,14 +1620,9 @@ function createRoutes({
 				// not verify gets neither, and a request with none is nobody's.
 				refuseUnverifiedClaim(context);
 				if (!context.agent) {
-					throw new AgentCliError({
-						code: 'no_agent_session',
-						message:
-							'This CLI is not running inside a recognised agent session, so it cannot claim or release.',
-						retryable: false,
-						recovery:
-							'Run from Claude Code or Codex, or export RNDEVTOOLS_AGENT_SESSION_ID.',
-					});
+					noAgentSession(
+						'This CLI is not running inside a recognised agent session, so it cannot claim or release.'
+					);
 				}
 				if (command.kind === 'release' && command.all) {
 					return releaseEverything(
@@ -2196,9 +2199,10 @@ function createRoutes({
 					);
 				}
 				const operationId = actionId(context.requestId);
-				// The lane's holder is the identity the connection verified, which
-				// for a Codex MCP caller is the envelope's synthetic `mcp-*` id. A
-				// request with none starts a lane that belongs to the operator.
+				// The lane's holder is the identity the connection verified: the
+				// Claude Code session the sender runs under, whatever its envelope
+				// names. A request with none starts a lane that belongs to the
+				// operator.
 				const laneAgent = context.agent;
 				switch (command.operation) {
 					case 'ls': {

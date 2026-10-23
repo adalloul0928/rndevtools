@@ -460,11 +460,26 @@
   session was whatever the request said it was, and a request that named none
   counted as the person at the desktop: `rndevtools lane up --udid` on a
   Simulator another agent had claimed took the claim over, and setting another
-  session's id let `release --all` stop its lanes. Requests with no identity,
-  may now use free Simulators only and cannot claim, release or take over a
-  hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
-  Codex threads, synthetic MCP identities and ended sessions, cannot perform
-  ownership-changing operations. Lane commands no longer accept an `agent` field.
+  session's id let `release --all` stop its lanes. A request that names no
+  session may now use free Simulators only and cannot claim, release or take
+  over a hold. A claim that cannot be tied to a running Claude Code session (a
+  shared-process Codex thread, a synthetic MCP identity, another agent's id or
+  an ended session) is refused with `agent_identity_unverified` on every
+  device-gated command and on `supabase` `up`, `down`, `destroy` and `reset`;
+  reads still work. Lane commands no longer accept an `agent` field.
+- A Claude Code `/clear`, or a stale or synthetic MCP claim, no longer makes a
+  session's requests fail. The process decides who is calling: a request from a
+  process under a Claude Code session is that session, and a claim that names
+  no live session is ignored. Only a claim that names another live session is
+  refused. Before, an MCP server that predated a `/clear` kept claiming the old
+  id and then failed every call with `agent_identity_mismatch`, reads
+  included, and so did one with no session variable. The session-end hook also
+  still releases a session after Claude Code has removed its registry file,
+  which it does before it runs the hook on a normal exit: the desktop keeps a
+  session's process for a minute after discovery last listed it. Before,
+  `release --all` was refused as unverified and the lanes waited out the
+  10-minute grace. The refusals now say what to do: retry, update the tool or
+  ask the user, and Codex, Cursor and Kiro are told what they can still do.
 - Background SimSlim status checks now take a Simulator's lease and skip one
   with a running job, never boot a shut-down Simulator (it shows as not
   inspected, not as clean), and update each Simulator's status on its own. A

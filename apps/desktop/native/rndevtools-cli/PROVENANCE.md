@@ -35,8 +35,12 @@ recovery message instead of misreading it, and an older CLI never sends it.
 
 - `release.sessionCwd`: an absolute path (at most 1024 characters), accepted
   only with `all: true`. The session-end hook sends the ending session's
-  working directory so the desktop can release lanes and claims held under a
-  shared MCP identity (Codex over MCP) by directory.
+  working directory. An older desktop used it to release lanes and claims held
+  under a shared MCP identity (Codex over MCP) by directory. The desktop now
+  verifies only a Claude Code session, so no new request holds anything under
+  such an identity; the field stays for older desktops and for the session-end
+  hook of a verified session, whose release also drops the holds an older build
+  recorded under a shared identity in that directory.
 - The `supabase` command kind: `{"kind":"supabase","operation":"up"|"down"|
   "ls"|"status"|"env"|"reset"|"log"|"destroy"}` with the optional fields
   `worktreePath` (absolute, 2..1024 bytes, no control characters), `stackId`
@@ -56,11 +60,15 @@ recovery message instead of misreading it, and an older CLI never sends it.
   sending process's own pid. The CLI, the MCP server, and the session-end hook
   send it with every request (the doctor probe that `setup` runs claims no
   session and sends none). The desktop checks that the process owns the
-  connection and follows its parents to the agent session that spawned it, so
-  the envelope's `agent` is a claim the desktop verifies, not an identity. A
-  desktop without the field rejects the request as malformed, and one with it
-  treats a session claimed by a CLI that sends no pid as unverified
-  (`agent_identity_unverified`), so the CLI and the desktop ship in one app.
+  connection and follows its parents to the Claude Code session that spawned
+  it. That session is the caller whatever the envelope's `agent` claims, so the
+  claim is not an identity: the desktop ignores one that names no live session,
+  refuses one that names another live session (`agent_identity_mismatch`), and
+  treats one it cannot tie to a running Claude Code session (a Codex thread, a
+  synthetic `mcp-*` id, another agent's id, an ended session, or a CLI that
+  sends no pid) as unverified (`agent_identity_unverified`): reads work, and
+  every device-gated command is refused. A desktop without the field rejects
+  the request as malformed, so the CLI and the desktop ship in one app.
 
 The PreToolUse hook also reads `steering.json` v1, which the desktop writes
 into the agent socket directory; it is a local file contract between the

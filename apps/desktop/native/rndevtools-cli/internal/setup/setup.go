@@ -627,6 +627,8 @@ this worktree on its own Simulator with its own Metro port; ` + "`input`" + ` an
 ` + "`capture`" + ` drive and observe the device. Never run ` + "`xcrun simctl boot`" + `,
 ` + "`shutdown`" + `, ` + "`openurl`" + `, ` + "`install`" + `, ` + "`launch`" + `, or start Metro by hand: other
 agents share these devices and the desktop app owns their ports and claims.
+Only a Claude Code session can hold a Simulator or start a lane; any other agent
+reads with the same tools and asks the user to act in RN Devtools.
 `
 	if project != "" && isRegularFile(filepath.Join(project, "supabase", "config.toml")) {
 		block += `

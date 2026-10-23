@@ -62,11 +62,14 @@ type Request struct {
 	Command  json.RawMessage `json:"command"`
 	// Agent is the coding-agent session this process says it runs inside, read
 	// from its session variables. It is a claim, not an identity: the desktop
-	// checks it against the process Peer names, and a request whose session it
-	// cannot verify is unprivileged, not the operator.
+	// traces the process Peer names to the Claude Code session it runs under,
+	// and that session is the caller whatever Agent names. A claim that names
+	// another live session is refused, and one it cannot tie to a running
+	// Claude Code session is refused wherever the work holds or drives a
+	// device. A request that claims none is anonymous, not the operator.
 	Agent map[string]any `json:"agent,omitempty"`
-	// Peer is the sending process's own pid. The desktop needs it only to
-	// check Agent, so a request that claims no session may leave it out.
+	// Peer is the sending process's own pid. The desktop needs it only when
+	// Agent is set, so a request that claims no session may leave it out.
 	Peer *Peer `json:"peer,omitempty"`
 }
 

@@ -45,7 +45,13 @@ Local iOS Simulator tooling on macOS:
   worktree, Simulator, or port; Metro health, agent attribution, and the Metro
   log are visible on the fleet wall and in the Lanes panel
 - A signed `rndevtools` local-agent CLI over a current-user `0600` Unix socket,
-  including `lane up|down|ls|launch|log` and an agent skill
+  including `lane up|down|ls|launch|log` and an agent skill. Only a Claude Code
+  session whose process the desktop can trace can hold, claim, release, start
+  lanes, or be attributed. A request that claims nothing may use free
+  Simulators only. A claim that cannot be tied to a running Claude Code session
+  (a Codex thread, a synthetic MCP id, another agent's id, an ended session)
+  can read but not hold or drive a device. A claim for another live session is
+  refused. See the [CLI README](native/rndevtools-cli/README.md#envelope).
 - Local Supabase per worktree (alpha): the Supabase tab (⌘8) tracks every native
   local Supabase stack on this Mac. For each one it shows the agent session, lane,
   Simulator and worktree/branch it belongs to. It starts, stops, resets, migrates,
@@ -193,7 +199,8 @@ as-built notes are in [`experiments/supabase-backends/`](experiments/supabase-ba
   commands. `rndevtools setup` installs the `rndevtools-supabase` skill and a
   hook that steers agents away from hand-run lifecycle commands while RN Devtools
   manages the worktree. Destroying, or resetting a stack another session holds,
-  becomes a request you approve.
+  becomes a request you approve. `up`, `down`, `reset`, and `destroy` need a
+  Claude Code session the desktop can trace; other agents can read stacks.
 - **Holds and cleanup.** Stacks are held by lanes, agent sessions and your pins,
   like Simulators. One stops 60 s after its last holder releases it, 10 min after
   that holder's session is gone, or at once when its worktree is deleted. Data is

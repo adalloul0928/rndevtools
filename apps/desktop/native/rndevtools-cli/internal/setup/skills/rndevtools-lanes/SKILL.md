@@ -57,15 +57,19 @@ a private local socket.
   `lane up` is the one to pass to every later `rndevtools` call.
 - **Stop only the lanes you started.** `lane down` stops the lane's Metro and
   frees the Simulator. It does not shut the Simulator down.
-- **Attribution is automatic, and checked.** The CLI forwards
-  `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` on every request, so each
-  Simulator you touch is shown with your session in the desktop's Agents view
-  for 30 minutes. Other agents can export `RNDEVTOOLS_AGENT_SESSION_ID`. The
-  desktop checks that the request really comes from the session it names, so
-  run `rndevtools` from your own shell or MCP server and never with another
-  session's id: that fails with `agent_identity_mismatch`, and a session it
-  cannot verify fails with `agent_identity_unverified`. A request that names
-  no session may use free Simulators only.
+- **Only a Claude Code session can hold, claim, release, or start lanes.** The
+  desktop decides who is calling from the process that sent the request, not
+  from the session id it names. A request from a process under your session is
+  your session's: each Simulator you touch is shown with it in the desktop's
+  Agents view for 30 minutes, and a stale id changes nothing (an MCP server
+  keeps the id it started with after a `/clear`, and an id that names no live
+  session is ignored). Run `rndevtools` from your own shell or MCP server and
+  never with another session's id: a request that names another live session
+  fails with `agent_identity_mismatch` before anything runs, and reconnecting a
+  stale MCP server fixes it. A request that names no session may use free
+  Simulators only. A claim the desktop cannot tie to a running Claude Code
+  session is unverified: reads work and everything that holds or drives a
+  device is refused (see "If you are not a Claude Code session" below).
 - **A Simulator is free or held.** It is held while a lane runs on it or a
   session has claimed it, and only the holder may boot it, send it input,
   install on it, slim it, or stop it. The desktop enforces this: `lane up`,
@@ -88,8 +92,9 @@ a private local socket.
   ```
 
   A hold whose session has exited is released by the desktop after 10 minutes;
-  the session-end hook that `rndevtools setup` installs releases it at once.
-  Run `release --all` yourself when you finish, so nobody waits those minutes.
+  the session-end hook that `rndevtools setup` installs releases a Claude Code
+  session's holds as it exits. Run `release --all` yourself when you finish, so
+  nobody waits those minutes if the hook does not run.
 - **You may slim the devices you hold.** `rndevtools slimming --operation
   apply|undo|restore --udids <UDID>[,...] [--profile-id <id>]` applies a SimSlim
   profile, reverts the last managed change, or restores every managed service.
@@ -98,6 +103,33 @@ a private local socket.
   runtime/profile combinations SimSlim has verified or the user approved once;
   the error names which gate refused. Applying reboots the device, so prefer
   `lane up --slim` for the device a lane is about to use.
+
+## If you are not a Claude Code session
+
+Codex, Cursor, Kiro, and other agents cannot hold a Simulator, claim or release
+one, or own a lane. RN Devtools ties a request to a Claude Code session by the
+process that sent it, and a session id alone proves nothing, so a claim it
+cannot tie to a running Claude Code session fails with
+`agent_identity_unverified`. Retrying does not change that for a caller that
+runs under no Claude Code session; the error's `recovery` says what does. It
+fails every command that holds or drives a device (`claim`, `release`,
+`lane --operation up`, `launch`, and `down`, `input`, `native --operation
+install`, slimming `apply`, `undo`, and `restore`, `recipe --operation run`, and
+stopping or cancelling a recording or job on a device) and `supabase` `up`,
+`down`, `reset`, and `destroy`. What works:
+
+- **Read.** `doctor`, `simulators`, `agents`, `apps`, `lane --operation ls` and
+  `log`, `screen`, `elements`, `capture`, `wait`, `act`, `network`, and
+  `supabase` `ls`, `status`, `env`, and `log` need no session.
+- **Use a free Simulator with a request that names no session.** Run the CLI
+  without `CODEX_THREAD_ID` and `RNDEVTOOLS_AGENT_SESSION_ID` set, for example
+  `env -u CODEX_THREAD_ID -u RNDEVTOOLS_AGENT_SESSION_ID rndevtools input …`.
+  The MCP server of these agents names a session of its own, from the client's
+  name, so through MCP only the reads work. A `lane up` that names no session
+  starts a lane that belongs to the user: you could not launch, drive, or stop
+  it, so leave lanes to the user.
+- **Ask the user.** Tell them which Simulator to claim or release, or which lane
+  or Supabase stack to start or stop, in RN Devtools.
 
 ## Start a worktree on a Simulator
 

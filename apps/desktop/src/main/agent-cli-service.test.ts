@@ -12,6 +12,7 @@ import {
 	AgentCliError,
 	type AgentCliHandlerContext,
 	AgentCliService,
+	identityRefusal,
 } from './agent-cli-service';
 
 const LANE_ID = 'lane-11111111-2222-4333-8444-555555555555';
@@ -435,6 +436,28 @@ describe('agent CLI service', () => {
 			expect(contexts[0]?.identity.status).toBe('unverified');
 		});
 
+		it('leaves a claim unverified for want of a session when nothing maps processes to sessions', async () => {
+			const { contexts, handler } = recordingHandler();
+			const { socketPath } = await fixture(handler, {
+				verifyPeer: async () => true,
+			});
+			// Even a proven sender is no session's here: without an identifier
+			// nothing can place it.
+			await request(
+				socketPath,
+				agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+			);
+			expect(contexts.map((context) => context.identity)).toEqual([
+				{
+					status: 'unverified',
+					cause: 'no-session',
+					reason:
+						'This desktop does not map requests to agent sessions, so the session named cannot be verified.',
+				},
+			]);
+			expect(contexts[0]?.agent).toBeUndefined();
+		});
+
 		it('takes a request that claims nothing for anonymous and verifies no process', async () => {
 			const { contexts, handler } = recordingHandler();
 			const verifyPeer = vi.fn(async () => true);
@@ -453,11 +476,12 @@ describe('agent CLI service', () => {
 			expect(verifyPeer).not.toHaveBeenCalled();
 		});
 
-		it('refuses a claim that names another session before any handler runs', async () => {
+		it('refuses a claim that names another session before any handler runs, and says how to fix a stale MCP server', async () => {
 			const { contexts, handler } = recordingHandler();
 			const mismatch: AgentIdentityResolution = {
 				status: 'mismatch',
-				reason: 'The request names claude session claude-session-1.',
+				reason:
+					'The request names a session other than the one the sending process runs under.',
 			};
 			const { socketPath } = await fixture(handler, {
 				verifyPeer: async () => true,
@@ -467,16 +491,47 @@ describe('agent CLI service', () => {
 				socketPath,
 				agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
 			);
-			expect(response).toMatchObject({
-				ok: false,
-				error: {
-					code: 'agent_identity_mismatch',
-					message: mismatch.reason,
-					retryable: false,
-					recovery: expect.stringContaining('your own agent session'),
-				},
+			expect(response).toMatchObject({ ok: false });
+			expect(response).toHaveProperty('error', {
+				code: 'agent_identity_mismatch',
+				message:
+					'The request names a session other than the one the sending process runs under.',
+				retryable: false,
+				recovery:
+					'Run the tool from inside your own agent session; an MCP server that predates a /clear is fixed by reconnecting it.',
 			});
 			expect(contexts).toHaveLength(0);
+		});
+
+		it('tells an agent what can fix each way its identity could not be verified', () => {
+			const recoveries = [
+				[
+					'no-proof',
+					true,
+					'Retry; if it keeps failing, update the tool with "rndevtools setup" and run it from inside the agent session.',
+				],
+				['no-process-table', true, 'Retry.'],
+				[
+					'no-session',
+					false,
+					'Ask the user to act in RN Devtools. A request that names no session may use free Simulators (for the CLI, run it without CODEX_THREAD_ID and RNDEVTOOLS_AGENT_SESSION_ID set).',
+				],
+			] as const;
+			for (const [cause, retryable, recovery] of recoveries) {
+				const refusal = identityRefusal({
+					status: 'unverified',
+					cause,
+					reason: `Why it failed: ${cause}.`,
+				});
+				expect(refusal).toBeInstanceOf(AgentCliError);
+				// The reason says what happened; only the recovery depends on the cause.
+				expect(refusal).toMatchObject({
+					code: 'agent_identity_unverified',
+					message: `Why it failed: ${cause}.`,
+					retryable,
+					recovery,
+				});
+			}
 		});
 
 		it('hands the handler a verified claim as the agent', async () => {
@@ -504,6 +559,7 @@ describe('agent CLI service', () => {
 			const identify = vi.fn(
 				async (): Promise<AgentIdentityResolution> => ({
 					status: 'unverified',
+					cause: 'no-proof',
 					reason: 'unproven',
 				})
 			);
@@ -548,16 +604,39 @@ describe('agent CLI service', () => {
 			expect(new Set(asked.map(({ socket }) => socket)).size).toBe(3);
 		});
 
-		it('never asks the verifier when a claim comes without a peer', async () => {
+		it('asks the verifier about a claim only when it comes with a peer', async () => {
 			const verifyPeer = vi.fn(async () => true);
 			const { socketPath } = await fixture(async () => ({}), { verifyPeer });
-			await request(socketPath, agentsRequest({ agent: claim }));
+			// With no peer there is no process to prove. This is a good request (a
+			// CLI from before the desktop checked sends exactly this), so the
+			// verifier stays unasked because there is nothing to ask about.
+			expect(
+				await request(socketPath, agentsRequest({ agent: claim }))
+			).toMatchObject({ ok: true });
 			expect(verifyPeer).not.toHaveBeenCalled();
+			// With a peer it is asked, about the pid the request names.
+			expect(
+				await request(
+					socketPath,
+					agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+				)
+			).toMatchObject({ ok: true });
+			expect(verifyPeer).toHaveBeenCalledTimes(1);
+			expect(verifyPeer).toHaveBeenCalledWith(expect.any(Socket), PEER_PID);
 		});
 
-		it('refuses a peer that names no valid pid', async () => {
+		it('accepts a peer that names a valid pid and refuses one that does not', async () => {
 			const { contexts, handler } = recordingHandler();
-			const { socketPath } = await fixture(handler);
+			const { socketPath } = await fixture(handler, {
+				verifyPeer: async () => true,
+			});
+			expect(
+				await request(
+					socketPath,
+					agentsRequest({ agent: claim, peer: { pid: PEER_PID } })
+				)
+			).toMatchObject({ ok: true });
+			expect(contexts).toHaveLength(1);
 			for (const peer of [
 				{ pid: 0 },
 				{ pid: -1 },
@@ -571,7 +650,8 @@ describe('agent CLI service', () => {
 					await request(socketPath, agentsRequest({ agent: claim, peer }))
 				).toMatchObject({ ok: false, error: { code: 'invalid_request' } });
 			}
-			expect(contexts).toHaveLength(0);
+			// None of those reached the handler.
+			expect(contexts).toHaveLength(1);
 		});
 	});
 

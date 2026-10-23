@@ -39,23 +39,55 @@ Two optional fields say who is calling:
 
 `agent` is the coding-agent session the process says it runs inside, read from
 `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, or `RNDEVTOOLS_AGENT_SESSION_ID`.
-It is a claim, since anyone can set a variable, so it never appears inside a
-command. `peer.pid` is the sending process's own pid. The desktop checks that
-this process holds the other end of the connection the request arrived on,
-follows its parent processes to the agent session that spawned it, and acts for
-the session only when that agrees with the claim. A request that names another
-live session is refused with `agent_identity_mismatch`. A claim the desktop
-cannot verify, from a CLI that sends no pid or a pid that does not own the
-socket, is refused with `agent_identity_unverified` wherever the command needs
-to know who is asking. A request that claims nothing is unprivileged, not the
-person at the desktop: it may use free Simulators and cannot claim, release, or
-take over a hold.
+It is only a claim, since anyone can set a variable, so it never appears inside
+a command. `peer.pid` is the sending process's own pid. The desktop checks that
+this process holds the other end of the connection the request arrived on and
+follows its parent processes to a running Claude Code session. The process
+decides who is calling. A claim cannot override it, and one that names
+another live session is refused.
 
-Codex threads that share a process, synthetic MCP identities, undiscovered
-agents, and ended sessions cannot yet prove a distinct session identity. Their
-ownership-changing requests are refused. Use the desktop to manage those
-resources; abandoned holds still expire through their existing grace period.
-An identifier alone never authorizes a claim or release.
+Only a Claude Code session whose process the desktop can trace can hold, claim,
+release, start lanes, or be attributed. The desktop answers one of four ways:
+
+- **Anonymous.** The request claims nothing. It is not the person at the
+  desktop: it may use free Simulators only and cannot claim, release, or take
+  over a hold.
+- **Verified.** The process runs under a Claude Code session, so it is that
+  session, and the desktop attributes its requests to it. A claim that names no
+  live session is ignored: the id a `/clear` replaced (an MCP server keeps the
+  id it was started with), a synthetic `mcp-<client>` id, another agent's
+  variable. The process works as the session it runs under.
+- **Mismatch.** The request names a live session other than the one its process
+  runs under, or the id of a running Claude Code session while its process runs
+  under none. It is refused with `agent_identity_mismatch` before any command
+  runs, reads included.
+- **Unverified.** The claim cannot be tied to a running Claude Code session: a
+  Codex thread (Codex threads share one process), a synthetic `mcp-*` id,
+  another agent's id, a session that has ended, or a request whose sender could
+  not be proven or traced. Reads work. Every device-gated command (`claim` and
+  `release`, `lane --operation up`, `launch`, and `down`, `input`,
+  `native --operation install`, the slimming `apply`, `undo`, and `restore`,
+  `recipe --operation run`, and stopping or cancelling a recording or job on a
+  device) and `supabase` `up`, `down`, `destroy`, and `reset` are refused with
+  `agent_identity_unverified`. Its `message` says why and its `recovery` says
+  what, if anything, can change it. A check that failed (the sender was not
+  proven, or the process list could not be read) has `retryable: true`. A caller
+  that runs under no Claude Code session never becomes one by asking again.
+
+Codex, Cursor, and Kiro normally run outside every Claude Code session, so none
+of them can hold or drive a Simulator, whatever it claims. What works for them:
+
+- The reads, and the commands no hold gates: `doctor`, `simulators`, `agents`,
+  `apps`, `lane --operation ls` and `log`, `screen`, `elements`, `capture`,
+  `wait`, `act`, `network`, and `supabase` `ls`, `status`, `env`, and `log`.
+- Free Simulators, for a request that names no session. Run the CLI without
+  `CODEX_THREAD_ID` and `RNDEVTOOLS_AGENT_SESSION_ID` set, as in `env -u
+  CODEX_THREAD_ID -u RNDEVTOOLS_AGENT_SESSION_ID rndevtools …`. The MCP server of
+  these agents names a session of its own, from the client's name, so a call
+  through it cannot. A lane started by a request that names no session belongs
+  to the operator, so the same caller cannot launch, drive, or stop it.
+- Asking the user to claim, release, start a lane, or stop a stack in RN
+  Devtools.
 
 The response is either:
 
@@ -102,8 +134,8 @@ applies. `rndevtools setup` registers it with each agent.
 Every command is one tool of the same name. Input schemas are generated from
 the CLI's own flag table (`command.Describe`), and every call is assembled and
 validated by `command.Build`, the same code path the flag parser uses, then
-sent on the same socket with the same agent attribution, so the desktop sees
-one kind of peer. Tool descriptions carry the workflow guidance a skill would
+sent on the same socket with the same claim and pid, so the desktop sees one
+kind of peer. Tool descriptions carry the workflow guidance a skill would
 (when to use `lane`, how `input` coordinates work, what to call first), and the
 `initialize` response's `instructions` carry the rule against driving
 Simulators with `xcrun simctl` directly. Argument errors come back as tool
@@ -133,14 +165,20 @@ right after `lane`; its description says when a worktree's local Supabase
 applies, what `up` returns, and the self-start fallback, and the `initialize`
 instructions repeat the rules against hand-run stack commands. The session an
 MCP server claims comes from the session variables it inherits. Claude Code
-passes `CLAUDE_CODE_SESSION_ID` to the servers it spawns. Codex does not pass
-`CODEX_THREAD_ID`, so Codex calls over MCP fall back to an identity built from
-the MCP client's name (`mcp-<client>`), which every Codex session shares. The
-desktop treats that identity as synthetic: such a session's lanes and claims
-are matched by its working directory instead, and its session-end hook sends
-that directory (`release.sessionCwd`) so they are released at once. Every call
-names the MCP server's own pid, and the desktop follows that process's parents
-to the agent that spawned it before it believes the claim.
+passes `CLAUDE_CODE_SESSION_ID` to the servers it spawns, but builds that
+environment once, when it connects the server, so after a `/clear` the server
+still claims the old id. A server that was given no session variable falls back
+to an id built from the MCP client's name (`mcp-<client>`), which every session
+of that client shares. Neither claim decides who is calling, because every call
+names the MCP server's own pid and the desktop follows that process's parents
+to the Claude Code session that spawned it: under a Claude Code session the
+server works as that session whatever it claims, so one that predates a
+`/clear` keeps working. Only a claim that names another live session is
+refused, with `agent_identity_mismatch`, and reconnecting the server fixes it.
+Codex does not pass `CODEX_THREAD_ID` to its servers, and Codex, Cursor, and
+Kiro run them outside any Claude Code session, so their calls claim
+`mcp-<client>` and are unverified: they read, and every device-gated call is
+refused (see [Envelope](#envelope)).
 
 ## Setup for coding agents
 
@@ -160,7 +198,7 @@ agents".
 | Symlink the verified CLI | `~/.local/bin/rndevtools` | Re-pointed when the app moves; a foreign file there is left alone and reported. `--no-link` skips it. |
 | Register the MCP server | Claude Code `~/.claude.json`, Codex `~/.codex/config.toml`, Cursor `~/.cursor/mcp.json`, Kiro `~/.kiro/settings/mcp.json` | Entry is `{command: <cli>, args: ["mcp"]}`. Claude and Codex are always configured; Cursor and Kiro only when their directory exists, or when named in `--agents`. Kiro gets the tools the MCP server marks read-only in `autoApprove`; tools that drive a device, cancel a job, or slim a Simulator still prompt. Codex's TOML is edited textually and setup owns only the `[mcp_servers.rndevtools]` table. |
 | Install the skills | `~/.claude/skills`, `~/.agents/skills` (Codex), `~/.kiro/skills` | Every `skills/*/SKILL.md` is embedded in the binary (`rndevtools-lanes` and `rndevtools-supabase`), so the installed copies always match the CLI. With `--project <dir>` they go into that repository's `.claude/skills` and `.agents/skills` instead. |
-| Agent hooks | Claude Code `~/.claude/settings.json` → `hooks`, Codex `~/.codex/hooks.json` | Two hooks, same for both agents because they send the same payload and read the same verdict. `PreToolUse` (`rndevtools hook pre-tool-use`) exits 2 (block, with the reason shown to the model) for `simctl boot`, `shutdown`, `erase`, `delete`, `openurl`, `install`, `uninstall`, `launch`, `terminate`, `io`, `privacy`, `push`, `keychain`, `status_bar`, `spawn`, `addmedia`, `clone`, and for hand-started Metro (`expo start`, `react-native start`); `simctl list` and other read-only verbs pass, and anything unparseable passes, because a hook that fails closed would lock the model out of Bash. While local Supabase is turned on in RN Devtools it also applies the [Supabase steering rules](#supabase-steering). `SessionEnd` (`rndevtools hook session-end`) releases everything the ending session holds (`release --all`) so its Simulators return to the pool at once rather than after the 10-minute grace; it never fails the agent's exit and finishes in milliseconds, inside Codex's 3-second cap. How it tells a steered command from a mention of one is described under [Simulator and Metro steering](#simulator-and-metro-steering): a match on each command's text is the baseline, the scripts a command hands on to be run are followed, and one excuse covers a mention on a line that looks as if it can only read and print text. Both agents run a hook command through a shell, so setup single-quotes the executable when its path needs it (a packaged install lives under `RN Devtools.app`). A rerun replaces only the hooks setup wrote (`<path>/rndevtools hook <event>`); other tools' hooks, and hooks you add to the same entry, stay. An event the installed build does not know exits 0 with a note on stderr, never 2. Codex runs new or changed hooks only after the user trusts them once with `/hooks`; setup says so in its report. Cursor has no hook mechanism, so for it the AGENTS.md block is the only guard. `--no-hook` skips both. |
+| Agent hooks | Claude Code `~/.claude/settings.json` → `hooks`, Codex `~/.codex/hooks.json` | Two hooks. `PreToolUse` (`rndevtools hook pre-tool-use`), which both agents run the same way because they send the same payload and read the same verdict, exits 2 (block, with the reason shown to the model) for `simctl boot`, `shutdown`, `erase`, `delete`, `openurl`, `install`, `uninstall`, `launch`, `terminate`, `io`, `privacy`, `push`, `keychain`, `status_bar`, `spawn`, `addmedia`, `clone`, and for hand-started Metro (`expo start`, `react-native start`); `simctl list` and other read-only verbs pass, and anything unparseable passes, because a hook that fails closed would lock the model out of Bash. While local Supabase is turned on in RN Devtools it also applies the [Supabase steering rules](#supabase-steering). `SessionEnd` (`rndevtools hook session-end`) releases everything the ending Claude Code session holds (`release --all`) so its Simulators return to the pool as the session exits rather than after the 10-minute grace; it never fails the agent's exit and finishes in milliseconds, inside Codex's 3-second cap. The hook sends the session id from its payload next to its own pid, and the desktop places that process under the session by its parents, as for any request. Claude Code deletes a session's registry file before it runs the hook on a normal exit, so the desktop keeps the process of a session it has seen for a minute after discovery last listed it; the hook still verifies in that time. For Codex the hook releases nothing, because a Codex thread cannot hold a Simulator: the desktop refuses the request as unverified, the hook prints the reason on stderr, and the exit status stays 0. How it tells a steered command from a mention of one is described under [Simulator and Metro steering](#simulator-and-metro-steering): a match on each command's text is the baseline, the scripts a command hands on to be run are followed, and one excuse covers a mention on a line that looks as if it can only read and print text. Both agents run a hook command through a shell, so setup single-quotes the executable when its path needs it (a packaged install lives under `RN Devtools.app`). A rerun replaces only the hooks setup wrote (`<path>/rndevtools hook <event>`); other tools' hooks, and hooks you add to the same entry, stay. An event the installed build does not know exits 0 with a note on stderr, never 2. Codex runs new or changed hooks only after the user trusts them once with `/hooks`; setup says so in its report. Cursor has no hook mechanism, so for it the AGENTS.md block is the only guard. `--no-hook` skips both. |
 | AGENTS.md block | `<project>/AGENTS.md` with `--project` | A short "iOS Simulators" section between `<!-- rndevtools:start -->` / `<!-- rndevtools:end -->` markers, replaced in place on rerun when the file has exactly one start-marker line and, after it, one end-marker line (a marker quoted inside other text does not count); markers that do not pair up are reported as `skip` and the file is left alone. When the project has `supabase/config.toml`, a "Local Supabase" paragraph follows, worded for when RN Devtools is not managing a worktree: use the `supabase` tool or `lane up` when it is, otherwise start the stack with the project's runner (from its lockfile) and `--runtime native`. The report also returns the block for manual installs. |
 
 Setup finishes with the `doctor` check, so a mis-registered path or a desktop
@@ -384,15 +422,19 @@ rndevtools lane --operation down --worktree "$PWD"
 a device request for the user and `lane ls` reports how it was settled.
 `down`, `launch`, and `log` take exactly one of `--lane-id` or `--worktree`. Lane creation fails rather than
 stealing a worktree, Simulator, or port another lane owns. The CLI sends
-`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` (or `RNDEVTOOLS_AGENT_SESSION_ID`)
-on the envelope of every request, with its own pid, so the desktop can verify
-which agent is calling and show which one holds a lane. A lane command carries
-no agent field, and one that names an agent is rejected. Run the CLI from the
-agent's own shell or MCP server: a request that names no session may use free
-Simulators only, and one whose session the desktop cannot verify is refused.
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, or `RNDEVTOOLS_AGENT_SESSION_ID`
+as a claim on the envelope of every request, with its own pid. The desktop
+takes the Claude Code session that process runs under as the caller and shows
+it as the lane's holder, so a lane belongs to the session that started it. A
+lane command carries no agent field, and one that names an agent is rejected.
+Run the CLI from the Claude Code session's own shell or MCP server: a request
+that names no session may use free Simulators only, and one whose session the
+desktop cannot tie to a running Claude Code session is refused (see
+[Envelope](#envelope) for what Codex, Cursor, and Kiro can do instead).
 The agent skill in [`internal/setup/skills/rndevtools-lanes`](internal/setup/skills/rndevtools-lanes/SKILL.md)
-teaches Claude Code and Codex the workflow; copy it into `.claude/skills` or
-`.codex/skills`. On the command line a relative `--worktree` (for example
+teaches Claude Code the workflow and tells Codex, Cursor, and Kiro what they can
+still do; `rndevtools setup` installs it, or copy it into `.claude/skills` or
+`.agents/skills`. On the command line a relative `--worktree` (for example
 `--worktree .`) resolves against the current directory, for `lane`,
 `supabase`, and `native`; stdin JSON and MCP tool calls must send absolute
 paths, because neither shares the caller's directory.
@@ -457,7 +499,10 @@ or `--stack-id`, and each option belongs only to the operation listed. The
 CLI validates all of this before connecting (exit 2), and the desktop
 validates it again. The agent's identity rides on the request envelope only:
 no command carries an agent field, and the desktop records the hold for the
-session it has verified from the envelope. Results are JSON: `up` returns the
+Claude Code session the sending process runs under. `up`, `down`, `reset`, and
+`destroy` act for a holder, so a claim that cannot be tied to a running Claude
+Code session is refused with `agent_identity_unverified`; `ls`, `status`, `env`,
+and `log` read and work for any caller. Results are JSON: `up` returns the
 stack (ports, never URLs), the app variable names Metro gets, whether Metro
 restarted, the CLI to run from the worktree (`cli.run`, `cli.workdir`), `next`,
 warnings, and a `jobId` when

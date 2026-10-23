@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type {
 	AgentCliClaim,
 	AgentIdentityResolution,
+	AgentUnverifiedCause,
 } from '../shared/agent-cli-protocol';
 import {
 	AGENT_TOUCH_TTL_MS,
@@ -42,6 +43,15 @@ import {
 import { writeFileAtomic } from './private-files';
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
+/**
+ * How long a session with a process stays matchable by `identify` after
+ * discovery last listed it. Claude Code deletes its registry file before it
+ * runs the SessionEnd hook on a normal exit, while its process still lives,
+ * so a hook that arrives after the next poll would find no session to be
+ * under. The trade-off: a pid that the system reuses for an unrelated process
+ * inside this window is taken for the session it belonged to.
+ */
+export const RECENT_SESSION_MS = 60_000;
 const MAX_CLAIMS = 200;
 const MAX_TOUCHES = 1_000;
 const EVERY_AGENT_KIND: ReadonlySet<AgentKind> = new Set([
@@ -67,6 +77,27 @@ function unseenKinds(
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * What happened when `identify` leaves a claim unverified, by cause. What the
+ * agent can do about it is the refusal's recovery, which the CLI service owns
+ * (`identityRefusal`).
+ */
+const UNVERIFIED_REASONS: Readonly<Record<AgentUnverifiedCause, string>> = {
+	'no-proof':
+		'RN Devtools could not confirm which process sent the request (an older rndevtools command-line tool does not name its process, or the check timed out).',
+	'no-process-table':
+		'RN Devtools could not read the process list to find the session.',
+	'no-session':
+		'This caller cannot be tied to a running Claude Code session, so it cannot hold or drive Simulators. Reads still work.',
+};
+
+/** A mismatch's reason when the sender runs under a session, but not the named one. */
+const MISMATCH_OTHER_SESSION =
+	'The request names a session other than the one the sending process runs under.';
+/** And when it runs under none. */
+const MISMATCH_NOT_UNDER_SESSION =
+	'The request names a running session, but the sending process does not run under it.';
 
 const storedClaimsSchema = z.strictObject({
 	version: z.literal(1),
@@ -130,7 +161,8 @@ export type AgentLaneSource = () => readonly {
 	simulatorUdid: string;
 	/**
 	 * The lane's checkout, not the app inside it: sessions working anywhere in
-	 * it are attributed to the lane and keep a synthetic owner's hold alive.
+	 * it are attributed to the lane and keep alive a hold that an older desktop
+	 * recorded under a shared MCP identity.
 	 */
 	worktreePath: string;
 	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string } | undefined;
@@ -181,6 +213,16 @@ export class AgentService {
 	 * with how long each had run when it paused.
 	 */
 	readonly #pausedClocks = new Map<string, number>();
+	/**
+	 * Sessions with a process (a pid above 1) that discovery listed within the
+	 * last RECENT_SESSION_MS, by `agentSessionKey`, with when it last did. Only
+	 * `identify` reads them, to match a sender's ancestry: holds, liveness, the
+	 * state and the mismatch test all go by the current `#sessions`.
+	 */
+	readonly #recentSessions = new Map<
+		string,
+		{ session: AgentSession; seenAt: number }
+	>();
 	#sessions: AgentSession[] = [];
 	#discovery: AgentState['discovery'] = { claude: 'ok', codex: 'ok' };
 	#revision = 0;
@@ -289,20 +331,25 @@ export class AgentService {
 	 * owns the connection. The rules, in order:
 	 *
 	 * 1. No claim: `anonymous`, whoever sent it.
-	 * 2. A claim without a proven sender, or a sender that cannot be traced
-	 *    because the process table cannot be read: `unverified`.
+	 * 2. A claim without a proven sender is `unverified` (`no-proof`), and so is
+	 *    one whose sender cannot be traced because the process table cannot be
+	 *    read (`no-process-table`).
 	 * 3. The sender, or an ancestor of it (nearest first), is the process of a
-	 *    discovered session S (a Claude Code session's pid, under which its
-	 *    shell, its hooks and the MCP servers it spawns run): the identity is S.
-	 *    A claim of exactly S is `verified` by `process`; any other claim is a
-	 *    `mismatch`. A claim that the discovered list does not confirm is
-	 *    checked again after discovering sessions afresh, once: a session that
-	 *    started, or took a new id (a /clear, a resume), since the last poll is
-	 *    not in the list yet, and its own requests must not read as another's.
-	 * 4. No matching discovered session in the ancestry: never promote the
-	 *    claim into an identity. Codex threads share one process, and other
-	 *    agents and ended sessions may have no discoverable process. Their
-	 *    claims remain unverified until a session-bound proof is available.
+	 *    session S (see `#sessionOfProcess`): the process proves S, so the
+	 *    identity is S, `verified` by `process`. The claim only has to not
+	 *    contradict that. A claim of exactly S agrees. One that names a
+	 *    different session that is live right now is a `mismatch`. Any other is
+	 *    ignored: the id a /clear replaced (an MCP server keeps the id it started
+	 *    with), a synthetic `mcp-*` id, another agent's variable that leaked into
+	 *    a Claude tree, an id no live session has. A claim that S does not
+	 *    confirm is checked again after discovering sessions afresh, once: a
+	 *    session that started, or took a new id, since the last poll is not in
+	 *    the list yet, and its own requests must not read as another's.
+	 * 4. No session in the ancestry: never promote the claim into an identity.
+	 *    A claim that names a live session with a process is a `mismatch`: its
+	 *    id, presented by a process that does not run under it. Any other claim
+	 *    is `unverified` (`no-session`): Codex threads share one process, and
+	 *    other agents and ended sessions have no process to match.
 	 */
 	async identify({
 		claimed,
@@ -315,8 +362,8 @@ export class AgentService {
 		if (peerPid === undefined) {
 			return {
 				status: 'unverified',
-				reason:
-					'The process that sent this request did not prove that it owns the connection, so the agent session it names cannot be verified.',
+				cause: 'no-proof',
+				reason: UNVERIFIED_REASONS['no-proof'],
 			};
 		}
 		let ancestry: number[];
@@ -325,52 +372,85 @@ export class AgentService {
 		} catch {
 			return {
 				status: 'unverified',
-				reason:
-					'The process table could not be read, so the process that sent this request cannot be mapped to its agent session.',
+				cause: 'no-process-table',
+				reason: UNVERIFIED_REASONS['no-process-table'],
 			};
 		}
-		const agent = { kind: claimed.kind, sessionId: claimed.sessionId };
-		const key = agentSessionKey(agent);
+		const key = agentSessionKey(claimed);
+		this.#forgetStaleSessions();
 		let owner = this.#sessionOfProcess(ancestry);
 		if (!owner || agentSessionKey(owner) !== key) {
 			await this.refresh();
 			owner = this.#sessionOfProcess(ancestry);
 		}
+		const named = this.#sessions.find(
+			(session) => agentSessionKey(session) === key
+		);
 		if (owner) {
-			if (agentSessionKey(owner) === key) {
-				return { status: 'verified', agent, basis: 'process' };
+			if (named && agentSessionKey(owner) !== key) {
+				return { status: 'mismatch', reason: MISMATCH_OTHER_SESSION };
 			}
 			return {
-				status: 'mismatch',
-				reason: `The request names ${agent.kind} session ${agent.sessionId}, but the process that sent it belongs to another ${owner.kind} session.`,
+				status: 'verified',
+				agent: { kind: owner.kind, sessionId: owner.sessionId },
+				basis: 'process',
 			};
 		}
-		// A live session owned by another process is a definite mismatch.
-		if (
-			this.#sessions.some(
-				(session) =>
-					session.pid !== undefined && agentSessionKey(session) === key
-			)
-		) {
-			return {
-				status: 'mismatch',
-				reason: `The request names ${agent.kind} session ${agent.sessionId}, a live session, but the process that sent it does not run under it.`,
-			};
+		if (named?.pid !== undefined) {
+			return { status: 'mismatch', reason: MISMATCH_NOT_UNDER_SESSION };
 		}
 		return {
 			status: 'unverified',
-			reason:
-				'The connection owner could not be mapped to the claimed agent session. Shared-process, undiscovered, and ended sessions cannot establish ownership from an identifier alone.',
+			cause: 'no-session',
+			reason: UNVERIFIED_REASONS['no-session'],
 		};
 	}
 
-	/** The discovered session whose process comes first in `ancestry`, if any. */
+	/**
+	 * The session whose process comes first in `ancestry`, which runs from the
+	 * sender up, if any: a session in the current discovery, else the one that
+	 * was listed last of those recently seen. Where several sessions share a
+	 * pid (a /clear gives a session a new id, in the same process) the current
+	 * one is the process's own. A pid of 1 or below never matches: launchd is
+	 * the ancestor of every orphaned process, so a registry entry that names it
+	 * would otherwise vouch for all of them.
+	 */
 	#sessionOfProcess(ancestry: readonly number[]): AgentSession | undefined {
 		for (const pid of ancestry) {
-			const session = this.#sessions.find((candidate) => candidate.pid === pid);
-			if (session) return session;
+			if (pid <= 1) continue;
+			const current = this.#sessions.find((candidate) => candidate.pid === pid);
+			if (current) return current;
+			let recent: { session: AgentSession; seenAt: number } | undefined;
+			for (const entry of this.#recentSessions.values()) {
+				if (
+					entry.session.pid === pid &&
+					(recent === undefined || entry.seenAt > recent.seenAt)
+				) {
+					recent = entry;
+				}
+			}
+			if (recent) return recent.session;
 		}
 		return undefined;
+	}
+
+	/** Remembers the sessions discovery just listed that have a process to match. */
+	#rememberSessions(): void {
+		const seenAt = this.#now();
+		for (const session of this.#sessions) {
+			if (session.pid !== undefined && session.pid > 1) {
+				this.#recentSessions.set(agentSessionKey(session), { session, seenAt });
+			}
+		}
+		this.#forgetStaleSessions();
+	}
+
+	/** Drops the sessions that discovery has not listed for RECENT_SESSION_MS. */
+	#forgetStaleSessions(): void {
+		const now = this.#now();
+		for (const [key, { seenAt }] of this.#recentSessions) {
+			if (now - seenAt > RECENT_SESSION_MS) this.#recentSessions.delete(key);
+		}
 	}
 
 	subscribe(listener: AgentListener): () => void {
@@ -409,7 +489,8 @@ export class AgentService {
 
 	/**
 	 * Records that a session just drove a Simulator. Called by the CLI router
-	 * for every device-targeted command that carried an agent id.
+	 * for every device-targeted command from a verified session, which is the
+	 * Claude Code session the sending process runs under, never a claim alone.
 	 */
 	touch(
 		agent: Pick<AgentSession, 'kind' | 'sessionId'>,
@@ -507,6 +588,7 @@ export class AgentService {
 		}
 		try {
 			this.#sessions = result.sessions.slice(0, 200);
+			this.#rememberSessions();
 			this.#discovery = {
 				claude: result.claude,
 				codex: result.codex,

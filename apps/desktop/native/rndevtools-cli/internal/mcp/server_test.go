@@ -131,6 +131,11 @@ func TestInitializeAndListTools(t *testing.T) {
 	if !strings.Contains(init["instructions"].(string), "xcrun simctl") {
 		t.Fatal("instructions must warn against raw simctl")
 	}
+	// Some clients cut server instructions at 2048 characters, as they do tool
+	// descriptions, and the last of them is the advice to release when done.
+	if length := len([]rune(init["instructions"].(string))); length > 2048 {
+		t.Fatalf("instructions have %d characters", length)
+	}
 	tools := responses[1]["result"].(map[string]any)["tools"].([]any)
 	if len(tools) != len(protocol.Commands()) {
 		t.Fatalf("%d tools for %d commands", len(tools), len(protocol.Commands()))
@@ -196,7 +201,7 @@ func TestToolCallBuildsValidatesAndAttributes(t *testing.T) {
 	}
 }
 
-func TestToolCallFallsBackToClientNameForAttribution(t *testing.T) {
+func TestToolCallFallsBackToClientNameForItsClaim(t *testing.T) {
 	server, calls := newTestServer(t, func(r protocol.Request) (protocol.Response, error) { return okResponse(r, `{"simulators":[]}`) }, nil, nil)
 	exchange(t, server,
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Codex CLI","version":"1"}}}`,
@@ -204,7 +209,7 @@ func TestToolCallFallsBackToClientNameForAttribution(t *testing.T) {
 	)
 	agent := (*calls)[0].request.Agent
 	if agent["kind"] != "codex" || agent["sessionId"] != "mcp-Codex-CLI" {
-		t.Fatalf("fallback attribution: %v", agent)
+		t.Fatalf("fallback claim: %v", agent)
 	}
 	requireNamesThisProcess(t, (*calls)[0].request)
 }
@@ -743,6 +748,60 @@ func TestClaimIsDescribedAsTheHoldTheDesktopEnforces(t *testing.T) {
 		return
 	}
 	t.Fatal("no claim tool is listed")
+}
+
+func TestTextsSayOnlyAClaudeCodeSessionHoldsAndWhatEveryOtherAgentCanDo(t *testing.T) {
+	// The desktop ties a request to a Claude Code session by the process that
+	// sent it, so Codex, Cursor, and Kiro hold nothing. Every text the model
+	// reads about a hold must say so, and must tell those agents what still
+	// works, rather than promise them lanes, claims, or an automatic identity
+	// they cannot have.
+	flat := func(text string) string { return strings.Join(strings.Fields(text), " ") }
+	tools := map[string]string{}
+	for _, tool := range Tools() {
+		tools[tool.Name] = flat(tool.Description)
+	}
+	for _, row := range []struct{ name, text string }{
+		{"the instructions", flat(instructions)},
+		{"the lane tool", tools["lane"]},
+		{"the claim tool", tools["claim"]},
+		{"the release tool", tools["release"]},
+	} {
+		for _, phrase := range []string{"Claude Code session", "agent_identity_unverified"} {
+			if !strings.Contains(row.text, phrase) {
+				t.Errorf("%s lacks %q: %s", row.name, phrase, row.text)
+			}
+		}
+	}
+	for _, phrase := range []string{
+		"Only a Claude Code session can hold a Simulator or a stack, claim or release, or start a lane",
+		"a stale session id changes nothing",
+		"get agent_identity_unverified from calls that hold or drive a device or stack",
+		"they can read (simulators, agents, lane ls, screen, elements, capture)",
+		"should ask the user to act in RN Devtools",
+		"A Claude Code session that is done calls release with all=true",
+	} {
+		if !strings.Contains(flat(instructions), phrase) {
+			t.Errorf("the instructions lack %q", phrase)
+		}
+	}
+	// What the identity fix removed: an identity shared by every session of a
+	// client, matched by working directory, and released the moment a session
+	// ended.
+	for name, text := range map[string]string{
+		"the instructions":  flat(instructions),
+		"the lane tool":     tools["lane"],
+		"the supabase tool": tools["supabase"],
+		"the claim tool":    tools["claim"],
+		"the release tool":  tools["release"],
+		"the agents tool":   tools["agents"],
+	} {
+		for _, removed := range []string{"shared identity", "shared MCP", "working directory", "sessionCwd", "mcp-"} {
+			if strings.Contains(text, removed) {
+				t.Errorf("%s still mentions %q: %s", name, removed, text)
+			}
+		}
+	}
 }
 
 func TestMutatingToolsAdvertisePossibleDestruction(t *testing.T) {
