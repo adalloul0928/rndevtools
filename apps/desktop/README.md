@@ -274,3 +274,7 @@ arbitrary-app XCTest accessibility are shown as capability-gated advanced provid
 are not silently approximated: raw `simctl io` capture, app-scoped network profiles,
 and semantic actions remain the supported fallbacks until those separately signed,
 permissioned providers are available.
+
+The desktop unit suite uses at most two workers to leave room for native
+helpers and the app on a development machine. Dedicated runners may override
+that with `pnpm --filter @rndevtools/desktop test:run --maxWorkers=4`.

@@ -1,9 +1,17 @@
+import { type ChildProcess, spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	runSimulatorCommand,
 	SimulatorCommandError,
 	type SimulatorCommandOptions,
 } from './simulator-command-runner';
+
+vi.mock('node:child_process', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('node:child_process')>();
+	return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 describe('simulator command runner', () => {
 	it('requires an absolute executable and preserves literal arguments', async () => {
@@ -51,27 +59,39 @@ describe('simulator command runner', () => {
 	});
 
 	it('requests helper cleanup through the private control pipe before force kill', async () => {
-		let failure: unknown;
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		try {
-			await runSimulatorCommand(
-				process.execPath,
-				[
-					'-e',
-					"const fs=require('node:fs'); const b=Buffer.alloc(1); fs.read(4,b,0,1,null,()=>{process.stdout.write('control-closed');process.exit(0)}); setInterval(()=>{},1000)",
-				],
-				{
-					timeoutMs: 25,
-					forceKillDelayMs: 1_000,
-					gracefulCancellationPipe: true,
-				}
-			);
-		} catch (error) {
-			failure = error;
+			const control = new PassThrough();
+			const child = Object.assign(new EventEmitter(), {
+				exitCode: null as number | null,
+				signalCode: null,
+				stdin: new PassThrough(),
+				stdout: new PassThrough(),
+				stderr: new PassThrough(),
+				stdio: [null, null, null, null, control],
+				kill: vi.fn(() => true),
+			});
+			vi.mocked(spawn).mockReturnValueOnce(child as unknown as ChildProcess);
+			const failure = runSimulatorCommand(process.execPath, [], {
+				timeoutMs: 25,
+				forceKillDelayMs: 1_000,
+				gracefulCancellationPipe: true,
+			}).catch((error: unknown) => error);
+			vi.advanceTimersByTime(25);
+			expect(control.writableEnded).toBe(true);
+			expect(child.kill).not.toHaveBeenCalled();
+			child.stdout.emit('data', Buffer.from('control-closed'));
+			child.exitCode = 0;
+			child.emit('close', 0);
+			expect(await failure).toMatchObject({
+				kind: 'timeout',
+				stdout: 'control-closed',
+			});
+			vi.advanceTimersByTime(1_000);
+			expect(child.kill).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
 		}
-		expect(failure).toMatchObject({
-			kind: 'timeout',
-			stdout: 'control-closed',
-		});
 	});
 
 	it('reserves descriptor 3 as an unpollable character device', async () => {
