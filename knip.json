@@ -12,7 +12,8 @@
 			],
 			"ignoreDependencies": [
 				"expo-file-system",
-				"expo-image-picker"
+				"expo-image-picker",
+				"hermes-compiler"
 			]
 		},
 		"apps/desktop": {

@@ -21,8 +21,10 @@ const JWT_FRAGMENT = /(?<![\w-])eyJ[\w-]{2,}\.[\w-]*(?:\.[\w-]*)?/g;
 // Keeps the scheme and the user (`postgresql://postgres:…@`), drops the
 // password. The password runs to the last `@` of the authority because
 // unencoded `@` in passwords is common, but never past a quote or space.
+// Start at the beginning of a scheme run. Retrying from every letter of an
+// ordinary log word made a 20 KiB message take seconds to redact.
 const URL_PASSWORD =
-	/([a-z][a-z\d+.-]*:\/\/[^\s/?#@:'"`<>\\]*):[^\s/?#'"`<>\\]*@/gi;
+	/(?<![a-z\d+.-])([a-z][a-z\d+.-]*:\/\/[^\s/?#@:'"`<>\\]*):[^\s/?#'"`<>\\]*@/gi;
 // The credential parameters Supabase's own gateway redacts
 // (packages/stack/src/internal/redact-credentials.ts at v2.121.0).
 const CREDENTIAL_PARAMETER =
