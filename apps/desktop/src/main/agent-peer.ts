@@ -196,35 +196,37 @@ export async function peerOwnsConnection(
 export type ProcessTableEntry = {
 	pid: number;
 	ppid: number;
+	startedAt?: string;
 };
 
 /** Reads the live process table; the agent service's injectable reader. */
 export type ProcessTableReader = () => Promise<readonly ProcessTableEntry[]>;
 
-/**
- * Parses `ps -axo pid=,ppid=` output: two numbers per line. A line of another
- * shape is skipped.
- */
 export function parseProcessTable(stdout: string): ProcessTableEntry[] {
 	const entries: ProcessTableEntry[] = [];
 	for (const line of stdout.split('\n')) {
-		const match = /^\s*(\d{1,10})\s+(\d{1,10})\s*$/.exec(line);
-		if (match) entries.push({ pid: Number(match[1]), ppid: Number(match[2]) });
+		const match =
+			/^\s*(\d{1,10})\s+(\d{1,10})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s*$/.exec(
+				line
+			);
+		const startedAt = match?.[3];
+		if (match && startedAt) {
+			entries.push({
+				pid: Number(match[1]),
+				ppid: Number(match[2]),
+				startedAt: startedAt.replace(/\s+/g, ' '),
+			});
+		}
 	}
 	return entries;
 }
 
-/**
- * The process table from ps, within a timeout; throws when ps fails. Only the
- * parent column is asked for: the executable's name costs ps a lookup per
- * process, which on a busy Mac more than doubles the time it takes, and
- * nothing here reads it.
- */
 export async function readProcessTable(): Promise<ProcessTableEntry[]> {
-	const result = await runSimulatorCommand(PS, ['-axo', 'pid=,ppid='], {
+	const result = await runSimulatorCommand(PS, ['-axo', 'pid=,ppid=,lstart='], {
 		timeoutMs: PS_TIMEOUT_MS,
 		maxOutputBytes: PS_MAX_OUTPUT_BYTES,
 		forceKillDelayMs: 1_000,
+		environment: { LC_ALL: 'C' },
 	});
 	return parseProcessTable(result.stdout);
 }
