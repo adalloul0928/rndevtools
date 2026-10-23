@@ -103,6 +103,35 @@ describe('optional console method source', () => {
 		dispose();
 	});
 
+	it('leaves a forwarded old wrapper passive after unsubscribe and reinstall', () => {
+		const log = jest.fn(() => 'printed');
+		const target: ConsoleMethodTarget = { log };
+		const source = createConsoleMethodSource({
+			target,
+			enabled: true,
+			development: true,
+		});
+		const oldListener = jest.fn();
+		const unsubscribe = source.subscribe(oldListener);
+		const wrapped = target.log;
+		target.log = (...args) => wrapped?.(...args);
+		const forwarder = target.log;
+		unsubscribe();
+		const listener = jest.fn();
+		const stop = source.subscribe(listener);
+		try {
+			expect(target.log?.('once')).toBe('printed');
+			expect(log).toHaveBeenCalledTimes(1);
+			expect(oldListener).not.toHaveBeenCalled();
+			expect(listener).toHaveBeenCalledTimes(1);
+		} finally {
+			stop();
+		}
+		expect(target.log).toBe(forwarder);
+		target.log?.('after stop');
+		expect(listener).toHaveBeenCalledTimes(1);
+	});
+
 	it('does not overwrite a method another owner installed later', () => {
 		const error = jest.fn();
 		const replacement = jest.fn();
