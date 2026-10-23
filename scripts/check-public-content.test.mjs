@@ -20,6 +20,7 @@ test('reports token formats without returning matched values', () => {
 		`sk_live_${'a'.repeat(30)}`,
 		`sb_secret_${'a'.repeat(30)}`,
 		`AKIA${'A'.repeat(16)}`,
+		`AIza${'A'.repeat(35)}`,
 	];
 	for (const token of tokens) {
 		const findings = scan(`first line\n${token}\n`);

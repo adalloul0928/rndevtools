@@ -362,3 +362,10 @@ trimmed. It does so for every release bundle by default, and fails the build
 when an import would still reach this package. `rndevtools-verify-bundle`
 asserts over an exported bundle that no devtools markers survived. Wire both
 up before shipping, and keep the shim list current when you add a plugin.
+
+Captured diagnostics redact common credential aliases (including PIN, OTP,
+card/bank fields, private keys, and password confirmations), Unicode-escaped
+JSON credential names, and recognizable provider/cloud tokens. Provider-token
+patterns are shared with the repository public-content check. Private-key
+blocks are omitted even when capture truncates the closing marker; the normal
+capture size and traversal budgets still apply.

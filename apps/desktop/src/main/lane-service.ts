@@ -105,7 +105,8 @@ export type LaneSimulatorPort = {
  */
 export type LaneSlimmingPort = {
 	getState: () => SlimmingState;
-	refresh: () => Promise<SlimmingState>;
+	/** Under a lease the lane holds, its Simulator is probed; see SlimmingService. */
+	refresh: (mutationLease?: SimulatorMutationLease) => Promise<SlimmingState>;
 	runAction: (
 		action: SlimmingAction,
 		mutationLease?: SimulatorMutationLease
@@ -2663,7 +2664,10 @@ export class LaneService {
 		}
 		try {
 			return await coordinator.runExclusive(udid, signal, async (lease) => {
-				await slimming.refresh();
+				// The Simulator was just booted, so only a probe under this lease
+				// gives it the fresh inventory entry and compatibility tuple the
+				// apply is gated on; a status check never probes a held lease.
+				await slimming.refresh(lease);
 				const receipt = slimming.runAction(
 					{
 						actionId: `lane-slim-${randomUUID()}`,

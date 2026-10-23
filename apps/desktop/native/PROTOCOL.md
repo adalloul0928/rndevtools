@@ -160,6 +160,13 @@ available in the simulator's actual current managed state. Every array-valued
 doctor result field is always a JSON array; an empty `blockedByServiceIds` is
 encoded as `[]`, never omitted or encoded as `null`.
 
+`simulator_status` never boots a Simulator, so the desktop can poll it for every
+Simulator in the background. A booted target is read in place. A shutdown target
+is returned as it is, with empty `managedDisabledServiceIds` and
+`matchingProfileIds`, which means it was not inspected, not that it is clean.
+`preview_profile`, `verify_profile`, and `doctor` inspect a shutdown target
+through a temporary boot. Both sets are always JSON arrays, never `null`.
+
 `verify_profile` accepts a booted or shutdown simulator. A shutdown target is
 booted only for the bounded probe and is restored to shutdown with an
 independent cleanup context before the helper responds. It succeeds with
