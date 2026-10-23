@@ -107,6 +107,52 @@ async function within<T>(
 }
 
 describe('agent CLI service', () => {
+	it('answers the ninth concurrent connection with a retryable busy response', async () => {
+		const releases: (() => void)[] = [];
+		let occupied = () => {};
+		const ready = new Promise<void>((resolve) => {
+			occupied = resolve;
+		});
+		const { socketPath } = await fixture(async () => {
+			await new Promise<void>((resolve) => {
+				releases.push(resolve);
+				if (releases.length === 8) occupied();
+			});
+			return {};
+		});
+		const sockets: Socket[] = [];
+		try {
+			for (let index = 0; index < 8; index += 1) {
+				const socket = connect(socketPath);
+				sockets.push(socket);
+				socket.on('error', () => {});
+				socket.once('connect', () =>
+					socket.end(
+						`${JSON.stringify({
+							protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+							id: `held-${index}`,
+							command: { kind: 'simulators', includeUnavailable: false },
+						})}\n`
+					)
+				);
+			}
+			await within(ready, 5_000, 'eight active handlers');
+			const response = await request(socketPath, {
+				protocol: RNDEVTOOLS_AGENT_CLI_PROTOCOL,
+				id: 'overflow',
+				command: { kind: 'simulators', includeUnavailable: false },
+			});
+			expect(response).toMatchObject({
+				ok: false,
+				error: { code: 'server_busy', retryable: true },
+			});
+			expect(releases).toHaveLength(8);
+		} finally {
+			for (const release of releases) release();
+			for (const socket of sockets) socket.destroy();
+		}
+	});
+
 	it('creates a private Unix socket and handles one typed command', async () => {
 		const { socketPath } = await fixture();
 		const metadata = await stat(socketPath);

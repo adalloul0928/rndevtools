@@ -52,12 +52,16 @@ type shellCall struct {
 // whether the Bash command should run. Any input that is not a Bash call, or
 // that cannot be parsed, is allowed: a hook that fails must fail open, since
 // exit status 2 on a parse error would lock the model out of Bash entirely.
-func EvaluateClaudePreToolUse(input io.Reader) HookDecision {
+func EvaluateClaudePreToolUse(input io.Reader, socketPath string) HookDecision {
+	return evaluateClaudePreToolUseWith(input, supabaseEnvironmentAt(socketPath))
+}
+
+func evaluateClaudePreToolUseWith(input io.Reader, environment supabaseEnvironment) HookDecision {
 	call, ok := readPreToolUse(input)
 	if !ok {
 		return HookDecision{}
 	}
-	return evaluateShellCall(call)
+	return evaluateShellCallWith(call, environment)
 }
 
 // readPreToolUse parses a PreToolUse payload; ok is false unless it is a
@@ -79,10 +83,6 @@ func readPreToolUse(input io.Reader) (shellCall, bool) {
 	return shellCall{command: payload.ToolInput.Command, cwd: payload.Cwd}, true
 }
 
-func evaluateShellCall(call shellCall) HookDecision {
-	return evaluateShellCallWith(call, defaultSupabaseEnvironment())
-}
-
 // evaluateShellCallWith judges each command of the line on its own, so a
 // harmless first command cannot carry a steered one past the rules: first the
 // Simulator and Metro rules, then the Supabase rules, which read steering.json
@@ -98,7 +98,7 @@ func evaluateShellCallWith(call shellCall, environment supabaseEnvironment) (dec
 		}
 	}()
 	line := parseShellLine(call.command)
-	if decision := judgeSimulatorRules(line, 0, &scriptLedger{}); decision.Block {
+	if decision := judgeSimulatorRules(line, 0, &scriptLedger{}); decision.Block && environment.reachable() {
 		return decision
 	}
 	rules := supabaseRules{environment: environment}

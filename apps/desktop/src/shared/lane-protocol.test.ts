@@ -302,7 +302,7 @@ describe('laneHealth', () => {
 			label: 'ready',
 			tone: 'success',
 		});
-		expect(laneHealth({ metro: 'starting' }).tone).toBe('warning');
+		expect(laneHealth({ metro: 'starting' }).tone).toBe('info');
 		expect(laneHealth({ metro: 'stopped' }).tone).toBe('danger');
 	});
 });

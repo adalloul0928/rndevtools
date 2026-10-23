@@ -4,12 +4,41 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android on-device chrome and panels follow system light/dark appearance changes,
+  including text, surfaces, controls and status tones. iOS retains native colors.
+- Floating controls and windows stay inside horizontal safe areas after rotation;
+  the Android sheet respects side and bottom insets in landscape.
+- Android Back returns from a tool panel to the tool list before closing the sheet.
+  iOS icon navigation buttons expose their supplied accessibility labels.
+- Validate and detach device hello fields before connecting, redacting display text
+  and omitting undeclared fields instead of entering a broker rejection loop.
+
+- Refused desktop actions keep read-only diagnostics connected. Authorization read
+  failures also refuse safely; replies remain paced, bounded and rate-limited.
+- Android build-cache entries require resolved target ABIs; provider calls without
+  them build normally instead of reusing potentially incompatible host-keyed APKs.
+
+- Symbol fallback matching treats lock, clock and pin as complete name segments,
+  keeping clocks and refresh arrows out of the shield icon and shipping boxes
+  out of the pin icon.
+
+- The Expo example uses neutral native identifiers, sends its declared request
+  correlation header, and enables inspection only for its own fetch wrapper.
+  Integration docs identify host-owned projection functions and launcher behavior.
+
+- A replacement desktop client stops the earlier owner of its device ID, including
+  across Fast Refresh. Broker-replaced clients stop reconnecting.
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
+- Event stores retain bounded history in a FIFO buffer and build immutable array
+  snapshots on demand, avoiding full-history copies for unobserved appends.
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 
+- Console and Network panels render at most 100 event rows per page. Filters
+  search all retained events, and older pages remain available without expanding
+  the mounted row count.
 - Recognize Expo fetch cancellation wrappers and preserved abort causes without
   inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
@@ -263,9 +292,27 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Restore sources reject identifiers outside the persisted ASCII alphabet during
+  registration, before a capture can fail to save.
+
+- Capability registry notifications isolate failing listeners, so healthy observers
+  still receive the committed capability state.
+- Reinstalled console capture leaves forwarded wrappers from old subscriptions
+  passive, so another logger wrapping the method cannot duplicate capture.
+
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Metro pruning checks the finished dependency graph before serialization, catching
+  later resolver wrappers that bypass replacement. Artifact verification remains required.
+- Debug camera fixtures honor the image picker's string, array, and legacy enum
+  media selections for both image and video flows.
+
+- Desktop header projections redact names, omit accessors and oversized values,
+  and bound total redaction work before storing the projection.
+- Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
+  and serialization while retaining heartbeats and client diagnostic updates.
+
 - The desktop client fits every snapshot to every size and range bound the
   desktop validates before it sends it, with the new `fitDesktopSnapshot` of
   `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
@@ -293,8 +340,54 @@
 
 ### Desktop app
 
+- Failed lane starts report unverified Metro cleanup with its PID and port,
+  retaining an existing record until the verified stop succeeds.
+
+- A Simulator chosen for a parked lane request becomes an agent-visible hold
+  before worktree preparation; newly created clones are held as soon as discovered.
+
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
+- Release notarization uses a temporary private key file with owner-only permissions,
+  removes it after storing the keychain profile, and keeps credentials out of child
+  process arguments and inherited environments.
+- Package release verification and packing run without publishing credentials.
+  A separate runner publishes checked tarballs with lifecycle scripts disabled
+  and npm trusted publishing; long-lived npm tokens are no longer used.
+
+- Desktop dev and build verify the licensed HeroUI Pro payload against reviewed
+  content hashes, including additions, removals, metadata changes and symlinks.
+
+- Local ad-hoc macOS packages launch without team-based library validation;
+  Developer ID release signing keeps hardened runtime and its existing gates.
+
+- Setup keeps its scrolling details edge inside the dialog, with room for a
+  visible scrollbar and keyboard scrolling at the minimum window size.
+
+- Connected App panels use shared section surfaces, sentence-case captions and
+  compact detail headings. Neutral selections have a visible edge; storage and
+  restore copy retain readable contrast, and performance uses chart tokens.
+
+- Share status chips and dots across panels: starting work is blue, exposed backends
+  are red, and Connected App status labels use sentence-case typography.
+- Development startup rejects stale native helper manifests and mismatched host
+  handshakes with a rebuild command, while allowing diagnostics without helpers.
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
+- Recheck Supabase CLI identity, permissions and canonical path immediately before
+  every execution, including version probes. A changed installation must be refreshed.
+
+
+- Native helper packaging skips unsupported platforms before touching generated
+  sources and rejects malformed Apple team IDs before constructing linker flags.
+
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
+- Mutation helpers must match the verified Electron signing team and compiled
+  handshake team. Unsigned local builds report them as untrusted before offering
+  controls that the native broker would refuse.
+
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 
@@ -302,6 +395,9 @@
   a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
   a target starts its steps and is never repeated after a persistence failure.
+
+- Resuming a saved Supabase stack now checks capacity. Config reloads recheck HEAD
+  inside the lock and before each start, including automatic CLI restarts.
 
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
@@ -312,6 +408,10 @@
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
+- Consolidate Simulator label casing into its original CSS rules, removing
+  redundant uppercase declarations and later overrides without changing appearance.
+- Refresh demo-only desktop screenshots after the shared controls, status styling
+  and responsive Connected App panel updates.
 - Added light and dark themes plus a persistent System / Light / Dark appearance
   setting. Main applies the stored theme before creating the window, and failed
   preference writes restore the previous selection.
@@ -338,12 +438,20 @@
   `@rndevtools/core/desktop-protocol`. It used to give up after 8 seconds (30
   for restores and refetches) while the device client allowed 45, so a long
   scenario was reported as unacknowledged while the device finished it.
+- The packaged renderer allows local blob video, matching development playback
+  without allowing remote media sources.
+
 - Playwright end-to-end harness and per-panel specs against the demo device.
 - The device snapshot schema reads its text, number and item bounds from
   `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
   holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
   of a snapshot past its bound, then requires the schema to reject the
   snapshot as it stands and accept it fitted. No bound changed.
+- The agent socket reserves bounded connection headroom to answer excess callers
+  with a retryable busy response while keeping the eight-handler limit.
+- The agent hook only redirects Simulator mutations and Metro starts while
+  the desktop is reachable; unrelated shell commands never run a reachability probe.
+
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
   checks that the process owns the connection, and it follows the process's
@@ -379,6 +487,9 @@
   had just shut down, and one that finished after an apply replaced the status
   the apply recorded, so disabling slimming soon afterwards could skip the
   restore.
+- Uncaught main-process exceptions and unhandled rejections write a private,
+  bounded, redacted diagnostic log before exiting with a failure status.
+
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
@@ -408,3 +519,6 @@
   start is no longer stopped as it ends. A start that RN Devtools adopts after
   a restart is still checked for 127.0.0.1 only when its record cannot be
   saved, and its job then fails with that error instead of passing as verified.
+
+- Desktop settings writes require a successful load, preserving unreadable settings
+  until they can be recovered and loaded again.

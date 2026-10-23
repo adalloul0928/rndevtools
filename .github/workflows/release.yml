@@ -9,16 +9,13 @@ permissions:
   contents: read
 
 jobs:
-  publish-packages:
-    name: Publish packages
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: desktop-app
+  verify-packages:
+    name: Verify and pack packages
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
-      # Required for npm provenance attestation.
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,25 +25,59 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-          registry-url: https://registry.npmjs.org
-      - name: Install
+      - name: Install without lifecycle scripts
         run: pnpm install --frozen-lockfile --ignore-scripts
-      # Publishing ships source, so the gates are the only thing standing
-      # between a tag and a broken release.
-      - name: Verify
+      - name: Verify source packages
         run: |
           pnpm --dir packages/core quality
           pnpm --dir packages/react-native quality
+      - name: Pack the verified source
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-packages"
+          pnpm --dir packages/core --config.ignore-scripts=true pack --out "$RUNNER_TEMP/npm-packages/core.tgz"
+          pnpm --dir packages/react-native --config.ignore-scripts=true pack --out "$RUNNER_TEMP/npm-packages/react-native.tgz"
+          cd "$RUNNER_TEMP/npm-packages"
+          sha256sum core.tgz react-native.tgz > SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/npm-packages/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-packages:
+    name: Publish verified packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop-app, verify-packages]
+    environment: release-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # This runner executes no checkout, dependency install, build or package
+      # lifecycle scripts. Only the tested tarballs cross from verification.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # Match .nvmrc without checking out executable repository content.
+          node-version: '24.21.0'
+          package-manager-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: npm-packages
+          path: npm-packages
+      - name: Verify tarballs and trusted-publishing client
+        working-directory: npm-packages
+        run: |
+          sha256sum --check SHA256SUMS.txt
+          node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); if (!(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))))) throw new Error("npm >=11.5.1 is required for trusted publishing")' "$(npm --version)"
       - name: Publish @rndevtools/core
-        run: pnpm --dir packages/core publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
+        working-directory: npm-packages
+        run: npm publish ./core.tgz --access public --ignore-scripts --registry=https://registry.npmjs.org
       - name: Publish @rndevtools/react-native
-        run: pnpm --dir packages/react-native publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
+        working-directory: npm-packages
+        run: npm publish ./react-native.tgz --access public --ignore-scripts --registry=https://registry.npmjs.org
 
   desktop-app:
     name: Desktop app
@@ -87,25 +118,16 @@ jobs:
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           APPLE_KEYCHAIN_PROFILE: rndevtools-release
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
-          node --input-type=module <<'JS'
-          import { execFileSync } from 'node:child_process';
-          const required = [ 'APPLE_TEAM_ID', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD'];
-          const missing = required.filter((name) => !process.env[name]);
-          if (missing.length) throw new Error(`Missing release secrets: ${missing.join(', ')}`);
-          execFileSync('/usr/bin/xcrun', [
-            'notarytool', 'store-credentials', process.env.APPLE_KEYCHAIN_PROFILE,
-            '--apple-id', process.env.APPLE_ID,
-            '--team-id', process.env.APPLE_TEAM_ID,
-            '--password', process.env.APPLE_APP_SPECIFIC_PASSWORD,
-          ], { stdio: 'pipe' });
-          JS
+          node -e 'for (const key of ["APPLE_TEAM_ID", "CSC_LINK", "CSC_KEY_PASSWORD"]) { if (!process.env[key]) throw new Error(`Missing release secret: ${key}`); }'
+          node scripts/store-notary-credentials.mjs
           node apps/desktop/scripts/release-macos.mjs --preflight
           pnpm --filter @rndevtools/desktop release:mac
       - name: Verify native capabilities
-        run: pnpm --filter @rndevtools/desktop native:verify:capabilities
+        run: pnpm --filter @rndevtools/desktop native:verify:capabilities 'release/public/mac-arm64/RN Devtools.app/Contents/Resources/native/rndevtools-native-host'
       - name: Verify packaged cold start
         run: pnpm --filter @rndevtools/desktop native:verify:cold-start 'release/public/mac-arm64/RN Devtools.app'
       - name: Retain verified artifacts for review

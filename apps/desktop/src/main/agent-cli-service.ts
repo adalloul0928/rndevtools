@@ -387,7 +387,8 @@ export class AgentCliService {
 			const server = createServer({ allowHalfOpen: true }, (socket) =>
 				this.#accept(socket)
 			);
-			server.maxConnections = MAX_CONNECTIONS;
+			// Leave bounded headroom to return a typed refusal beyond the handler cap.
+			server.maxConnections = MAX_CONNECTIONS * 2;
 			await new Promise<void>((resolve, reject) => {
 				const onError = (error: Error) => {
 					server.off('listening', onListening);
@@ -459,6 +460,22 @@ export class AgentCliService {
 		}
 	}
 
+	/** Drain a bounded request before replying so the peer can finish its write. */
+	#refuseConnection(socket: Socket, error: AgentCliErrorBody): void {
+		let bytes = 0;
+		socket.setTimeout(5_000, () => socket.destroy());
+		socket.once('error', () => socket.destroy());
+		socket.on('data', (chunk: Buffer) => {
+			bytes += chunk.byteLength;
+			if (bytes > MAX_REQUEST_BYTES) socket.destroy();
+		});
+		socket.once('end', () => {
+			socket.end(encodeResponse(failureResponse('', error)), () =>
+				socket.destroy()
+			);
+		});
+	}
+
 	#accept(socket: Socket): void {
 		const now = Date.now();
 		while (
@@ -468,27 +485,19 @@ export class AgentCliService {
 			this.#requestTimestamps.shift();
 		}
 		if (this.#connections.size >= MAX_CONNECTIONS) {
-			socket.end(
-				encodeResponse(
-					failureResponse('', {
-						code: 'server_busy',
-						message: 'The local agent command limit has been reached.',
-						retryable: true,
-					})
-				)
-			);
+			this.#refuseConnection(socket, {
+				code: 'server_busy',
+				message: 'The local agent command limit has been reached.',
+				retryable: true,
+			});
 			return;
 		}
 		if (this.#requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) {
-			socket.end(
-				encodeResponse(
-					failureResponse('', {
-						code: 'rate_limited',
-						message: 'Too many local agent requests were opened.',
-						retryable: true,
-					})
-				)
-			);
+			this.#refuseConnection(socket, {
+				code: 'rate_limited',
+				message: 'Too many local agent requests were opened.',
+				retryable: true,
+			});
 			return;
 		}
 		this.#requestTimestamps.push(now);

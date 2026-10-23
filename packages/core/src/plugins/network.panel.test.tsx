@@ -6,13 +6,14 @@ import {
 	waitFor,
 	within,
 } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Platform, Share } from 'react-native';
 import { createDevToolsActionCoordinator } from '../core/action-policy';
 import type {
 	DevToolsActionRequest,
 	DevToolsActionServices,
 	DevToolsPanelProps,
 } from '../types';
+import { type ConsoleLogInput, createConsolePlugin } from './console';
 import {
 	createNetworkPlugin as createNetworkPluginBase,
 	type NetworkPluginOptions,
@@ -40,6 +41,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 	}) => ReactRuntime.createElement(Native.View, { testID }, children);
 	return {
 		Host: Container,
+		Label: Container,
 		List: Container,
 		HStack: Container,
 		VStack: Container,
@@ -213,6 +215,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
 	autocorrectionDisabled: () => 'autocorrectionDisabled',
 	badge: (value: unknown) => ({ badge: value }),
 	buttonStyle: (value: unknown) => value,
@@ -220,6 +223,8 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 	foregroundStyle: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	listStyle: (value: unknown) => value,
+	listRowBackground: (value: unknown) => value,
+	lineLimit: (value: unknown) => value,
 	pickerStyle: (value: unknown) => value,
 	tag: (value: unknown) => value,
 	textSelection: (value: unknown) => value,
@@ -309,6 +314,101 @@ async function seededDiagnostics() {
 }
 
 describe('NetworkPanel', () => {
+	it.each(['ios', 'android'] as const)(
+		'bounds request rows on %s while retaining search across pages',
+		async (platform) => {
+			const previousPlatform = Platform.OS;
+			Object.defineProperty(Platform, 'OS', {
+				configurable: true,
+				value: platform,
+			});
+			const diagnostics = createNetworkPlugin({ maxEvents: 150 });
+			const dispose = diagnostics.plugin.install?.();
+			try {
+				const fetch = diagnostics.instrumentFetch(
+					jest.fn(async () =>
+						response('{}'),
+					) as unknown as typeof globalThis.fetch,
+				);
+				for (let index = 0; index < 105; index += 1)
+					await fetch(`https://example.com/item-${index}`);
+				await flushCapture();
+				await render(
+					<diagnostics.plugin.Panel {...panelProps(createActions())} />,
+				);
+				expect(screen.getByText(/(?:^| )item-104$/)).toBeOnTheScreen();
+				expect(screen.queryByText(/(?:^| )item-0$/)).toBeNull();
+				expect(screen.getByText('Showing 1–100 of 105')).toBeOnTheScreen();
+				await fireEvent.press(screen.getByText('Next page'));
+				expect(screen.getByText(/(?:^| )item-0$/)).toBeOnTheScreen();
+				expect(screen.queryByText(/(?:^| )item-104$/)).toBeNull();
+				await fireEvent.changeText(
+					screen.getByPlaceholderText('Search URL, table, or status'),
+					'item-104',
+				);
+				expect(screen.getByText(/(?:^| )item-104$/)).toBeOnTheScreen();
+				expect(screen.queryByText('Next page')).toBeNull();
+				expect(diagnostics.getEvents()).toHaveLength(105);
+			} finally {
+				await disposeDiagnostics(dispose);
+				Object.defineProperty(Platform, 'OS', {
+					configurable: true,
+					value: previousPlatform,
+				});
+			}
+		},
+	);
+
+	it.each(['ios', 'android'] as const)(
+		'bounds log rows on %s without dropping retained logs',
+		async (platform) => {
+			const previousPlatform = Platform.OS;
+			Object.defineProperty(Platform, 'OS', {
+				configurable: true,
+				value: platform,
+			});
+			let ingest: ((event: ConsoleLogInput) => void) | undefined;
+			const diagnostics = createConsolePlugin({
+				maxEvents: 150,
+				source: {
+					subscribe: (next) => {
+						ingest = next;
+						return () => {};
+					},
+				},
+			});
+			const dispose = diagnostics.plugin.install?.();
+			try {
+				for (let index = 0; index < 105; index += 1)
+					ingest?.({ level: 'info', message: `Log number ${index}` });
+				await render(
+					<diagnostics.plugin.Panel {...panelProps(createActions())} />,
+				);
+				expect(screen.getAllByText(/Log number 104$/).length).toBeGreaterThan(
+					0,
+				);
+				expect(screen.queryAllByText(/Log number 0$/)).toHaveLength(0);
+				await fireEvent.press(screen.getByText('Next page'));
+				expect(screen.getAllByText(/Log number 0$/).length).toBeGreaterThan(0);
+				expect(screen.queryAllByText(/Log number 104$/)).toHaveLength(0);
+				await fireEvent.changeText(
+					screen.getByPlaceholderText('Search structured logs'),
+					'Log number 104',
+				);
+				expect(screen.getAllByText(/Log number 104$/).length).toBeGreaterThan(
+					0,
+				);
+				expect(diagnostics.getEvents()).toHaveLength(105);
+			} finally {
+				await disposeDiagnostics(dispose);
+				Object.defineProperty(Platform, 'OS', {
+					configurable: true,
+					value: previousPlatform,
+				});
+			}
+		},
+	);
+
 	it('lists requests, hides system traffic by default, and filters segments', async () => {
 		const { diagnostics, dispose } = await seededDiagnostics();
 		await render(<diagnostics.plugin.Panel {...panelProps(createActions())} />);

@@ -101,6 +101,42 @@ describe('createRestorePointsPlugin', () => {
 		expect(diagnostics.getPoints()[0]?.label).toBe('Two');
 	});
 
+	it.each(['contains space', 'path/source', 'é', '😀'])(
+		'rejects nonpersistable source id %s at registration',
+		(id) => {
+			expect(() =>
+				createRestorePointsPlugin({
+					sources: [
+						{ id, title: 'Example', capture: () => 1, restore: () => {} },
+					],
+				}),
+			).toThrow('source id');
+		},
+	);
+
+	it('captures and reloads each allowed source identifier shape', async () => {
+		const storage = createMemoryRestoreStorage();
+		const sources = ['Example_1:v2.value-test', 'a'.repeat(256)].map((id) => ({
+			id,
+			title: 'Example',
+			capture: () => 1,
+			restore: () => {},
+		}));
+		const first = createRestorePointsPlugin({
+			sources,
+			persistence: { storage },
+		});
+		const point = await first.capture();
+		const second = createRestorePointsPlugin({
+			sources,
+			persistence: { storage },
+		});
+		await second.ready;
+		expect(
+			second.getPoints()[0]?.sources.map((source) => source.sourceId),
+		).toEqual(point.sources.map((source) => source.sourceId));
+	});
+
 	it('validates source metadata and bounds labels', async () => {
 		expect(() =>
 			createRestorePointsPlugin({

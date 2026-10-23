@@ -27,7 +27,7 @@ import type {
 	DevToolsPresentationMode,
 	DevToolsSize,
 } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
 import { PresentationSwitcher } from './presentation-switcher';
 import { SystemIcon } from './system-icon';
@@ -82,10 +82,14 @@ export function FloatingWindow({
 	homeStatus = [],
 	onOpenPlugin,
 }: FloatingWindowProps) {
+	const { colors, styles } = useStyles();
 	const [query, setQuery] = useState('');
 	const { width, height } = useWindowDimensions();
 	const insets = useSafeAreaInsets();
-	const availableWidth = Math.max(1, width - OUTER_MARGIN * 2);
+	const availableWidth = Math.max(
+		1,
+		width - insets.left - insets.right - OUTER_MARGIN * 2,
+	);
 	const availableHeight = Math.max(
 		1,
 		height - insets.top - insets.bottom - OUTER_MARGIN * 2,
@@ -102,15 +106,19 @@ export function FloatingWindow({
 		minimumHeight,
 		availableHeight,
 	);
-	const maximumX = Math.max(OUTER_MARGIN, width - resolvedWidth - OUTER_MARGIN);
+	const minimumX = insets.left + OUTER_MARGIN;
+	const maximumX = Math.max(
+		minimumX,
+		width - insets.right - resolvedWidth - OUTER_MARGIN,
+	);
 	const minimumY = insets.top + OUTER_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
 		height - resolvedHeight - insets.bottom - OUTER_MARGIN,
 	);
 	const resolvedX = clamp(
-		initialPosition?.x ?? (width - resolvedWidth) / 2,
-		OUTER_MARGIN,
+		initialPosition?.x ?? minimumX + (availableWidth - resolvedWidth) / 2,
+		minimumX,
 		maximumX,
 	);
 	const resolvedY = clamp(
@@ -165,7 +173,10 @@ export function FloatingWindow({
 			const nextWidth = clamp(
 				windowWidth.value + delta,
 				minimumWidth,
-				Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+				Math.max(
+					minimumWidth,
+					width - insets.right - translateX.value - OUTER_MARGIN,
+				),
 			);
 			const nextHeight = clamp(
 				windowHeight.value + delta,
@@ -183,6 +194,7 @@ export function FloatingWindow({
 			commitSize,
 			height,
 			insets.bottom,
+			insets.right,
 			minimumHeight,
 			minimumWidth,
 			translateX,
@@ -204,8 +216,11 @@ export function FloatingWindow({
 				.onUpdate((event) => {
 					translateX.value = clamp(
 						startX.value + event.translationX,
-						OUTER_MARGIN,
-						Math.max(OUTER_MARGIN, width - windowWidth.value - OUTER_MARGIN),
+						minimumX,
+						Math.max(
+							minimumX,
+							width - insets.right - windowWidth.value - OUTER_MARGIN,
+						),
 					);
 					translateY.value = clamp(
 						startY.value + event.translationY,
@@ -223,6 +238,8 @@ export function FloatingWindow({
 			commitPosition,
 			height,
 			insets.bottom,
+			insets.right,
+			minimumX,
 			minimumY,
 			startX,
 			startY,
@@ -246,7 +263,10 @@ export function FloatingWindow({
 					windowWidth.value = clamp(
 						startWidth.value + event.translationX,
 						minimumWidth,
-						Math.max(minimumWidth, width - translateX.value - OUTER_MARGIN),
+						Math.max(
+							minimumWidth,
+							width - insets.right - translateX.value - OUTER_MARGIN,
+						),
 					);
 					windowHeight.value = clamp(
 						startHeight.value + event.translationY,
@@ -264,6 +284,7 @@ export function FloatingWindow({
 			commitSize,
 			height,
 			insets.bottom,
+			insets.right,
 			minimumHeight,
 			minimumWidth,
 			startHeight,
@@ -441,146 +462,148 @@ export function FloatingWindow({
 	);
 }
 
-const styles = StyleSheet.create({
-	positioner: {
-		left: 0,
-		position: 'absolute',
-		shadowColor: colors.shadow,
-		shadowOffset: { width: 0, height: 14 },
-		shadowOpacity: 0.28,
-		shadowRadius: 30,
-		top: 0,
-		zIndex: 10_001,
-	},
-	window: {
-		backgroundColor: colors.background,
-		borderColor: colors.separator,
-		borderRadius: 22,
-		borderWidth: StyleSheet.hairlineWidth,
-		flex: 1,
-		overflow: 'hidden',
-	},
-	header: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		height: 52,
-		paddingLeft: 14,
-		paddingRight: 4,
-	},
-	dragArea: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		height: '100%',
-	},
-	headerCopy: {
-		flex: 1,
-	},
-	headerTitle: {
-		color: colors.label,
-		fontSize: 15,
-		fontWeight: '600',
-	},
-	closeButton: {
-		alignItems: 'center',
-		backgroundColor: colors.fill,
-		borderRadius: 22,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
-	},
-	switcher: {
-		backgroundColor: colors.card,
-		paddingBottom: 7,
-		paddingHorizontal: 12,
-	},
-	content: {
-		flex: 1,
-	},
-	home: {
-		flex: 1,
-	},
-	search: {
-		alignItems: 'center',
-		backgroundColor: colors.card,
-		borderColor: colors.separator,
-		borderRadius: 11,
-		borderWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		marginHorizontal: 12,
-		marginTop: 10,
-		paddingHorizontal: 10,
-	},
-	searchInput: {
-		color: colors.label,
-		flex: 1,
-		fontSize: 14,
-		height: 40,
-		paddingHorizontal: 8,
-	},
-	statusGroup: {
-		backgroundColor: colors.card,
-		borderRadius: 11,
-		marginHorizontal: 12,
-		marginTop: 10,
-		overflow: 'hidden',
-	},
-	statusRow: {
-		alignItems: 'center',
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		gap: 8,
-		minHeight: 36,
-		paddingHorizontal: 11,
-	},
-	statusLabel: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-	},
-	statusValueWrap: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		gap: 6,
-		justifyContent: 'flex-end',
-	},
-	statusBadge: {
-		color: colors.orange,
-		fontSize: 10,
-		fontWeight: '700',
-	},
-	statusValue: {
-		color: colors.label,
-		fontSize: 12,
-		maxWidth: '70%',
-	},
-	toolList: {
-		flex: 1,
-	},
-	resizeHandle: {
-		alignItems: 'flex-end',
-		bottom: 0,
-		height: 44,
-		justifyContent: 'flex-end',
-		paddingBottom: 8,
-		paddingRight: 8,
-		position: 'absolute',
-		right: 0,
-		width: 44,
-		zIndex: 4,
-	},
-	resizeCurve: {
-		borderBottomColor: colors.secondaryLabel,
-		borderBottomRightRadius: 9,
-		borderBottomWidth: 2,
-		borderRightColor: colors.secondaryLabel,
-		borderRightWidth: 2,
-		height: 15,
-		opacity: 0.65,
-		width: 15,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		positioner: {
+			left: 0,
+			position: 'absolute',
+			shadowColor: colors.shadow,
+			shadowOffset: { width: 0, height: 14 },
+			shadowOpacity: 0.28,
+			shadowRadius: 30,
+			top: 0,
+			zIndex: 10_001,
+		},
+		window: {
+			backgroundColor: colors.background,
+			borderColor: colors.separator,
+			borderRadius: 22,
+			borderWidth: StyleSheet.hairlineWidth,
+			flex: 1,
+			overflow: 'hidden',
+		},
+		header: {
+			alignItems: 'center',
+			backgroundColor: colors.card,
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			height: 52,
+			paddingLeft: 14,
+			paddingRight: 4,
+		},
+		dragArea: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			height: '100%',
+		},
+		headerCopy: {
+			flex: 1,
+		},
+		headerTitle: {
+			color: colors.label,
+			fontSize: 15,
+			fontWeight: '600',
+		},
+		closeButton: {
+			alignItems: 'center',
+			backgroundColor: colors.fill,
+			borderRadius: 22,
+			height: 44,
+			justifyContent: 'center',
+			width: 44,
+		},
+		switcher: {
+			backgroundColor: colors.card,
+			paddingBottom: 7,
+			paddingHorizontal: 12,
+		},
+		content: {
+			flex: 1,
+		},
+		home: {
+			flex: 1,
+		},
+		search: {
+			alignItems: 'center',
+			backgroundColor: colors.card,
+			borderColor: colors.separator,
+			borderRadius: 11,
+			borderWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			marginHorizontal: 12,
+			marginTop: 10,
+			paddingHorizontal: 10,
+		},
+		searchInput: {
+			color: colors.label,
+			flex: 1,
+			fontSize: 14,
+			height: 40,
+			paddingHorizontal: 8,
+		},
+		statusGroup: {
+			backgroundColor: colors.card,
+			borderRadius: 11,
+			marginHorizontal: 12,
+			marginTop: 10,
+			overflow: 'hidden',
+		},
+		statusRow: {
+			alignItems: 'center',
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			gap: 8,
+			minHeight: 36,
+			paddingHorizontal: 11,
+		},
+		statusLabel: {
+			color: colors.secondaryLabel,
+			fontSize: 12,
+		},
+		statusValueWrap: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			gap: 6,
+			justifyContent: 'flex-end',
+		},
+		statusBadge: {
+			color: colors.orange,
+			fontSize: 10,
+			fontWeight: '700',
+		},
+		statusValue: {
+			color: colors.label,
+			fontSize: 12,
+			maxWidth: '70%',
+		},
+		toolList: {
+			flex: 1,
+		},
+		resizeHandle: {
+			alignItems: 'flex-end',
+			bottom: 0,
+			height: 44,
+			justifyContent: 'flex-end',
+			paddingBottom: 8,
+			paddingRight: 8,
+			position: 'absolute',
+			right: 0,
+			width: 44,
+			zIndex: 4,
+		},
+		resizeCurve: {
+			borderBottomColor: colors.secondaryLabel,
+			borderBottomRightRadius: 9,
+			borderBottomWidth: 2,
+			borderRightColor: colors.secondaryLabel,
+			borderRightWidth: 2,
+			height: 15,
+			opacity: 0.65,
+			width: 15,
+		},
+	}),
+);

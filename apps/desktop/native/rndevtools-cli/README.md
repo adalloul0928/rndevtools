@@ -597,3 +597,7 @@ The implementation is first-party RN Devtools code. It uses only the Go
 and standard-library attribution is reproduced in
 `apps/desktop/THIRD_PARTY_NOTICES.md`. See `PROVENANCE.md` for the full source,
 dependency, build, and release record.
+
+The installed shell hook steers Simulator mutations and Metro starts only while
+RN Devtools answers its bounded local socket probe. If the desktop is unavailable,
+those commands are allowed. Unrelated commands do not probe the desktop.

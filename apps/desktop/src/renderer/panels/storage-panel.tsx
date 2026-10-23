@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	ConfirmAction,
 	DetailPlaceholder,
@@ -30,7 +31,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
@@ -152,9 +152,9 @@ export function StoragePanel() {
 				header: 'Type',
 				width: 92,
 				cell: (entry) => (
-					<StatusPill tone={entry.sensitive ? 'warning' : 'default'}>
+					<Chip tone={entry.sensitive ? 'warning' : 'default'}>
 						{entry.valueType}
-					</StatusPill>
+					</Chip>
 				),
 			},
 			{
@@ -180,7 +180,7 @@ export function StoragePanel() {
 	}
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Storage"
 				description="Browse standard and encrypted MMKV keys, edit explicitly writable values, and review recent changes."
@@ -268,16 +268,16 @@ export function StoragePanel() {
 						<div className="h-full overflow-auto p-4">
 							<div className="mb-4 flex items-start justify-between gap-3">
 								<div className="min-w-0">
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										{selected.adapterTitle}
 									</p>
 									<h2 className="mb-0 mt-1 break-all font-mono text-xs font-medium leading-5 text-(--foreground)">
 										{selected.key}
 									</h2>
 								</div>
-								<StatusPill tone={selected.sensitive ? 'warning' : 'default'}>
+								<Chip tone={selected.sensitive ? 'warning' : 'default'}>
 									{selected.valueType}
-								</StatusPill>
+								</Chip>
 							</div>
 							<dl className="mb-4">
 								<KeyValue
@@ -303,7 +303,7 @@ export function StoragePanel() {
 									<div className="flex items-center gap-2 text-xs font-medium text-warning-text">
 										<EyeOff className="h-4 w-4" /> Encrypted value hidden
 									</div>
-									<p className="mb-0 mt-2 text-xs leading-5 text-warning-text/60">
+									<p className="mb-0 mt-2 text-xs leading-5 text-warning-text">
 										The key is listed for diagnostics, but its value is never
 										read or transmitted to desktop.
 									</p>
@@ -393,7 +393,7 @@ export function StoragePanel() {
 													key={event.id}
 												>
 													<div className="flex items-center justify-between text-xs">
-														<StatusPill tone="info">{event.kind}</StatusPill>
+														<Chip tone="info">{event.kind}</Chip>
 														<span className="font-mono text-(--text-3)">
 															{formatRelativeTime(event.at)}
 														</span>

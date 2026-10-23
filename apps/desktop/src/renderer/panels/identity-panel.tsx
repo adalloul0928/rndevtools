@@ -8,11 +8,11 @@ import {
 } from 'lucide-react';
 import {
 	Badge,
+	Chip,
 	ConfirmAction,
 	EmptyPanel,
 	PanelHeader,
 	PanelNotice,
-	StatusPill,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -30,7 +30,7 @@ export function IdentityPanel() {
 	const stopReason = actionUnavailableReason('identity', 'stop');
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				actions={
 					active ? (
@@ -56,7 +56,7 @@ export function IdentityPanel() {
 				}
 				description="Run allowlisted seeded identities as reversible sessions while keeping the original actor recoverable on the device."
 				meta={
-					<StatusPill
+					<Chip
 						dot
 						tone={
 							active?.status === 'needs-attention'
@@ -71,7 +71,7 @@ export function IdentityPanel() {
 							: active
 								? `${active.target.label} active`
 								: 'Original actor active'}
-					</StatusPill>
+					</Chip>
 				}
 				title="Test Identities"
 			/>
@@ -114,8 +114,8 @@ export function IdentityPanel() {
 					</div>
 				</div>
 			) : null}
-			<div className="panel-scroll p-5">
-				<h2 className="mb-3 mt-0 text-xs font-medium uppercase tracking-[0.08em] text-(--text-3)">
+			<div className="panel-scroll connected-panel-body">
+				<h2 className="mb-3 mt-0 text-xs font-medium panel-label text-(--text-3)">
 					Seeded identities
 				</h2>
 				{session.personas.length === 0 ? (
@@ -132,7 +132,7 @@ export function IdentityPanel() {
 								const selected = active?.target.personaId === persona.id;
 								return (
 									<Card
-										className="rounded-lg border border-foreground/8 bg-foreground/[0.025] shadow-none"
+										className="panel-section shadow-none"
 										key={persona.id}
 										variant="secondary"
 									>
@@ -182,7 +182,7 @@ export function IdentityPanel() {
 					</>
 				)}
 
-				<h2 className="mb-3 mt-6 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.08em] text-(--text-3)">
+				<h2 className="mb-3 mt-6 flex items-center gap-2 text-xs font-medium panel-label text-(--text-3)">
 					<History className="h-3.5 w-3.5" /> Recent sessions
 				</h2>
 				{session.history.length === 0 ? (
@@ -202,7 +202,7 @@ export function IdentityPanel() {
 								<span className="text-xs text-(--text-3)">
 									{formatRelativeTime(entry.startedAt)}
 								</span>
-								<StatusPill
+								<Chip
 									tone={
 										entry.status === 'stopped'
 											? 'success'
@@ -214,7 +214,7 @@ export function IdentityPanel() {
 									{entry.status === 'stopped'
 										? 'RESTORED'
 										: entry.status.toUpperCase()}
-								</StatusPill>
+								</Chip>
 							</div>
 						))}
 					</div>

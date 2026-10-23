@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+	Chip,
 	CodePreview,
 	ConfirmAction,
 	DetailPlaceholder,
@@ -21,7 +22,6 @@ import {
 	KeyValue,
 	PanelHeader,
 	SearchControl,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { boundedTextExport, copyText, formatClock } from '@/lib/format';
@@ -158,7 +158,7 @@ export function ConsolePanel() {
 				header: 'Level',
 				width: 88,
 				cell: (entry) => (
-					<StatusPill tone={levelTone(entry.level)}>{entry.level}</StatusPill>
+					<Chip tone={levelTone(entry.level)}>{entry.level}</Chip>
 				),
 			},
 			{
@@ -200,7 +200,7 @@ export function ConsolePanel() {
 	}
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Console"
 				description="Events from the app's structured logger after telemetry sanitization—without monkey-patching the global console."
@@ -313,9 +313,7 @@ export function ConsolePanel() {
 					{selected ? (
 						<div className="h-full overflow-auto p-4">
 							<div className="mb-4 flex items-center gap-2">
-								<StatusPill tone={levelTone(selected.level)}>
-									{selected.level}
-								</StatusPill>
+								<Chip tone={levelTone(selected.level)}>{selected.level}</Chip>
 								<span className="font-mono text-xs text-(--text-3)">
 									{formatClock(selected.at)}
 								</span>

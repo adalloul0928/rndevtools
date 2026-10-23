@@ -47,6 +47,7 @@ import {
 	useWindowDimensions,
 	View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { groupPlugins, hasPillQuickAction } from '../core/plugins';
 import type {
 	DevToolsActionServices,
@@ -55,7 +56,7 @@ import type {
 	DevToolsPlugin,
 	DevToolsPresentationMode,
 } from '../types';
-import { colors } from './panel-ui';
+import { createPanelStyles } from './panel-ui';
 import { PluginPanelRenderer } from './plugin-panel-renderer';
 import { SystemIcon } from './system-icon';
 import { ToolList } from './tool-list';
@@ -77,13 +78,6 @@ const CHIP_COLORS = [
 	'#FF2D55',
 	'#34C759',
 ] as const;
-
-const BADGE_TONES = {
-	info: '#0E7E93',
-	success: '#1D8A3E',
-	warning: '#C93400',
-	danger: '#D70015',
-} as const;
 
 function chipColor(plugin: DevToolsPlugin): ColorValue {
 	if (plugin.tint) return plugin.tint;
@@ -129,9 +123,17 @@ export function ToolsSheet({
 	homeStatus = [],
 	onOpenPlugin,
 }: ToolsSheetProps) {
+	const { colors, styles } = useStyles();
+	const badgeColors = {
+		info: colors.blue,
+		success: colors.green,
+		warning: colors.orange,
+		danger: colors.red,
+	};
 	const [query, setQuery] = useState('');
 	const colorScheme = useColorScheme();
 	const window = useWindowDimensions();
+	const insets = useSafeAreaInsets();
 	// SwiftUI quaternary-fill approximation for the circular header controls
 	// (Maps/Find My-style sheet dismiss buttons).
 	const headerControlFill = colorScheme === 'dark' ? '#7676803D' : '#7676801F';
@@ -162,11 +164,12 @@ export function ToolsSheet({
 	};
 	if (Platform.OS !== 'ios') {
 		const visiblePlugins = sections.flatMap((section) => section.plugins);
-		const sheetHeight = Math.max(360, window.height - safeAreaTop - 24);
+		const sheetHeight = Math.max(1, window.height - safeAreaTop - 24);
 		return (
 			<Modal
 				animationType="slide"
-				onRequestClose={onClose}
+				onRequestClose={selectedPlugin ? onBack : onClose}
+				testID="devtools-sheet-modal"
 				presentationStyle="overFullScreen"
 				statusBarTranslucent
 				transparent
@@ -174,7 +177,15 @@ export function ToolsSheet({
 			>
 				<View style={styles.androidBackdrop}>
 					<View
-						style={[styles.androidSheet, { height: sheetHeight }]}
+						style={[
+							styles.androidSheet,
+							{
+								height: sheetHeight,
+								paddingLeft: 12 + insets.left,
+								paddingRight: 12 + insets.right,
+								paddingBottom: Math.max(8, insets.bottom),
+							},
+						]}
 						testID="devtools-sheet"
 					>
 						<View style={styles.androidDragIndicator} />
@@ -260,7 +271,7 @@ export function ToolsSheet({
 																	styles.androidBadge,
 																	{
 																		color:
-																			BADGE_TONES[row.badge.tone ?? 'info'],
+																			badgeColors[row.badge.tone ?? 'info'],
 																	},
 																]}
 															>
@@ -553,6 +564,13 @@ function ToolRow({
 }
 
 function HomeStatusRowContent({ row }: { row: DevToolsHomeStatusRow }) {
+	const { colors } = useStyles();
+	const badgeColors = {
+		info: colors.blue,
+		success: colors.green,
+		warning: colors.orange,
+		danger: colors.red,
+	};
 	return (
 		<LabeledContent
 			label={
@@ -566,7 +584,7 @@ function HomeStatusRowContent({ row }: { row: DevToolsHomeStatusRow }) {
 					<UIText
 						modifiers={[
 							font({ size: 12, weight: 'semibold' }),
-							foregroundStyle(BADGE_TONES[row.badge.tone ?? 'info']),
+							foregroundStyle(badgeColors[row.badge.tone ?? 'info']),
 						]}
 					>
 						{row.badge.label}
@@ -578,119 +596,121 @@ function HomeStatusRowContent({ row }: { row: DevToolsHomeStatusRow }) {
 	);
 }
 
-const styles = StyleSheet.create({
-	androidBackdrop: {
-		backgroundColor: '#00000066',
-		flex: 1,
-		justifyContent: 'flex-end',
-	},
-	androidBadge: {
-		fontSize: 11,
-		fontWeight: '700',
-	},
-	androidFooter: {
-		color: colors.secondaryLabel,
-		fontSize: 12,
-		paddingBottom: 6,
-		paddingHorizontal: 16,
-	},
-	androidDragIndicator: {
-		alignSelf: 'center',
-		backgroundColor: colors.secondaryLabel,
-		borderRadius: 2,
-		height: 4,
-		marginBottom: 4,
-		marginTop: 8,
-		opacity: 0.55,
-		width: 36,
-	},
-	androidHeader: {
-		alignItems: 'center',
-		flexDirection: 'row',
-		gap: 12,
-		minHeight: 56,
-		paddingHorizontal: 4,
-	},
-	androidHeaderControl: {
-		alignItems: 'center',
-		backgroundColor: colors.fill,
-		borderRadius: 22,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
-	},
-	androidList: {
-		flex: 1,
-	},
-	androidSearch: {
-		alignItems: 'center',
-		backgroundColor: colors.groupedFill,
-		borderColor: colors.separator,
-		borderRadius: 24,
-		borderWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		gap: 8,
-		marginBottom: 10,
-		paddingHorizontal: 14,
-	},
-	androidSearchInput: {
-		color: colors.label,
-		flex: 1,
-		fontSize: 16,
-		height: 48,
-	},
-	androidSheet: {
-		backgroundColor: colors.background,
-		borderTopLeftRadius: 28,
-		borderTopRightRadius: 28,
-		overflow: 'hidden',
-		paddingBottom: 8,
-		paddingHorizontal: 12,
-	},
-	androidStatusGroup: {
-		backgroundColor: colors.card,
-		borderRadius: 12,
-		marginBottom: 8,
-		overflow: 'hidden',
-	},
-	androidStatusLabel: {
-		color: colors.label,
-		fontSize: 14,
-		fontWeight: '500',
-	},
-	androidStatusRow: {
-		alignItems: 'center',
-		borderBottomColor: colors.separator,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		flexDirection: 'row',
-		justifyContent: 'space-between',
-		minHeight: 44,
-		paddingHorizontal: 14,
-	},
-	androidStatusValue: {
-		color: colors.secondaryLabel,
-		flexShrink: 1,
-		fontSize: 13,
-	},
-	androidStatusValueWrap: {
-		alignItems: 'center',
-		flex: 1,
-		flexDirection: 'row',
-		gap: 8,
-		justifyContent: 'flex-end',
-		marginLeft: 12,
-	},
-	androidTitle: {
-		color: colors.label,
-		flex: 1,
-		fontSize: 22,
-		fontWeight: '700',
-	},
-	host: {
-		height: 1,
-		width: 1,
-	},
-	panel: {
-		flex: 1,
-	},
-});
+const useStyles = createPanelStyles((colors) =>
+	StyleSheet.create({
+		androidBackdrop: {
+			backgroundColor: '#00000066',
+			flex: 1,
+			justifyContent: 'flex-end',
+		},
+		androidBadge: {
+			fontSize: 11,
+			fontWeight: '700',
+		},
+		androidFooter: {
+			color: colors.secondaryLabel,
+			fontSize: 12,
+			paddingBottom: 6,
+			paddingHorizontal: 16,
+		},
+		androidDragIndicator: {
+			alignSelf: 'center',
+			backgroundColor: colors.secondaryLabel,
+			borderRadius: 2,
+			height: 4,
+			marginBottom: 4,
+			marginTop: 8,
+			opacity: 0.55,
+			width: 36,
+		},
+		androidHeader: {
+			alignItems: 'center',
+			flexDirection: 'row',
+			gap: 12,
+			minHeight: 56,
+			paddingHorizontal: 4,
+		},
+		androidHeaderControl: {
+			alignItems: 'center',
+			backgroundColor: colors.fill,
+			borderRadius: 22,
+			height: 44,
+			justifyContent: 'center',
+			width: 44,
+		},
+		androidList: {
+			flex: 1,
+		},
+		androidSearch: {
+			alignItems: 'center',
+			backgroundColor: colors.groupedFill,
+			borderColor: colors.separator,
+			borderRadius: 24,
+			borderWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			gap: 8,
+			marginBottom: 10,
+			paddingHorizontal: 14,
+		},
+		androidSearchInput: {
+			color: colors.label,
+			flex: 1,
+			fontSize: 16,
+			height: 48,
+		},
+		androidSheet: {
+			backgroundColor: colors.background,
+			borderTopLeftRadius: 28,
+			borderTopRightRadius: 28,
+			overflow: 'hidden',
+			paddingBottom: 8,
+			paddingHorizontal: 12,
+		},
+		androidStatusGroup: {
+			backgroundColor: colors.card,
+			borderRadius: 12,
+			marginBottom: 8,
+			overflow: 'hidden',
+		},
+		androidStatusLabel: {
+			color: colors.label,
+			fontSize: 14,
+			fontWeight: '500',
+		},
+		androidStatusRow: {
+			alignItems: 'center',
+			borderBottomColor: colors.separator,
+			borderBottomWidth: StyleSheet.hairlineWidth,
+			flexDirection: 'row',
+			justifyContent: 'space-between',
+			minHeight: 44,
+			paddingHorizontal: 14,
+		},
+		androidStatusValue: {
+			color: colors.secondaryLabel,
+			flexShrink: 1,
+			fontSize: 13,
+		},
+		androidStatusValueWrap: {
+			alignItems: 'center',
+			flex: 1,
+			flexDirection: 'row',
+			gap: 8,
+			justifyContent: 'flex-end',
+			marginLeft: 12,
+		},
+		androidTitle: {
+			color: colors.label,
+			flex: 1,
+			fontSize: 22,
+			fontWeight: '700',
+		},
+		host: {
+			height: 1,
+			width: 1,
+		},
+		panel: {
+			flex: 1,
+		},
+	}),
+);

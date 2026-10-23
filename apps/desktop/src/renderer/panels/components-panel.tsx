@@ -18,6 +18,7 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	EmptyPanel,
 	InlineCode,
@@ -26,7 +27,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -180,7 +180,7 @@ export function ComponentsPanel() {
 		: 'The target is not currently visible on device.';
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="Components"
 				description="Inspect only components the app explicitly registers, with stable target keys, source locations, safe instance projections, and optional measured bounds."
@@ -316,7 +316,7 @@ export function ComponentsPanel() {
 
 				<div className="panel-scroll border-r border-foreground/8 p-5 max-[1160px]:hidden">
 					<div className="mb-4">
-						<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+						<p className="m-0 text-xs panel-label text-(--text-3)">
 							Measured coordinate map
 						</p>
 						<p className="mb-0 mt-1 text-xs leading-4 text-(--muted)">
@@ -358,12 +358,12 @@ export function ComponentsPanel() {
 					</div>
 				</div>
 
-				<div className="panel-scroll p-5">
+				<div className="panel-scroll connected-panel-body">
 					{selected ? (
 						<div className="space-y-4">
 							<div className="flex items-start justify-between gap-4">
 								<div>
-									<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+									<p className="m-0 text-xs panel-label text-(--text-3)">
 										Selected target
 									</p>
 									<h2 className="mb-0 mt-1 text-base font-semibold tracking-[-0.025em] text-(--foreground)">
@@ -445,13 +445,13 @@ export function ComponentsPanel() {
 													{event.baseDuration.toFixed(1)} ms
 												</p>
 											</div>
-											<StatusPill
+											<Chip
 												tone={
 													event.actualDuration >= 16 ? 'warning' : 'success'
 												}
 											>
 												{event.actualDuration.toFixed(1)} ms
-											</StatusPill>
+											</Chip>
 										</div>
 									))}
 								</SectionCard>

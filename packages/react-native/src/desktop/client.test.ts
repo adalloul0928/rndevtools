@@ -426,6 +426,216 @@ describe('desktop client', () => {
 		jest.useRealTimers();
 	});
 
+	it.each([
+		{ id: ' ' },
+		{ id: 'x'.repeat(257) },
+		{ platform: 'unsupported' },
+		{ capabilities: ['custom.execute'] },
+		{ processId: Number.POSITIVE_INFINITY },
+		{ viewport: { width: 0, height: 10 } },
+		{ model: 123 },
+		{ bundleIdentifier: 'bad/id' },
+	])('rejects an invalid hello before opening a socket (%j)', (fields) => {
+		expect(() => {
+			const client = startDesktopClient({
+				host: {
+					...testHost,
+					createDeviceInfo: () =>
+						({ ...testDevice, ...fields }) as DesktopDeviceInfoSnapshot,
+				},
+				candidates: [BROKER_URL],
+			});
+			client.stop();
+		}).toThrow('Invalid desktop device info');
+		expect(FakeWebSocket.instances).toHaveLength(0);
+	});
+
+	it('detaches the hello from host mutations and omits undeclared fields', () => {
+		const info = {
+			...testDevice,
+			capabilities: [...testDevice.capabilities],
+			name: 'token=secret-example',
+			extra: 'private host data',
+		};
+		const client = startDesktopClient({
+			host: { ...testHost, createDeviceInfo: () => info },
+			candidates: [BROKER_URL],
+		});
+		try {
+			info.name = 'changed';
+			info.capabilities.length = 0;
+			latestSocket().open();
+			const device = sentMessages(latestSocket())[0]?.device as Record<
+				string,
+				unknown
+			>;
+			expect(device.name).not.toContain('secret-example');
+			expect(device.name).not.toBe('changed');
+			expect(device.capabilities).toEqual(['console.clear']);
+			expect(device).not.toHaveProperty('extra');
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('refuses a hello accessor without invoking it', () => {
+		const getter = jest.fn(() => 'private host data');
+		const info = { ...testDevice };
+		Object.defineProperty(info, 'model', { get: getter });
+		expect(() =>
+			startDesktopClient({
+				host: { ...testHost, createDeviceInfo: () => info },
+				candidates: [BROKER_URL],
+			}),
+		).toThrow('Invalid desktop device info');
+		expect(getter).not.toHaveBeenCalled();
+	});
+
+	it('replaces an earlier client for the same device and leaves its old stop inert', async () => {
+		jest.useFakeTimers();
+		const unsubscribe = jest.fn();
+		const first = startDesktopClient({
+			host: { ...testHost, subscribeToAuthorization: () => unsubscribe },
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		firstSocket.open();
+		const second = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const secondSocket = latestSocket();
+		try {
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+			expect(unsubscribe).toHaveBeenCalledTimes(1);
+			secondSocket.open();
+			first.stop();
+			await jest.advanceTimersByTimeAsync(30_000);
+			expect(FakeWebSocket.instances).toHaveLength(2);
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+			const third = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				expect(secondSocket.close).toHaveBeenCalled();
+			} finally {
+				third.stop();
+			}
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('retires the previous module instance after Fast Refresh', () => {
+		const first = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		let refreshedStart = startDesktopClient;
+		jest.isolateModules(() => {
+			refreshedStart =
+				jest.requireActual<typeof import('./client')>(
+					'./client',
+				).startDesktopClient;
+		});
+		const second = refreshedStart({ host: testHost, candidates: [BROKER_URL] });
+		try {
+			expect(firstSocket.close).toHaveBeenCalledTimes(1);
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('keeps clients for different device ids independent', () => {
+		const first = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		const firstSocket = latestSocket();
+		const second = startDesktopClient({
+			host: {
+				...testHost,
+				createDeviceInfo: () => ({ ...testDevice, id: 'device-2' }),
+			},
+			candidates: [BROKER_URL],
+		});
+		try {
+			expect(firstSocket.close).not.toHaveBeenCalled();
+		} finally {
+			first.stop();
+			second.stop();
+		}
+	});
+
+	it('retires after the broker replaces it instead of evicting the replacement', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			latestSocket().open();
+			latestSocket().serverClose(1008, 'replaced by a newer connection');
+			await jest.advanceTimersByTimeAsync(60_000);
+			expect(FakeWebSocket.instances).toHaveLength(1);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('skips unchanged host projections while keeping heartbeats and changed snapshots', async () => {
+		jest.useFakeTimers();
+		let revision = 0;
+		const client = startDesktopClient({
+			host: { ...testHost, getToolsRevision: () => revision },
+			candidates: [BROKER_URL],
+		});
+		const socket = latestSocket();
+		try {
+			socket.open();
+			await jest.advanceTimersByTimeAsync(10_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(1);
+			expect(
+				sentMessages(socket).some((message) => message.type === 'heartbeat'),
+			).toBe(true);
+			revision += 1;
+			await jest.advanceTimersByTimeAsync(1_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(2);
+			await jest.advanceTimersByTimeAsync(5_000);
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(2);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+			socket.receive(consoleClear('unchanged-revision-action'));
+			await flushPromises();
+			expect(mockCaptureDesktopTools).toHaveBeenCalledTimes(3);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('falls back to polling if the optional revision callback fails', async () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: {
+				...testHost,
+				getToolsRevision: () => {
+					throw new Error('unavailable');
+				},
+			},
+			candidates: [BROKER_URL],
+		});
+		try {
+			latestSocket().open();
+			await jest.advanceTimersByTimeAsync(2_000);
+			expect(mockCaptureDesktopTools.mock.calls.length).toBeGreaterThan(1);
+		} finally {
+			client.stop();
+		}
+	});
+
 	it('opens a loopback candidate with the default connection options', () => {
 		const client = startDesktopClient({
 			host: testHost,
@@ -498,6 +708,57 @@ describe('desktop client', () => {
 				client.stop();
 			}
 		});
+	});
+
+	it.each([false, true])(
+		'keeps snapshots connected after an authorization refusal (read throws=%s)',
+		async (throws) => {
+			jest.useFakeTimers();
+			const authorization = jest.fn(() => {
+				if (throws) throw new Error('owner unavailable');
+				return { enabled: false, ownerId: null };
+			});
+			const client = startDesktopClient({
+				host: { ...testHost, getAuthorization: authorization },
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				expect(() => socket.receive(consoleClear('refused'))).not.toThrow();
+				await jest.advanceTimersByTimeAsync(2_000);
+				expect(socket.close).not.toHaveBeenCalled();
+				expect(actionResults(socket)).toContainEqual(
+					expect.objectContaining({ actionId: 'refused', ok: false }),
+				);
+				expect(
+					sentMessages(socket).filter((message) => message.type === 'snapshot')
+						.length,
+				).toBeGreaterThan(1);
+				expect(mockRunDesktopAction).not.toHaveBeenCalled();
+			} finally {
+				client.stop();
+			}
+		},
+	);
+
+	it('bounds a flood of unauthorized action replies', () => {
+		jest.useFakeTimers();
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+		try {
+			const socket = latestSocket();
+			socket.open();
+			for (let i = 0; i < 200; i++)
+				socket.receive(consoleClear(`refused-${i}`));
+			expect(socket.close).toHaveBeenCalled();
+			expect(actionResults(socket).length).toBeLessThanOrEqual(61);
+			expect(mockRunDesktopAction).not.toHaveBeenCalled();
+		} finally {
+			client.stop();
+		}
 	});
 
 	it('rechecks the authorized owner before queued actions execute', async () => {
@@ -1654,11 +1915,13 @@ describe('desktop client', () => {
 			for (let attempt = 0; attempt < 3; attempt += 1) {
 				const socket = latestSocket();
 				socket.open();
-				// Unauthorized, so the client refuses and closes with 1008 itself.
-				socket.receive(consoleClear(`unauthorized-${attempt}`));
+				// A wrong-device action is a protocol violation and closes with 1008.
+				socket.receive(
+					consoleClear(`wrong-device-${attempt}`, 'another-device'),
+				);
 				expect(socket.close).toHaveBeenCalledWith(
 					1008,
-					'internal tools authorization required',
+					'desktop action for another device',
 				);
 				delays.push(await reconnectDelayMs());
 			}

@@ -149,7 +149,7 @@ describe('desktop URL boundaries', () => {
 			"img-src 'self' data: blob: rndevtools-capture:"
 		);
 		expect(PACKAGED_RENDERER_CONTENT_SECURITY_POLICY).toContain(
-			'media-src rndevtools-capture:'
+			'media-src rndevtools-capture: blob:'
 		);
 	});
 });

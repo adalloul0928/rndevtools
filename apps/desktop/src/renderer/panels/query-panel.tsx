@@ -6,8 +6,10 @@ import {
 } from '@heroui-pro/react/data-grid';
 import { DatabaseZap, RefreshCw, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { SegmentedControl } from '@/components/selection-controls';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	DetailPlaceholder,
 	EmptyPanel,
@@ -17,7 +19,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
@@ -158,9 +159,9 @@ export function QueryPanel() {
 				header: 'Status',
 				width: 104,
 				cell: (entry) => (
-					<StatusPill tone={queryTone(entry)} dot>
+					<Chip tone={queryTone(entry)} dot>
 						{queryLabel(entry)}
-					</StatusPill>
+					</Chip>
 				),
 			},
 			{
@@ -199,7 +200,7 @@ export function QueryPanel() {
 	}
 
 	return (
-		<section className="panel-root">
+		<section className="panel-root connected-panel">
 			<PanelHeader
 				title="React Query"
 				description="Inspect the live TanStack Query cache and run narrowly scoped refetch or invalidation actions on the selected device."
@@ -210,22 +211,18 @@ export function QueryPanel() {
 				}
 			/>
 			<Toolbar>
-				<div className="flex rounded-md border border-foreground/8 bg-background/25 p-0.5">
-					{(['queries', 'mutations'] as const).map((value) => (
-						<Button
-							aria-pressed={tab === value}
-							className="h-7 rounded px-3 text-xs"
-							key={value}
-							size="sm"
-							variant={tab === value ? 'secondary' : 'ghost'}
-							onPress={() => setTab(value)}
-						>
-							{value === 'queries'
+				<SegmentedControl
+					label="Cache entries"
+					value={tab}
+					onChange={setTab}
+					items={(['queries', 'mutations'] as const).map((value) => ({
+						value,
+						label:
+							value === 'queries'
 								? `Queries ${queries.length}${summary?.omittedQueryCount ? ` / ${summary.sourceQueryCount}` : ''}`
-								: `Mutations ${mutations.length}${summary?.omittedMutationCount ? ` / ${summary.sourceMutationCount}` : ''}`}
-						</Button>
-					))}
-				</div>
+								: `Mutations ${mutations.length}${summary?.omittedMutationCount ? ` / ${summary.sourceMutationCount}` : ''}`,
+					}))}
+				/>
 				<SearchControl
 					ariaLabel={`Search ${tab}`}
 					placeholder={`Search ${tab}…`}
@@ -233,22 +230,17 @@ export function QueryPanel() {
 					onChange={setQuery}
 				/>
 				{tab === 'queries' ? (
-					<div className="flex items-center gap-1">
-						{(['all', 'active', 'stale', 'fetching', 'errors'] as const).map(
-							(value) => (
-								<Button
-									aria-pressed={filter === value}
-									className="h-7 rounded-md px-2 text-xs capitalize"
-									key={value}
-									size="sm"
-									variant={filter === value ? 'secondary' : 'ghost'}
-									onPress={() => setFilter(value)}
-								>
-									{value}
-								</Button>
-							)
-						)}
-					</div>
+					<SegmentedControl
+						label="Query status"
+						value={filter}
+						onChange={setFilter}
+						items={(
+							['all', 'active', 'stale', 'fetching', 'errors'] as const
+						).map((value) => ({
+							value,
+							label: value.charAt(0).toUpperCase() + value.slice(1),
+						}))}
+					/>
 				) : null}
 			</Toolbar>
 			{simulation && selectedFamily ? (
@@ -374,7 +366,7 @@ export function QueryPanel() {
 				</PanelNotice>
 			) : null}
 			{tab === 'mutations' ? (
-				<div className="panel-scroll p-5">
+				<div className="panel-scroll connected-panel-body">
 					{visibleMutations.length === 0 ? (
 						<EmptyPanel
 							icon={<DatabaseZap className="h-5 w-5" />}
@@ -390,10 +382,7 @@ export function QueryPanel() {
 					) : (
 						<div className="grid gap-3">
 							{visibleMutations.map((mutation) => (
-								<div
-									className="rounded-lg border border-foreground/8 bg-foreground/[0.025] p-4"
-									key={mutation.id}
-								>
+								<div className="panel-section p-4" key={mutation.id}>
 									<div className="flex items-start justify-between gap-4">
 										<div className="min-w-0">
 											<InlineCode className="break-all">
@@ -407,11 +396,11 @@ export function QueryPanel() {
 										</div>
 										<div className="flex items-center gap-1.5">
 											{mutation.truncated ? (
-												<StatusPill tone="warning">shortened</StatusPill>
+												<Chip tone="warning">shortened</Chip>
 											) : null}
-											<StatusPill tone={mutationTone(mutation.status)}>
+											<Chip tone={mutationTone(mutation.status)}>
 												{mutation.status}
-											</StatusPill>
+											</Chip>
 										</div>
 									</div>
 									{mutation.variablesText ? (
@@ -462,16 +451,16 @@ export function QueryPanel() {
 							<div className="h-full overflow-auto p-4">
 								<div className="mb-4 flex items-start justify-between gap-3">
 									<div className="min-w-0">
-										<p className="m-0 text-xs uppercase tracking-[0.08em] text-(--text-3)">
+										<p className="m-0 text-xs panel-label text-(--text-3)">
 											Query key
 										</p>
 										<h2 className="mb-0 mt-1 break-all font-mono text-xs leading-5 text-(--foreground)">
 											{selected.keyText}
 										</h2>
 									</div>
-									<StatusPill tone={queryTone(selected)} dot>
+									<Chip tone={queryTone(selected)} dot>
 										{queryLabel(selected)}
-									</StatusPill>
+									</Chip>
 								</div>
 								<div className="mb-4 flex gap-2">
 									<Button

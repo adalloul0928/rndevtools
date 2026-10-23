@@ -1,11 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import * as Native from 'react-native';
 import { Platform, Text } from 'react-native';
 import type {
 	DevToolsPanelPlugin,
 	DevToolsPluginWithPillQuickAction,
 } from '../types';
+import {
+	AndroidPanelRow,
+	AndroidPanelSearch,
+	AndroidPanelSection,
+} from './android-panel-ui';
 import { FloatingLauncher } from './floating-launcher';
 import { MiniPill } from './mini-pill';
+import { PanelShell } from './panel-shell';
 import { ToolsSheet } from './tools-sheet';
 
 jest.mock('@expo/ui', () => {
@@ -133,7 +140,7 @@ jest.mock('@expo/ui/swift-ui/modifiers', () => ({
 }));
 
 jest.mock('react-native-safe-area-context', () => ({
-	useSafeAreaInsets: () => ({ top: 24, right: 0, bottom: 24, left: 0 }),
+	useSafeAreaInsets: () => ({ top: 24, right: 32, bottom: 24, left: 20 }),
 }));
 
 jest.mock('react-native-worklets', () => ({
@@ -205,6 +212,37 @@ const plugin: DevToolsPanelPlugin = {
 const actions = { run: jest.fn(async () => true) };
 
 describe('Android presentation boundary', () => {
+	it('updates shell and panel colors when Android appearance changes', async () => {
+		const scheme = jest.spyOn(Native, 'useColorScheme').mockReturnValue('dark');
+		const content = () => (
+			<PanelShell title="Theme probe" onBack={jest.fn()}>
+				<AndroidPanelSection title="Section">
+					<AndroidPanelRow label="Field" value="Value" />
+				</AndroidPanelSection>
+				<AndroidPanelSearch
+					placeholder="Search probe"
+					value=""
+					onChangeText={jest.fn()}
+				/>
+			</PanelShell>
+		);
+		try {
+			await render(content());
+			expect(screen.getByText('Theme probe')).toHaveStyle({ color: '#E6E0E9' });
+			expect(screen.getByText('Field')).toHaveStyle({ color: '#E6E0E9' });
+			expect(screen.getByPlaceholderText('Search probe')).toHaveProp(
+				'placeholderTextColor',
+				'#CAC4D0',
+			);
+			scheme.mockReturnValue('light');
+			await screen.rerender(content());
+			expect(screen.getByText('Theme probe')).toHaveStyle({ color: '#1D1B20' });
+			expect(screen.getByText('Field')).toHaveStyle({ color: '#1D1B20' });
+		} finally {
+			scheme.mockRestore();
+		}
+	});
+
 	it('renders and opens the launcher without mounting SwiftUI', async () => {
 		const onOpen = jest.fn();
 		await render(<FloatingLauncher label="Open diagnostics" onOpen={onOpen} />);
@@ -236,12 +274,42 @@ describe('Android presentation boundary', () => {
 			/>,
 		);
 
+		expect(screen.getByTestId('devtools-sheet')).toHaveStyle({
+			paddingLeft: 32,
+			paddingRight: 44,
+			paddingBottom: 24,
+		});
 		await fireEvent.press(screen.getByLabelText('Window'));
 		await fireEvent.press(screen.getByTestId('devtools-tool-row-example'));
 		await fireEvent.press(screen.getByTestId('devtools-sheet-close'));
 
 		expect(onPresentationModeChange).toHaveBeenCalledWith('window');
 		expect(onSelectPlugin).toHaveBeenCalledWith(plugin);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('Android Back returns to the tool list before dismissing the sheet', async () => {
+		const onBack = jest.fn();
+		const onClose = jest.fn();
+		const props = {
+			actions,
+			isPresented: true,
+			onBack,
+			onClose,
+			onPresentationModeChange: jest.fn(),
+			onQuickActionPinnedChange: jest.fn(),
+			onSelectPlugin: jest.fn(),
+			pinnedPillQuickActionIds: [],
+			plugins: [plugin],
+			safeAreaTop: 24,
+			title: 'Developer Tools',
+		};
+		await render(<ToolsSheet {...props} selectedPlugin={plugin} />);
+		await fireEvent(screen.getByTestId('devtools-sheet-modal'), 'requestClose');
+		expect(onBack).toHaveBeenCalledTimes(1);
+		expect(onClose).not.toHaveBeenCalled();
+		await screen.rerender(<ToolsSheet {...props} />);
+		await fireEvent(screen.getByTestId('devtools-sheet-modal'), 'requestClose');
 		expect(onClose).toHaveBeenCalledTimes(1);
 	});
 

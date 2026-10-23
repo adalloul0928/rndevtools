@@ -3235,6 +3235,55 @@ describe('LaneService', () => {
 			return { starting, releaseBoot: () => releaseBoot.resolve(undefined) };
 		}
 
+		it.each(['use', 'clone'] as const)(
+			'holds a parked request device during %s preparation before worktree lookup',
+			async (decision) => {
+				const wired = await wire();
+				const devices = simulator.state.devices;
+				simulator.state = { ...simulator.state, devices: [] };
+				const parked = await wired.lanes.runOperation({
+					actionId: 'park-before-hold',
+					kind: 'lane.start',
+					worktreePath: WORKTREE,
+					environment: 'development',
+					launch: false,
+					agent: LANE_AGENT,
+				});
+				expect(parked.deviceRequest?.status).toBe('pending');
+				simulator.state = { ...simulator.state, devices };
+				const entered = deferred<void>();
+				const release = deferred<void>();
+				const originalRoot = worktrees.repositoryRoot;
+				worktrees.repositoryRoot = async (value) => {
+					entered.resolve(undefined);
+					await release.promise;
+					return originalRoot(value);
+				};
+				const starting = wired.lanes.runOperation({
+					actionId: 'provide-before-hold',
+					kind: 'lane.provide-device',
+					requestId: parked.deviceRequest?.id ?? '',
+					decision,
+					simulatorUdid: UDID,
+				});
+				await entered.promise;
+				try {
+					const chosen = decision === 'clone' ? CLONE_UDID : UDID;
+					expect(wired.agents.access(chosen, OTHER_AGENT)).toMatchObject({
+						allowed: false,
+					});
+					expect(wired.agents.holds().get(chosen)).toMatchObject({
+						holder: LANE_AGENT,
+						via: 'lane',
+					});
+				} finally {
+					release.resolve(undefined);
+					await starting;
+				}
+				expect((await starting).completed).toBe(true);
+			}
+		);
+
 		it('refuses a claim on the Simulator a start is booting, and the lane keeps it', async () => {
 			const wired = await wire();
 			const { starting, releaseBoot } = await startHeldInBoot(wired.lanes);
@@ -3440,6 +3489,50 @@ describe('LaneService', () => {
 	});
 
 	describe('a start that fails after Metro spawned', () => {
+		it('reports unverified Metro cleanup with the PID and port', async () => {
+			worktrees.identity = {
+				scheme: 'my_app',
+				bundleIdentifier: 'com.example.app',
+			};
+			metro.stop = async () => {
+				throw new Error('lsof unavailable password=private-value');
+			};
+			const receipt = await service.runOperation({
+				actionId: 'cleanup-failed',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toMatch(/Metro cleanup.*PID 1001, port 8100/);
+			expect(receipt.error).toContain('lsof unavailable');
+			expect(receipt.error).not.toContain('private-value');
+		});
+
+		it('retains the recorded Metro until failed-start cleanup is verified', async () => {
+			const upsert = store.upsert.bind(store);
+			vi.spyOn(store, 'upsert').mockImplementation(async (lane) => {
+				await upsert(lane);
+				throw new Error('Persistence acknowledgement failed');
+			});
+			metro.stop = async () => {
+				throw new Error('ps unavailable');
+			};
+			const receipt = await service.runOperation({
+				actionId: 'cleanup-recorded',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(receipt.completed).toBe(false);
+			expect(store.lanes()).toHaveLength(1);
+			expect(store.lanes()[0]?.metroPid).toBe(1001);
+		});
+
 		it('stops that Metro, so a retry does not leak another one', async () => {
 			// Not a scheme app.json yields any more, but the lane record refuses it.
 			worktrees.identity = {

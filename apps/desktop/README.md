@@ -80,6 +80,11 @@ Simulator-capable command at least once (and again after native changes):
 pnpm --filter @rndevtools/desktop dev:simulator
 ```
 
+Plain `dev` verifies any existing native helper bundle and its reported version
+before launching Electron. Rebuild stale helpers with `native:build`. Without a
+helper bundle, read-only app diagnostics remain available; Simulator tools require
+the native build. This preflight does not prompt for system permissions.
+
 That command verifies the pinned vendored SimSlim source, builds the Go and
 Swift helpers for the current architecture, then starts Electron.
 
@@ -300,6 +305,43 @@ sidebar Simulator dot follows the selected device state.
 The README screenshots use the connected demo device and synthetic Simulator
 and Supabase fixtures. They do not depict this machine's Simulator inventory.
 
+Fatal main-process exceptions and unhandled rejections exit with status 1 after
+writing a redacted summary to `diagnostics/main-process-errors.log` beneath the
+Electron user-data directory. The private log is capped at 64 KiB and resets
+when full. A logging failure still exits; failed main-process state is not resumed.
 Recipe teardown runs only for targets whose steps started. Cancellation while
 queued for a Simulator lease, or a failed preflight, does not run cleanup on
 that untouched target. Cleanup after an attempted step still runs on failure.
+
+Resuming a saved local Supabase stack uses the same capacity admission as a new
+start. Operations that reload checkout configuration recheck its branch after
+waiting for the stack lock and before each start attempt. A branch change during
+the stop leaves the stack stopped and reports a recoverable refusal.
+If settings cannot be loaded, preference changes fail without overwriting the
+file. Repair or restore `settings-v1.json` in the Electron user-data directory
+and restart the app before changing preferences.
+
+Supabase CLI selections are rechecked immediately before execution. If the file
+was replaced, redirected or made writable since validation, the call is refused;
+refresh the installation before retrying.
+
+Mutation helper availability requires the Electron app and its Simulator/native-host
+helpers to share a verified Apple signing team. Ad-hoc local packages can launch
+but cannot offer these native mutation capabilities; ordinary diagnostics and the
+local agent CLI remain available. The Simulator helper must also report the same
+team compiled from `APPLE_TEAM_ID`.
+
+### Licensed renderer integrity
+
+The HeroUI Pro installer hydrates code beyond the npm lockfile stub. Desktop dev
+and build verify `dist/`, `package.json`, and `LICENSE` against
+`scripts/heroui-pro-integrity.json` before loading the renderer toolchain. The
+initial manifest pins the locally hydrated 1.0.0-beta.8 payload, which matched in
+two independent workspace installs. This is a reviewed content pin, not a vendor
+signature. Installer dependencies remain pinned by the pnpm lockfile.
+
+For a deliberate licensed update, install it with `HEROUI_AUTH_TOKEN`, review the
+changed package and payload, then run
+`node apps/desktop/scripts/verify-heroui-pro.mjs --record` and review the manifest
+diff in the same PR. Builds never record new hashes automatically. Token-free
+main-process checks use fixture integrity tests and do not require the payload.

@@ -1,3 +1,4 @@
+import type { ImagePickerOptions } from 'expo-image-picker';
 import {
 	disableDevtoolsAuthorization,
 	setDevtoolsAuthorization,
@@ -84,6 +85,44 @@ describe('devtoolsCameraProvider', () => {
 			height: 240,
 		});
 	});
+
+	it.each([
+		['images', true, false],
+		['videos', false, true],
+		['Images', true, false],
+		['Videos', false, true],
+		['All', true, true],
+		[['images'], true, false],
+		[['videos'], false, true],
+		[['images', 'videos'], true, true],
+	] as const)(
+		'honors string, array and legacy media selection %s',
+		async (selection, imageAllowed, videoAllowed) => {
+			const mediaTypes = selection as ImagePickerOptions['mediaTypes'];
+			for (const video of [false, true]) {
+				await devtoolsCameraProvider.setDebugFixture({
+					kind: video ? 'video' : 'still',
+					mimeType: video ? 'video/mp4' : 'image/png',
+					dataBase64: 'AAAAAA==',
+					width: 10,
+					height: 10,
+					...(video ? { durationMs: 1000 } : {}),
+				});
+				const result = devtoolsCameraProvider.launchCameraAsync(
+					{ launchCameraAsync: jest.fn() },
+					{ mediaTypes },
+				);
+				if (video ? videoAllowed : imageAllowed)
+					await expect(result).resolves.toMatchObject({
+						canceled: false,
+						assets: [
+							expect.objectContaining({ type: video ? 'video' : 'image' }),
+						],
+					});
+				else await expect(result).rejects.toThrow('camera flow accepts');
+			}
+		},
+	);
 
 	it('supports deterministic unavailable and error fixtures', async () => {
 		await devtoolsCameraProvider.setDebugFixture({ kind: 'unavailable' });

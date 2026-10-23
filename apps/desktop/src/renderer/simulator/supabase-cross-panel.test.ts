@@ -556,7 +556,7 @@ describe('Fleet briefs', () => {
 				demo
 			)
 		).toEqual({
-			chip: { label: 'db starting', tone: 'warning' },
+			chip: { label: 'db starting', tone: 'info' },
 			line: 'Starting…',
 			apiPort: 23_310,
 		});

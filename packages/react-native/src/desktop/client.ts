@@ -17,6 +17,7 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import type { DevtoolsAuthorization } from '../authorization';
+import { validatedDeviceInfo } from './device-info';
 import { desktopProjectionId } from './projection';
 
 // A headless host can build its device info and snapshot projections from this
@@ -50,6 +51,12 @@ export type DesktopClientHost = {
 	captureTools: (
 		diagnostics: readonly DesktopDiagnostic[],
 	) => DesktopDeviceToolsSnapshot;
+	/**
+	 * Optional cheap revision of every value captureTools projects. Advance this
+	 * nonnegative safe integer whenever that data changes. Unchanged revisions
+	 * skip capture and serialization; absent, invalid or failed reads keep polling.
+	 */
+	getToolsRevision?: () => number;
 	/** Identifies this device and build to the desktop. */
 	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
 	/**
@@ -333,6 +340,8 @@ type DesktopOutbox = {
 	snapshotDue: boolean;
 	lastSnapshotAt: number;
 	lastSnapshotBytes: number;
+	lastToolsRevision: number | undefined;
+	lastDiagnosticSequence: number;
 	flushTimer: ReturnType<typeof setTimeout> | undefined;
 };
 
@@ -571,6 +580,16 @@ export type DesktopClientOptions = {
 	actionTimeoutMs?: number;
 };
 
+// Survives Fast Refresh so a new module instance retires the previous client.
+const CLIENT_OWNERS = Symbol.for('@rndevtools/desktop/client-owners');
+function clientOwners(): Map<string, DesktopClientHandle> {
+	const runtime = globalThis as typeof globalThis & {
+		[CLIENT_OWNERS]?: Map<string, DesktopClientHandle>;
+	};
+	runtime[CLIENT_OWNERS] ??= new Map();
+	return runtime[CLIENT_OWNERS];
+}
+
 export function startDesktopClient(
 	options: DesktopClientOptions,
 ): DesktopClientHandle {
@@ -622,7 +641,7 @@ export function startDesktopClient(
 	const diagnostics: DesktopDiagnostic[] = [];
 	const processedActions = new DesktopActionReplayCache();
 	const actionAdmission = new DesktopActionAdmissionController();
-	const device = host.createDeviceInfo();
+	const device = validatedDeviceInfo(host.createDeviceInfo());
 	// The broker keys this session by the trimmed identifier, and the action
 	// parser trims too, so actions for this device carry the trimmed form.
 	const deviceId = typeof device.id === 'string' ? device.id.trim() : '';
@@ -746,6 +765,20 @@ export function startDesktopClient(
 		);
 	};
 
+	const toolsRevision = (): number | undefined => {
+		try {
+			const value = host.getToolsRevision?.();
+			return typeof value === 'number' &&
+				Number.isSafeInteger(value) &&
+				value >= 0
+				? value
+				: undefined;
+		} catch {
+			// A revision source is only an optimization; keep capturing if it fails.
+			return undefined;
+		}
+	};
+
 	const serializeSnapshot = (
 		target: WebSocket,
 	): { serialized: string; bytes: number } | undefined => {
@@ -825,6 +858,16 @@ export function startDesktopClient(
 			// Capture only once there is room, so a deferred snapshot carries the
 			// latest state rather than the state when it was requested.
 			if (!budget.fits(current.lastSnapshotBytes)) break;
+			const revision = toolsRevision();
+			const diagnosticRevision = diagnosticSequence;
+			if (
+				revision !== undefined &&
+				revision === current.lastToolsRevision &&
+				diagnosticRevision === current.lastDiagnosticSequence
+			) {
+				current.snapshotDue = false;
+				return;
+			}
 			const snapshot = serializeSnapshot(target);
 			if (!snapshot) {
 				current.snapshotDue = false;
@@ -836,6 +879,8 @@ export function startDesktopClient(
 			if (sendSerialized(snapshot.serialized, target)) {
 				sequence += 1;
 				current.lastSnapshotAt = Date.now();
+				current.lastToolsRevision = revision;
+				current.lastDiagnosticSequence = diagnosticRevision;
 			}
 			return;
 		}
@@ -911,8 +956,7 @@ export function startDesktopClient(
 		expectedOwnerId: string | null,
 	) => {
 		if (!active || socket !== target || target.readyState !== 1) return;
-		const authorization = host.getAuthorization();
-		if (!authorization.enabled || authorization.ownerId !== expectedOwnerId) {
+		if (!isAuthorizedOwner(expectedOwnerId)) {
 			queueResult(
 				{
 					type: 'action-result',
@@ -1117,6 +1161,8 @@ export function startDesktopClient(
 				snapshotDue: false,
 				lastSnapshotAt: 0,
 				lastSnapshotBytes: 0,
+				lastToolsRevision: undefined,
+				lastDiagnosticSequence: -1,
 				flushTimer: undefined,
 			};
 			const sentHello = sendWithinBudget(
@@ -1152,6 +1198,8 @@ export function startDesktopClient(
 		};
 
 		nextSocket.onmessage = (event) => {
+			if (!active || socket !== nextSocket || nextSocket.readyState !== 1)
+				return;
 			if (typeof event.data !== 'string') return;
 			if (
 				utf8ByteLengthWithin(event.data, MAX_INCOMING_MESSAGE_BYTES) ===
@@ -1204,15 +1252,6 @@ export function startDesktopClient(
 				);
 				return;
 			}
-			const authorization = host.getAuthorization();
-			if (!authorization.enabled) {
-				refuse(
-					action.actionId,
-					'Internal tools are not authorized.',
-					'internal tools authorization required',
-				);
-				return;
-			}
 			const admission = actionAdmission.admit();
 			if (!admission.accepted) {
 				const queueFull = admission.reason === 'queue-full';
@@ -1229,6 +1268,35 @@ export function startDesktopClient(
 						? 'Desktop action queue is full; retry later.'
 						: 'Desktop action rate limit exceeded; retry later.',
 					'desktop action admission limit exceeded',
+				);
+				return;
+			}
+			let authorization: DevtoolsAuthorization;
+			try {
+				authorization = host.getAuthorization();
+			} catch {
+				authorization = { enabled: false, ownerId: null };
+			}
+			if (!authorization.enabled) {
+				admission.release();
+				// A normal refusal must not interrupt read-only diagnostics. It
+				// shares frame pacing and has a bounded queue even under a flood.
+				if ((outbox?.results.length ?? 0) >= MAX_PENDING_DESKTOP_ACTIONS) {
+					refuse(
+						action.actionId,
+						'Too many pending action results; retry later.',
+						'desktop action result queue full',
+					);
+					return;
+				}
+				queueResult(
+					{
+						type: 'action-result',
+						actionId: action.actionId,
+						ok: false,
+						error: 'Internal tools are not authorized.',
+					},
+					nextSocket,
 				);
 				return;
 			}
@@ -1256,6 +1324,13 @@ export function startDesktopClient(
 			clearConnectionTimers();
 			socket = undefined;
 			if (!active) return;
+			if (
+				event?.code === 1008 &&
+				event.reason === 'replaced by a newer connection'
+			) {
+				client.stop();
+				return;
+			}
 			if (opened) {
 				// 1008 and 1009 mean the broker rejected what this device sent.
 				// Reconnecting at the usual pace would only repeat the rejection, so
@@ -1286,6 +1361,37 @@ export function startDesktopClient(
 		};
 	};
 
+	const owners = clientOwners();
+	const client: DesktopClientHandle = {
+		stop: () => {
+			if (!active) return;
+			active = false;
+			if (owners.get(deviceId) === client) owners.delete(deviceId);
+			cancelActiveAction();
+			const unsubscribe = unsubscribeAuthorization;
+			unsubscribeAuthorization = undefined;
+			try {
+				unsubscribe?.();
+			} catch {
+				// A listener the host cannot remove stays inert: `active` is false.
+			}
+			if (reconnectTimer) clearTimeout(reconnectTimer);
+			reconnectTimer = undefined;
+			clearConnectionTimers();
+			const activeSocket = socket;
+			socket = undefined;
+			if (activeSocket && activeSocket.readyState < 2) {
+				try {
+					activeSocket.close(1000, 'Devtools unmounted');
+				} catch {
+					// Stopping diagnostics must never interrupt app teardown.
+				}
+			}
+		},
+	};
+	owners.get(deviceId)?.stop();
+	owners.set(deviceId, client);
+
 	try {
 		const unsubscribe = host.subscribeToAuthorization?.(onAuthorizationChange);
 		unsubscribeAuthorization =
@@ -1309,29 +1415,5 @@ export function startDesktopClient(
 		connect();
 	}
 
-	return {
-		stop: () => {
-			active = false;
-			cancelActiveAction();
-			const unsubscribe = unsubscribeAuthorization;
-			unsubscribeAuthorization = undefined;
-			try {
-				unsubscribe?.();
-			} catch {
-				// A listener the host cannot remove stays inert: `active` is false.
-			}
-			if (reconnectTimer) clearTimeout(reconnectTimer);
-			reconnectTimer = undefined;
-			clearConnectionTimers();
-			const activeSocket = socket;
-			socket = undefined;
-			if (activeSocket && activeSocket.readyState < 2) {
-				try {
-					activeSocket.close(1000, 'Devtools unmounted');
-				} catch {
-					// Stopping diagnostics must never interrupt app teardown.
-				}
-			}
-		},
-	};
+	return client;
 }

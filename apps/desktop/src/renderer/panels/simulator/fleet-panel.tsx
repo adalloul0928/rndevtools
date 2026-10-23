@@ -29,6 +29,7 @@ import { ControllableScreen } from '@/components/controllable-screen';
 import { DeviceScreen } from '@/components/device-screen';
 import { GetStartedChecklist, useGetStarted } from '@/components/get-started';
 import { AgentBadge, AgentGlyph } from '@/components/lane-ui';
+import { SegmentedControl } from '@/components/selection-controls';
 import {
 	BridgeUnavailableNotice,
 	DenseVirtualList,
@@ -40,6 +41,7 @@ import {
 	TargetStatePill,
 } from '@/components/simulator-ui';
 import {
+	Chip,
 	ConfirmAction,
 	Disclosure,
 	InfoPopover,
@@ -47,7 +49,7 @@ import {
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
+	StatusDot,
 	Toolbar,
 } from '@/components/ui';
 import { clearFleetRequest, useOnboarding } from '@/lib/onboarding';
@@ -521,31 +523,23 @@ export function FleetPanel() {
 					</NativeSelect.Trigger>
 				</NativeSelect>
 				<span className="sim-toolbar-separator" />
-				<fieldset className="sim-layout-toggle">
-					<legend className="sr-only">Fleet layout</legend>
-					<Button
-						aria-label="Show as wall of live screens"
-						aria-pressed={layout === 'wall'}
-						className="sim-icon-button"
-						isIconOnly
-						size="sm"
-						variant={layout === 'wall' ? 'secondary' : 'ghost'}
-						onPress={() => setLayout('wall')}
-					>
-						<LayoutGrid className="h-3.5 w-3.5" />
-					</Button>
-					<Button
-						aria-label="Show as list"
-						aria-pressed={layout === 'list'}
-						className="sim-icon-button"
-						isIconOnly
-						size="sm"
-						variant={layout === 'list' ? 'secondary' : 'ghost'}
-						onPress={() => setLayout('list')}
-					>
-						<List className="h-3.5 w-3.5" />
-					</Button>
-				</fieldset>
+				<SegmentedControl
+					label="Fleet layout"
+					value={layout}
+					onChange={setLayout}
+					items={[
+						{
+							value: 'wall',
+							label: <LayoutGrid className="h-3.5 w-3.5" />,
+							ariaLabel: 'Show as wall of live screens',
+						},
+						{
+							value: 'list',
+							label: <List className="h-3.5 w-3.5" />,
+							ariaLabel: 'Show as list',
+						},
+					]}
+				/>
 				{layout === 'wall' ? (
 					<label className="sim-tile-size">
 						<span>Tile</span>
@@ -762,7 +756,7 @@ export function FleetPanel() {
 										</strong>
 										<span>{job.message}</span>
 									</div>
-									<StatusPill
+									<Chip
 										tone={
 											job.status === 'failed' ||
 											job.status === 'needs-attention'
@@ -773,7 +767,7 @@ export function FleetPanel() {
 										}
 									>
 										{job.status}
-									</StatusPill>
+									</Chip>
 									{!job.finishedAt ? (
 										<Button
 											size="sm"
@@ -953,7 +947,7 @@ function FleetRowFacts({ row }: { row: FleetRow }) {
 						{lane.branch}
 					</code>
 					<span className={`fleet-row-metro is-${lane.metro}`}>
-						<span aria-hidden="true" className="fleet-row-dot" />:{lane.port}{' '}
+						<StatusDot tone={row.laneHealth?.tone ?? 'default'} />:{lane.port}{' '}
 						{row.laneHealth?.label ?? lane.metro}
 					</span>
 				</>
@@ -1289,7 +1283,7 @@ function TargetDetail({
 					</div>
 					{health ? (
 						<span className={`sim-lane-health is-${health.tone}`}>
-							<span aria-hidden="true" className="fleet-row-dot" />
+							<StatusDot tone={health.tone} />
 							Metro {health.label}
 						</span>
 					) : (

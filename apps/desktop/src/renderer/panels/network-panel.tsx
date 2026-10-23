@@ -23,6 +23,7 @@ import {
 	X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { SegmentedControl, Tabs } from '@/components/selection-controls';
 import {
 	Badge,
 	CodePreview,
@@ -539,23 +540,23 @@ export function NetworkPanel() {
 					widthClassName="w-[260px] max-[1080px]:w-[200px]"
 					onChange={setQuery}
 				/>
-				<fieldset className="sim-layout-toggle network-segments">
-					<legend className="sr-only">Show requests</legend>
-					{NETWORK_FILTERS.map(({ id, label }) => (
-						<Button
-							aria-pressed={filter === id}
-							key={id}
-							size="sm"
-							variant={filter === id ? 'secondary' : 'ghost'}
-							onPress={() => setFilter(id)}
-						>
-							{label}
-							<span aria-hidden="true" className="network-segment-count">
-								{segmentCounts[id]}
-							</span>
-						</Button>
-					))}
-				</fieldset>
+				<SegmentedControl
+					label="Show requests"
+					className="network-segments"
+					value={filter}
+					onChange={setFilter}
+					items={NETWORK_FILTERS.map(({ id, label }) => ({
+						value: id,
+						label: (
+							<>
+								{label}
+								<span aria-hidden="true" className="network-segment-count">
+									{segmentCounts[id]}
+								</span>
+							</>
+						),
+					}))}
+				/>
 				{targetFilter ? (
 					<span className="network-target-filter">
 						<Badge className="network-target-filter-label">
@@ -747,46 +748,14 @@ function NetworkDetail({
 					{entry.source ? ` · ${entry.source}` : ''}
 				</p>
 			</div>
-			<div
-				aria-label="Request detail"
-				className="network-tabs"
-				role="tablist"
-				onKeyDown={(event) => {
-					const index = DETAIL_TABS.findIndex(({ id }) => id === tab);
-					const next =
-						event.key === 'ArrowRight'
-							? DETAIL_TABS[(index + 1) % DETAIL_TABS.length]
-							: event.key === 'ArrowLeft'
-								? DETAIL_TABS[
-										(index + DETAIL_TABS.length - 1) % DETAIL_TABS.length
-									]
-								: event.key === 'Home'
-									? DETAIL_TABS[0]
-									: event.key === 'End'
-										? DETAIL_TABS.at(-1)
-										: undefined;
-					if (!next) return;
-					event.preventDefault();
-					onTabChange(next.id);
-					document.getElementById(`network-tab-${next.id}`)?.focus();
-				}}
-			>
-				{DETAIL_TABS.map(({ id, label }) => (
-					<button
-						aria-controls="network-tab-panel"
-						aria-selected={tab === id}
-						className="network-tab"
-						id={`network-tab-${id}`}
-						key={id}
-						role="tab"
-						tabIndex={tab === id ? 0 : -1}
-						type="button"
-						onClick={() => onTabChange(id)}
-					>
-						{label}
-					</button>
-				))}
-			</div>
+			<Tabs
+				label="Request detail"
+				id="network-tab"
+				panelId="network-tab-panel"
+				value={tab}
+				onChange={onTabChange}
+				items={DETAIL_TABS.map(({ id, label }) => ({ value: id, label }))}
+			/>
 			<div
 				aria-labelledby={`network-tab-${tab}`}
 				className="min-h-0 flex-1 overflow-auto p-4"
@@ -901,20 +870,15 @@ function BodyPreview({
 			<CodePreview
 				actions={
 					canFormat ? (
-						<fieldset className="sim-layout-toggle network-body-format">
-							<legend className="sr-only">{label} format</legend>
-							{(['pretty', 'raw'] as const).map((option) => (
-								<Button
-									aria-pressed={format === option}
-									key={option}
-									size="sm"
-									variant={format === option ? 'secondary' : 'ghost'}
-									onPress={() => setFormat(option)}
-								>
-									{option === 'pretty' ? 'Pretty' : 'Raw'}
-								</Button>
-							))}
-						</fieldset>
+						<SegmentedControl
+							label={`${label} format`}
+							value={format}
+							onChange={setFormat}
+							items={[
+								{ value: 'pretty', label: 'Pretty' },
+								{ value: 'raw', label: 'Raw' },
+							]}
+						/>
 					) : null
 				}
 				label={label}

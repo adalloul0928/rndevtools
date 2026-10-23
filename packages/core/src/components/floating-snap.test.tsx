@@ -1,5 +1,6 @@
 import { act, render } from '@testing-library/react-native';
 import { useState } from 'react';
+import { Dimensions } from 'react-native';
 import type { DevToolsPosition } from '../types';
 import { FloatingLauncher } from './floating-launcher';
 import { MiniPill } from './mini-pill';
@@ -15,6 +16,15 @@ const mockGesture: {
 } = {};
 const mockAnimatedStyle: { current?: () => unknown } = {};
 
+const mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+jest.mock('react-native-safe-area-context', () => ({
+	useSafeAreaInsets: () => mockInsets,
+}));
+beforeEach(() => {
+	mockInsets.left = 0;
+	mockInsets.right = 0;
+});
+
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
 	const Native = jest.requireActual('react-native');
@@ -26,6 +36,7 @@ jest.mock('@expo/ui/swift-ui', () => {
 });
 
 jest.mock('@expo/ui/swift-ui/modifiers', () => ({
+	accessibilityLabel: (value: unknown) => value,
 	frame: (value: unknown) => value,
 	glassEffect: (value: unknown) => value,
 	padding: (value: unknown) => value,
@@ -186,3 +197,38 @@ describe('draggable floating controls', () => {
 		});
 	});
 });
+
+it.each(['launcher', 'pill'] as const)(
+	'keeps the %s outside landscape cutouts',
+	async (kind) => {
+		mockInsets.left = 48;
+		mockInsets.right = 32;
+		const onPositionChange = jest.fn();
+		await render(
+			kind === 'launcher' ? (
+				<FloatingLauncher
+					label="Tools"
+					onOpen={jest.fn()}
+					onPositionChange={onPositionChange}
+				/>
+			) : (
+				<MiniPill
+					label="Tools"
+					onRestore={jest.fn()}
+					onPositionChange={onPositionChange}
+					actions={{ run: jest.fn(async () => true) }}
+					onQuickActionPinnedChange={jest.fn()}
+				/>
+			),
+		);
+		const controlWidth = kind === 'launcher' ? 56 : 58;
+		expect(renderedTranslation().translateX).toBe(
+			Dimensions.get('window').width - 32 - controlWidth - 10,
+		);
+		await dragFarLeft();
+		expect(onPositionChange).toHaveBeenLastCalledWith({
+			x: 58,
+			y: expect.any(Number),
+		});
+	},
+);

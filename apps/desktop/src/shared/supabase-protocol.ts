@@ -6,6 +6,7 @@ import {
 	holdCountdownLabel,
 } from './device-hold';
 import { UDID_PATTERN } from './simulator-protocol';
+import { BACKEND_STATUS, type StatusTone } from './status-presentation';
 
 /**
  * Local Supabase: one native stack per git worktree and branch, tracked,
@@ -2578,7 +2579,7 @@ export type LaneBackendSummary = z.infer<typeof laneBackendSummarySchema>;
 
 export type LaneBackendChip = {
 	label: string;
-	tone: 'success' | 'warning' | 'danger';
+	tone: StatusTone;
 };
 
 /**
@@ -2596,7 +2597,7 @@ export function laneBackendChip(
 			return { label: port ? `db :${port}` : 'db ready', tone: 'success' };
 		}
 		case 'starting':
-			return { label: 'db starting', tone: 'warning' };
+			return { label: 'db starting', tone: BACKEND_STATUS.starting.tone };
 		case 'stopped':
 			return { label: 'db stopped', tone: 'warning' };
 		case 'stale':

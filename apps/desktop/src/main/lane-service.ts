@@ -886,7 +886,7 @@ export class LaneService {
 		// before the reservation, which from then on holds the device for this
 		// start in the agent service's eyes (holdingLanes).
 		this.#assertDeviceAccess(device.udid, requester);
-		const id = this.#store.newLaneId();
+		const id = reservation.laneId ?? this.#store.newLaneId();
 		reservation.simulatorUdid = device.udid;
 		reservation.laneId = id;
 		reservation.worktreePath = worktreePath;
@@ -1009,7 +1009,13 @@ export class LaneService {
 			// Nor does its Metro have anyone to serve; left running it would
 			// keep the port, and every retry would leave another.
 			if (metroPid !== undefined) {
-				await this.#discardMetro(id, metroPid, target);
+				try {
+					await this.#discardMetro(id, metroPid, target);
+				} catch (cleanupError) {
+					throw new Error(
+						`Metro cleanup incomplete (PID ${metroPid}, port ${target.port}): ${safeErrorText(cleanupError)}. Original lane failure: ${safeErrorText(error)}`
+					);
+				}
 			}
 			throw error;
 		}
@@ -1047,12 +1053,11 @@ export class LaneService {
 		metroPid: number,
 		lane: Pick<Lane, 'worktreePath' | 'appPath' | 'port'>
 	): Promise<void> {
+		// Keep a recorded process recoverable until PID-verified cleanup succeeds.
+		await this.#metro.stop(metroPid, lane.port, laneAppDirectory(lane));
 		if (this.#store.get(laneId)) {
-			await this.#store.remove(laneId).catch(() => undefined);
+			await this.#store.remove(laneId);
 		}
-		await this.#metro
-			.stop(metroPid, lane.port, laneAppDirectory(lane))
-			.catch(() => undefined);
 	}
 
 	/**
@@ -1284,8 +1289,25 @@ export class LaneService {
 		// Hold the device the user chose from this moment (a clone from the
 		// moment it exists), so a lane up that picks its own device cannot take
 		// it while the clone or the start is still running.
+		if (input.decision === 'use') {
+			this.#assertDeviceAccess(
+				input.simulatorUdid,
+				request.agent ?? 'operator'
+			);
+		}
 		const reservation: LaneReservation = {
 			appDirectory: laneAppDirectory(request),
+			laneId: this.#store.newLaneId(),
+			worktreePath: request.worktreePath,
+			startedAt: this.#now(),
+			...(request.agent
+				? {
+						agent: {
+							kind: request.agent.kind,
+							sessionId: request.agent.sessionId,
+						},
+					}
+				: {}),
 			...(input.decision === 'use'
 				? { simulatorUdid: input.simulatorUdid }
 				: {}),

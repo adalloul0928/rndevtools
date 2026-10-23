@@ -43,7 +43,9 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
   startDesktopClient({
     host: {
       // Project your registered diagnostics into a snapshot payload.
-      captureTools: (diagnostics) => buildToolsSnapshot(diagnostics),
+      captureTools: () => captureRegisteredTools(),
+      // Optional: a cheap revision of every value in that projection.
+      getToolsRevision: () => diagnosticsRevision,
       // Identify this device and build, and list the actions it accepts.
       createDeviceInfo: () => buildDeviceInfo(),
       // Apply one desktop-issued action. Throw to reject it. `signal` aborts
@@ -58,6 +60,13 @@ if (shouldStartDesktopClient({ isDevelopmentBuild: __DEV__ })) {
   });
 }
 ```
+
+`captureRegisteredTools`, `buildDeviceInfo`, `diagnosticsRevision` and `applyAction`
+are host-owned implementations in this sketch, not exports from these packages.
+There is no automatic `buildToolsSnapshot` adapter. Start with
+`createEmptyDesktopToolsSnapshot` from `@rndevtools/core/desktop-protocol`, then
+replace only the fields your app collects and advertise only implemented actions.
+The example app shows connection-only wiring with empty projections.
 
 `shouldStartDesktopClient` stays false under Jest and honours the
 `EXPO_PUBLIC_DESKTOP_DEVTOOLS_DISABLED` kill switch. Pass
@@ -199,7 +208,11 @@ While a bundle is pruned, an import that resolves into any `@rndevtools/*`
 package without going through a `replace` entry fails the build, naming the
 import and the module that made it, instead of quietly adding the package to
 the bundle. A package is recognised by the `name` in its `package.json`, so a
-workspace or `link:` install counts too.
+workspace or `link:` install counts too. The serializer hook checks the finished
+graph as well, including updates, so replacing the resolver later cannot silently
+reintroduce a devtools package. Existing serializer hooks are preserved and their
+graph changes are checked before serialization. Keep the verifier as an independent
+check of the emitted artifact.
 
 Two options change the default. Both must be real booleans; an environment
 variable passed straight through is a string, and is refused.
@@ -209,9 +222,9 @@ variable passed straight through is a string, and is refused.
   pruning off.
 - `keepInReleaseBundles: true` turns pruning off, so release bundles keep their
   devtools. It exists for an internal build that deliberately ships the tools,
-  such as a preview for testers. Derive it from an exact match, for example
-  `keepInReleaseBundles: process.env.APP_VARIANT === 'preview'`, so that a
-  build which forgets the variable is still pruned.
+  such as a preview for testers. Enable it only for an explicitly selected internal
+  build. A store build must set it to `false`: an EAS production profile that
+  extends preview inherits preview environment values unless it overrides them.
 
 `projectRoot` and `replace` are checked on every config load, development
 included, unless `keepInReleaseBundles` is `true`.
@@ -223,6 +236,9 @@ The guarantee does not cover:
   store build inherit the setting.
 - A bundle built with `dev: true`, wherever it ends up. `expo export:embed` and
   `react-native bundle` build one unless they are given `--dev false`.
+- An Xcode archive whose configuration name contains `Debug`, such as
+  `Debug-Staging`: React Native treats it as `dev: true`. Use a release
+  configuration and verify the actual archive bundle before distribution.
 - Your own diagnostics that import nothing from `@rndevtools/*`. Only a
   `replace` entry cuts them out, and only a `--marker` finds them.
 
@@ -288,7 +304,7 @@ unknown flag or preset fails the run instead of skipping its check.
 
 Running several git worktrees of one app side by side (the desktop app's
 *lanes*) means several `expo run:ios` builds of the same native shell. The
-build cache provider stores a finished Simulator or emulator binary once,
+build cache provider stores a finished Simulator binary once,
 keyed by Expo's native fingerprint, and hands it to any worktree whose
 fingerprint matches. A JavaScript-only branch installs in seconds instead of
 rebuilding for twenty minutes, and two worktrees that miss at the same time
@@ -320,13 +336,20 @@ The `v2` namespace keeps the immutable lock protocol separate from older
 worktrees. Legacy entries remain untouched; the first build with this provider
 populates the new namespace.
 Entries are split by platform, build configuration, and toolchain (CPU
-architecture plus, for iOS, the `xcodebuild -version` output), so a Release
+architecture plus the `xcodebuild -version` output for iOS; resolved target ABIs
+for Android), so a Release
 binary is never installed for a Debug run and an Xcode upgrade never serves a
 build from the old SDK. Claims are immutable; when a builder dies or releases
 its claim, waiters compete for one shared successor. An entry's binary is never
 replaced once stored, so a second upload of the same fingerprint cannot
 remove an app that another worktree is installing. Delete the directory to
 start clean; there is no eviction.
+
+Android caching requires the actual Gradle target ABIs in `runOptions.architectures`
+(an array or comma-separated list). Expo CLI 57 passes its original run options,
+without the resolved ABIs, so these calls build normally and skip both cache lookup
+and upload. The host CPU is never used as an Android target. Integrations supplying
+resolved ABIs get separate entries for each ABI set, independent of the host CPU.
 
 `@expo/fingerprint` decides what counts as a native change. If your project
 has native inputs outside the usual places, configure them in
@@ -407,3 +430,23 @@ MIT
 Desktop discovery waits 2.5, 5, 10, 20, then at most 30 seconds between
 unsuccessful candidate sweeps. Candidates within a sweep still advance promptly.
 A successful connection resets discovery backoff; `stop()` cancels pending retries.
+
+Each device ID has one active desktop client per JavaScript runtime, including
+Fast Refresh. Starting a replacement stops the earlier client; an old handle
+cannot stop the replacement. Always call the returned `stop()` from your
+host effect cleanup. Use distinct IDs for distinct devices. A client replaced
+by the broker retires rather than reconnecting and evicting its replacement.
+
+`getToolsRevision` is an optional nonnegative safe integer covering all data your
+`captureTools` projects. Advance it whenever that data changes. An unchanged
+revision avoids rebuilding and serializing the snapshot; client diagnostics still
+trigger updates and heartbeats continue. Hosts without a revision source, or with
+a failed/invalid revision read, retain the once-per-second capture fallback.
+
+`startDesktopClient` validates `createDeviceInfo()` before opening a socket. Invalid
+identifiers, capabilities, numeric fields or accessors throw a value-free error.
+Supported fields are detached, display text is redacted, and extra fields are omitted.
+
+An action refused because internal tools are unauthorized leaves diagnostics
+connected. Authorization-read failures refuse safely too. Reply pacing, queue
+bounds and action admission limits still close abusive connections.

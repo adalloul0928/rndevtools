@@ -27,7 +27,7 @@ import {
 import { PanelErrorBoundary } from '@/components/error-boundary';
 import { GetStartedCard, useGetStarted } from '@/components/get-started';
 import { SetupFlow } from '@/components/setup-flow';
-import { ActionNotice, StatusPill } from '@/components/status-ui';
+import { ActionNotice, Chip } from '@/components/status-ui';
 import {
 	type ActionNoticeRuntime,
 	type ActionNoticeSource,
@@ -1264,9 +1264,9 @@ function WaitingForDevice() {
 			<div className="waiting-icon">
 				<TerminalSquare className="h-5 w-5" />
 			</div>
-			<StatusPill tone={brokerError ? 'danger' : 'warning'} dot>
+			<Chip tone={brokerError ? 'danger' : 'warning'} dot>
 				{brokerError ? 'Broker error' : 'Listening'}
-			</StatusPill>
+			</Chip>
 			<h1>
 				{brokerError
 					? 'The device broker could not start'

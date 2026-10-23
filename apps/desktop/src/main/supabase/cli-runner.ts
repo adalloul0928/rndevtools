@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, lstatSync, realpathSync } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
@@ -412,6 +412,13 @@ export class SupabaseCliRunResult {
 export type SupabaseCliRunRequest = Readonly<{
 	/** A binary the resolver validated. */
 	binaryPath: string;
+	/** Identity confirmed by the resolver; checked again at the spawn boundary. */
+	expectedBinary?: Readonly<{
+		dev: number;
+		ino: number;
+		size: number;
+		mtimeMs: number;
+	}>;
 	/** From buildSupabaseArgv; checked against the allowlist before spawning. */
 	argv: readonly string[];
 	/** Refuses any command that changes something: a binary not validated yet. */
@@ -460,6 +467,7 @@ export type SupabaseCliRunnerOptions = Readonly<{
 
 type PreparedRun = Readonly<{
 	binaryPath: string;
+	expectedBinary: SupabaseCliRunRequest['expectedBinary'];
 	argv: readonly string[];
 	cwd: string;
 	environment: Record<string, string>;
@@ -1111,6 +1119,7 @@ export class SupabaseCliRunner {
 				: boundedDuration(request.forceKillAfterMs, 0, 'forceKillAfterMs', 0);
 		return {
 			binaryPath: request.binaryPath,
+			expectedBinary: request.expectedBinary && { ...request.expectedBinary },
 			argv: [...request.argv],
 			cwd: request.cwd,
 			environment: buildSupabaseCliEnvironment({
@@ -1129,6 +1138,32 @@ export class SupabaseCliRunner {
 		detached: boolean,
 		stderr: 'pipe' | number
 	): SupabaseChildProcess {
+		if (prepared.expectedBinary) {
+			// All asynchronous setup has finished. Recheck the canonical path,
+			// permissions and probed identity immediately before spawning.
+			try {
+				const actual = lstatSync(prepared.binaryPath);
+				const expected = prepared.expectedBinary;
+				if (
+					!actual.isFile() ||
+					actual.isSymbolicLink() ||
+					actual.uid !== this.#uid ||
+					(actual.mode & 0o022) !== 0 ||
+					(actual.mode & 0o100) === 0 ||
+					realpathSync(prepared.binaryPath) !== prepared.binaryPath ||
+					actual.dev !== expected.dev ||
+					actual.ino !== expected.ino ||
+					actual.size !== expected.size ||
+					actual.mtimeMs !== expected.mtimeMs
+				)
+					throw new Error('Binary identity mismatch');
+			} catch {
+				throw new SupabaseCliRunnerError(
+					'invalid-request',
+					'The Supabase CLI changed or is no longer safe to execute. Refresh its installation before retrying.'
+				);
+			}
+		}
 		try {
 			return this.#spawn(prepared.binaryPath, prepared.argv, {
 				cwd: prepared.cwd,
