@@ -1,6 +1,31 @@
 import { BoundedEventStore, ExternalStore } from './external-store';
 
 describe('BoundedEventStore', () => {
+	it('keeps published snapshots immutable through wraparound, replacement and removal', () => {
+		const store = new BoundedEventStore<string>({
+			maxEvents: 3,
+			maxBytes: 6,
+			estimateBytes: (value) => value.length,
+		});
+		store.append('a');
+		store.append('bb');
+		store.append('cc');
+		const before = store.getSnapshot();
+		expect(Object.isFrozen(before)).toBe(true);
+		store.append('d');
+		store.append('ee');
+		expect(store.getSnapshot()).toEqual(['cc', 'd', 'ee']);
+		store.replace((value) => value === 'd', 'xxxx');
+		expect(store.getSnapshot()).toEqual(['xxxx', 'ee']);
+		store.remove((value) => value === 'xxxx');
+		store.append('f');
+		store.append('g');
+		store.append('h');
+		expect(store.getSnapshot()).toEqual(['f', 'g', 'h']);
+		expect(store.getEstimatedBytes()).toBe(3);
+		expect(before).toEqual(['a', 'bb', 'cc']);
+	});
+
 	it('removes only confirmed entries without re-estimating or emitting intermediate state', () => {
 		const estimate = jest.fn((value: string) => value.length);
 		const store = new BoundedEventStore({

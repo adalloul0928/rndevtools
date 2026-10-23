@@ -40,6 +40,30 @@ function acceptedEvent(
 }
 
 describe('DevtoolsEventStore', () => {
+	it('defers retained-array snapshots until a reader requests one', () => {
+		const store = createStore({ maxEvents: 10 });
+		const freeze = jest.spyOn(Object, 'freeze');
+		try {
+			for (let index = 0; index < 100; index += 1) {
+				acceptedEvent(store, eventInput(`Event ${index}`));
+			}
+			const frozenArrays = freeze.mock.calls.filter(([value]) =>
+				Array.isArray(value),
+			);
+			expect(frozenArrays).toHaveLength(0);
+			const snapshot = store.getSnapshot();
+			expect(snapshot.events.map((event) => event.title)).toEqual(
+				Array.from({ length: 10 }, (_, index) => `Event ${index + 90}`),
+			);
+			expect(store.getSnapshot()).toBe(snapshot);
+			acceptedEvent(store, eventInput('Newest'));
+			expect(snapshot.events[0]?.title).toBe('Event 90');
+			expect(store.getEvents().at(-1)?.title).toBe('Newest');
+		} finally {
+			freeze.mockRestore();
+		}
+	});
+
 	it('creates immutable versioned envelopes and publishes stable snapshots', () => {
 		const store = createStore();
 		const listener = jest.fn();
