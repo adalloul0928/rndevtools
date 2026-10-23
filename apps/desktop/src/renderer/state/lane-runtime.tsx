@@ -188,6 +188,12 @@ export function resolveLaneFocus(
 type LaneRuntimeValue = {
 	state: LaneState;
 	isLoading: boolean;
+	/**
+	 * True once a lane state has been read, or when there is no bridge to read
+	 * one from. A failed read leaves it false, so an empty `state` is not
+	 * mistaken for an empty workspace.
+	 */
+	hasLoaded: boolean;
 	isBridgeAvailable: boolean;
 	/** Operation kind currently in flight, or null. */
 	pendingOperation: LaneOperation['kind'] | null;
@@ -241,6 +247,8 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 	const bridge = useMemo(laneBridge, []);
 	const [state, setState] = useState<LaneState>(EMPTY_LANE_STATE);
 	const [isLoading, setIsLoading] = useState(Boolean(bridge));
+	// Without a bridge there is nothing to read, so the empty state is final.
+	const [hasLoaded, setHasLoaded] = useState(!bridge);
 	const [pendingOperation, setPendingOperation] = useState<
 		LaneOperation['kind'] | null
 	>(null);
@@ -263,7 +271,10 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 		void bridge
 			.getLaneState()
 			.then((next) => {
-				if (active) setState(next);
+				if (active) {
+					setState(next);
+					setHasLoaded(true);
+				}
 			})
 			.catch((error: unknown) => {
 				if (active) {
@@ -352,6 +363,7 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 		() => ({
 			state,
 			isLoading,
+			hasLoaded,
 			isBridgeAvailable: Boolean(bridge),
 			pendingOperation,
 			actionStatus: notice.status,
@@ -369,6 +381,7 @@ export function LaneRuntimeProvider({ children }: { children: ReactNode }) {
 		[
 			state,
 			isLoading,
+			hasLoaded,
 			bridge,
 			pendingOperation,
 			notice.status,

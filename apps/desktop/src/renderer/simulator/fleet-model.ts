@@ -311,3 +311,24 @@ export function agentLabel(kind: LaneAgent['kind']): string {
 			return 'Agent';
 	}
 }
+
+/**
+ * The Simulator Get started's "Boot a Simulator" points at: the selected one
+ * when it can boot, otherwise the first that can, otherwise one already
+ * booted (to open it). Undefined when nothing can boot, so the panel offers
+ * to create one instead.
+ */
+export function bootTarget(
+	devices: readonly Pick<SimulatorDevice, 'udid' | 'state' | 'isAvailable'>[],
+	selectedUdid: string | undefined
+): string | undefined {
+	const bootable = devices.filter(
+		(device) => device.isAvailable && device.state === 'shutdown'
+	);
+	return (
+		bootable.find((device) => device.udid === selectedUdid)?.udid ??
+		bootable[0]?.udid ??
+		devices.find((device) => device.isAvailable && device.state === 'booted')
+			?.udid
+	);
+}
