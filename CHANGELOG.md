@@ -290,6 +290,9 @@
 
 ### Desktop app
 
+- The CLI still reads and validates a buffered reply if the desktop closes
+  just before the client half-closes its request, avoiding a spurious transport error.
+
 - Every agent-requested Supabase reset requires operator confirmation, even for
   a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
 - Cancelled recipes leave queued Simulators untouched. Teardown runs only after
