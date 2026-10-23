@@ -299,6 +299,12 @@ function validateRepositoryPoints(
 	}
 }
 
+function refusedWhileUnloaded(loadError: string): Error {
+	return new Error(
+		`Stored restore points could not be loaded (${loadError}), so nothing was written. Retry loading them or discard the stored data.`,
+	);
+}
+
 export class RestorePointRepository {
 	readonly #store = new ExternalStore<readonly RestorePoint[]>([]);
 	readonly #loadErrorStore = new ExternalStore<string | undefined>(undefined);
@@ -409,6 +415,8 @@ export class RestorePointRepository {
 
 	async duplicate(id: string, label?: string): Promise<RestorePoint> {
 		await this.ready;
+		const loadError = this.#loadErrorStore.getSnapshot();
+		if (loadError !== undefined) throw refusedWhileUnloaded(loadError);
 		const source = this.#store
 			.getSnapshot()
 			.find((candidate) => candidate.id === id);
@@ -493,14 +501,22 @@ export class RestorePointRepository {
 	/**
 	 * Deletes the stored document on purpose, clears the load error and empties
 	 * the repository. This is the only way to write again while a load error
-	 * stands without first loading the stored data.
+	 * stands without first loading the stored data. It rejects, and deletes
+	 * nothing, once the points have loaded after all, so a confirmation given
+	 * while they could not be loaded cannot destroy them after a retry worked.
 	 */
 	discardStoredData(): Promise<void> {
 		return this.#enqueue(async () => {
 			const storage = this.#storage;
-			if (storage?.removeItem) {
+			if (!storage) return;
+			if (this.#loadErrorStore.getSnapshot() === undefined) {
+				throw new Error(
+					'The stored restore points loaded in the meantime, so nothing was discarded.',
+				);
+			}
+			if (storage.removeItem) {
 				await storage.removeItem(this.#key);
-			} else if (storage) {
+			} else {
 				await storage.setItem(this.#key, JSON.stringify(documentFor([])));
 			}
 			this.#store.set([]);
@@ -531,7 +547,10 @@ export class RestorePointRepository {
 					parsed.discarded > 0 || retained.length !== parsed.points.length;
 			}
 		} catch (error) {
-			this.#loadErrorStore.set(diagnosticErrorText(error));
+			// Never empty: a blank message must still stand as an error.
+			this.#loadErrorStore.set(
+				diagnosticErrorText(error) || 'The stored document could not be read.',
+			);
 			return;
 		}
 		this.#store.set(retained);
@@ -562,11 +581,7 @@ export class RestorePointRepository {
 	): Promise<void> {
 		return this.#enqueue(async () => {
 			const loadError = this.#loadErrorStore.getSnapshot();
-			if (loadError !== undefined) {
-				throw new Error(
-					`Stored restore points could not be loaded (${loadError}), so nothing was written. Retry loading them or discard the stored data.`,
-				);
-			}
+			if (loadError !== undefined) throw refusedWhileUnloaded(loadError);
 			const previous = this.#store.getSnapshot();
 			const next = operation(previous);
 			validateRepositoryPoints(next, this.#maxPoints, this.#maxTotalBytes);

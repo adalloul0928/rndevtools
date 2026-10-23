@@ -213,7 +213,12 @@ describe('RestorePointsPanel load errors', () => {
 		expect(
 			screen.getByText('Stored restore points unavailable'),
 		).toBeOnTheScreen();
-		expect(screen.getByText(/disk unavailable/)).toBeOnTheScreen();
+		expect(screen.getByText('disk unavailable')).toBeOnTheScreen();
+		expect(
+			screen.getByText(
+				'Nothing is written until they load or you discard them.',
+			),
+		).toBeOnTheScreen();
 		expect(screen.getByText('Saved points · 0')).toBeOnTheScreen();
 
 		await fireEvent.press(screen.getByLabelText('Retry loading'));

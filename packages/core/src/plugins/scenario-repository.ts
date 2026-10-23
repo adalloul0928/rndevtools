@@ -296,14 +296,23 @@ export class ScenarioRepository {
 
 	/**
 	 * Deletes the stored document on purpose, clears the load error and empties
-	 * the user scenarios; bundled scenarios are untouched.
+	 * the user scenarios; bundled scenarios are untouched. It rejects, and
+	 * deletes nothing, once the scenarios have loaded after all, so a
+	 * confirmation given while they could not be loaded cannot destroy them
+	 * after a retry worked.
 	 */
 	discardStoredData(): Promise<void> {
 		return this.#enqueue(async () => {
 			const storage = this.#storage;
-			if (storage?.removeItem) {
+			if (!storage) return;
+			if (this.#store.getSnapshot().loadError === undefined) {
+				throw new Error(
+					'The stored scenarios loaded in the meantime, so nothing was discarded.',
+				);
+			}
+			if (storage.removeItem) {
 				await storage.removeItem(this.#key);
-			} else if (storage) {
+			} else {
 				await storage.setItem(this.#key, JSON.stringify(documentFor([])));
 			}
 			this.#syncDefinitionTokens(this.#store.getSnapshot().user, []);
@@ -330,7 +339,9 @@ export class ScenarioRepository {
 			this.#store.set(
 				this.#snapshotFor(
 					this.#store.getSnapshot().user,
-					diagnosticErrorText(error),
+					// Never empty: a blank message must still stand as an error.
+					diagnosticErrorText(error) ||
+						'The stored document could not be read.',
 				),
 			);
 			return;

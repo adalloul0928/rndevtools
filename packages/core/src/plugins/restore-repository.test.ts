@@ -99,9 +99,7 @@ describe('RestorePointRepository load failures', () => {
 		await expect(
 			repository.importJson(documentWith(point('imported', 3))),
 		).rejects.toThrow(REFUSAL);
-		await expect(repository.duplicate('kept')).rejects.toThrow(
-			'no longer available',
-		);
+		await expect(repository.duplicate('kept')).rejects.toThrow(REFUSAL);
 		expect(setItem).not.toHaveBeenCalled();
 		expect(values.get(KEY)).toBe(documentWith(stored));
 	});
@@ -265,6 +263,77 @@ describe('RestorePointRepository load failures', () => {
 			namespace: 'rndevtools-restore-points',
 			points: [stored, added],
 		});
+	});
+
+	it('discards only while a load error stands', async () => {
+		const stored = point('kept', 1);
+		const { storage, removeItem, values, failReads } = createStorage(
+			documentWith(stored),
+		);
+		failReads(1);
+		const repository = createRepository(storage);
+		await repository.ready;
+
+		// A confirmation given while the points could not be loaded runs after
+		// a retry worked, and must not destroy what that retry loaded.
+		const retry = repository.reload();
+		const discard = repository.discardStoredData();
+		await retry;
+
+		await expect(discard).rejects.toThrow(
+			'loaded in the meantime, so nothing was discarded',
+		);
+		expect(removeItem).not.toHaveBeenCalled();
+		expect(values.get(KEY)).toBe(documentWith(stored));
+		expect(repository.getSnapshot().map((candidate) => candidate.id)).toEqual([
+			'kept',
+		]);
+	});
+
+	it('keeps the points it loaded when a later reload fails, and refuses writes until one works', async () => {
+		const stored = point('kept', 1);
+		const { storage, setItem, failReads } = createStorage(documentWith(stored));
+		const repository = createRepository(storage);
+		await repository.ready;
+		expect(repository.getSnapshot()).toHaveLength(1);
+
+		failReads(1);
+		await expect(repository.reload()).rejects.toThrow('disk unavailable');
+		expect(repository.getLoadError()).toBe('disk unavailable');
+		expect(repository.getSnapshot().map((candidate) => candidate.id)).toEqual([
+			'kept',
+		]);
+		await expect(repository.add(point('new', 2))).rejects.toThrow(REFUSAL);
+		expect(setItem).not.toHaveBeenCalled();
+
+		await repository.reload();
+		expect(repository.getLoadError()).toBeUndefined();
+		await repository.add(point('new', 2));
+		expect(setItem).toHaveBeenCalledTimes(1);
+	});
+
+	it('redacts the stored error and never leaves it blank', async () => {
+		const secret = 'hunter2';
+		for (const failure of [
+			new Error(`could not reach postgres://user:${secret}@db.example.com/app`),
+			new Error(''),
+		]) {
+			const repository = createRepository({
+				getItem: () => {
+					throw failure;
+				},
+				setItem: () => {},
+			});
+			await repository.ready;
+
+			const loadError = repository.getLoadError();
+			expect(typeof loadError).toBe('string');
+			expect(loadError).not.toBe('');
+			expect(loadError).not.toContain(secret);
+			await expect(repository.add(point('new', 2))).rejects.toThrow(
+				'could not be loaded',
+			);
+		}
 	});
 
 	it('is a no-op without storage', async () => {

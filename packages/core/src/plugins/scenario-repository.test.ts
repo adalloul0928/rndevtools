@@ -248,4 +248,109 @@ describe('ScenarioRepository load failures', () => {
 			scenarios: [stored, added],
 		});
 	});
+
+	it('discards only while a load error stands', async () => {
+		const stored = definition({ id: 'kept', name: 'Kept' });
+		const { storage, removeItem, values, failReads } = createStorage(
+			documentWith(stored),
+		);
+		failReads(1);
+		const repository = new ScenarioRepository({ storage });
+		await repository.ready;
+
+		// A confirmation given while the scenarios could not be loaded runs after
+		// a retry worked, and must not destroy what that retry loaded.
+		const retry = repository.reload();
+		const discard = repository.discardStoredData();
+		await retry;
+
+		await expect(discard).rejects.toThrow(
+			'loaded in the meantime, so nothing was discarded',
+		);
+		expect(removeItem).not.toHaveBeenCalled();
+		expect(values.get(KEY)).toBe(documentWith(stored));
+		expect(repository.getSnapshot().user.map((item) => item.id)).toEqual([
+			'kept',
+		]);
+	});
+
+	it('keeps the scenarios it loaded when a later reload fails, and refuses writes until one works', async () => {
+		const stored = definition({ id: 'kept', name: 'Kept' });
+		const { storage, setItem, failReads } = createStorage(documentWith(stored));
+		const repository = new ScenarioRepository({ storage });
+		await repository.ready;
+		const target = repository.getTarget('kept');
+		expect(target).toBeDefined();
+		const seen: Array<string | undefined> = [];
+		repository.subscribeToLoadError(() => {
+			seen.push(repository.getLoadError());
+		});
+
+		failReads(1);
+		await expect(repository.reload()).rejects.toThrow('disk unavailable');
+		expect(repository.getLoadError()).toBe('disk unavailable');
+		expect(repository.getSnapshot().user.map((item) => item.id)).toEqual([
+			'kept',
+		]);
+		expect(repository.getTarget('kept')).toEqual(target);
+		await expect(repository.save(definition({ id: 'new' }))).rejects.toThrow(
+			REFUSAL,
+		);
+		expect(setItem).not.toHaveBeenCalled();
+
+		await repository.reload();
+		expect(repository.getLoadError()).toBeUndefined();
+		// The snapshot notified when the error appeared and when it cleared.
+		expect(seen).toContain('disk unavailable');
+		expect(seen.at(-1)).toBeUndefined();
+	});
+
+	it('runs a reload behind queued writes in order', async () => {
+		const stored = definition({ id: 'kept', name: 'Kept' });
+		const { storage, values, failReads } = createStorage(documentWith(stored));
+		failReads(1);
+		const repository = new ScenarioRepository({ storage });
+		await repository.ready;
+
+		const refused = repository.save(definition({ id: 'first' }));
+		const reloaded = repository.reload();
+		const accepted = repository.save(definition({ id: 'second' }));
+
+		await expect(refused).rejects.toThrow(REFUSAL);
+		await reloaded;
+		await accepted;
+		expect(
+			(
+				JSON.parse(values.get(KEY) ?? '{}') as {
+					scenarios: ScenarioDefinition[];
+				}
+			).scenarios.map((item) => item.id),
+		).toEqual(['kept', 'second']);
+	});
+
+	it('redacts the stored error and never leaves it blank', async () => {
+		const secret = 'hunter2';
+		for (const failure of [
+			new Error(`could not reach postgres://user:${secret}@db.example.com/app`),
+			new Error(''),
+		]) {
+			const repository = new ScenarioRepository({
+				storage: {
+					getItem: () => {
+						throw failure;
+					},
+					setItem: () => {},
+				},
+			});
+			await repository.ready;
+
+			const loadError = repository.getLoadError();
+			expect(typeof loadError).toBe('string');
+			expect(loadError).not.toBe('');
+			expect(loadError).not.toContain(secret);
+			await expect(repository.save(definition({ id: 'new' }))).rejects.toThrow(
+				'could not be loaded',
+			);
+		}
+	});
 });

@@ -700,13 +700,23 @@ export function createRestorePointsPlugin(
 	};
 	const reload = async (): Promise<void> => {
 		ensureIdle('Cannot reload restore points during an active operation.');
-		await repository.reload();
+		operationStore.set(true);
+		try {
+			await repository.reload();
+		} finally {
+			operationStore.set(false);
+		}
 	};
 	const discardStoredData = async (): Promise<void> => {
 		ensureIdle(
 			'Cannot discard stored restore points during an active operation.',
 		);
-		await repository.discardStoredData();
+		operationStore.set(true);
+		try {
+			await repository.discardStoredData();
+		} finally {
+			operationStore.set(false);
+		}
 	};
 	const retentionDescription = options.persistence
 		? 'persisted in the dedicated devtools namespace'
@@ -822,7 +832,15 @@ export function createRestorePointsPlugin(
 											foregroundStyle('secondary'),
 										]}
 									>
-										{`${loadError} Nothing is written until they load or you discard them.`}
+										{loadError}
+									</UIText>
+									<UIText
+										modifiers={[
+											font({ textStyle: 'footnote' }),
+											foregroundStyle('secondary'),
+										]}
+									>
+										Nothing is written until they load or you discard them.
 									</UIText>
 									<Button
 										label="Retry loading"

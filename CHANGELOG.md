@@ -93,11 +93,14 @@
   stored document could not be loaded. A failed `getItem` used to leave the
   repository empty, and the next capture or save then replaced everything that
   was stored with a document of one entry. Writes now reject with the load
-  error, `getLoadError()` is observable through `subscribeToLoadError()` (and
-  as `loadError` on the scenario snapshot), `reload()` reads the document again
-  behind any queued write, and `discardStoredData()` deletes it on purpose. The
-  restore-points panel shows the error with Retry and Discard controls, and the
-  plugin exposes `getLoadError()`, `reload()` and `discardStoredData()`.
+  error. `ScenarioRepository` reports it as `loadError` on its snapshot and
+  through `subscribeToLoadError()`, which fires with every change to the
+  repository, and `getLoadError()`. `reload()` reads the document again behind
+  any queued write. `discardStoredData()` deletes it on purpose, and only while
+  the load error still stands, so a confirmation given before a successful
+  retry cannot destroy what that retry loaded. The restore-points panel shows
+  the error with Retry and Discard controls, and the plugin exposes
+  `getLoadError()`, `reload()` and `discardStoredData()`.
 - `rndevtools-verify-bundle --forbid-loopback-urls` and
   `--preset supabase-local` fail a release bundle that still carries a
   loopback URL or a local Supabase key.
