@@ -34,6 +34,7 @@ import {
 	AndroidPanelSection,
 	AndroidPanelTabs,
 } from '../components/android-panel-ui';
+import { EventPageControls, useEventPage } from '../components/event-page';
 import { NavIconButton } from '../components/nav-controls';
 import { PanelShell } from '../components/panel-shell';
 import {
@@ -3472,6 +3473,11 @@ export function createNetworkPlugin(
 			};
 		}, [events, search, segment, hideSystemTraffic]);
 
+		const page = useEventPage(
+			rows,
+			JSON.stringify([search, segment, hideSystemTraffic]),
+		);
+
 		// The search field is native-owned and unmounts with the list, so a query
 		// that outlived it would filter the list behind an empty search box.
 		const openEvent = (event: NetworkEvent) => {
@@ -3711,6 +3717,7 @@ export function createNetworkPlugin(
 									))}
 								</Section>
 							) : null}
+							<EventPageControls {...page} />
 							{rows.length === 0 ? (
 								<Section>
 									<ContentUnavailableView
@@ -3726,7 +3733,7 @@ export function createNetworkPlugin(
 								</Section>
 							) : (
 								<Section title={headerText}>
-									{rows.map(({ event, count }) => {
+									{page.items.map(({ event, count }) => {
 										const status = networkStatusPresentation(event);
 										const rowModifiers =
 											count > 1
@@ -3868,6 +3875,7 @@ export function createNetworkPlugin(
 								))}
 							</AndroidPanelSection>
 						) : null}
+						<EventPageControls {...page} />
 						<AndroidPanelSection title={headerText}>
 							{rows.length === 0 ? (
 								<AndroidPanelRow
@@ -3875,7 +3883,7 @@ export function createNetworkPlugin(
 									detail="Captured app requests appear here."
 								/>
 							) : (
-								rows.map(({ event, count }) => {
+								page.items.map(({ event, count }) => {
 									const status = networkStatusPresentation(event);
 									return (
 										<AndroidPanelRow
