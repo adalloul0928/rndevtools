@@ -188,6 +188,7 @@ func TestRunServesMCPOverStdio(t *testing.T) {
 	if seen.Agent["kind"] != "codex" || seen.Agent["sessionId"] != "thread-mcp" {
 		t.Fatalf("MCP calls must be attributed through the injected lookup: %v", seen.Agent)
 	}
+	requireNamesThisProcess(t, seen)
 	if !strings.HasPrefix(seen.ID, "mcp-") {
 		t.Fatalf("MCP request id %q", seen.ID)
 	}
@@ -296,6 +297,7 @@ func TestSessionEndHookReleasesEverythingForThePayloadSession(t *testing.T) {
 	if seen.Agent["sessionId"] != "thr_abc" {
 		t.Fatalf("the payload's session id must attribute the release: %v", seen.Agent)
 	}
+	requireNamesThisProcess(t, seen)
 	if stdout.Len() != 0 {
 		t.Fatalf("hooks must not write to stdout: %q", stdout.String())
 	}
@@ -387,6 +389,7 @@ func TestSupabaseCommandsCarryTheAgentOnTheEnvelopeOnly(t *testing.T) {
 	if seen.Agent["kind"] != "claude" || seen.Agent["sessionId"] != "sess-9" {
 		t.Fatalf("the envelope must attribute the call: %v", seen.Agent)
 	}
+	requireNamesThisProcess(t, seen)
 	if !strings.HasPrefix(seen.ID, "cli-") {
 		t.Fatalf("CLI request id %q", seen.ID)
 	}
@@ -414,6 +417,104 @@ func TestSupabaseCommandsCarryTheAgentOnTheEnvelopeOnly(t *testing.T) {
 	}
 	if !strings.Contains(RootUsage(), "  supabase\n") {
 		t.Fatal("root usage must list supabase")
+	}
+}
+
+// requireNamesThisProcess fails unless the request carries the pid of the
+// sender, here the test binary: the process that owns the connection, which
+// the desktop checks before it believes the session the request claims.
+func requireNamesThisProcess(t *testing.T, request protocol.Request) {
+	t.Helper()
+	if request.Peer == nil || request.Peer.PID != os.Getpid() {
+		t.Fatalf("the request must name the sending process, pid %d: peer = %+v", os.Getpid(), request.Peer)
+	}
+}
+
+func TestLaneRequestsClaimTheSessionOnTheEnvelopeAndNeverInTheCommand(t *testing.T) {
+	const deviceUDID = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+	claimed := func(name string) string {
+		if name == "CLAUDE_CODE_SESSION_ID" {
+			return "sess-9"
+		}
+		return ""
+	}
+	for name, arguments := range map[string][]string{
+		"up":     {"lane", "--operation", "up", "--worktree", "/Users/example/app", "--udid", deviceUDID},
+		"launch": {"lane", "--operation", "launch", "--worktree", "/Users/example/app"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var seen protocol.Request
+			socketPath := appTestServerCapturing(t, &seen, func(id string) string {
+				return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"lanes":[]}}`
+			})
+			var stdout, stderr bytes.Buffer
+			exitCode := Run(Config{
+				Arguments:  arguments,
+				Stdin:      strings.NewReader(""),
+				Stdout:     &stdout,
+				Stderr:     &stderr,
+				SocketPath: socketPath,
+				Lookup:     claimed,
+			})
+			if exitCode != ExitSuccess {
+				t.Fatalf("exit %d stderr %s", exitCode, stderr.String())
+			}
+			if seen.Agent["kind"] != "claude" || seen.Agent["sessionId"] != "sess-9" {
+				t.Fatalf("the envelope carries the claim: %v", seen.Agent)
+			}
+			requireNamesThisProcess(t, seen)
+			if strings.Contains(string(seen.Command), "agent") {
+				t.Fatalf("the lane command must not name an agent: %s", seen.Command)
+			}
+		})
+	}
+}
+
+func TestARequestThatClaimsNoSessionStillNamesItsProcess(t *testing.T) {
+	var seen protocol.Request
+	socketPath := appTestServerCapturing(t, &seen, func(id string) string {
+		return `{"protocol":"rndevtools/1","id":"` + id + `","ok":true,"result":{"healthy":true}}`
+	})
+	var stdout, stderr bytes.Buffer
+	exitCode := Run(Config{
+		Arguments:  []string{"doctor"},
+		Stdin:      strings.NewReader(""),
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		SocketPath: socketPath,
+		Lookup:     func(string) string { return "" },
+	})
+	if exitCode != ExitSuccess {
+		t.Fatalf("exit %d stderr %s", exitCode, stderr.String())
+	}
+	if seen.Agent != nil {
+		t.Fatalf("no session variable, no claim: %v", seen.Agent)
+	}
+	requireNamesThisProcess(t, seen)
+}
+
+func TestALaneCommandThatNamesAnAgentNeverReachesTheSocket(t *testing.T) {
+	// A caller cannot attribute a lane to a session by piping an agent in: the
+	// CLI refuses it itself. The exit code shows it never tried the socket,
+	// which does not exist here and would have been "unavailable".
+	var stdout, stderr bytes.Buffer
+	exitCode := Run(Config{
+		Arguments:      []string{"lane", "--operation", "up", "--worktree", "/Users/example/app"},
+		Stdin:          strings.NewReader(`{"agent":{"kind":"codex","sessionId":"thread-9"}}`),
+		StdinAvailable: true,
+		Stdout:         &stdout,
+		Stderr:         &stderr,
+		SocketPath:     filepath.Join(t.TempDir(), "missing.sock"),
+		Lookup:         func(string) string { return "" },
+	})
+	var failure struct {
+		Error protocol.RemoteError `json:"error"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &failure); err != nil {
+		t.Fatalf("stderr is not one JSON error: %q", stderr.String())
+	}
+	if exitCode != ExitUsage || failure.Error.Code != "invalid_arguments" || !strings.Contains(failure.Error.Message, `unknown field "agent"`) {
+		t.Fatalf("exit %d, error %+v", exitCode, failure.Error)
 	}
 }
 

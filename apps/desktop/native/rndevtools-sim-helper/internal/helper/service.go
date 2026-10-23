@@ -286,7 +286,10 @@ func (service *Service) Handle(ctx context.Context, request protocol.Request) (a
 		if apiError := protocol.DecodePayload(request.Payload, &payload); apiError != nil {
 			return nil, apiError
 		}
-		status, err := service.backend.Status(ctx, payload.SimulatorID)
+		// The desktop polls this for every booted Simulator in the background,
+		// so it must never boot one; preview_profile is the documented way to
+		// inspect a shut-down Simulator through a temporary boot.
+		status, err := service.backend.ProbeStatus(ctx, payload.SimulatorID)
 		if err != nil {
 			return nil, backendError(err)
 		}

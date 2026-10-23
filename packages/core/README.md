@@ -367,3 +367,10 @@ Zustand adapters that enable edits must keep `validatePatch` pure. An edit
 rechecks the current projection after validation and refuses a stale patch.
 If the app writes while validation is pending, that write is preserved;
 rollback is attempted only after the devtools mutation has actually started.
+
+Captured diagnostics redact common credential aliases (including PIN, OTP,
+card/bank fields, private keys, and password confirmations), Unicode-escaped
+JSON credential names, and recognizable provider/cloud tokens. Provider-token
+patterns are shared with the repository public-content check. Private-key
+blocks are omitted even when capture truncates the closing marker; the normal
+capture size and traversal budgets still apply.

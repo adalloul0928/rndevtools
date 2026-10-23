@@ -57,10 +57,15 @@ a private local socket.
   `lane up` is the one to pass to every later `rndevtools` call.
 - **Stop only the lanes you started.** `lane down` stops the lane's Metro and
   frees the Simulator. It does not shut the Simulator down.
-- **Attribution is automatic.** The CLI forwards `CLAUDE_CODE_SESSION_ID` or
-  `CODEX_THREAD_ID` on every request, so each Simulator you touch is shown with
-  your session in the desktop's Agents view for 30 minutes. Other agents can
-  export `RNDEVTOOLS_AGENT_SESSION_ID`.
+- **Attribution is automatic, and checked.** The CLI forwards
+  `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID` on every request, so each
+  Simulator you touch is shown with your session in the desktop's Agents view
+  for 30 minutes. Other agents can export `RNDEVTOOLS_AGENT_SESSION_ID`. The
+  desktop checks that the request really comes from the session it names, so
+  run `rndevtools` from your own shell or MCP server and never with another
+  session's id: that fails with `agent_identity_mismatch`, and a session it
+  cannot verify fails with `agent_identity_unverified`. A request that names
+  no session may use free Simulators only.
 - **A Simulator is free or held.** It is held while a lane runs on it or a
   session has claimed it, and only the holder may boot it, send it input,
   install on it, slim it, or stop it. The desktop enforces this: `lane up`,

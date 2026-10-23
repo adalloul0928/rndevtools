@@ -307,9 +307,13 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 	/** Live coding-agent sessions and which Simulators they are attached to. */
 	z.strictObject({ kind: z.literal('agents') }),
 	/**
-	 * Claims make ownership explicit. The agent identity comes from the request
-	 * envelope (CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID), never from a flag,
-	 * so a session cannot claim on behalf of another.
+	 * Claims make ownership explicit. The agent identity comes from the
+	 * connection, never from a flag or a field: the desktop proves that the
+	 * process sending the request owns the socket (`peer` on the envelope)
+	 * and maps it to the agent session that spawned it, and the envelope's
+	 * `agent` is a claim that must agree with that. A request without a
+	 * verified identity is unprivileged, not the operator: it may use free
+	 * Simulators only and can neither claim nor release.
 	 */
 	z.strictObject({
 		kind: z.literal('claim'),
@@ -380,8 +384,6 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 			laneId: laneIdSchema.optional(),
 			url: z.string().min(1).max(2_048).optional(),
 			maxCharacters: z.number().int().min(256).max(64_000).optional(),
-			/** Filled by the CLI from CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID. */
-			agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
 		})
 		.superRefine((value, context) => {
 			const only = (allowed: readonly string[]) =>
@@ -400,7 +402,6 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 						'launch',
 						'slimProfileId',
 						'backend',
-						'agent',
 					])) ||
 				(value.operation === 'down' &&
 					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
@@ -408,7 +409,7 @@ const agentCliCommandSchema = z.discriminatedUnion('kind', [
 				(value.operation === 'ls' && only(['operation'])) ||
 				(value.operation === 'launch' &&
 					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
-					only(['operation', 'laneId', 'worktreePath', 'url', 'agent'])) ||
+					only(['operation', 'laneId', 'worktreePath', 'url'])) ||
 				(value.operation === 'log' &&
 					(value.laneId !== undefined) !== (value.worktreePath !== undefined) &&
 					only(['operation', 'laneId', 'worktreePath', 'maxCharacters']));
@@ -492,13 +493,39 @@ export const agentCliRequestSchema = z.strictObject({
 	id: identifierSchema,
 	command: agentCliCommandSchema,
 	/**
-	 * The coding-agent session the CLI is running inside, when it can tell.
-	 * Every device-targeted command records a touch for it, so the desktop can
-	 * show who is driving which Simulator.
+	 * The coding-agent session the CLI says it is running inside, read from
+	 * its session variables. A claim, not an identity: the desktop checks it
+	 * against the session it maps `peer` to, and records touches and holds
+	 * only for a verified one.
 	 */
 	agent: laneAgentSchema.pick({ kind: true, sessionId: true }).optional(),
+	/**
+	 * The process that sent the request, by its own pid. The desktop verifies
+	 * with lsof that this pid holds the other end of the connection the
+	 * request arrived on, and only then walks its process tree to the agent
+	 * session that spawned it; a pid it cannot prove leaves the identity
+	 * unverified. The bound is one no pid on a Mac reaches.
+	 */
+	peer: z
+		.strictObject({ pid: z.number().int().positive().max(4_194_304) })
+		.optional(),
 });
 export type AgentCliRequest = z.infer<typeof agentCliRequestSchema>;
+
+/** The session a request claims, as the CLI's session variables name it. */
+export type AgentCliClaim = NonNullable<AgentCliRequest['agent']>;
+
+/**
+ * Connection-bound identity. Only a sender that descends from the discovered
+ * session it claims is verified. Missing proof, undiscovered sessions and
+ * shared-process sessions stay unverified; a different discovered owner is a
+ * mismatch. Anonymous requests claim no session and are unprivileged.
+ */
+export type AgentIdentityResolution =
+	| { status: 'anonymous' }
+	| { status: 'unverified'; reason: string }
+	| { status: 'verified'; agent: AgentCliClaim; basis: 'process' }
+	| { status: 'mismatch'; reason: string };
 
 /**
  * What `release --all` answers. Work that outlasts the session-end budget

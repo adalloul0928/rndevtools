@@ -13,13 +13,9 @@ import (
 
 const testUDID = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
 
-// Parse is ParseWithEnvironment with no environment, so no agent is attributed.
-func Parse(kind protocol.Command, arguments []string, stdin io.Reader, stdinAvailable bool) (Parsed, error) {
-	return ParseWithEnvironment(kind, arguments, stdin, stdinAvailable, nil)
-}
-
-func TestValidateMatchesServerCommandUnion(t *testing.T) {
-	tests := map[protocol.Command]string{
+// validCommands returns one command per kind that the desktop's schema accepts.
+func validCommands() map[protocol.Command]string {
+	return map[protocol.Command]string{
 		protocol.CommandDoctor:     `{"kind":"doctor"}`,
 		protocol.CommandSimulators: `{"kind":"simulators","includeUnavailable":true}`,
 		protocol.CommandApps:       `{"kind":"apps","udid":"` + testUDID + `"}`,
@@ -33,7 +29,7 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandRecipe:     `{"kind":"recipe","operation":"run","recipeId":"smoke","udids":["` + testUDID + `"]}`,
 		protocol.CommandJobs:       `{"kind":"jobs","operation":"cancel","jobId":"job-1"}`,
 		protocol.CommandSlimming:   `{"kind":"slimming","operation":"verify","udids":["` + testUDID + `"],"profileId":"rndevtools-development"}`,
-		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"slimProfileId":"rndevtools-development","agent":{"kind":"claude","sessionId":"session-1"}}`,
+		protocol.CommandLane:       `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","environment":"development","launch":true,"slimProfileId":"rndevtools-development"}`,
 		protocol.CommandSupabase:   `{"kind":"supabase","operation":"up","worktreePath":"/Users/dev/app","waitMs":30000}`,
 		protocol.CommandNative:     `{"kind":"native","operation":"install","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","configuration":"Release"}`,
 		protocol.CommandAgents:     `{"kind":"agents"}`,
@@ -41,10 +37,33 @@ func TestValidateMatchesServerCommandUnion(t *testing.T) {
 		protocol.CommandRelease:    `{"kind":"release","udid":"` + testUDID + `"}`,
 		protocol.CommandInput:      `{"kind":"input","input":{"kind":"swipe","udid":"` + testUDID + `","fromX":0.5,"fromY":0.9,"toX":0.5,"toY":0.2,"durationMilliseconds":300,"steps":20}}`,
 	}
-	for kind, encoded := range tests {
+}
+
+func TestValidateMatchesServerCommandUnion(t *testing.T) {
+	for kind, encoded := range validCommands() {
 		t.Run(string(kind), func(t *testing.T) {
 			if err := Validate(json.RawMessage(encoded), kind); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// No command carries the agent: the session is a claim on the request
+// envelope, which the desktop verifies against the sending process. A command
+// that named one would let a caller attribute its own holds to someone else.
+func TestNoCommandAcceptsAnAgentField(t *testing.T) {
+	valid := validCommands()
+	for _, kind := range protocol.Commands() {
+		encoded, ok := valid[kind]
+		if !ok {
+			t.Fatalf("no valid %s command to extend; add one to validCommands", kind)
+		}
+		t.Run(string(kind), func(t *testing.T) {
+			withAgent := strings.TrimSuffix(encoded, "}") + `,"agent":{"kind":"claude","sessionId":"session-1"}}`
+			err := Validate(json.RawMessage(withAgent), kind)
+			if err == nil || !strings.Contains(err.Error(), `unknown field "agent"`) {
+				t.Fatalf("a %s command naming an agent must be rejected as an unknown field: %v", kind, err)
 			}
 		})
 	}
@@ -70,7 +89,8 @@ func TestValidateRejectsMutationUnknownFieldsAndNullOptionals(t *testing.T) {
 		{protocol.CommandLane, `{"kind":"lane","operation":"launch","laneId":"lane-11111111-2222-4333-8444-555555555555","worktreePath":"/Users/dev/app"}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"down"}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"log","laneId":"lane-11111111-2222-4333-8444-555555555555","url":"x"}`},
-		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","agent":{"kind":"gpt","sessionId":"s"}}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","agent":{"kind":"claude","sessionId":"session-1"}}`},
+		{protocol.CommandLane, `{"kind":"lane","operation":"launch","laneId":"lane-11111111-2222-4333-8444-555555555555","agent":{"kind":"codex","sessionId":"thread-9"}}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","shell":"whoami"}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"up","worktreePath":"/Users/dev/app","udid":"` + testUDID + `","slimProfileId":"../escape"}`},
 		{protocol.CommandLane, `{"kind":"lane","operation":"launch","laneId":"lane-11111111-2222-4333-8444-555555555555","slimProfileId":"rndevtools-development"}`},
@@ -288,61 +308,73 @@ func TestLaneUpNeedsOnlyAWorktree(t *testing.T) {
 	}
 }
 
-func TestLaneAttributionComesFromAgentEnvironment(t *testing.T) {
-	env := map[string]string{"CLAUDE_CODE_SESSION_ID": "session-abc"}
-	lookup := func(key string) string { return env[key] }
-	parsed, err := ParseWithEnvironment(protocol.CommandLane, []string{
-		"--operation", "up",
-		"--worktree", "/Users/dev/app",
-		"--udid", testUDID,
-	}, strings.NewReader(""), false, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded struct {
-		Agent map[string]string `json:"agent"`
-	}
-	if err := json.Unmarshal(parsed.Command, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Agent["kind"] != "claude" || decoded.Agent["sessionId"] != "session-abc" {
-		t.Fatalf("expected claude attribution, got %s", parsed.Command)
+func TestLaneCommandsNeverCarryAnAgent(t *testing.T) {
+	// The session is a claim on the request envelope, so nothing the caller
+	// types or pipes into a lane command can name one, and nothing is added.
+	for _, arguments := range [][]string{
+		{"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID},
+		{"--operation", "launch", "--worktree", "/Users/dev/app"},
+		{"--operation", "ls"},
+	} {
+		parsed, err := Parse(protocol.CommandLane, arguments, strings.NewReader(""), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(parsed.Command), "agent") {
+			t.Fatalf("lane %s must not carry an agent: %s", arguments[1], parsed.Command)
+		}
 	}
 
-	// Explicit stdin attribution wins over the environment.
-	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{
-		"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID,
-	}, strings.NewReader(`{"agent":{"kind":"codex","sessionId":"thread-9"}}`), true, lookup)
-	if err != nil {
-		t.Fatal(err)
+	// A caller that pipes one in, as the CLI once did for itself, is refused.
+	for _, arguments := range [][]string{
+		{"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID},
+		{"--operation", "launch", "--worktree", "/Users/dev/app"},
+	} {
+		_, err := Parse(protocol.CommandLane, arguments,
+			strings.NewReader(`{"agent":{"kind":"codex","sessionId":"thread-9"}}`), true)
+		if err == nil || !strings.Contains(err.Error(), `unknown field "agent"`) {
+			t.Fatalf("lane %s with an agent on stdin must be rejected as an unknown field: %v", arguments[1], err)
+		}
 	}
-	if err := json.Unmarshal(parsed.Command, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Agent["kind"] != "codex" {
-		t.Fatalf("stdin attribution should win, got %s", parsed.Command)
-	}
+}
 
-	// Operations that do not accept attribution never receive it.
-	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{"--operation", "ls"},
-		strings.NewReader(""), false, lookup)
-	if err != nil {
-		t.Fatal(err)
+func TestAgentFromEnvironmentReadsTheSessionClaim(t *testing.T) {
+	environment := func(values map[string]string) func(string) string {
+		return func(name string) string { return values[name] }
 	}
-	if strings.Contains(string(parsed.Command), "agent") {
-		t.Fatalf("ls must not carry attribution: %s", parsed.Command)
+	claim := func(values map[string]string) string {
+		agent := AgentFromEnvironment(environment(values))
+		if agent == nil {
+			return ""
+		}
+		return agent["kind"].(string) + ":" + agent["sessionId"].(string)
 	}
-
-	// Malformed identifiers are dropped rather than forwarded.
-	bad := func(string) string { return "has spaces" }
-	parsed, err = ParseWithEnvironment(protocol.CommandLane, []string{
-		"--operation", "up", "--worktree", "/Users/dev/app", "--udid", testUDID,
-	}, strings.NewReader(""), false, bad)
-	if err != nil {
-		t.Fatal(err)
+	for name, test := range map[string]struct {
+		values map[string]string
+		want   string
+	}{
+		"claude":                   {map[string]string{"CLAUDE_CODE_SESSION_ID": "session-abc"}, "claude:session-abc"},
+		"codex":                    {map[string]string{"CODEX_THREAD_ID": "thread-9"}, "codex:thread-9"},
+		"generic":                  {map[string]string{"RNDEVTOOLS_AGENT_SESSION_ID": "tool-1"}, "other:tool-1"},
+		"claude beats codex":       {map[string]string{"CLAUDE_CODE_SESSION_ID": "a", "CODEX_THREAD_ID": "b"}, "claude:a"},
+		"codex beats generic":      {map[string]string{"CODEX_THREAD_ID": "b", "RNDEVTOOLS_AGENT_SESSION_ID": "c"}, "codex:b"},
+		"padding is trimmed":       {map[string]string{"CLAUDE_CODE_SESSION_ID": "  session-abc \n"}, "claude:session-abc"},
+		"nothing set":              {map[string]string{}, ""},
+		"blank":                    {map[string]string{"CLAUDE_CODE_SESSION_ID": "   "}, ""},
+		"spaces inside":            {map[string]string{"CLAUDE_CODE_SESSION_ID": "has spaces"}, ""},
+		"leading punctuation":      {map[string]string{"CLAUDE_CODE_SESSION_ID": "-session"}, ""},
+		"too long":                 {map[string]string{"CLAUDE_CODE_SESSION_ID": strings.Repeat("a", 129)}, ""},
+		"longest allowed":          {map[string]string{"CLAUDE_CODE_SESSION_ID": strings.Repeat("a", 128)}, "claude:" + strings.Repeat("a", 128)},
+		"a bad id does not shadow": {map[string]string{"CLAUDE_CODE_SESSION_ID": "has spaces", "CODEX_THREAD_ID": "thread-9"}, "codex:thread-9"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := claim(test.values); got != test.want {
+				t.Fatalf("claim = %q, want %q", got, test.want)
+			}
+		})
 	}
-	if strings.Contains(string(parsed.Command), "agent") {
-		t.Fatalf("invalid session ids must be ignored: %s", parsed.Command)
+	if AgentFromEnvironment(nil) != nil {
+		t.Fatal("a missing environment reader names no session")
 	}
 }
 
@@ -490,7 +522,7 @@ func TestPathFlagsResolveAgainstTheWorkingDirectory(t *testing.T) {
 	if _, err := Parse(protocol.CommandSupabase, []string{"--operation", "up"}, strings.NewReader(`{"worktreePath":"."}`), true); err == nil {
 		t.Fatal("a relative stdin path must be rejected")
 	}
-	if _, err := Build(protocol.CommandSupabase, map[string]any{"operation": "up", "worktree": "."}, nil); err == nil {
+	if _, err := Build(protocol.CommandSupabase, map[string]any{"operation": "up", "worktree": "."}); err == nil {
 		t.Fatal("a relative tool-call path must be rejected")
 	}
 }
@@ -526,22 +558,6 @@ func TestSupabaseDeadlinesSitPastTheDesktopBudgets(t *testing.T) {
 	}
 	if wait.Timeout != 130*time.Second {
 		t.Fatalf("wait timeout from stdin %v", wait.Timeout)
-	}
-}
-
-func TestSupabaseCarriesNoAgentInTheCommand(t *testing.T) {
-	lookup := func(name string) string {
-		if name == "CLAUDE_CODE_SESSION_ID" {
-			return "session-abc"
-		}
-		return ""
-	}
-	parsed, err := ParseWithEnvironment(protocol.CommandSupabase, []string{"--operation", "up", "--worktree", "/Users/dev/app"}, strings.NewReader(""), false, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(parsed.Command), "agent") {
-		t.Fatalf("the agent rides on the envelope only: %s", parsed.Command)
 	}
 }
 
