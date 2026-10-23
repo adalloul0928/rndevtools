@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { Arch } = require('electron-builder');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { flipFuses, FuseV1Options, FuseVersion } = require('@electron/fuses');
@@ -31,8 +32,12 @@ module.exports = async function afterPack(context) {
 	const nativeResourcesPath = appPath
 		? path.join(appPath, 'Contents', 'Resources', 'native')
 		: null;
+	const expectedBuild = {
+		appVersion: context.packager.appInfo.version,
+		architecture: Arch[context.arch],
+	};
 	const manifest = nativeResourcesPath
-		? verifyNativeResources(nativeResourcesPath)
+		? verifyNativeResources(nativeResourcesPath, expectedBuild)
 		: null;
 	const executablePath =
 		context.electronPlatformName === 'darwin'
@@ -77,7 +82,7 @@ module.exports = async function afterPack(context) {
 			]);
 		}
 		refreshNativeResourceManifest(nativeResourcesPath, manifest);
-		verifyNativeResources(nativeResourcesPath);
+		verifyNativeResources(nativeResourcesPath, expectedBuild);
 
 		// A distribution build is signed by electron-builder after this hook. Its
 		// signing pass excludes the finalized, already-hashed native executables.

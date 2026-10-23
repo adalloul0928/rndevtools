@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Text } from 'react-native';
+import { Dimensions, Text } from 'react-native';
 import type {
 	DevToolsPlugin,
 	DevToolsPluginWithPillQuickAction,
@@ -9,6 +9,13 @@ import { FloatingWindow } from './floating-window';
 import { MiniPill } from './mini-pill';
 import { NavIconButton } from './nav-controls';
 import { PresentationSwitcher } from './presentation-switcher';
+
+const mockHorizontalInsets = { left: 0, right: 0 };
+const mockWindowStyle: { current?: unknown } = {};
+beforeEach(() => {
+	mockHorizontalInsets.left = 0;
+	mockHorizontalInsets.right = 0;
+});
 
 jest.mock('@expo/ui/swift-ui', () => {
 	const ReactRuntime = jest.requireActual('react');
@@ -101,7 +108,7 @@ jest.mock('react-native-safe-area-context', () => ({
 		frame: { x: 0, y: 0, width: 402, height: 874 },
 		insets: { top: 47, right: 0, bottom: 34, left: 0 },
 	},
-	useSafeAreaInsets: () => ({ top: 47, right: 0, bottom: 34, left: 0 }),
+	useSafeAreaInsets: () => ({ top: 47, bottom: 34, ...mockHorizontalInsets }),
 }));
 
 jest.mock('react-native-worklets', () => ({
@@ -117,7 +124,10 @@ jest.mock('react-native-reanimated', () => {
 		__esModule: true,
 		default: { View: Native.View },
 		ReduceMotion: { System: 'system' },
-		useAnimatedStyle: (factory: () => unknown) => factory(),
+		useAnimatedStyle: (factory: () => unknown) => {
+			mockWindowStyle.current = factory();
+			return mockWindowStyle.current;
+		},
 		useSharedValue: (value: unknown) => ({ value }),
 		withSpring: (value: unknown) => value,
 	};
@@ -303,5 +313,27 @@ describe('presentation components', () => {
 		).toEqual({ selected: true });
 		await fireEvent.press(screen.getByLabelText('Window presentation'));
 		expect(onModeChange).toHaveBeenCalledWith('window');
+	});
+});
+
+it('fits a restored floating window between horizontal safe areas', async () => {
+	mockHorizontalInsets.left = 48;
+	mockHorizontalInsets.right = 32;
+	await render(
+		<FloatingWindow
+			actions={actions}
+			initialPosition={{ x: -100, y: 100 }}
+			initialSize={{ width: 10000, height: 360 }}
+			onBack={jest.fn()}
+			onClose={jest.fn()}
+			onPresentationModeChange={jest.fn()}
+			onSelectPlugin={jest.fn()}
+			plugins={[plugin]}
+			title="Developer Tools"
+		/>,
+	);
+	expect(mockWindowStyle.current).toMatchObject({
+		width: Dimensions.get('window').width - 48 - 32 - 24,
+		transform: [{ translateX: 60 }, { translateY: expect.any(Number) }],
 	});
 });

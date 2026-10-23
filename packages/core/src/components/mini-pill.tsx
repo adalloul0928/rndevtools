@@ -59,10 +59,13 @@ export function MiniPill({
 	const insets = useSafeAreaInsets();
 	const pillWidth = Math.min(
 		BASE_WIDTH + QUICK_ACTION_WIDTH * quickActionPlugins.length,
-		Math.max(120, width - EDGE_MARGIN * 2),
+		Math.max(1, width - insets.left - insets.right - EDGE_MARGIN * 2),
 	);
-	const minimumX = EDGE_MARGIN;
-	const maximumX = Math.max(minimumX, width - pillWidth - EDGE_MARGIN);
+	const minimumX = insets.left + EDGE_MARGIN;
+	const maximumX = Math.max(
+		minimumX,
+		width - insets.right - pillWidth - EDGE_MARGIN,
+	);
 	const minimumY = insets.top + EDGE_MARGIN;
 	const maximumY = Math.max(
 		minimumY,
@@ -134,6 +137,7 @@ export function MiniPill({
 			commitPosition,
 			maximumX,
 			maximumY,
+			minimumX,
 			minimumY,
 			pillWidth,
 			startX,
