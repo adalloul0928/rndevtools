@@ -1,3 +1,5 @@
+import { RetainedEventBuffer } from './retained-event-buffer';
+
 type Listener = () => void;
 
 export type BoundedEventStoreOptions<T> = {
@@ -8,12 +10,9 @@ export type BoundedEventStoreOptions<T> = {
 
 export class BoundedEventStore<T> {
 	readonly #listeners = new Set<Listener>();
-	readonly #maxEvents: number;
 	readonly #maxBytes: number;
 	readonly #estimateBytes: (event: T) => number;
-	#events: readonly T[] = [];
-	#sizes: readonly number[] = [];
-	#bytes = 0;
+	readonly #buffer: RetainedEventBuffer<T>;
 
 	constructor(options: BoundedEventStoreOptions<T>) {
 		if (!Number.isInteger(options.maxEvents) || options.maxEvents <= 0) {
@@ -22,7 +21,7 @@ export class BoundedEventStore<T> {
 		if (!Number.isFinite(options.maxBytes) || options.maxBytes <= 0) {
 			throw new Error('maxBytes must be a positive finite number');
 		}
-		this.#maxEvents = options.maxEvents;
+		this.#buffer = new RetainedEventBuffer(options.maxEvents, options.maxBytes);
 		this.#maxBytes = options.maxBytes;
 		this.#estimateBytes = options.estimateBytes;
 	}
@@ -33,45 +32,13 @@ export class BoundedEventStore<T> {
 			return;
 		}
 
-		const events = [...this.#events, event];
-		const sizes = [...this.#sizes, eventBytes];
-		let bytes = this.#bytes + eventBytes;
-
-		while (
-			events.length > this.#maxEvents ||
-			(bytes > this.#maxBytes && events.length > 0)
-		) {
-			events.shift();
-			bytes -= sizes.shift() ?? 0;
-		}
-
-		this.#events = events;
-		this.#sizes = sizes;
-		this.#bytes = bytes;
+		this.#buffer.append(event, eventBytes);
 		this.#emit();
 	}
 
 	replace(predicate: (event: T) => boolean, event: T): boolean {
-		const index = this.#events.findIndex(predicate);
-		if (index < 0) return false;
-		const eventBytes = this.#eventBytes(event);
-		const events = [...this.#events];
-		const sizes = [...this.#sizes];
-		if (eventBytes > this.#maxBytes) {
-			events.splice(index, 1);
-			sizes.splice(index, 1);
-		} else {
-			events[index] = event;
-			sizes[index] = eventBytes;
-		}
-		let bytes = sizes.reduce((sum, size) => sum + size, 0);
-		while (bytes > this.#maxBytes && events.length > 0) {
-			events.shift();
-			bytes -= sizes.shift() ?? 0;
-		}
-		this.#events = events;
-		this.#sizes = sizes;
-		this.#bytes = bytes;
+		if (!this.#buffer.replace(predicate, event, () => this.#eventBytes(event)))
+			return false;
 		this.#emit();
 		return true;
 	}
@@ -82,36 +49,21 @@ export class BoundedEventStore<T> {
 
 	/** Removes a confirmed subset in one notification, preserving admitted sizes. */
 	remove(predicate: (event: T) => boolean): void {
-		const events: T[] = [];
-		const sizes: number[] = [];
-		let bytes = 0;
-		this.#events.forEach((event, index) => {
-			if (predicate(event)) return;
-			const size = this.#sizes[index] ?? 0;
-			events.push(event);
-			sizes.push(size);
-			bytes += size;
-		});
-		if (events.length === this.#events.length) return;
-		this.#events = events;
-		this.#sizes = sizes;
-		this.#bytes = bytes;
+		if (!this.#buffer.remove(predicate)) return;
 		this.#emit();
 	}
 
 	clear = (): void => {
-		if (this.#events.length === 0) return;
-		this.#events = [];
-		this.#sizes = [];
-		this.#bytes = 0;
+		if (this.#buffer.length === 0) return;
+		this.#buffer.clear();
 		this.#emit();
 	};
 
-	getSnapshot = (): readonly T[] => this.#events;
+	getSnapshot = (): readonly T[] => this.#buffer.getSnapshot();
 
-	getServerSnapshot = (): readonly T[] => this.#events;
+	getServerSnapshot = (): readonly T[] => this.#buffer.getSnapshot();
 
-	getEstimatedBytes = (): number => this.#bytes;
+	getEstimatedBytes = (): number => this.#buffer.bytes;
 
 	subscribe = (listener: Listener): (() => void) => {
 		this.#listeners.add(listener);

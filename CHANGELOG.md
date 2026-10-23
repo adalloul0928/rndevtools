@@ -31,6 +31,8 @@
 - Committed navigation stays successful when a host supplies no focus updates.
   Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
+- Event stores retain bounded history in a FIFO buffer and build immutable array
+  snapshots on demand, avoiding full-history copies for unobserved appends.
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
 

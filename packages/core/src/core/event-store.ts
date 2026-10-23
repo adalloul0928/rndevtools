@@ -10,6 +10,7 @@ import {
 	type DevtoolsEventStoreSnapshot,
 } from '../events/types';
 import { redactDiagnosticText } from './redact';
+import { RetainedEventBuffer } from './retained-event-buffer';
 import { utf8ByteLength } from './serialize';
 
 type Listener = () => void;
@@ -86,15 +87,13 @@ export class DevtoolsEventStore {
 	readonly #instanceId = nextStoreInstance++;
 	#enabled: boolean;
 	#disposed = false;
-	#events: readonly DevtoolsEvent[] = Object.freeze([]);
-	#sizes: readonly number[] = Object.freeze([]);
-	#estimatedBytes = 0;
+	readonly #buffer: RetainedEventBuffer<DevtoolsEvent>;
 	#nextEventSequence = 1;
 	#nextCorrelationSequence = 1;
 	#sessionNamespace: string | undefined;
 	#writeEpoch = 0;
 	#counters: DevtoolsEventStoreCounters = emptyCounters();
-	#snapshot: DevtoolsEventStoreSnapshot;
+	#snapshot: DevtoolsEventStoreSnapshot | undefined;
 
 	constructor(options: DevtoolsEventStoreOptions) {
 		this.#maxEvents = positiveInteger(options.maxEvents, 'maxEvents');
@@ -135,7 +134,7 @@ export class DevtoolsEventStore {
 		this.#idFactory = options.idFactory;
 		this.#sanitize = options.sanitize;
 		this.#enabled = options.enabled ?? true;
-		this.#snapshot = this.#createSnapshot();
+		this.#buffer = new RetainedEventBuffer(this.#maxEvents, this.#maxBytes);
 	}
 
 	append(input: DevtoolsEventInput): DevtoolsEventAppendResult {
@@ -198,18 +197,7 @@ export class DevtoolsEventStore {
 			return this.#drop('oversized');
 		}
 
-		const events = [...this.#events, event];
-		const sizes = [...this.#sizes, eventBytes];
-		let estimatedBytes = this.#estimatedBytes + eventBytes;
-		let evicted = 0;
-		while (events.length > this.#maxEvents || estimatedBytes > this.#maxBytes) {
-			events.shift();
-			estimatedBytes -= sizes.shift() ?? 0;
-			evicted += 1;
-		}
-		this.#events = Object.freeze(events);
-		this.#sizes = Object.freeze(sizes);
-		this.#estimatedBytes = estimatedBytes;
+		const evicted = this.#buffer.append(event, eventBytes);
 		this.#nextEventSequence += 1;
 		this.#counters = Object.freeze({
 			accepted: this.#counters.accepted + 1,
@@ -239,10 +227,8 @@ export class DevtoolsEventStore {
 	}
 
 	clear = (): void => {
-		if (this.#disposed || this.#events.length === 0) return;
-		this.#events = Object.freeze([]);
-		this.#sizes = Object.freeze([]);
-		this.#estimatedBytes = 0;
+		if (this.#disposed || this.#buffer.length === 0) return;
+		this.#buffer.clear();
 		this.#publish();
 	};
 
@@ -254,9 +240,7 @@ export class DevtoolsEventStore {
 	resetSession = (): void => {
 		if (this.#disposed) return;
 		this.#writeEpoch += 1;
-		this.#events = Object.freeze([]);
-		this.#sizes = Object.freeze([]);
-		this.#estimatedBytes = 0;
+		this.#buffer.clear();
 		this.#nextEventSequence = 1;
 		this.#nextCorrelationSequence = 1;
 		this.#sessionNamespace = createOpaqueSessionNamespace();
@@ -265,28 +249,14 @@ export class DevtoolsEventStore {
 	};
 
 	removeEvents = (eventIds: readonly string[]): void => {
-		if (this.#disposed || eventIds.length === 0 || this.#events.length === 0) {
+		if (this.#disposed || eventIds.length === 0 || this.#buffer.length === 0) {
 			return;
 		}
 		if (eventIds.length > this.#maxEvents) {
 			throw new Error('eventIds cannot exceed the configured event limit');
 		}
 		const ids = new Set(eventIds);
-		const events: DevtoolsEvent[] = [];
-		const sizes: number[] = [];
-		let estimatedBytes = 0;
-		for (let index = 0; index < this.#events.length; index += 1) {
-			const event = this.#events[index];
-			if (!event || ids.has(event.id)) continue;
-			const size = this.#sizes[index] ?? 0;
-			events.push(event);
-			sizes.push(size);
-			estimatedBytes += size;
-		}
-		if (events.length === this.#events.length) return;
-		this.#events = Object.freeze(events);
-		this.#sizes = Object.freeze(sizes);
-		this.#estimatedBytes = estimatedBytes;
+		if (!this.#buffer.remove((event) => ids.has(event.id))) return;
 		this.#publish();
 	};
 
@@ -295,9 +265,7 @@ export class DevtoolsEventStore {
 		this.#writeEpoch += 1;
 		this.#disposed = true;
 		this.#enabled = false;
-		this.#events = Object.freeze([]);
-		this.#sizes = Object.freeze([]);
-		this.#estimatedBytes = 0;
+		this.#buffer.clear();
 		this.#publish();
 		this.#listeners.clear();
 		this.#sanitize = undefined;
@@ -308,7 +276,7 @@ export class DevtoolsEventStore {
 	exportEvents(options: DevtoolsEventExportOptions): DevtoolsEventExportResult {
 		const requestedMaxBytes = options.maxBytes ?? this.#maxExportBytes;
 		positiveInteger(requestedMaxBytes, 'maxBytes');
-		return exportDevtoolsEvents(this.#events, {
+		return exportDevtoolsEvents(this.#buffer.getSnapshot(), {
 			format: options.format,
 			maxBytes: Math.min(requestedMaxBytes, this.#maxExportBytes),
 			...(options.maxEvents === undefined
@@ -317,13 +285,14 @@ export class DevtoolsEventStore {
 		});
 	}
 
-	getSnapshot = (): DevtoolsEventStoreSnapshot => this.#snapshot;
+	getSnapshot = (): DevtoolsEventStoreSnapshot =>
+		(this.#snapshot ??= this.#createSnapshot());
 
-	getServerSnapshot = (): DevtoolsEventStoreSnapshot => this.#snapshot;
+	getServerSnapshot = (): DevtoolsEventStoreSnapshot => this.getSnapshot();
 
-	getEvents = (): readonly DevtoolsEvent[] => this.#events;
+	getEvents = (): readonly DevtoolsEvent[] => this.#buffer.getSnapshot();
 
-	getEstimatedBytes = (): number => this.#estimatedBytes;
+	getEstimatedBytes = (): number => this.#buffer.bytes;
 
 	subscribe = (listener: Listener): (() => void) => {
 		if (this.#disposed) return () => {};
@@ -381,14 +350,14 @@ export class DevtoolsEventStore {
 			version: DEVTOOLS_EVENT_VERSION,
 			enabled: this.#enabled,
 			disposed: this.#disposed,
-			events: this.#events,
-			estimatedBytes: this.#estimatedBytes,
+			events: this.#buffer.getSnapshot(),
+			estimatedBytes: this.#buffer.bytes,
 			counters: this.#counters,
 		});
 	}
 
 	#publish(): void {
-		this.#snapshot = this.#createSnapshot();
+		this.#snapshot = undefined;
 		for (const listener of [...this.#listeners]) {
 			try {
 				listener();
