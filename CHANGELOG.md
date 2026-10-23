@@ -219,6 +219,9 @@
 
 ### Desktop app
 
+- Fit Network, Storage, and React Query grids to narrow panes. Secondary
+  columns hide while their values remain available in the detail pane.
+
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.
