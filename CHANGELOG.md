@@ -273,6 +273,8 @@
 
 ### Desktop app
 
+- Fit Network, Storage, and React Query grids to narrow panes. Secondary
+  columns hide while their values remain available in the detail pane.
 - Show the selected Simulator state in the sidebar dot; a shutdown device no
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.

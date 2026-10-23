@@ -21,6 +21,7 @@ import {
 	Toolbar,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
+import { useCompactGrid } from '@/lib/use-compact-grid';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { QueryEntry } from '../../shared/protocol';
 
@@ -133,12 +134,13 @@ export function QueryPanel() {
 		tab === 'queries'
 			? (summary?.omittedQueryCount ?? 0)
 			: (summary?.omittedMutationCount ?? 0);
-	const columns = useMemo<DataGridColumn<QueryEntry>[]>(
-		() => [
+	const { gridPaneRef, compact } = useCompactGrid();
+	const columns = useMemo<DataGridColumn<QueryEntry>[]>(() => {
+		const all: DataGridColumn<QueryEntry>[] = [
 			{
 				id: 'key',
 				header: 'Query key',
-				minWidth: 380,
+				minWidth: compact ? 200 : 380,
 				isRowHeader: true,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
@@ -183,9 +185,13 @@ export function QueryPanel() {
 					</span>
 				),
 			},
-		],
-		[]
-	);
+		];
+		return compact
+			? all.filter(
+					(column) => column.id !== 'observers' && column.id !== 'updated'
+				)
+			: all;
+	}, [compact]);
 
 	function onSelectionChange(selection: DataGridSelection): void {
 		const key = selection === 'all' ? filtered[0]?.id : [...selection][0];
@@ -428,7 +434,7 @@ export function QueryPanel() {
 				</div>
 			) : (
 				<div className="split-panel">
-					<div className="min-w-0 overflow-hidden">
+					<div className="min-w-0 overflow-hidden" ref={gridPaneRef}>
 						{filtered.length === 0 ? (
 							<EmptyPanel
 								icon={<DatabaseZap className="h-5 w-5" />}
