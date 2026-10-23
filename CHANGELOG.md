@@ -10,6 +10,8 @@
 - Offline now blocks instrumented requests with untrusted init dictionaries
   without inspecting them. Other profiles report unsupported request boundaries
   instead of silently bypassing the selected conditions.
+- Clearing captured requests removes the confirmed set while preserving new
+  requests and their body readers that arrived during the dialog.
 
 - Preserve app writes made during asynchronous Zustand patch validation.
   A stale or rejected edit no longer restores an old state before its own

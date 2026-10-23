@@ -1,6 +1,30 @@
 import { BoundedEventStore, ExternalStore } from './external-store';
 
 describe('BoundedEventStore', () => {
+	it('removes only confirmed entries without re-estimating or emitting intermediate state', () => {
+		const estimate = jest.fn((value: string) => value.length);
+		const store = new BoundedEventStore({
+			maxEvents: 3,
+			maxBytes: 10,
+			estimateBytes: estimate,
+		});
+		store.append('one');
+		store.append('four');
+		store.append('xx');
+		const snapshots: string[][] = [];
+		const changed = jest.fn(() => snapshots.push([...store.getSnapshot()]));
+		store.subscribe(changed);
+		store.remove((value) => value === 'four');
+		expect(snapshots).toEqual([['one', 'xx']]);
+		expect(store.getEstimatedBytes()).toBe(5);
+		expect(estimate).toHaveBeenCalledTimes(3);
+		store.remove(() => false);
+		expect(changed).toHaveBeenCalledTimes(1);
+		store.append('seven');
+		expect(store.getSnapshot()).toEqual(['one', 'xx', 'seven']);
+		expect(store.getEstimatedBytes()).toBe(10);
+	});
+
 	it('evicts the oldest events by count', () => {
 		const store = new BoundedEventStore<number>({
 			maxEvents: 2,
