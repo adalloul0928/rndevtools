@@ -54,10 +54,10 @@ func Describe(kind protocol.Command) ([]Field, bool) {
 
 // Build assembles and validates a command from already-typed arguments keyed
 // by field name, the way a tool call delivers them. It applies the same
-// placement, agent attribution, timeout derivation, and validation as the
-// flag parser, so a request built here is indistinguishable to the desktop
-// from one typed at a shell.
-func Build(kind protocol.Command, arguments map[string]any, lookup func(string) string) (Parsed, error) {
+// placement, timeout derivation, and validation as the flag parser, so a
+// request built here is indistinguishable to the desktop from one typed at a
+// shell. No command carries an agent: the session is a claim on the envelope.
+func Build(kind protocol.Command, arguments map[string]any) (Parsed, error) {
 	specs, ok := commandFields[kind]
 	if !ok {
 		return Parsed{}, fmt.Errorf("unsupported command %q", kind)
@@ -86,8 +86,6 @@ func Build(kind protocol.Command, arguments map[string]any, lookup func(string) 
 			return Parsed{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	attachAgent(kind, command, lookup)
-
 	encoded, err := json.Marshal(command)
 	if err != nil {
 		return Parsed{}, fmt.Errorf("encode command: %w", err)
@@ -176,22 +174,6 @@ func coerceArgument(kind fieldKind, raw any) (any, error) {
 		return object, nil
 	}
 	return nil, fmt.Errorf("unsupported field type")
-}
-
-// attachAgent embeds the owning agent session into lane up/launch commands when
-// the caller did not already provide one. Every request also carries the agent
-// on its envelope; this copy is what the lane itself records. Supabase holds
-// come from the envelope alone: its command carries no agent field.
-func attachAgent(kind protocol.Command, command map[string]any, lookup func(string) string) {
-	if kind != protocol.CommandLane {
-		return
-	}
-	operation, _ := command["operation"].(string)
-	if _, provided := command["agent"]; !provided && (operation == "up" || operation == "launch") {
-		if agent := AgentFromEnvironment(lookup); agent != nil {
-			command["agent"] = agent
-		}
-	}
 }
 
 // LongOperationTimeout is the socket deadline for lane and native calls.

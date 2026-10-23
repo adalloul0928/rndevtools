@@ -164,10 +164,13 @@ var commandFields = map[protocol.Command][]fieldSpec{
 	},
 }
 
-// Agent attribution. Claude Code and Codex export a session identifier into
-// every subprocess they spawn; the CLI forwards it so the desktop can show
-// which agent holds which lane. Every request carries it on its envelope;
-// lane up/launch also embed it in the command so the lane records it.
+// Agent claim. Claude Code and Codex export a session identifier into every
+// subprocess they spawn, and the CLI forwards it on the request envelope so
+// the desktop can show which agent is driving which Simulator. It is a claim
+// anyone can make by setting the variable, so it never rides inside a command
+// and grants nothing by itself: the desktop verifies it against the process
+// that sent the request, and a request without a verified session may use
+// free Simulators only.
 const (
 	envClaudeSession  = "CLAUDE_CODE_SESSION_ID"
 	envCodexThread    = "CODEX_THREAD_ID"
@@ -198,16 +201,15 @@ func AgentFromEnvironment(lookup func(string) string) map[string]any {
 	return nil
 }
 
-// ParseWithEnvironment parses a command's flags and optional stdin object into
-// a validated command. Agent attribution is read from `lookup` (normally
-// os.Getenv); it is attached only to lane commands that accept it and only
-// when the caller did not already provide one.
-func ParseWithEnvironment(
+// Parse parses a command's flags and optional stdin object into a validated
+// command. It reads no environment: the agent session is a claim on the
+// request envelope, and a command that names one is rejected as an unknown
+// field.
+func Parse(
 	kind protocol.Command,
 	arguments []string,
 	stdin io.Reader,
 	stdinAvailable bool,
-	lookup func(string) string,
 ) (Parsed, error) {
 	specs, ok := commandFields[kind]
 	if !ok {
@@ -263,8 +265,6 @@ func ParseWithEnvironment(
 			return Parsed{}, fmt.Errorf("--%s: %w", spec.flagName, err)
 		}
 	}
-
-	attachAgent(kind, command, lookup)
 
 	timeout := client.DefaultTimeout
 	if requestTimeout.set {

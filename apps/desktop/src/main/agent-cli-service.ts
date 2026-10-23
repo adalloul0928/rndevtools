@@ -6,14 +6,17 @@ import {
 	redactDiagnosticText,
 } from '@rndevtools/core/redact';
 import {
+	type AgentCliClaim,
 	type AgentCliCommand,
 	type AgentCliErrorBody,
 	type AgentCliRequest,
 	type AgentCliResponse,
+	type AgentIdentityResolution,
 	agentCliRequestSchema,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
 import { SUPABASE_AGENT_DEFAULT_WAIT_MS } from '../shared/supabase-protocol';
+import { peerOwnsConnection } from './agent-peer';
 
 const MAX_CONNECTIONS = 8;
 const MAX_REQUESTS_PER_WINDOW = 120;
@@ -56,17 +59,49 @@ const LIVENESS_PROBE_INTERVAL_MS = 1_000;
 const MAX_LIVENESS_PROBES = 1_024;
 const LIVENESS_PROBE = Buffer.from(' ', 'utf8');
 
-type AgentCliHandlerContext = {
+export type AgentCliHandlerContext = {
 	requestId: string;
 	signal: AbortSignal;
-	/** Session attribution from the request envelope, when the CLI had one. */
-	agent?: { kind: 'claude' | 'codex' | 'other'; sessionId: string };
+	/**
+	 * What the desktop made of the request's identity, from the connection
+	 * rather than the envelope. Handlers refuse what an unverified identity
+	 * may not do and treat an anonymous one as unprivileged. A mismatch is
+	 * answered by the service itself and never reaches a handler.
+	 */
+	identity: Exclude<AgentIdentityResolution, { status: 'mismatch' }>;
+	/** The agent session the request is verified to come from; set exactly when `identity` is verified. */
+	agent?: AgentCliClaim;
 };
 
 export type AgentCliHandler = (
 	command: AgentCliCommand,
 	context: AgentCliHandlerContext
 ) => Promise<unknown>;
+
+/** Proves that `pid` owns the client end of `socket`; false means unproven. */
+type AgentPeerVerifier = (socket: Socket, pid: number) => Promise<boolean>;
+
+/**
+ * Maps a request's claim and its proven sender to an identity; the agent
+ * service's `identify`.
+ */
+type AgentIdentifier = (input: {
+	claimed?: AgentCliClaim;
+	peerPid?: number;
+}) => Promise<AgentIdentityResolution>;
+
+/**
+ * Without an identifier nothing maps a process to a session, so a claim
+ * stays a claim: unverified.
+ */
+const identifyNothing: AgentIdentifier = async ({ claimed }) =>
+	claimed
+		? {
+				status: 'unverified',
+				reason:
+					'This desktop does not map requests to agent sessions, so the session named cannot be verified.',
+			}
+		: { status: 'anonymous' };
 
 export type AgentCliServiceState = {
 	status: 'stopped' | 'available' | 'unavailable';
@@ -227,6 +262,8 @@ export class AgentCliService {
 	readonly #platform: NodeJS.Platform;
 	readonly #readiness: (() => Promise<void>) | undefined;
 	readonly #livenessProbeMs: number;
+	readonly #verifyPeer: AgentPeerVerifier;
+	readonly #identify: AgentIdentifier;
 	readonly #connections = new Set<Socket>();
 	readonly #requestTimestamps: number[] = [];
 	#server: Server | undefined;
@@ -241,6 +278,8 @@ export class AgentCliService {
 		platform = process.platform,
 		readiness,
 		livenessProbeMs = LIVENESS_PROBE_INTERVAL_MS,
+		verifyPeer = (socket, pid) => peerOwnsConnection(socket, pid),
+		identify = identifyNothing,
 	}: {
 		socketPath: string;
 		handler: AgentCliHandler;
@@ -248,6 +287,10 @@ export class AgentCliService {
 		readiness?: () => Promise<void>;
 		/** How often a running handler's socket is probed; tests shorten it. */
 		livenessProbeMs?: number;
+		/** The socket proof; defaults to lsof over this process and the peer. */
+		verifyPeer?: AgentPeerVerifier;
+		/** Maps a proven sender to its session; defaults to verifying nothing. */
+		identify?: AgentIdentifier;
 	}) {
 		this.#socketPath = path.resolve(socketPath);
 		this.#socketDirectory = path.dirname(this.#socketPath);
@@ -255,6 +298,8 @@ export class AgentCliService {
 		this.#platform = platform;
 		this.#readiness = readiness;
 		this.#livenessProbeMs = livenessProbeMs;
+		this.#verifyPeer = verifyPeer;
+		this.#identify = identify;
 	}
 
 	getState(): AgentCliServiceState {
@@ -495,10 +540,21 @@ export class AgentCliService {
 			socket.write(LIVENESS_PROBE);
 		}, this.#livenessProbeMs);
 		try {
+			const identity = await this.#resolveIdentity(socket, request);
+			if (identity.status === 'mismatch') {
+				throw new AgentCliError({
+					code: 'agent_identity_mismatch',
+					message: identity.reason,
+					retryable: false,
+					recovery:
+						'Run the rndevtools CLI from inside your own agent session, with its own session variables; a request cannot act for another session.',
+				});
+			}
 			const result = await this.#handler(request.command, {
 				requestId: request.id,
 				signal: controller.signal,
-				...(request.agent ? { agent: request.agent } : {}),
+				identity,
+				...(identity.status === 'verified' ? { agent: identity.agent } : {}),
 			});
 			if (!socket.destroyed) {
 				socket.end(
@@ -527,5 +583,33 @@ export class AgentCliService {
 			clearInterval(probe);
 			socket.off('close', onClose);
 		}
+	}
+
+	/**
+	 * Who sent the request. The pid the envelope names counts only once the
+	 * verifier shows it owns this very connection; a verifier that fails
+	 * proves nothing. The identifier then maps a proven pid, and the claim,
+	 * to an identity. A request that claims no session is anonymous whoever
+	 * sent it, so the proof, which costs a process spawn, is spared it.
+	 */
+	async #resolveIdentity(
+		socket: Socket,
+		request: AgentCliRequest
+	): Promise<AgentIdentityResolution> {
+		const { agent: claimed, peer } = request;
+		let peerPid: number | undefined;
+		if (claimed && peer) {
+			let owns = false;
+			try {
+				owns = await this.#verifyPeer(socket, peer.pid);
+			} catch {
+				owns = false;
+			}
+			if (owns) peerPid = peer.pid;
+		}
+		return this.#identify({
+			...(claimed ? { claimed } : {}),
+			...(peerPid === undefined ? {} : { peerPid }),
+		});
 	}
 }

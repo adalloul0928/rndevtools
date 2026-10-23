@@ -224,6 +224,19 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- Agent requests over the local socket now prove which process sent them. The
+  CLI, its MCP server and its session-end hook send their own pid, the desktop
+  checks that the process owns the connection, and it follows the process's
+  parents to the Claude Code session that spawned it. A request that names
+  another live session is refused with `agent_identity_mismatch`. Before, the
+  session was whatever the request said it was, and a request that named none
+  counted as the person at the desktop: `rndevtools lane up --udid` on a
+  Simulator another agent had claimed took the claim over, and setting another
+  session's id let `release --all` stop its lanes. Requests with no identity,
+  may now use free Simulators only and cannot claim, release or take over a
+  hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
+  Codex threads, synthetic MCP identities and ended sessions, cannot perform
+  ownership-changing operations. Lane commands no longer accept an `agent` field.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
