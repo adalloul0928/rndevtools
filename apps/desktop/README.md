@@ -300,3 +300,7 @@ when full. A logging failure still exits; failed main-process state is not resum
 Recipe teardown runs only for targets whose steps started. Cancellation while
 queued for a Simulator lease, or a failed preflight, does not run cleanup on
 that untouched target. Cleanup after an attempted step still runs on failure.
+
+If settings cannot be loaded, preference changes fail without overwriting the
+file. Repair or restore `settings-v1.json` in the Electron user-data directory
+and restart the app before changing preferences.

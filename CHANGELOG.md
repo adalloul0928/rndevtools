@@ -406,3 +406,6 @@
   start is no longer stopped as it ends. A start that RN Devtools adopts after
   a restart is still checked for 127.0.0.1 only when its record cannot be
   saved, and its job then fails with that error instead of passing as verified.
+
+- Desktop settings writes require a successful load, preserving unreadable settings
+  until they can be recovered and loaded again.
