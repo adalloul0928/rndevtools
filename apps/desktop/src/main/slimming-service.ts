@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { redactDiagnosticText } from '@rndevtools/core/redact';
-import type { DeviceAccessDecision } from '../shared/device-hold';
+import type {
+	DeviceAccessDecision,
+	DeviceRequester,
+} from '../shared/device-hold';
 import type {
 	SlimmingAcknowledgementReceipt,
 	SlimmingAcknowledgementRequest,
@@ -18,7 +21,6 @@ import type {
 	SlimmingState,
 } from '../shared/slimming-protocol';
 import {
-	type SlimmingRequester,
 	slimmingAcknowledgementRequestSchema,
 	slimmingActionSchema,
 	slimmingSettingRequestSchema,
@@ -47,10 +49,13 @@ import {
 	SlimmingPersistence,
 } from './slimming-persistence';
 
-/** Answers whether `requester` (an agent, or the operator when undefined) may mutate the device. */
+/**
+ * Answers whether `requester` (an agent, or the operator for an action with
+ * no requester) may mutate the device: the agent service's answer.
+ */
 export type DeviceAccessPort = (
 	simulatorUdid: string,
-	requester: SlimmingRequester | undefined
+	requester: DeviceRequester
 ) => DeviceAccessDecision;
 
 const DEFAULT_POLL_INTERVAL_MS = 15_000;
@@ -846,7 +851,7 @@ export class SlimmingService {
 				// never restart another agent's Simulator.
 				const access = this.#deviceAccess?.(
 					udid,
-					'requester' in action ? action.requester : undefined
+					('requester' in action ? action.requester : undefined) ?? 'operator'
 				);
 				if (access && !access.allowed) {
 					return this.#reject(action, access.reason);

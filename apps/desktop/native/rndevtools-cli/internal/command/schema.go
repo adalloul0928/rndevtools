@@ -279,19 +279,20 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			return validateIdentifier(*value.ProfileID, "profileId")
 		}
 	case protocol.CommandLane:
+		// A lane command names no agent: the session is a claim on the
+		// request envelope, so an "agent" key is an unknown field here.
 		var value struct {
-			Kind          string             `json:"kind"`
-			Operation     string             `json:"operation"`
-			WorktreePath  *string            `json:"worktreePath,omitempty"`
-			UDID          *string            `json:"udid,omitempty"`
-			Environment   *string            `json:"environment,omitempty"`
-			PreferredPort *int               `json:"preferredPort,omitempty"`
-			Launch        *bool              `json:"launch,omitempty"`
-			SlimProfileID *string            `json:"slimProfileId,omitempty"`
-			LaneID        *string            `json:"laneId,omitempty"`
-			URL           *string            `json:"url,omitempty"`
-			MaxCharacters *int               `json:"maxCharacters,omitempty"`
-			Agent         *map[string]string `json:"agent,omitempty"`
+			Kind          string  `json:"kind"`
+			Operation     string  `json:"operation"`
+			WorktreePath  *string `json:"worktreePath,omitempty"`
+			UDID          *string `json:"udid,omitempty"`
+			Environment   *string `json:"environment,omitempty"`
+			PreferredPort *int    `json:"preferredPort,omitempty"`
+			Launch        *bool   `json:"launch,omitempty"`
+			SlimProfileID *string `json:"slimProfileId,omitempty"`
+			LaneID        *string `json:"laneId,omitempty"`
+			URL           *string `json:"url,omitempty"`
+			MaxCharacters *int    `json:"maxCharacters,omitempty"`
 			// Backend is the worktree's local Supabase policy for up.
 			Backend *string `json:"backend,omitempty"`
 		}
@@ -307,7 +308,7 @@ func Validate(encoded json.RawMessage, expectedKind protocol.Command) error {
 			}
 		}
 		return validateLane(value.Operation, value.WorktreePath, value.UDID, value.Environment,
-			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters, value.Agent)
+			value.PreferredPort, value.Launch, value.SlimProfileID, value.LaneID, value.URL, value.MaxCharacters)
 	case protocol.CommandSupabase:
 		var value supabaseCommand
 		if err := decodeAndCheckKind(encoded, expectedKind, &value, valueKind(&value.Kind)); err != nil {
@@ -450,7 +451,6 @@ func validateLane(
 	launch *bool,
 	slimProfileID, laneID, url *string,
 	maxCharacters *int,
-	agent *map[string]string,
 ) error {
 	if !oneOf(operation, "up", "down", "ls", "launch", "log") {
 		return errors.New("lane operation must be up, down, ls, launch, or log")
@@ -483,18 +483,6 @@ func validateLane(
 	if maxCharacters != nil && (*maxCharacters < 256 || *maxCharacters > 64000) {
 		return errors.New("maxCharacters must be between 256 and 64000")
 	}
-	if agent != nil {
-		kind := (*agent)["kind"]
-		if !oneOf(kind, "claude", "codex", "other") {
-			return errors.New("agent kind must be claude, codex, or other")
-		}
-		if err := validateIdentifier((*agent)["sessionId"], "agent.sessionId"); err != nil {
-			return err
-		}
-		if len(*agent) != 2 {
-			return errors.New("agent accepts only kind and sessionId")
-		}
-	}
 	targetsLane := (laneID != nil) != (worktreePath != nil)
 	switch operation {
 	case "up":
@@ -506,11 +494,11 @@ func validateLane(
 		}
 	case "ls":
 		if worktreePath != nil || udid != nil || environment != nil || preferredPort != nil ||
-			launch != nil || slimProfileID != nil || laneID != nil || url != nil || maxCharacters != nil || agent != nil {
+			launch != nil || slimProfileID != nil || laneID != nil || url != nil || maxCharacters != nil {
 			return errors.New("lane ls does not accept other fields")
 		}
 	case "down":
-		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || maxCharacters != nil || agent != nil {
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || maxCharacters != nil {
 			return errors.New("lane down takes exactly one of laneId or worktreePath")
 		}
 	case "launch":
@@ -518,7 +506,7 @@ func validateLane(
 			return errors.New("lane launch takes exactly one of laneId or worktreePath, plus an optional url")
 		}
 	case "log":
-		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil || agent != nil {
+		if !targetsLane || udid != nil || environment != nil || preferredPort != nil || launch != nil || slimProfileID != nil || url != nil {
 			return errors.New("lane log takes exactly one of laneId or worktreePath, plus an optional maxCharacters")
 		}
 	}

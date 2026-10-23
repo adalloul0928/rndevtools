@@ -28,6 +28,7 @@ import {
 } from './engine.test-support';
 import { SupabaseJobStore, supabaseArgvDigest } from './job-store';
 import type { SupabaseOperationContext } from './service-ports';
+import { SupabaseStackStore } from './stack-store';
 
 // These suites drive the orchestrator through hundreds of store writes. The
 // stores' atomic, fsync'd writes are tested on their own; here the same bytes
@@ -2005,6 +2006,7 @@ describe('SupabaseEngine lifecycle', () => {
 		await h.settle();
 		expect(h.engine.job(failed.jobId ?? '')?.status).toBe('failed');
 		expect(h.engine.stackStore.record(stackId)?.flags.failedStart).toBe(true);
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
 		// The CLI still registered the stack, with no members.
 		h.cli.addStack({ id: stackId, projectRoot: repo, members: 0 });
 		await h.engine.runOperation(op({ kind: 'refresh' }), OPERATOR);
@@ -2492,6 +2494,34 @@ describe('SupabaseEngine lifecycle', () => {
 		expect(h.engine.stackStore.record(mainId)).toBeUndefined();
 	});
 
+	it('forgets the record written for an id the create then did not make', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		await h.engine.start();
+		await h.engine.settle();
+		const mainId = await h.identity(repo);
+		const release = h.cli.hold('stack start');
+		const receipt = await h.engine.runOperation(
+			op({ kind: 'start', stackId: mainId }),
+			OPERATOR
+		);
+		await h.cli.waitForCall('stack start');
+		expect(h.engine.stackStore.record(mainId)?.flags.starting).toBe(true);
+		// HEAD moves after the check and before the CLI reads it, so the CLI
+		// makes the stack of the new branch.
+		await h.checkout(repo, 'feature');
+		const featureId = await h.identity(repo);
+		release();
+		await h.engine.waitForJob(receipt.jobId ?? '', 10_000);
+		await h.settle();
+		expect(h.cli.stacks.has(mainId)).toBe(false);
+		expect(h.cli.stacks.has(featureId)).toBe(true);
+		expect(h.engine.stackStore.record(mainId)).toBeUndefined();
+		expect(
+			h.engine.stackStore.record(featureId)?.flags.starting
+		).toBeUndefined();
+	});
+
 	it('stops a stack whose start succeeded but printed output it cannot read', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');
@@ -2585,6 +2615,7 @@ describe('SupabaseEngine lifecycle', () => {
 		expect(h.cli.interrupts).toEqual(['stack start']);
 		expect(h.engine.job(receipt.jobId ?? '')?.status).toBe('cancelled');
 		expect(h.engine.stackStore.record(stackId)?.flags.interrupted).toBe(true);
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
 	});
 
 	it('lets callers that join an ensure learn its job', async () => {
@@ -3484,7 +3515,301 @@ describe('SupabaseEngine adoption', () => {
 		await h.advance(2_000);
 		expect(h.engine.job(job.id)?.status).toBe('complete');
 	});
+
+	it('writes a provisional record before the create spawns, and clears it when the CLI answers', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		await h.engine.start();
+		await h.engine.settle();
+		const release = h.cli.hold('stack start');
+		const stackId = await h.identity(repo);
+		const receipt = await h.engine.runOperation(
+			op({ kind: 'start', stackId }),
+			OPERATOR
+		);
+		await h.cli.waitForCall('stack start');
+		// The CLI still runs: a desktop that quit now adopts the stack from
+		// this record, which says a create was spawned and nothing more.
+		const provisional = h.engine.stackStore.record(stackId);
+		expect(provisional?.flags.starting).toBe(true);
+		expect(provisional?.origin).toBe('managed');
+		expect(provisional?.projectRoot).toBe(repo);
+		expect(provisional?.createdBy).toEqual({ via: 'desktop' });
+		expect(provisional?.lastStartedAt).toBeUndefined();
+		release();
+		await h.engine.waitForJob(receipt.jobId ?? '', 10_000);
+		await h.settle();
+		expect(h.engine.job(receipt.jobId ?? '')?.status).toBe('complete');
+		const record = h.engine.stackStore.record(stackId);
+		expect(record?.flags.starting).toBeUndefined();
+		expect(record?.lastStartedAt).toBe(h.clock.now);
+	});
+
+	it('records, exposure-checks and auto-stops a create a previous desktop left running', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		// A desktop of an older version spawned it, so no record names the stack.
+		const previous = await previousCreate(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		await h.engine.start();
+		await h.settle();
+		expect(h.engine.job(previous.jobId)?.status).toBe('running');
+		expect(h.engine.stackStore.record(stackId)).toBeUndefined();
+		const lsof = () =>
+			h.discovery.probes.filter((probe) => probe === 'lsof').length;
+		const before = lsof();
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		expect(h.engine.job(previous.jobId)?.status).toBe('complete');
+		const record = h.engine.stackStore.record(stackId);
+		expect(record?.origin).toBe('managed');
+		expect(record?.projectRoot).toBe(repo);
+		expect(record?.flags.starting).toBeUndefined();
+		expect(record?.lastStartedAt).toBeDefined();
+		expect(lsof()).toBeGreaterThan(before);
+		expect(stateOf(h, stackId)?.state).toBe('running');
+		expect(stateOf(h, stackId)?.exposure.verdict).toBe('loopback');
+		expect(h.cli.count('stack stop')).toBe(0);
+		// Nothing holds it, so the unheld linger stops it.
+		await h.advance(60_000 + 15_000);
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+	});
+
+	it('stops an adopted stack that listens beyond loopback', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({
+			id: stackId,
+			projectRoot: repo,
+			running: true,
+			lanExposed: true,
+		});
+		await h.engine.start();
+		await h.settle();
+		expect(h.engine.job(previous.jobId)?.status).toBe('running');
+		expect(h.cli.count('stack stop')).toBe(0);
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		const job = h.engine.job(previous.jobId);
+		expect(job?.status).toBe('failed');
+		expect(job?.error?.title).toBe('Stack listened on your network');
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+		const record = h.engine.stackStore.record(stackId);
+		expect(record?.flags.starting).toBeUndefined();
+		expect(record?.lastStoppedAt).toBeDefined();
+		expect(stateOf(h, stackId)?.exposure.verdict).toBe('lan-exposed');
+		expect(stateOf(h, stackId)?.flags).toContain('lan-exposed');
+	});
+
+	it('stops an adopted stack whose exposure cannot be verified', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		h.discovery.exposureUnavailable = true;
+		await h.engine.start();
+		await h.settle();
+		expect(h.cli.count('stack stop')).toBe(0);
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		const job = h.engine.job(previous.jobId);
+		expect(job?.status).toBe('failed');
+		expect(job?.error?.title).toBe('Exposure could not be verified');
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+	});
+
+	it('marks a create that failed while RN Devtools was away as interrupted once the CLI registered it', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const registered = await h.repository('registered');
+		const unregistered = await h.repository('unregistered');
+		const registeredId = await h.identity(registered);
+		const unregisteredId = await h.identity(unregistered);
+		const failed = '[task] failed: database: initdb failed\n';
+		const first = await previousCreate(h, registeredId, registered, {
+			progress: failed,
+			pid: 4_242,
+		});
+		const second = await previousCreate(h, unregisteredId, unregistered, {
+			progress: failed,
+			pid: 4_343,
+		});
+		await provisionalRecord(h, registeredId, registered);
+		await provisionalRecord(h, unregisteredId, unregistered);
+		// Only one of the two creates got as far as registering its stack.
+		h.cli.addStack({ id: registeredId, projectRoot: registered, members: 0 });
+		await h.engine.start();
+		await h.settle();
+		h.alivePids.delete(first.pid);
+		h.alivePids.delete(second.pid);
+		await h.advance(2_000);
+		expect(h.engine.job(first.jobId)?.status).toBe('failed');
+		expect(h.engine.job(second.jobId)?.status).toBe('failed');
+		const marked = h.engine.stackStore.record(registeredId);
+		expect(marked?.flags.starting).toBeUndefined();
+		expect(marked?.flags.interrupted).toBe(true);
+		expect(marked?.lastError?.title).toBe(
+			'First start ended while RN Devtools was not running'
+		);
+		expect(stateOf(h, registeredId)?.state).toBe('interrupted');
+		// There is nothing to destroy for a stack the CLI never registered.
+		const unmarked = h.engine.stackStore.record(unregisteredId);
+		expect(unmarked?.flags).toEqual({});
+		expect(unmarked?.lastError).toBeUndefined();
+		expect(h.cli.count('stack stop')).toBe(0);
+	});
+
+	it('stops a stack whose create finished after its desktop quit and left no child to follow', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		// The create finished, and its stack kept running, before this desktop opened.
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		await h.engine.start();
+		await h.settle();
+		// No job follows it, so the flag is stale; the stack is swept anyway.
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+		expect(h.discovery.probes).toContain('lsof');
+		expect(stateOf(h, stackId)?.state).toBe('running');
+		expect(h.cli.count('stack stop')).toBe(0);
+		await h.advance(60_000 + 15_000);
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+	});
+
+	it('fails an adopted job and stops its stack when exposure discovery throws', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		h.discovery.discoverOwners = async () => {
+			throw new Error('ps could not run');
+		};
+		await h.engine.start();
+		await h.settle();
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		// A job left running would keep a turn-off waiting for starts for good.
+		expect(h.engine.job(previous.jobId)?.status).toBe('failed');
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
+		expect(h.logs.join('\n')).toContain('could not settle an adopted job');
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+	});
+
+	it('clears the flag of a create that ends while the feature is off, probing nothing', async () => {
+		const h = await createEngineHarness({ enabled: false, start: false });
+		const repo = await h.repository('repo');
+		const stackId = await h.identity(repo);
+		const previous = await previousCreate(h, stackId, repo);
+		await provisionalRecord(h, stackId, repo);
+		h.cli.addStack({ id: stackId, projectRoot: repo, running: true });
+		await h.engine.start();
+		await h.settle();
+		expect(h.engine.job(previous.jobId)?.status).toBe('running');
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBe(true);
+		h.alivePids.delete(previous.pid);
+		await h.advance(2_000);
+		expect(h.engine.job(previous.jobId)?.status).toBe('complete');
+		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
+		expect(h.processCalls()).toBe(0);
+	});
 });
+
+/**
+ * A create a previous desktop spawned for `stackId` and left running when it
+ * quit: its job store entry, its detached child (alive, and shown by ps with
+ * the command it was started with) and the progress file the CLI wrote.
+ */
+async function previousCreate(
+	h: EngineHarness,
+	stackId: string,
+	repo: string,
+	options: Readonly<{ pid?: number; progress?: string }> = {}
+) {
+	const root = path.join(h.userData, 'supabase');
+	const progress = path.join(root, 'progress');
+	await mkdir(progress, { recursive: true, mode: 0o700 });
+	const previous = new SupabaseJobStore({
+		directory: root,
+		now: () => h.clock.now,
+	});
+	await previous.load();
+	const job = await previous.create({
+		kind: 'create',
+		stackIds: [stackId],
+		requestedBy: { kind: 'operator' },
+		cancellable: true,
+	});
+	previous.start(job.id);
+	const pid = options.pid ?? 4_242;
+	const progressFile = path.join(
+		progress,
+		`create-${h.clock.now - 5_000}-0f8fad5b-d9cb-469f-a165-${String(pid).padStart(12, '0')}.log`
+	);
+	await writeFile(
+		progressFile,
+		options.progress ?? '[task] done: Stack is ready.\n'
+	);
+	const command = `${fakeResolvedCli().binaryPath} stack start --workdir ${repo} --runtime native --output-format json`;
+	await previous.recordChild({
+		jobId: job.id,
+		pid,
+		startedAt: h.clock.now - 5_000,
+		argvDigest: supabaseArgvDigest([command]),
+		progressFile,
+		stackIds: [stackId],
+	});
+	h.alivePids.add(pid);
+	h.discovery.commands.set(pid, command);
+	return { jobId: job.id, pid };
+}
+
+/**
+ * The record a previous desktop wrote right before it spawned the create of
+ * `stackId`, flagged as awaiting the CLI's report.
+ */
+async function provisionalRecord(
+	h: EngineHarness,
+	stackId: string,
+	repo: string
+): Promise<void> {
+	const store = new SupabaseStackStore({
+		directory: path.join(h.userData, 'supabase'),
+		now: () => h.clock.now,
+	});
+	await store.load();
+	await store.upsertRecord({
+		id: stackId,
+		origin: 'managed',
+		name: 'default',
+		projectRoot: repo,
+		worktreePath: repo,
+		appPaths: [repo],
+		branchContext: 'refs/heads/main',
+		createdBy: { via: 'desktop' },
+		createdAt: h.clock.now - 5_000,
+		runtime: 'native',
+		pinned: false,
+		holds: [],
+		clocks: {},
+		exclusions: [],
+		studioEnabled: false,
+		flags: { starting: true },
+	});
+}
 
 describe('SupabaseEngine storage', () => {
 	it('keeps its stores in a private <userData>/supabase', async () => {

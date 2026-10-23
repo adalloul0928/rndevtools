@@ -5,6 +5,7 @@ import { redactDiagnosticText } from '@rndevtools/core/redact';
 import {
 	type DeviceAccessDecision,
 	type DeviceHold,
+	type DeviceRequester,
 	freeDevices,
 } from '../shared/device-hold';
 import {
@@ -133,17 +134,28 @@ export type LaneBackendPort = {
 };
 
 /**
- * Whether `requester` (an agent, or the operator when undefined) may drive
- * the Simulator: the agent service's answer, the one the router asks.
+ * Whether `requester` (an agent, the operator, or an anonymous request) may
+ * drive the Simulator: the agent service's answer, the one the router asks.
+ * The lane service asks as the agent that started the lane, else as the
+ * operator (the renderer starts lanes), and as `anonymous` only for a start
+ * the router took from a request with no verified identity.
  */
 export type LaneDeviceAccessPort = (
 	simulatorUdid: string,
-	requester: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined
+	requester: DeviceRequester
 ) => DeviceAccessDecision;
 
 type LaneListener = (state: LaneState) => void;
 
-type LaneStartInput = Extract<LaneOperation, { kind: 'lane.start' }>;
+type LaneStartInput = Extract<LaneOperation, { kind: 'lane.start' }> & {
+	/**
+	 * Set for a start the agent router took from a request with no verified
+	 * identity, which carries no `agent` either. The start then checks its
+	 * device as `anonymous`, not as the operator that an absent agent
+	 * otherwise means.
+	 */
+	requester?: 'anonymous';
+};
 
 type BackendEnv = Readonly<Record<string, string>>;
 
@@ -586,7 +598,8 @@ export class LaneService {
 
 	async runOperation(
 		value: LaneOperation,
-		signal: AbortSignal = new AbortController().signal
+		signal: AbortSignal = new AbortController().signal,
+		options: { requester?: 'anonymous' } = {}
 	): Promise<LaneOperationReceipt> {
 		const operation = laneOperationSchema.parse(value);
 		const base = { actionId: operation.actionId, kind: operation.kind };
@@ -594,7 +607,12 @@ export class LaneService {
 			if (this.#stopped) throw new Error('Lanes are shutting down.');
 			switch (operation.kind) {
 				case 'lane.start': {
-					const outcome = await this.#startLane(operation, signal);
+					const outcome = await this.#startLane(
+						options.requester
+							? { ...operation, requester: options.requester }
+							: operation,
+						signal
+					);
 					return laneOperationReceiptSchema.parse({
 						...base,
 						completed: true,
@@ -756,6 +774,14 @@ export class LaneService {
 		if (!environment) {
 			throw new Error(`Unknown lane environment "${input.environment}".`);
 		}
+		// Who this start checks its device as, in its turn. An agent's start is
+		// the agent's; one with no agent is the operator's (the renderer), unless
+		// the router marked it as taken from a request with no verified identity.
+		// The check that comes after the reservation stays the agent's or the
+		// operator's: the reservation holds the device against any later claim,
+		// and is itself the hold an anonymous start would then be refused by.
+		const requester: DeviceRequester =
+			input.agent ?? input.requester ?? 'operator';
 
 		// The agent passes wherever it is working. Resolve the checkout that
 		// contains it: that is the lane's worktree, and the requested directory
@@ -805,7 +831,7 @@ export class LaneService {
 			// existing lane, before anything starts. That lane may have been
 			// created since by a start queued ahead of this one, possibly on
 			// another session's device, so the check is made here too, in turn.
-			const access = this.#deviceAccess?.(existing.simulatorUdid, input.agent);
+			const access = this.#deviceAccess?.(existing.simulatorUdid, requester);
 			if (access && !access.allowed) throw new Error(access.reason);
 			const resumed = await this.#resumeLane(
 				existing,
@@ -858,7 +884,7 @@ export class LaneService {
 		// claim may have landed since. Checked again here, with nothing awaited
 		// before the reservation, which from then on holds the device for this
 		// start in the agent service's eyes (holdingLanes).
-		this.#assertDeviceAccess(device.udid, input.agent);
+		this.#assertDeviceAccess(device.udid, requester);
 		const id = this.#store.newLaneId();
 		reservation.simulatorUdid = device.udid;
 		reservation.laneId = id;
@@ -972,7 +998,7 @@ export class LaneService {
 			// got in anyway (as one can once an abandoned start's grace period
 			// runs out) is never overridden: the start fails instead. Nothing is
 			// awaited between this check and the store taking the lane.
-			this.#assertDeviceAccess(device.udid, input.agent);
+			this.#assertDeviceAccess(device.udid, input.agent ?? 'operator');
 			await this.#store.upsert(lane);
 		} catch (error) {
 			// The lane never came to exist, so the backend lets go of it: now,
@@ -1003,12 +1029,9 @@ export class LaneService {
 		return { lane: this.#view(lane) };
 	}
 
-	/** Refuses a device someone other than `agent` holds (see LaneDeviceAccessPort). */
-	#assertDeviceAccess(
-		simulatorUdid: string,
-		agent: Pick<LaneAgent, 'kind' | 'sessionId'> | undefined
-	): void {
-		const access = this.#deviceAccess?.(simulatorUdid, agent);
+	/** Refuses a device someone other than `requester` holds (see LaneDeviceAccessPort). */
+	#assertDeviceAccess(simulatorUdid: string, requester: DeviceRequester): void {
+		const access = this.#deviceAccess?.(simulatorUdid, requester);
 		if (access && !access.allowed) throw new Error(access.reason);
 	}
 

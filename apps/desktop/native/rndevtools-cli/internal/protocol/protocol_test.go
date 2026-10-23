@@ -23,6 +23,51 @@ func TestEncodeRequestUsesFrozenEnvelope(t *testing.T) {
 	}
 }
 
+func TestEncodeRequestCarriesTheSenderPidNextToTheClaim(t *testing.T) {
+	// The claim and the proof travel side by side: agent says which session the
+	// process names, peer lets the desktop check that the process is the one
+	// on the other end of the socket.
+	encoded, err := EncodeRequest(Request{
+		Protocol: Name,
+		ID:       testID,
+		Command:  json.RawMessage(`{"kind":"doctor"}`),
+		Agent:    map[string]any{"kind": "claude", "sessionId": "session-1"},
+		Peer:     &Peer{PID: 4242},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"protocol":"rndevtools/1","id":"cli-0123456789abcdef0123456789abcdef","command":{"kind":"doctor"},"agent":{"kind":"claude","sessionId":"session-1"},"peer":{"pid":4242}}`
+	if string(encoded) != want {
+		t.Fatalf("encoded request = %s, want %s", encoded, want)
+	}
+
+	// A request that names no peer carries no peer key at all.
+	encoded, err = EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"doctor"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "peer") {
+		t.Fatalf("an absent peer must not be encoded: %s", encoded)
+	}
+}
+
+func TestEncodeRequestOnlySendsAPidTheDesktopAccepts(t *testing.T) {
+	// The desktop's envelope schema takes an integer from 1 to 4194304 and
+	// refuses the whole request otherwise; a bad pid fails here instead.
+	for _, pid := range []int{1, 99999, 4_194_304} {
+		if _, err := EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"doctor"}`), Peer: &Peer{PID: pid}}); err != nil {
+			t.Fatalf("pid %d: %v", pid, err)
+		}
+	}
+	for _, pid := range []int{0, -1, -4242, 4_194_305} {
+		_, err := EncodeRequest(Request{Protocol: Name, ID: testID, Command: json.RawMessage(`{"kind":"doctor"}`), Peer: &Peer{PID: pid}})
+		if err == nil || !strings.Contains(err.Error(), "peer pid") {
+			t.Fatalf("pid %d must be rejected as a peer pid: %v", pid, err)
+		}
+	}
+}
+
 func TestSupabaseIsACommandListedAfterLane(t *testing.T) {
 	if command, err := ParseCommand("supabase"); err != nil || command != CommandSupabase {
 		t.Fatalf("ParseCommand(supabase) = %q, %v", command, err)
