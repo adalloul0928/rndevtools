@@ -152,13 +152,19 @@ async function resolveNativeSigning(context) {
 		);
 		localAdHoc = true;
 	}
+	// An ad-hoc binary has no TeamIdentifier. Hardened runtime's library
+	// validation would reject Electron Framework on a cold launch. This local
+	// path cannot satisfy the Developer ID public-release gate above.
+	const effectiveConfig = localAdHoc
+		? { ...config, hardenedRuntime: false }
+		: config;
 	return identity
 		? {
 				identity: identity.hash || identity.name,
 				builderIdentity: identity,
-				config,
+				config: effectiveConfig,
 				keychainFile: signingInfo.keychainFile,
-				hardenedRuntime: config.hardenedRuntime !== false,
+				hardenedRuntime: effectiveConfig.hardenedRuntime !== false,
 				localAdHoc,
 				timestamp: identity.name === '-' ? 'none' : config.timestamp,
 				type,
@@ -193,3 +199,5 @@ function buildNativeCodeSignArguments(helperPath, signing) {
 	);
 	return arguments_;
 }
+
+module.exports.resolveNativeSigning = resolveNativeSigning;
