@@ -95,6 +95,18 @@
 - `createAsyncStorageDevtoolsAdapter` and `createSecureStoreDevtoolsAdapter`
   throw a `TypeError` when given no store, instead of returning an adapter
   whose every read fails.
+- The restore-point and scenario repositories refuse to write while their
+  stored document could not be loaded. A failed `getItem` used to leave the
+  repository empty, and the next capture or save then replaced everything that
+  was stored with a document of one entry. Writes now reject with the load
+  error. `ScenarioRepository` reports it as `loadError` on its snapshot and
+  through `subscribeToLoadError()`, which fires with every change to the
+  repository, and `getLoadError()`. `reload()` reads the document again behind
+  any queued write. `discardStoredData()` deletes it on purpose, and only while
+  the load error still stands, so a confirmation given before a successful
+  retry cannot destroy what that retry loaded. The restore-points panel shows
+  the error with Retry and Discard controls, and the plugin exposes
+  `getLoadError()`, `reload()` and `discardStoredData()`.
 - `rndevtools-verify-bundle --forbid-loopback-urls` and
   `--preset supabase-local` fail a release bundle that still carries a
   loopback URL or a local Supabase key.

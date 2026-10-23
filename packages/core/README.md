@@ -138,8 +138,11 @@ The advanced plugins use host-owned adapters instead of global interception:
   under a key whose name marks it sensitive, such as `refreshToken` or
   `session`. An adapter opts out of both with `revealValues: true`.
 - Restore points accept only declared sources. Snapshots must be JSON, are
-  bounded by source and session size, remain in memory, and capture rollback
-  state before applying a restore.
+  bounded by source and session size, remain in memory unless a persistence
+  adapter is given, and capture rollback state before applying a restore. When
+  persisted points cannot be loaded, the plugin writes nothing until they load
+  again or the stored points are discarded on purpose, so a transient storage
+  failure cannot replace them; the panel offers both choices.
 - Console subscribes to an application's structured logger, groups repeated
   entries, and preserves supplied scope, correlation, bounded stack, source,
   and bookmark metadata after redaction. It redacts a bounded window of each
