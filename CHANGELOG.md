@@ -55,6 +55,15 @@
 - While an owner source is bound, an authorization grant applies only when it
   names that source's live owner. A source that cannot be subscribed to
   revokes authorization and refuses grants until a working one is bound.
+- The desktop client checks authorization again while an action runs, not only
+  before it starts. A host that passes the new optional
+  `subscribeToAuthorization` (the mirror's `subscribeToDevtoolsAuthorization`)
+  has the action's `signal` aborted when authorization is revoked or changes
+  owner, and the desktop is told the action failed with an unknown outcome.
+  Without it, the client compares the grant when the action settles and gives
+  the same answer if it changed, where a `storage.set` or `scenarios.execute`
+  that finished after sign-out was reported `ok`. Signing out and back in as
+  the same user during an action is only noticed with the subscription.
 - `rndevtools-verify-bundle` fails when it finds no bundle file, instead of
   passing an empty or mistyped directory. It also scans `.bundle`,
   `.jsbundle`, `.mjs` and `.cjs` files, accepts a single bundle file, and
@@ -82,6 +91,16 @@
   `node_modules/.bin` symlink, including under `--preserve-symlinks-main`.
   Previously the main-module guard never matched and the command exited 0
   without scanning.
+- `rndevtools-verify-bundle` reads Hermes bytecode (`.hbc`, `.bundle` and
+  `.jsbundle`) as bytes and searches a marker as UTF-8 and as UTF-16LE, and
+  decodes the file as UTF-8 and as UTF-16LE from either byte alignment for
+  `--forbid-loopback-urls` and `--preset supabase-local`. Hermes stores a
+  string literal with any non-ASCII character as UTF-16, so a non-ASCII
+  `--marker`, or an ASCII one inside such a literal, passed as clean before.
+  The preset also finds a service-role token that Hermes stores right after
+  another token; it read the first token's signature into the second token's
+  header and missed it. The example app's `verify:bundle` also exports an
+  unpruned bundle and fails unless the verifier fails on it.
 - The storage plugin redacts a value stored under a key whose name marks it
   sensitive (`refreshToken`, `session`, `email`…) as `[REDACTED]`; set
   `revealValues: true` on the adapter to show such values.

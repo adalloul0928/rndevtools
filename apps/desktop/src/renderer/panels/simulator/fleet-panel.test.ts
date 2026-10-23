@@ -14,6 +14,7 @@ import {
 	parseSimulatorCreateCount,
 	simulatorEraseAvailability,
 	simulatorOpenPresentation,
+	storedFleetTile,
 } from './fleet-panel';
 
 // What each runtime hook returns while FleetPanel renders; tests fill it in.
@@ -139,6 +140,13 @@ describe('Simulator Fleet wall tiles', () => {
 		expect(clampFleetTile(10_000)).toBe(FLEET_TILE_RANGE.max);
 		expect(clampFleetTile(207)).toBe(200);
 		expect(clampFleetTile(211)).toBe(220);
+	});
+
+	it('starts at the default size when nothing was stored yet', () => {
+		expect(storedFleetTile(null)).toBe(FLEET_TILE_RANGE.default);
+		expect(storedFleetTile('')).toBe(FLEET_TILE_RANGE.default);
+		expect(storedFleetTile('260')).toBe(260);
+		expect(storedFleetTile('not a size')).toBe(FLEET_TILE_RANGE.default);
 	});
 });
 
