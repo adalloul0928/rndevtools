@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Validate and detach device hello fields before connecting, redacting display text
+  and omitting undeclared fields instead of entering a broker rejection loop.
+
 - Refused desktop actions keep read-only diagnostics connected. Authorization read
   failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
