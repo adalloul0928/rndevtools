@@ -290,8 +290,8 @@
 
 ### Desktop app
 
-- The agent hook only redirects Simulator mutations and Metro starts while
-  the desktop is reachable; unrelated shell commands never run a reachability probe.
+- SimSlim verification serializes absent observed-process evidence as empty arrays,
+  including preparation and failure responses, so desktop validation accepts it.
 - The CLI still reads and validates a buffered reply if the desktop closes
   just before the client half-closes its request, avoiding a spurious transport error.
 
@@ -341,6 +341,9 @@
   holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
   of a snapshot past its bound, then requires the schema to reject the
   snapshot as it stands and accept it fitted. No bound changed.
+- The agent hook only redirects Simulator mutations and Metro starts while
+  the desktop is reachable; unrelated shell commands never run a reachability probe.
+
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
   checks that the process owns the connection, and it follows the process's
