@@ -41,6 +41,10 @@ type fakeBackend struct {
 	diskPlanCalls           int
 	diskCleanupCalls        int
 	diskCleanupCategoryIDs  []string
+	// Status on a shut-down Simulator boots it temporarily, as the real
+	// client's does; ProbeStatus never does.
+	temporaryBoots int
+	probeCalls     int
 }
 
 func newFakeBackend(managed ...string) *fakeBackend {
@@ -143,12 +147,33 @@ func (backend *fakeBackend) Status(context.Context, string) (simulator.Status, e
 	if backend.err != nil {
 		return simulator.Status{}, backend.err
 	}
+	if backend.device.State == "Shutdown" {
+		backend.temporaryBoots++
+	}
 	return simulator.Status{
 		Device:                    backend.device,
 		ManagedDisabledServiceIDs: canonicalManagedIDs(backend.managed),
 		ManagedDisabledCount:      len(backend.managed),
 		ManagedServiceCount:       len(catalog.ManagedServiceIDs()),
+		MatchingProfileIDs:        []string{},
 	}, nil
+}
+
+func (backend *fakeBackend) ProbeStatus(ctx context.Context, simulatorID string) (simulator.Status, error) {
+	backend.probeCalls++
+	if backend.err != nil {
+		return simulator.Status{}, backend.err
+	}
+	if backend.device.State == "Shutdown" {
+		return simulator.Status{
+			Device:                    backend.device,
+			ManagedDisabledServiceIDs: []string{},
+			ManagedDisabledCount:      0,
+			ManagedServiceCount:       len(catalog.ManagedServiceIDs()),
+			MatchingProfileIDs:        []string{},
+		}, nil
+	}
+	return backend.Status(ctx, simulatorID)
 }
 
 func (backend *fakeBackend) Compatibility(context.Context, string) (compatibility.Tuple, error) {
@@ -344,6 +369,40 @@ func TestDiskCleanupRequiresExactConfirmationAndBoundedUniqueSelection(t *testin
 	cleanup := result.(DiskCleanupResult)
 	if backend.diskCleanupCalls != 1 || !slices.Equal(backend.diskCleanupCategoryIDs, []string{"logs", "caches"}) || cleanup.SimulatorID != helperTestUDID || cleanup.ReclaimedBytes != 3_072 || !cleanup.BootStateRestored {
 		t.Fatalf("disk cleanup did not use the exact bounded request: %#v backend=%#v", cleanup, backend)
+	}
+}
+
+func TestSimulatorStatusNeverBootsAShutdownTargetAndEncodesEmptyArrays(t *testing.T) {
+	backend := newFakeBackend("com.apple.apsd")
+	backend.device.State = "Shutdown"
+	service := NewService(backend, "dev", "unknown")
+	result, apiError := service.Handle(
+		context.Background(),
+		request(protocol.OperationSimulatorStatus, `{"simulatorId":"`+helperTestUDID+`"}`),
+	)
+	if apiError != nil {
+		t.Fatal(apiError)
+	}
+	if backend.temporaryBoots != 0 || backend.probeCalls != 1 || backend.device.State != "Shutdown" {
+		t.Fatalf("the status operation booted a shut-down Simulator: boots=%d probes=%d state=%s", backend.temporaryBoots, backend.probeCalls, backend.device.State)
+	}
+	status, ok := result.(simulator.Status)
+	if !ok {
+		t.Fatalf("unexpected status result: %#v", result)
+	}
+	if status.Device.State != "Shutdown" || status.ManagedDisabledCount != 0 ||
+		len(status.ManagedDisabledServiceIDs) != 0 || len(status.MatchingProfileIDs) != 0 ||
+		status.ManagedServiceCount != len(catalog.ManagedServiceIDs()) {
+		t.Fatalf("a shut-down Simulator must report empty managed sets without inspection: %#v", status)
+	}
+	encoded, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"managedDisabledServiceIds":[]`, `"matchingProfileIds":[]`} {
+		if !bytes.Contains(encoded, []byte(field)) {
+			t.Fatalf("status must encode %s, not null: %s", field, encoded)
+		}
 	}
 }
 

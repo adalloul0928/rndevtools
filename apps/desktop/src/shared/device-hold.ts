@@ -259,9 +259,18 @@ export type DeviceAccessDecision =
 	| { allowed: false; reason: string; hold: DeviceHold };
 
 /**
- * Whether `requester` may mutate or drive the device. The operator (no
- * requester) may touch anything; an agent may touch a free device, a device it
- * holds, or a device whose hold is abandoned and past its grace period.
+ * Who asks for a device: an agent session, the `operator` (the person at the
+ * desktop, acting through the renderer), or `anonymous`, a socket request
+ * with no verified agent identity, which nothing ties to any holder.
+ */
+export type DeviceRequester = DeviceHolder | 'operator' | 'anonymous';
+
+/**
+ * Whether `requester` may mutate or drive the device. The operator may touch
+ * anything. An agent may touch a free device, a device it holds, or a device
+ * whose hold is abandoned and past its grace period. An anonymous request
+ * may touch a free device or one whose hold is abandoned past its grace
+ * period, and nothing anyone holds: it cannot be the holder of anything.
  *
  * A synthetic holder stands for every MCP session of its kind. A session of
  * that kind working inside the held lane's checkout (`scope`) is the one
@@ -270,7 +279,7 @@ export type DeviceAccessDecision =
  */
 export function decideDeviceAccess(
 	hold: DeviceHold | undefined,
-	requester: DeviceHolder | undefined,
+	requester: DeviceRequester,
 	now: number,
 	scope?: {
 		/** The held lane's checkout (its worktree root). */
@@ -279,7 +288,17 @@ export function decideDeviceAccess(
 		requesterCwd?: string | undefined;
 	}
 ): DeviceAccessDecision {
-	if (!hold || !requester) return { allowed: true };
+	if (!hold || requester === 'operator') return { allowed: true };
+	const released =
+		!hold.holderLive && hold.releaseAt !== undefined && now >= hold.releaseAt;
+	if (requester === 'anonymous') {
+		if (released) return { allowed: true };
+		return {
+			allowed: false,
+			hold,
+			reason: `${describeHold(hold, now)} Requests without a verified agent identity may use free Simulators only.`,
+		};
+	}
 	if (hold.holder && holderKey(hold.holder) === holderKey(requester)) {
 		return { allowed: true };
 	}
@@ -294,13 +313,16 @@ export function decideDeviceAccess(
 	) {
 		return { allowed: true };
 	}
-	if (
-		!hold.holderLive &&
-		hold.releaseAt !== undefined &&
-		now >= hold.releaseAt
-	) {
-		return { allowed: true };
-	}
+	if (released) return { allowed: true };
+	return {
+		allowed: false,
+		hold,
+		reason: `${describeHold(hold, now)} Pick a free device, or ask the user to release it.`,
+	};
+}
+
+/** `Simulator X is held by … through …`, with how long an abandoned hold has left. */
+function describeHold(hold: DeviceHold, now: number): string {
 	const owner = hold.holder
 		? `${hold.holder.kind} session ${hold.holder.sessionId}`
 		: 'the operator';
@@ -313,11 +335,7 @@ export function decideDeviceAccess(
 					? `in ${Math.max(0, Math.ceil((hold.releaseAt - now) / 60_000))} min`
 					: 'soon'
 			})`;
-	return {
-		allowed: false,
-		hold,
-		reason: `Simulator ${hold.simulatorUdid} is held by ${owner} through ${what}${liveness}. Pick a free device, or ask the user to release it.`,
-	};
+	return `Simulator ${hold.simulatorUdid} is held by ${owner} through ${what}${liveness}.`;
 }
 
 /**

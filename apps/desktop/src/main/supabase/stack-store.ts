@@ -160,6 +160,12 @@ const recordFlagsSchema = z.strictObject({
 	needsRecreate: z.literal(true).optional(),
 	/** Registered by prepare and never started since. */
 	prepared: z.literal(true).optional(),
+	/**
+	 * A create was spawned and has not reported back. The record is written
+	 * before the CLI runs, so that a desktop which quits meanwhile can adopt
+	 * the stack from it; whatever learns how the create ended clears the flag.
+	 */
+	starting: z.literal(true).optional(),
 	/** A Docker or Podman stack on a managed identity was stopped once at this time. */
 	containerStoppedAt: timestampSchema.optional(),
 	/** Was: the stack a branch follow moved the holds to. No longer written. */

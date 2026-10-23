@@ -12,6 +12,9 @@ export default defineConfig({
 		},
 	},
 	test: {
+		// Avoid saturating developer machines while Electron/native builds run.
+		// A dedicated runner can opt into more with --maxWorkers.
+		maxWorkers: 2,
 		include: ['*.test.ts', 'src/**/*.test.ts', 'src/**/*.test.tsx'],
 	},
 });

@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import {
+	desktopActionAcknowledgementTimeoutMs,
+	desktopActionTimeoutMs,
+} from '@rndevtools/core/desktop-protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import {
 	createEmptyDeviceTools,
@@ -70,6 +74,53 @@ function actionRouter(session: BrokerActionSession): {
 }
 
 describe('BrokerActionRouter', () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it.each([
+		['console', 'clear', 'console.clear'],
+		['query', 'invalidate', 'query.invalidate'],
+		['restore', 'rename', 'restore.rename'],
+		['scenarios', 'execute', 'scenarios.execute'],
+	] as const)(
+		'waits for %s.%s as long as the device may take, plus its grace',
+		async (tool, command, capability) => {
+			vi.useFakeTimers();
+			const { session } = actionSession([capability]);
+			const { router } = actionRouter(session);
+			const settled = vi.fn();
+			const pending = router.dispatch({
+				actionId: 'slow-action',
+				deviceId: 'action-device',
+				tool,
+				command,
+				payload: {},
+			});
+			void pending.then(settled);
+
+			// The device client may still be inside its own allowance for the
+			// command, however long that is, so the desktop has not given up.
+			await vi.advanceTimersByTimeAsync(desktopActionTimeoutMs(tool, command));
+			expect(settled).not.toHaveBeenCalled();
+
+			const acknowledgement = desktopActionAcknowledgementTimeoutMs(
+				tool,
+				command
+			);
+			await vi.advanceTimersByTimeAsync(
+				acknowledgement - desktopActionTimeoutMs(tool, command) - 1
+			);
+			expect(settled).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			await expect(pending).resolves.toMatchObject({
+				actionId: 'slow-action',
+				ok: false,
+				error: expect.stringContaining('did not acknowledge the action'),
+			});
+		}
+	);
+
 	it('rejects unsupported actions before sending to the device', async () => {
 		const { session, send } = actionSession([]);
 		const { router } = actionRouter(session);

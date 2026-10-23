@@ -2,7 +2,11 @@ import {
 	type DesktopDeviceAction,
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
+	RNDEVTOOLS_ACTION_TIMEOUTS_MS,
+	RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS,
 	RNDEVTOOLS_SNAPSHOT_LIMITS,
+	RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS,
+	RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import { utf8ByteLength } from '@rndevtools/core/serialize';
 import * as Device from 'expo-device';
@@ -537,14 +541,17 @@ describe('desktop client', () => {
 
 	it.each([
 		// Over in UTF-16 code units, so the client never counts its bytes.
-		['in UTF-16 code units', 'x'.repeat(MAX_SNAPSHOT_BYTES), false],
+		['in UTF-16 code units', 'x', 17, false],
 		// Two bytes per character: within the budget in code units, over in bytes.
-		['in UTF-8 bytes alone', 'é'.repeat(MAX_SNAPSHOT_BYTES / 2), true],
+		['in UTF-8 bytes alone', 'é', 9, true],
 	])(
 		'refuses to send a snapshot over the aggregate wire budget %s',
-		(_case, message, counted) => {
+		(_case, character, rows, counted) => {
+			// Each message is as long as the desktop takes, since the client cuts
+			// a longer one, so only the rows together are over the budget.
+			const message = character.repeat(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.long);
 			mockCaptureDesktopTools.mockReturnValueOnce({
-				diagnostics: [{ message }],
+				diagnostics: Array.from({ length: rows }, () => ({ message })),
 			} as never);
 			const client = startDesktopClient({
 				host: testHost,
@@ -717,6 +724,120 @@ describe('desktop client', () => {
 		} finally {
 			client.stop();
 		}
+	});
+
+	describe('host action deadlines', () => {
+		const scenarioHost: DesktopClientHost = {
+			...testHost,
+			createDeviceInfo: () => ({
+				...testDevice,
+				capabilities: ['console.clear', 'scenarios.execute'],
+			}),
+		};
+		const scenarioExecute = (actionId: string) => ({
+			type: 'action',
+			action: {
+				actionId,
+				deviceId: 'device-1',
+				tool: 'scenarios',
+				command: 'execute',
+				payload: { id: 'scenario', version: 1, definitionToken: 'token' },
+			},
+		});
+		const timedOut = (actionId: string, ms: number) => ({
+			type: 'action-result',
+			actionId,
+			ok: false,
+			error: `Desktop action timed out after ${ms} ms; its outcome is unknown.`,
+		});
+
+		beforeEach(() => {
+			jest.useFakeTimers();
+			mockRunDesktopAction.mockImplementation(
+				() => new Promise<void>(() => undefined),
+			);
+			setDevtoolsAuthorization({ enabled: true, ownerId: 'owner-a' });
+		});
+
+		it('gives a quick command the time it is allowed, not a fixed longer one', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['console.clear'];
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('quick'));
+				await jest.advanceTimersByTimeAsync(allowance - 1);
+				expect(actionResults(socket)).toEqual([]);
+
+				await jest.advanceTimersByTimeAsync(1);
+				expect(actionResults(socket)).toEqual([timedOut('quick', allowance)]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('lets a scenario run take longer than any quick command', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['scenarios.execute'];
+			const client = startDesktopClient({
+				host: scenarioHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(scenarioExecute('long-scenario'));
+				await jest.advanceTimersByTimeAsync(allowance - 1);
+				expect(actionResults(socket)).toEqual([]);
+
+				await jest.advanceTimersByTimeAsync(1);
+				expect(actionResults(socket)).toEqual([
+					timedOut('long-scenario', allowance),
+				]);
+			} finally {
+				client.stop();
+			}
+		});
+
+		it('treats actionTimeoutMs as a ceiling that shortens a command and never extends it', async () => {
+			const allowance = RNDEVTOOLS_ACTION_TIMEOUTS_MS['console.clear'];
+			const extended = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+				actionTimeoutMs: 60 * 60_000,
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(consoleClear('capped-above'));
+				await jest.advanceTimersByTimeAsync(allowance);
+				expect(actionResults(socket)).toEqual([
+					timedOut('capped-above', allowance),
+				]);
+			} finally {
+				extended.stop();
+			}
+
+			FakeWebSocket.instances = [];
+			const shortened = startDesktopClient({
+				host: scenarioHost,
+				candidates: [BROKER_URL],
+				actionTimeoutMs: 2_000,
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				socket.receive(scenarioExecute('capped-below'));
+				await jest.advanceTimersByTimeAsync(2_000);
+				expect(actionResults(socket)).toEqual([
+					timedOut('capped-below', 2_000),
+				]);
+			} finally {
+				shortened.stop();
+			}
+		});
 	});
 
 	it.each(['stop', 'disconnect'] as const)(
@@ -1204,6 +1325,236 @@ describe('desktop client', () => {
 			client.stop();
 		}
 	});
+
+	it('fits nested lists, texts and numbers to what the desktop validates', async () => {
+		jest.useFakeTimers();
+		const sourceFiles = RNDEVTOOLS_SNAPSHOT_LIMITS.componentSourceFiles;
+		const samples = RNDEVTOOLS_SNAPSHOT_LIMITS.performanceSamples;
+		const depth = RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS.componentDepth;
+		mockCaptureDesktopTools.mockReturnValue({
+			components: [
+				{
+					id: 'component-1',
+					name: 'n'.repeat(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.short + 1),
+					depth: depth + 1,
+					sourceFiles: Array.from(
+						{ length: sourceFiles + 1 },
+						(_, index) => `file-${index}.tsx`,
+					),
+				},
+			],
+			performance: {
+				samples: Array.from({ length: samples + 1 }, (_, index) => ({
+					id: `sample-${index}`,
+					jsFps: 60,
+				})),
+			},
+			scenarioRuntime: {
+				running: true,
+				active: {
+					warnings: Array.from(
+						{ length: RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioWarnings + 1 },
+						(_, index) => `warning-${index}`,
+					),
+				},
+			},
+		} as never);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			socket.open();
+			await jest.advanceTimersByTimeAsync(3_000);
+
+			const snapshots = sentMessages(socket).filter(
+				(message) => message.type === 'snapshot',
+			);
+			expect(snapshots.length).toBeGreaterThan(1);
+			const [first] = snapshots;
+			if (!first) throw new Error('Expected a snapshot.');
+			const tools = first.tools as {
+				components: {
+					name: string;
+					depth: number;
+					sourceFiles: string[];
+				}[];
+				performance: { samples: { id: string }[] };
+				scenarioRuntime: { active: { warnings: string[] } };
+			};
+			const [component] = tools.components;
+			expect(component?.sourceFiles).toHaveLength(sourceFiles);
+			expect(component?.sourceFiles[0]).toBe('file-0.tsx');
+			expect(component?.name).toBe(
+				'n'.repeat(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.short),
+			);
+			expect(component?.depth).toBe(depth);
+			// A chronological list keeps its newest rows, an ordered one its first.
+			expect(tools.performance.samples).toHaveLength(samples);
+			expect(tools.performance.samples[0]?.id).toBe('sample-1');
+			expect(tools.performance.samples.at(-1)?.id).toBe(`sample-${samples}`);
+			expect(tools.scenarioRuntime.active.warnings).toHaveLength(
+				RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioWarnings,
+			);
+			expect(tools.scenarioRuntime.active.warnings[0]).toBe('warning-0');
+
+			const warnings = clientDiagnosticMessages().filter((message) =>
+				message.startsWith('Trimmed '),
+			);
+			expect(warnings).toHaveLength(1);
+			for (const change of [
+				`components[].sourceFiles to ${sourceFiles} rows`,
+				`components[].name to ${RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.short} characters`,
+				`components[].depth to 0..${depth}`,
+				`performance.samples to ${samples} rows`,
+				`scenarioRuntime.active.warnings to ${RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS.scenarioWarnings} rows`,
+			]) {
+				expect(warnings[0]).toContain(change);
+			}
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('cuts one oversized text so the snapshot is still sent', async () => {
+		jest.useFakeTimers();
+		const limit = RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.long;
+		mockCaptureDesktopTools.mockReturnValue({
+			diagnostics: [
+				{ id: 'diagnostic-1', message: 'x'.repeat(MAX_SNAPSHOT_BYTES) },
+			],
+		} as never);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			socket.open();
+			await jest.advanceTimersByTimeAsync(1_000);
+
+			const snapshot = sentMessages(socket).find(
+				(message) => message.type === 'snapshot',
+			);
+			const tools = snapshot?.tools as { diagnostics: { message: string }[] };
+			expect(tools.diagnostics[0]?.message).toBe('x'.repeat(limit));
+			expect(clientDiagnosticMessages()).toContain(
+				`Trimmed diagnostics[].message to ${limit} characters in the desktop snapshot to fit its limits.`,
+			);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('names only the first few changes in a warning, and how many more', async () => {
+		jest.useFakeTimers();
+		const long = 'x'.repeat(RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS.long + 1);
+		const row = {
+			id: 'request-1',
+			url: long,
+			path: long,
+			requestBody: long,
+			responseBody: long,
+			error: long,
+			host: long,
+			contentType: long,
+			source: long,
+		};
+		mockCaptureDesktopTools.mockReturnValue({ network: [row] } as never);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			socket.open();
+			await jest.advanceTimersByTimeAsync(3_000);
+
+			// Eight texts are over, and the warning names six of them.
+			const warnings = clientDiagnosticMessages().filter((message) =>
+				message.startsWith('Trimmed '),
+			);
+			expect(warnings).toHaveLength(1);
+			const [warning = ''] = warnings;
+			const { long, short } = RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS;
+			const start = `Trimmed network[].url to ${long} characters, network[].host to ${short} characters, `;
+			expect(warning.slice(0, start.length)).toBe(start);
+			expect(warning.split(' characters')).toHaveLength(7);
+			expect(
+				warning.endsWith(
+					' and 2 more in the desktop snapshot to fit its limits.',
+				),
+			).toBe(true);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it('sends a snapshot that is within every bound as it is, with no warning', async () => {
+		jest.useFakeTimers();
+		const tools = {
+			network: [{ id: 'request-1', url: 'https://example.com/items' }],
+			components: [{ id: 'component-1', sourceFiles: ['App.tsx'] }],
+		};
+		mockCaptureDesktopTools.mockReturnValue(tools as never);
+		const client = startDesktopClient({
+			host: testHost,
+			candidates: [BROKER_URL],
+		});
+
+		try {
+			const socket = latestSocket();
+			socket.open();
+			await jest.advanceTimersByTimeAsync(1_000);
+
+			const snapshot = sentMessages(socket).find(
+				(message) => message.type === 'snapshot',
+			);
+			expect(snapshot?.tools).toEqual(tools);
+			expect(
+				clientDiagnosticMessages().filter((message) =>
+					message.startsWith('Trimmed '),
+				),
+			).toEqual([]);
+		} finally {
+			client.stop();
+		}
+	});
+
+	it.each([
+		['undefined', undefined],
+		['null', null],
+	])(
+		'records a failed capture, not a frame, when captureTools returns %s',
+		async (_name, returned) => {
+			jest.useFakeTimers();
+			mockCaptureDesktopTools.mockReturnValue(returned as never);
+			const client = startDesktopClient({
+				host: testHost,
+				candidates: [BROKER_URL],
+			});
+			try {
+				const socket = latestSocket();
+				socket.open();
+				await jest.advanceTimersByTimeAsync(1_500);
+
+				expect(
+					sentMessages(socket).filter((message) => message.type === 'snapshot'),
+				).toEqual([]);
+				expect(
+					clientDiagnosticMessages().some((message) =>
+						message.includes('captureTools returned no snapshot object'),
+					),
+				).toBe(true);
+			} finally {
+				client.stop();
+			}
+		},
+	);
 
 	it('backs off after consecutive broker rejections and reports why', async () => {
 		jest.useFakeTimers();

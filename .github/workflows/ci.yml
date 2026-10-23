@@ -28,7 +28,7 @@ jobs:
           cache: pnpm
       - name: Public content
         run: |
-          node --test scripts/check-public-content.test.mjs
+          node --test scripts/check-public-content.test.mjs scripts/release-signing.test.mjs
           node scripts/check-public-content.mjs
       # Neither npm package needs an install script, so none run here. That
       # keeps dependency postinstall code off a job that builds fork PRs.

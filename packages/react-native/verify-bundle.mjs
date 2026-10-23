@@ -238,7 +238,7 @@ async function readBundle(file) {
 		texts: [
 			bytes.toString('utf8'),
 			bytes.toString('utf16le'),
-			// Node 24's Linux decoder can corrupt memory on an unaligned
+			// Node 24.21's Linux decoder can corrupt memory on an unaligned
 			// UTF-16 view. Copy the odd-offset bytes into an aligned Buffer first.
 			Buffer.from(bytes.subarray(1)).toString('utf16le'),
 		],

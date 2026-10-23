@@ -91,13 +91,11 @@ func Run(config Config) int {
 		)
 		return ExitUsage
 	}
-	getenv := config.lookup()
-	parsed, err := command.ParseWithEnvironment(
+	parsed, err := command.Parse(
 		kind,
 		config.Arguments[1:],
 		config.Stdin,
 		config.StdinAvailable,
-		getenv,
 	)
 	if errors.Is(err, command.ErrHelp) {
 		fmt.Fprint(config.Stdout, command.Usage(kind))
@@ -132,10 +130,16 @@ func Run(config Config) int {
 		Protocol: protocol.Name,
 		ID:       requestID,
 		Command:  parsed.Command,
+		// The pid lets the desktop check the session named below: it confirms
+		// this process owns the socket, then follows it to the agent that
+		// spawned it.
+		Peer: &protocol.Peer{PID: os.Getpid()},
 	}
-	// Attribution rides on the envelope for every command, so the desktop can
-	// show which session is driving which Simulator without per-command flags.
-	if agent := command.AgentFromEnvironment(getenv); agent != nil {
+	// The session variables ride on the envelope of every command as a claim
+	// and never inside a command: the desktop attributes touches and holds to a
+	// session only after it has verified the claim, so naming one here proves
+	// nothing, and omitting it makes the request unprivileged.
+	if agent := command.AgentFromEnvironment(config.lookup()); agent != nil {
 		request.Agent = agent
 	}
 	if _, err := protocol.EncodeRequest(request); err != nil {

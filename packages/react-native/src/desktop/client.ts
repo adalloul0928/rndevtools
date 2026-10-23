@@ -3,9 +3,10 @@ import {
 	type DesktopDeviceInfoSnapshot,
 	type DesktopDeviceToolsSnapshot,
 	desktopActionCapability,
+	desktopActionTimeoutMs,
+	fitDesktopSnapshot,
 	parseDesktopActionEnvelope,
 	RNDEVTOOLS_PROTOCOL_VERSION,
-	RNDEVTOOLS_SNAPSHOT_LIMITS,
 } from '@rndevtools/core/desktop-protocol';
 import {
 	diagnosticErrorText,
@@ -83,9 +84,6 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 2_500;
 const MAX_RETRY_DELAY_MS = 30_000;
 const HEALTHY_CONNECTION_MS = 10_000;
-// Outlasts the broker's longest acknowledgement window (30 s), so the client
-// never gives up on an action the desktop is still waiting for.
-const DEFAULT_ACTION_TIMEOUT_MS = 45_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_DIAGNOSTICS = 200;
 const MAX_PROCESSED_ACTIONS = 200;
@@ -110,7 +108,9 @@ const ANDROID_EMULATOR_HOST_ALIAS = '10.0.2.2';
 const MAX_PENDING_DESKTOP_ACTIONS = 16;
 const MAX_DESKTOP_ACTIONS_PER_WINDOW = 60;
 const DESKTOP_ACTION_RATE_WINDOW_MS = 10_000;
-const SNAPSHOT_ROW_LIMITS = Object.entries(RNDEVTOOLS_SNAPSHOT_LIMITS);
+// How many of the changes a fit made one warning names, so that a snapshot
+// over many bounds still gives a short line.
+const MAX_REPORTED_TRIMS = 6;
 
 type ActionResultMessage = {
 	type: 'action-result';
@@ -265,6 +265,19 @@ function utf8ByteLengthWithin(
 	return bytes > maxBytes ? undefined : bytes;
 }
 
+/**
+ * How long the host gets for `action`: the limit its command is allowed, or the
+ * host's ceiling when that is shorter. The desktop waits this long plus a short
+ * grace for the result.
+ */
+function actionDeadlineMs(
+	action: DesktopDeviceAction,
+	ceilingMs: number | undefined,
+): number {
+	const limit = desktopActionTimeoutMs(action.tool, action.command);
+	return ceilingMs === undefined ? limit : Math.min(limit, ceilingMs);
+}
+
 /** Meters one connection's outgoing frames and their UTF-8 bytes. */
 class DesktopFrameBudget {
 	readonly #sent: { at: number; bytes: number }[] = [];
@@ -322,32 +335,6 @@ type DesktopOutbox = {
 	lastSnapshotBytes: number;
 	flushTimer: ReturnType<typeof setTimeout> | undefined;
 };
-
-/**
- * Trims every top-level collection to the row limit the desktop schema
- * enforces. The broker rejects a whole snapshot that is over any limit and
- * closes the socket, so one oversized projection would otherwise leave the
- * device reconnecting in a loop. The newest rows are kept: core's event stores
- * append, so those are last.
- */
-function trimToSnapshotLimits(tools: DesktopDeviceToolsSnapshot): {
-	tools: DesktopDeviceToolsSnapshot;
-	trimmed: readonly string[];
-} {
-	const fields: Readonly<Record<string, unknown>> = tools;
-	let trimmedFields: Record<string, unknown> | undefined;
-	const trimmed: string[] = [];
-	for (const [name, limit] of SNAPSHOT_ROW_LIMITS) {
-		const rows = fields[name];
-		if (!Array.isArray(rows) || rows.length <= limit) continue;
-		trimmedFields ??= { ...fields };
-		trimmedFields[name] = rows.slice(-limit);
-		trimmed.push(`${name} to ${limit} rows`);
-	}
-	return trimmedFields
-		? { tools: trimmedFields as DesktopDeviceToolsSnapshot, trimmed }
-		: { tools, trimmed };
-}
 
 function closeDetail(
 	event: { code?: number; reason?: string } | undefined,
@@ -574,9 +561,12 @@ export type DesktopClientOptions = {
 	/** Explicit broker URLs. Defaults to the discovered loopback candidates. */
 	candidates?: readonly string[];
 	/**
-	 * How long one host action may run before the client tells the desktop it
-	 * timed out, aborts the action's signal, and moves on to the next queued
-	 * action. Defaults to 45 seconds.
+	 * A ceiling, in milliseconds, on how long any one host action may run
+	 * before the client tells the desktop it timed out, aborts the action's
+	 * signal, and moves on to the next queued action. Each command's own limit
+	 * is `desktopActionTimeoutMs`, and the desktop waits that long plus a short
+	 * grace for the answer. This can only shorten the limit. Defaults to no
+	 * ceiling.
 	 */
 	actionTimeoutMs?: number;
 };
@@ -584,15 +574,12 @@ export type DesktopClientOptions = {
 export function startDesktopClient(
 	options: DesktopClientOptions,
 ): DesktopClientHandle {
-	const {
-		host,
-		candidates,
-		actionTimeoutMs = DEFAULT_ACTION_TIMEOUT_MS,
-	} = options;
+	const { host, candidates, actionTimeoutMs } = options;
 	if (
-		!Number.isFinite(actionTimeoutMs) ||
-		actionTimeoutMs <= 0 ||
-		actionTimeoutMs > MAX_TIMER_DELAY_MS
+		actionTimeoutMs !== undefined &&
+		(!Number.isFinite(actionTimeoutMs) ||
+			actionTimeoutMs <= 0 ||
+			actionTimeoutMs > MAX_TIMER_DELAY_MS)
 	) {
 		throw new Error(
 			'actionTimeoutMs must be a positive number of milliseconds.',
@@ -744,14 +731,17 @@ export function startDesktopClient(
 	};
 
 	const reportTrim = (trimmed: readonly string[]) => {
-		const summary = trimmed.join(', ');
-		if (summary === reportedTrim) return;
-		reportedTrim = summary;
-		if (!summary) return;
+		// The same trims every second are reported once, however many there are.
+		const key = trimmed.join('\n');
+		if (key === reportedTrim) return;
+		reportedTrim = key;
+		if (!key) return;
+		const named = trimmed.slice(0, MAX_REPORTED_TRIMS).join(', ');
+		const more = trimmed.length - MAX_REPORTED_TRIMS;
 		record(
 			'warn',
 			'snapshot',
-			`Trimmed ${summary} in the desktop snapshot to fit its row limits; the newest rows were kept.`,
+			`Trimmed ${named}${more > 0 ? ` and ${more} more` : ''} in the desktop snapshot to fit its limits.`,
 		);
 	};
 
@@ -771,7 +761,16 @@ export function startDesktopClient(
 		}
 		backpressureReported = false;
 		try {
-			const captured = trimToSnapshotLimits(host.captureTools(diagnostics));
+			// The broker closes the socket on a snapshot that is over any bound, so
+			// one oversized projection would leave the device reconnecting in a
+			// loop.
+			const tools = host.captureTools(diagnostics);
+			// A host that returns no snapshot object failed to capture one; sending
+			// the frame anyway would have the broker close the socket.
+			if (typeof tools !== 'object' || tools === null) {
+				throw new TypeError('captureTools returned no snapshot object.');
+			}
+			const captured = fitDesktopSnapshot(tools);
 			reportTrim(captured.trimmed);
 			const serialized = JSON.stringify({
 				type: 'snapshot',
@@ -860,7 +859,7 @@ export function startDesktopClient(
 		flushOutbox();
 	};
 
-	/** Runs one host action, giving up after `actionTimeoutMs`. */
+	/** Runs one host action, giving up after its deadline. */
 	const runHostAction = async (
 		action: DesktopDeviceAction,
 		expectedOwnerId: string | null,
@@ -889,10 +888,13 @@ export function startDesktopClient(
 					host.runAction(action, { signal: controller.signal }),
 				).then(() => 'completed' as const),
 				new Promise<'timed-out'>((resolve) => {
-					timer = setTimeout(() => {
-						resolve('timed-out');
-						controller.abort();
-					}, actionTimeoutMs);
+					timer = setTimeout(
+						() => {
+							resolve('timed-out');
+							controller.abort();
+						},
+						actionDeadlineMs(action, actionTimeoutMs),
+					);
 				}),
 			]);
 		} finally {
@@ -954,7 +956,7 @@ export function startDesktopClient(
 					type: 'action-result',
 					actionId: action.actionId,
 					ok: false,
-					error: `Desktop action timed out after ${actionTimeoutMs} ms; its outcome is unknown.`,
+					error: `Desktop action timed out after ${actionDeadlineMs(action, actionTimeoutMs)} ms; its outcome is unknown.`,
 				};
 			} else if (outcome === 'revoked' || !isAuthorizedOwner(expectedOwnerId)) {
 				// Without a subscription, or when the host settled before the

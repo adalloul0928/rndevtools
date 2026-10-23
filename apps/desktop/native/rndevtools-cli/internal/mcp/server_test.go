@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -102,6 +103,16 @@ func okResponse(request protocol.Request, result string) (protocol.Response, err
 	return protocol.Response{Protocol: protocol.Name, ID: request.ID, OK: true, Result: json.RawMessage(result)}, nil
 }
 
+// requireNamesThisProcess fails unless the request carries the pid of the
+// sender, here the test binary: the process that owns the socket, which the
+// desktop checks before it believes the session the request claims.
+func requireNamesThisProcess(t *testing.T, request protocol.Request) {
+	t.Helper()
+	if request.Peer == nil || request.Peer.PID != os.Getpid() {
+		t.Fatalf("the request must name the sending process, pid %d: peer = %+v", os.Getpid(), request.Peer)
+	}
+}
+
 func TestInitializeAndListTools(t *testing.T) {
 	server, _ := newTestServer(t, func(r protocol.Request) (protocol.Response, error) { return okResponse(r, `{}`) }, nil, nil)
 	responses := exchange(t, server,
@@ -169,6 +180,7 @@ func TestToolCallBuildsValidatesAndAttributes(t *testing.T) {
 	if request.Agent["kind"] != "claude" || request.Agent["sessionId"] != "sess-1" {
 		t.Fatalf("agent not attributed from the environment: %v", request.Agent)
 	}
+	requireNamesThisProcess(t, request)
 	if !strings.HasPrefix(request.ID, "mcp-") {
 		t.Fatalf("request id %q", request.ID)
 	}
@@ -193,6 +205,34 @@ func TestToolCallFallsBackToClientNameForAttribution(t *testing.T) {
 	agent := (*calls)[0].request.Agent
 	if agent["kind"] != "codex" || agent["sessionId"] != "mcp-Codex-CLI" {
 		t.Fatalf("fallback attribution: %v", agent)
+	}
+	requireNamesThisProcess(t, (*calls)[0].request)
+}
+
+func TestLaneToolCallsClaimTheSessionOnTheEnvelopeAndNeverInTheCommand(t *testing.T) {
+	server, calls := newTestServer(t, func(r protocol.Request) (protocol.Response, error) {
+		return okResponse(r, `{"lanes":[]}`)
+	}, nil, map[string]string{"CLAUDE_CODE_SESSION_ID": "sess-1"})
+	responses := exchange(t, server,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"lane","arguments":{"operation":"up","worktree":"/Users/dev/app","udid":"`+udid+`"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lane","arguments":{"operation":"launch","worktree":"/Users/dev/app"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"lane","arguments":{"operation":"up","worktree":"/Users/dev/app","agent":{"kind":"claude","sessionId":"someone-else"}}}}`,
+	)
+	if len(*calls) != 2 {
+		t.Fatalf("%d socket calls; a tool call naming an agent must not reach the socket", len(*calls))
+	}
+	for _, call := range *calls {
+		if call.request.Agent["sessionId"] != "sess-1" {
+			t.Fatalf("the envelope carries the server's own claim: %v", call.request.Agent)
+		}
+		requireNamesThisProcess(t, call.request)
+		if strings.Contains(string(call.request.Command), "agent") {
+			t.Fatalf("the lane command must not name an agent: %s", call.request.Command)
+		}
+	}
+	refused := responses[2]["result"].(map[string]any)
+	if refused["isError"] != true || !strings.Contains(fmt.Sprint(refused["content"]), `unknown argument "agent"`) {
+		t.Fatalf("an agent argument is refused as an unknown argument: %v", refused)
 	}
 }
 

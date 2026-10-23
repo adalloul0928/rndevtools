@@ -58,9 +58,9 @@ type Transport func(ctx context.Context, request protocol.Request, timeout time.
 type Config struct {
 	Version   string
 	Transport Transport
-	// Lookup reads environment variables (os.Getenv). Agent attribution comes
-	// from it: Claude Code and Codex pass their session identifiers to the
-	// MCP servers they spawn.
+	// Lookup reads environment variables (os.Getenv). The session this server
+	// claims comes from it: Claude Code and Codex pass their session
+	// identifiers to the MCP servers they spawn.
 	Lookup func(string) string
 	// ReadFile loads a capture for embedding; defaults to os.ReadFile.
 	ReadFile func(string) ([]byte, error)
@@ -606,7 +606,7 @@ func (server *Server) callTool(ctx context.Context, params json.RawMessage) (any
 	if call.Arguments == nil {
 		call.Arguments = map[string]any{}
 	}
-	parsed, err := command.Build(kind, call.Arguments, server.config.Lookup)
+	parsed, err := command.Build(kind, call.Arguments)
 	if err != nil {
 		// Argument problems are reported as a tool error, not a protocol error,
 		// so the model sees the message and can correct the call.
@@ -628,7 +628,15 @@ func (server *Server) send(ctx context.Context, parsed command.Parsed) (protocol
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	request := protocol.Request{Protocol: protocol.Name, ID: requestID, Command: parsed.Command}
+	request := protocol.Request{
+		Protocol: protocol.Name,
+		ID:       requestID,
+		Command:  parsed.Command,
+		// This server process, not the agent that spawned it, owns the socket,
+		// so its pid is what the desktop checks; it then follows the process
+		// tree up to the agent for the session the claim below must match.
+		Peer: &protocol.Peer{PID: os.Getpid()},
+	}
 	if agent := server.agent(); agent != nil {
 		request.Agent = agent
 	}
@@ -638,9 +646,9 @@ func (server *Server) send(ctx context.Context, parsed command.Parsed) (protocol
 	return server.config.Transport(ctx, request, parsed.Timeout)
 }
 
-// agent attributes requests to the coding-agent session that spawned this
-// server. The session variables win; failing those, the MCP client's name
-// identifies at least which agent product is calling.
+// agent is the coding-agent session this server claims to serve, the claim
+// the desktop verifies. The session variables win; failing those, the MCP
+// client's name identifies at least which agent product is calling.
 func (server *Server) agent() map[string]any {
 	if agent := command.AgentFromEnvironment(server.config.Lookup); agent != nil {
 		return agent
