@@ -376,13 +376,17 @@ describe('createNetworkPlugin', () => {
 			return response('{}');
 		}) as unknown as typeof fetch;
 
-		await diagnostics.instrumentFetch(fetchImplementation)(
-			'https://example.test/accessor-init',
-			init,
-		);
+		const instrumented = diagnostics.instrumentFetch(fetchImplementation);
+		await expect(
+			instrumented('https://example.test/accessor-init', init),
+		).rejects.toThrow('cannot safely apply');
+		expect(methodGetter).not.toHaveBeenCalled();
+		expect(fetchImplementation).not.toHaveBeenCalled();
+		await diagnostics.clearSimulationProfile();
+		await instrumented('https://example.test/accessor-init', init);
 
 		expect(methodGetter).toHaveBeenCalledTimes(1);
-		expect(diagnostics.getEvents()[0]).toEqual(
+		expect(diagnostics.getEvents().at(-1)).toEqual(
 			expect.objectContaining({
 				method: 'UNKNOWN',
 				requestProjectionComplete: false,
@@ -3741,6 +3745,72 @@ describe('network presentation model', () => {
 				),
 			).toContain('complete original request was not retained');
 		});
+	});
+
+	it.each(['plain', 'proxy'] as const)(
+		'blocks untrusted %s init dictionaries while Offline without inspecting them',
+		async (kind) => {
+			const diagnostics = createNetworkPluginBase(confirmedSimulationOptions());
+			const dispose = diagnostics.plugin.install?.();
+			const inspect = jest.fn(() => {
+				throw new Error('Unexpected init inspection');
+			});
+			const init: RequestInit =
+				kind === 'plain'
+					? { method: 'POST', headers: { 'x-example-id': 'request' } }
+					: new Proxy(
+							{},
+							{
+								get: inspect,
+								getPrototypeOf: inspect,
+								getOwnPropertyDescriptor: inspect,
+								has: inspect,
+								ownKeys: inspect,
+							},
+						);
+			const transport = jest.fn(async () => response('{}'));
+			try {
+				await diagnostics.setSimulationProfile('offline');
+				await expect(
+					diagnostics.instrumentFetch(transport)(
+						'https://example.com/items',
+						init,
+					),
+				).rejects.toThrow('Offline network profile');
+				expect(transport).not.toHaveBeenCalled();
+				expect(inspect).not.toHaveBeenCalled();
+				expect(diagnostics.getEvents()[0]).toMatchObject({
+					state: 'error',
+					simulationProfileId: 'offline',
+				});
+			} finally {
+				dispose?.();
+			}
+		},
+	);
+
+	it('reports unsupported conditions instead of silently bypassing an active profile', async () => {
+		const diagnostics = createNetworkPluginBase(confirmedSimulationOptions());
+		const dispose = diagnostics.plugin.install?.();
+		const init: RequestInit = { headers: { 'x-example-id': 'request' } };
+		const transport = jest.fn(async () => response('{}'));
+		const instrumented = diagnostics.instrumentFetch(transport);
+		try {
+			await diagnostics.setSimulationProfile('wifi');
+			await expect(
+				instrumented('https://example.com/items', init),
+			).rejects.toThrow('cannot safely apply');
+			expect(transport).not.toHaveBeenCalled();
+			expect(diagnostics.getEvents()[0]).toMatchObject({
+				state: 'error',
+				simulationProfileId: 'wifi',
+			});
+			await diagnostics.clearSimulationProfile();
+			await instrumented('https://example.com/items', init);
+			expect(transport).toHaveBeenCalledWith('https://example.com/items', init);
+		} finally {
+			dispose?.();
+		}
 	});
 
 	it('applies and clears an app-scoped offline profile', async () => {

@@ -7,6 +7,13 @@
 - Scenario preflight results are normalized, validated and detached before any
   mutation, so durable recovery checkpoints can be loaded after restart.
 
+- Offline now blocks instrumented requests with untrusted init dictionaries
+  without inspecting them. Other profiles report unsupported request boundaries
+  instead of silently bypassing the selected conditions.
+
+- Preserve app writes made during asynchronous Zustand patch validation.
+  A stale or rejected edit no longer restores an old state before its own
+  mutation has started. Validators must not mutate the store.
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
@@ -269,6 +276,8 @@
 
 ### Desktop app
 
+- Show the selected Simulator state in the sidebar dot; a shutdown device no
+  longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
 
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
@@ -330,3 +339,8 @@
   as for any other stack; a first start that failed meanwhile is marked
   interrupted, like a cancelled one. Before, the stack ran with no record, no
   loopback check and no automatic stop.
+- An unheld local Supabase stack now gets its stop linger from the end of the
+  job that started it, not from the moment its owner came up, so a long first
+  start is no longer stopped as it ends. A start that RN Devtools adopts after
+  a restart is still checked for 127.0.0.1 only when its record cannot be
+  saved, and its job then fails with that error instead of passing as verified.

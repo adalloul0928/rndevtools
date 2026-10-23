@@ -91,7 +91,12 @@ fetch implementations returned by `instrumentFetch` (or the separately opted-in
 global fetch layer). They do not intercept native SDK sockets, WebSockets, or
 traffic from other applications. Upload shaping is available only when the
 request body size is synchronously knowable; download shaping requires a valid
-`Content-Length`. Disabling the collector always resets the active profile.
+`Content-Length`. Disabling the collector always resets the active profile. Offline blocks every instrumented
+request, including requests with an untrusted `init`, without inspecting it.
+Other profiles reject requests they cannot shape safely instead of silently
+using the real network. For host-vetted inputs, opt into `trustedRequest` (or
+`canonicalizeRequest` when the fetch accepts an owned `Request`); otherwise
+clear the profile to send the original request unchanged.
 
 Profile mutations return versioned action-policy receipts, and hosts can supply
 a dynamic capability from the runtime registry. Active conditions bind to the
@@ -369,6 +374,11 @@ trimmed. It does so for every release bundle by default, and fails the build
 when an import would still reach this package. `rndevtools-verify-bundle`
 asserts over an exported bundle that no devtools markers survived. Wire both
 up before shipping, and keep the shim list current when you add a plugin.
+
+Zustand adapters that enable edits must keep `validatePatch` pure. An edit
+rechecks the current projection after validation and refuses a stale patch.
+If the app writes while validation is pending, that write is preserved;
+rollback is attempted only after the devtools mutation has actually started.
 
 Captured diagnostics redact common credential aliases (including PIN, OTP,
 card/bank fields, private keys, and password confirmations), Unicode-escaped

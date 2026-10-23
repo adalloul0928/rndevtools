@@ -145,6 +145,12 @@ export class DesktopHarness {
 		const userDataDir = mkdtempSync(join(tmpdir(), 'rndevtools-e2e-'));
 		const brokerPort = await freeLoopbackPort();
 		const app = await electron.launch({
+			timeout: 180_000,
+			// Playwright otherwise emulates `prefers-color-scheme: light`, which
+			// pinned every screenshot to the light theme. Null lets the window
+			// follow the appearance preference main sets on `nativeTheme`, as
+			// the real app does.
+			colorScheme: null,
 			args: [
 				mainEntry,
 				'--no-sandbox',
@@ -162,7 +168,7 @@ export class DesktopHarness {
 				NODE_ENV: 'production',
 			},
 		});
-		const window = await app.firstWindow();
+		const window = await app.firstWindow({ timeout: 180_000 });
 		await window.waitForLoadState('domcontentloaded');
 		await window.waitForSelector('.desktop-provider', { timeout: 30_000 });
 		// A fresh profile would open first-run setup over the panels under test.
@@ -232,6 +238,19 @@ export class DesktopHarness {
 	}
 
 	async close(): Promise<void> {
-		await this.app.close();
+		// Keep the main-process inspector connected while the app's asynchronous
+		// before-quit cleanup runs. Playwright's close() disconnects it as soon
+		// as the first, prevented app.quit() returns.
+		const closed = this.app.waitForEvent('close', { timeout: 120_000 });
+		try {
+			await this.app.evaluate(({ app }) => {
+				setImmediate(() => app.quit());
+			});
+			await closed;
+		} catch (error) {
+			this.app.process().kill('SIGKILL');
+			await closed.catch(() => undefined);
+			throw error;
+		}
 	}
 }

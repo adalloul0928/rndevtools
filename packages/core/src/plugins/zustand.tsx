@@ -59,7 +59,10 @@ export type DevToolsZustandAdapter = {
 	description?: string;
 	getInspectableState: () => unknown;
 	subscribe: (listener: () => void) => () => void;
-	/** Validates and returns a detached, canonical top-level patch. */
+	/**
+	 * Validates and returns a detached, canonical top-level patch. Must be pure:
+	 * validation failures never write or roll back app state.
+	 */
 	validatePatch?: (patch: unknown) => unknown | Promise<unknown>;
 	/** Applies only a patch returned by validatePatch. */
 	applyPatch?: (patch: unknown) => void | Promise<void>;
@@ -1151,20 +1154,9 @@ export function createZustandPlugin(
 			} catch (error) {
 				let status: ZustandMutationReceipt['status'] = 'failed';
 				let failure = truncateText(errorMessage(error), 8 * 1024).text;
-				let shouldRollback = mutationStarted;
-				if (!shouldRollback && adapter && before && observedBefore) {
-					try {
-						const currentObserved = canonicalizeTopLevelState(
-							adapter.getInspectableState(),
-							maxMutationBytes,
-							`Zustand state for ${adapter.id}`,
-						);
-						shouldRollback = currentObserved.json !== observedBefore.json;
-					} catch {
-						shouldRollback = true;
-					}
-				}
-				if (shouldRollback && adapter && before) {
+				// Validation may await while the app writes. Until our mutation
+				// starts, no state belongs to this operation to roll back.
+				if (mutationStarted && adapter && before) {
 					try {
 						await adapter.applyPatch(JSON.parse(before.json));
 						const restored = await captureCanonicalState(adapter);
