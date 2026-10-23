@@ -33,7 +33,11 @@ type ChildProcess = {
 		on: (event: 'close', listener: () => void) => void;
 	};
 };
-type RunOptions = { configuration?: string; variant?: string };
+type RunOptions = {
+	configuration?: string;
+	variant?: string;
+	architectures?: string[] | string | undefined;
+};
 type Context = {
 	fingerprintHash: string;
 	platform: string;
@@ -64,7 +68,11 @@ type BuildCacheModule = Provider & {
 		internals?: Internals,
 	) => string;
 	defaultCacheRoot: (env?: Record<string, string>, homedir?: string) => string;
-	toolchainSegment: (platform: string, internals?: Internals) => string;
+	toolchainSegment: (
+		platform: string,
+		internals?: Internals,
+		architectures?: string[] | string,
+	) => string;
 };
 
 const fs = require('node:fs') as Fs;
@@ -85,7 +93,7 @@ const TOOLCHAIN = {
 	xcodeIdentity: () => 'Xcode 26.6\nBuild version 17F100',
 };
 const iosToolchain = toolchainSegment('ios', TOOLCHAIN);
-const androidToolchain = toolchainSegment('android', TOOLCHAIN);
+const androidToolchain = toolchainSegment('android', TOOLCHAIN, ['arm64-v8a']);
 const {
 	mkdtempSync,
 	mkdirSync,
@@ -154,7 +162,7 @@ describe('build cache provider', () => {
 			{
 				fingerprintHash: HASH,
 				platform: 'android',
-				runOptions: { variant: 'debug' },
+				runOptions: { variant: 'debug', architectures: ['arm64-v8a'] },
 			},
 			{ cacheDirectory },
 			TOOLCHAIN,
@@ -269,10 +277,14 @@ describe('build cache provider', () => {
 		expect(otherArch).toMatch(/^x64-/);
 		// Android has no Xcode dependency: the Xcode version must not matter.
 		expect(
-			toolchainSegment('android', {
-				...TOOLCHAIN,
-				xcodeIdentity: () => 'Xcode 27.0',
-			}),
+			toolchainSegment(
+				'android',
+				{
+					...TOOLCHAIN,
+					xcodeIdentity: () => 'Xcode 27.0',
+				},
+				['arm64-v8a'],
+			),
 		).toBe(androidToolchain);
 		// The real host resolves a toolchain without being told one.
 		expect(toolchainSegment('ios')).toMatch(/^[a-z0-9]+-[0-9a-f]{12}$/);
@@ -796,11 +808,50 @@ cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
 		]);
 	});
 
+	it('keeps different Android target ABIs separate on the same host', () => {
+		const context = { fingerprintHash: HASH, platform: 'android' };
+		const arm = entryDirectory(
+			{ ...context, runOptions: { architectures: ['arm64-v8a'] } },
+			{ cacheDirectory },
+			TOOLCHAIN,
+		);
+		const intel = entryDirectory(
+			{ ...context, runOptions: { architectures: ['x86_64'] } },
+			{ cacheDirectory },
+			TOOLCHAIN,
+		);
+		expect(arm).not.toBe(intel);
+	});
+
+	it.each([undefined, [], ['unknown']])(
+		'skips Android caching without usable target ABIs (%j)',
+		async (architectures) => {
+			const context = {
+				fingerprintHash: HASH,
+				platform: 'android',
+				runOptions: { architectures },
+			};
+			const provider = createBuildCacheProvider();
+			expect(
+				await provider.resolveBuildCache(context, { cacheDirectory }),
+			).toBeNull();
+			const apk = path.join(work, 'app.apk');
+			writeFileSync(apk, 'apk');
+			expect(
+				await provider.uploadBuildCache(
+					{ ...context, buildPath: apk },
+					{ cacheDirectory },
+				),
+			).toBeNull();
+			expect(readdirSync(cacheDirectory)).toEqual([]);
+		},
+	);
+
 	it('stores Android APKs as files', async () => {
 		const context = {
 			fingerprintHash: HASH,
 			platform: 'android',
-			runOptions: { variant: 'debug' },
+			runOptions: { variant: 'debug', architectures: ['arm64-v8a'] },
 			projectRoot: work,
 		};
 		const apk = path.join(work, 'app-debug.apk');
@@ -815,7 +866,7 @@ cache.resolveBuildCache(context, { cacheDirectory }).then(async (hit) => {
 				'v2',
 				'android',
 				'debug',
-				toolchainSegment('android'),
+				toolchainSegment('android', {}, ['arm64-v8a']),
 				HASH,
 				'app-debug.apk',
 			),

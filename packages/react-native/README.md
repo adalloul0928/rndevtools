@@ -297,7 +297,7 @@ unknown flag or preset fails the run instead of skipping its check.
 
 Running several git worktrees of one app side by side (the desktop app's
 *lanes*) means several `expo run:ios` builds of the same native shell. The
-build cache provider stores a finished Simulator or emulator binary once,
+build cache provider stores a finished Simulator binary once,
 keyed by Expo's native fingerprint, and hands it to any worktree whose
 fingerprint matches. A JavaScript-only branch installs in seconds instead of
 rebuilding for twenty minutes, and two worktrees that miss at the same time
@@ -329,13 +329,20 @@ The `v2` namespace keeps the immutable lock protocol separate from older
 worktrees. Legacy entries remain untouched; the first build with this provider
 populates the new namespace.
 Entries are split by platform, build configuration, and toolchain (CPU
-architecture plus, for iOS, the `xcodebuild -version` output), so a Release
+architecture plus the `xcodebuild -version` output for iOS; resolved target ABIs
+for Android), so a Release
 binary is never installed for a Debug run and an Xcode upgrade never serves a
 build from the old SDK. Claims are immutable; when a builder dies or releases
 its claim, waiters compete for one shared successor. An entry's binary is never
 replaced once stored, so a second upload of the same fingerprint cannot
 remove an app that another worktree is installing. Delete the directory to
 start clean; there is no eviction.
+
+Android caching requires the actual Gradle target ABIs in `runOptions.architectures`
+(an array or comma-separated list). Expo CLI 57 passes its original run options,
+without the resolved ABIs, so these calls build normally and skip both cache lookup
+and upload. The host CPU is never used as an Android target. Integrations supplying
+resolved ABIs get separate entries for each ABI set, independent of the host CPU.
 
 `@expo/fingerprint` decides what counts as a native change. If your project
 has native inputs outside the usual places, configure them in
