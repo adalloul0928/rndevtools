@@ -317,6 +317,9 @@ async function stopAndStart(
 						const off = engine.calledOff();
 						if (off) return off;
 						job.begin();
+						const moved = await engine.stillOnBranch(view);
+						if (moved)
+							return { status: 'failed', error: engine.errorView(moved) };
 						const stopped = await engine.stopStep(view.id, job, {
 							clearPin: false,
 						});
@@ -327,6 +330,7 @@ async function stopAndStart(
 								stackId: view.id,
 								mode: 'resume',
 								exclusions: engine.exclusionsFor(view.id),
+								precondition: () => engine.stillOnBranch(view),
 							},
 							job
 						);
@@ -356,11 +360,14 @@ async function restart(
 		operation,
 		engine.startJob(
 			{
-				kind: 'restart',
+				kind: operation.kind === 'resume-saved' ? 'resume' : 'restart',
 				stackIds: [view.id],
 				requestedBy: { kind: 'operator' },
 				cancellable: false,
 				steps: [
+					...initialSupabaseJobSteps('resume').filter(
+						(step) => operation.kind === 'resume-saved' && step.id === 'room'
+					),
 					...initialSupabaseJobSteps('restart'),
 					...initialSupabaseJobSteps('resume').filter(
 						(step) => step.id === 'verify'
@@ -373,6 +380,10 @@ async function restart(
 						const off = engine.calledOff();
 						if (off) return off;
 						job.begin();
+						if (operation.kind === 'resume-saved' || !engine.isLive(view.id)) {
+							const room = await engine.admit(view.id, job);
+							if (!room.ok) return { status: 'failed', error: room.error };
+						}
 						const restarted = await engine.restartStep(view, job, cli);
 						if (!restarted.ok)
 							return { status: 'failed', error: restarted.error };
@@ -966,6 +977,9 @@ async function setStudio(
 						const off = engine.calledOff();
 						if (off) return off;
 						job.begin();
+						const moved = await engine.stillOnBranch(view);
+						if (moved)
+							return { status: 'failed', error: engine.errorView(moved) };
 						const stopped = await engine.stopStep(view.id, job, {
 							clearPin: false,
 						});
@@ -976,6 +990,7 @@ async function setStudio(
 								stackId: view.id,
 								mode: 'resume',
 								exclusions: engine.exclusionsFor(view.id),
+								precondition: () => engine.stillOnBranch(view),
 							},
 							job
 						);

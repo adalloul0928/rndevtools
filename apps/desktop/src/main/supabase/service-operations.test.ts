@@ -246,6 +246,75 @@ describe('lifecycle operations', () => {
 		expect(stackOf(h, stackId)?.pinned).toBe(true);
 	});
 
+	it('rechecks capacity for Resume saved after waiting for the stack lock', async () => {
+		const { h, repo, stackId } = await started();
+		await runToEnd(h, { kind: 'stop', stackIds: [stackId] });
+		await h.checkout(repo, 'saved-branch');
+		await h.engine.policyStore.updatePolicy({ maxRunning: 1 });
+		const other = await h.repository('other');
+		await run(h, { kind: 'refresh' });
+		const otherId = await h.identity(other);
+		let release = () => {};
+		const held = h.engine.lockStack(
+			stackId,
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve;
+				})
+		);
+		const receipt = await run(h, { kind: 'resume-saved', stackId });
+		expect(receipt.jobId).toBeDefined();
+		await runToEnd(h, { kind: 'start', stackId: otherId });
+		await h.until(
+			() =>
+				stackOf(h, otherId)?.pinned === true &&
+				stackOf(h, otherId)?.state === 'running'
+		);
+		expect(h.cli.stacks.get(otherId)?.running).toBe(true);
+		release();
+		await held;
+		await h.engine.waitForJob(receipt.jobId ?? '', 10_000);
+		expect(jobOf(h, receipt.jobId)?.status).toBe('failed');
+		expect(h.cli.count('stack restart')).toBe(0);
+	});
+
+	it.each(['stop-and-start', 'reapply-exclusions', 'set-studio'] as const)(
+		'refuses %s when HEAD moves while stopping',
+		async (kind) => {
+			const { h, repo, stackId } =
+				kind === 'reapply-exclusions' ? await setup() : await started();
+			if (kind === 'reapply-exclusions') {
+				await h.engine.policyStore.updatePolicy({
+					exclude: ['studio', 'analytics', 'functions'],
+				});
+				await runToEnd(h, { kind: 'start', stackId });
+				await h.settle();
+			}
+			const starts = h.cli.count('stack start');
+			const release = h.cli.hold('stack stop');
+			const receipt = await run(
+				h,
+				{
+					kind,
+					stackId,
+					...(kind === 'stop-and-start' ? { purpose: 'apply-config' } : {}),
+					...(kind === 'set-studio' ? { enabled: true } : {}),
+				},
+				CONFIRMED
+			);
+			expect(receipt.jobId).toBeDefined();
+			await h.cli.waitForCall('stack stop');
+			await h.checkout(repo, 'changed-during-stop');
+			release();
+			await h.engine.waitForJob(receipt.jobId ?? '', 10_000);
+			expect(jobOf(h, receipt.jobId)).toMatchObject({
+				status: 'failed',
+				error: { title: 'Worktree switched branches' },
+			});
+			expect(h.cli.count('stack start')).toBe(starts);
+		}
+	);
+
 	it('resumes a stopped stack with its saved settings, even on another branch', async () => {
 		const { h, repo, stackId } = await started();
 		await runToEnd(h, { kind: 'stop', stackIds: [stackId] });
