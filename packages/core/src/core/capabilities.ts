@@ -237,7 +237,13 @@ export function createDevToolsCapabilityRegistry(
 				),
 			),
 		});
-		for (const listener of [...listeners]) listener();
+		for (const listener of [...listeners]) {
+			try {
+				listener();
+			} catch {
+				// One observer cannot prevent others from seeing the committed registry.
+			}
+		}
 	};
 
 	const resolve = (

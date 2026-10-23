@@ -24,6 +24,7 @@ export class DesktopSettingsStore {
 	readonly #directory: string;
 	readonly #filePath: string;
 	#settings: DesktopSettings = { version: 1 };
+	#loaded = false;
 	#writeQueue: Promise<void> = Promise.resolve();
 
 	constructor(directory: string) {
@@ -32,6 +33,7 @@ export class DesktopSettingsStore {
 	}
 
 	async load(): Promise<DesktopSettings> {
+		this.#loaded = false;
 		await mkdir(this.#directory, { recursive: true, mode: 0o700 });
 		await chmod(this.#directory, 0o700);
 		try {
@@ -44,6 +46,7 @@ export class DesktopSettingsStore {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 			this.#settings = { version: 1 };
 		}
+		this.#loaded = true;
 		return { ...this.#settings };
 	}
 
@@ -68,6 +71,11 @@ export class DesktopSettingsStore {
 		const write = this.#writeQueue
 			.catch(() => undefined)
 			.then(async () => {
+				if (!this.#loaded) {
+					throw new Error(
+						'Desktop settings must be loaded successfully before writing.'
+					);
+				}
 				const nextSettings = settingsSchema.parse(
 					Object.fromEntries(
 						Object.entries({ ...this.#settings, ...patch }).filter(
