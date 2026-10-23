@@ -74,6 +74,13 @@ describe('request bodies', () => {
 				'{"id":"[REDACTED_ID]","email":"[REDACTED_EMAIL]","note":"[REDACTED]"}'
 			)
 		).toBe(3);
+		// The markers core's redaction actually writes, a cut one included.
+		expect(
+			redactedCount(
+				'{"email":"[REDACTED EMAIL]","token":"[REDACTED JWT]","key":"[REDACTED SECRET KEY]","note":"[REDACTED…'
+			)
+		).toBe(4);
+		expect(redactedCount('[REDACTED]@example.com and [redacted]')).toBe(1);
 	});
 });
 

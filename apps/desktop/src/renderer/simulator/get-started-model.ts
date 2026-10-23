@@ -30,6 +30,7 @@ export type GetStartedInput = Readonly<{
 		runtimeAvailability: Readonly<{ available: number }>;
 	}>;
 	repositories: readonly string[];
+	/** Worktrees of the first repository, the one the task names. */
 	worktreeCount: number;
 	bootedCount: number;
 	appSessionCount: number;
