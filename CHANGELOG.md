@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Offline now blocks instrumented requests with untrusted init dictionaries
+  without inspecting them. Other profiles report unsupported request boundaries
+  instead of silently bypassing the selected conditions.
+
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21

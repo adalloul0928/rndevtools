@@ -2297,13 +2297,11 @@ export function createNetworkPlugin(
 				canonicalBodyFound && canonicalBody != null
 					? (Object.freeze({ body: canonicalBody }) as RequestInit)
 					: initInspection.diagnosticInit;
-			// Unusual inputs still reach the caller's fetch unchanged. Simulation needs
-			// to inspect and add a timeout signal, so it fails open for accessor-backed
-			// dictionaries, inherited WebIDL fields, and non-canonical request objects.
-			const activeProfile =
-				initInspection.safeToRead && canonicalInput
-					? authorizedProfile
-					: noSimulationProfile;
+			// Never silently bypass selected conditions. Offline needs no input reads;
+			// other profiles require a vetted signal/body boundary for safe shaping.
+			const simulationInputInspectable =
+				initInspection.safeToRead && canonicalInput;
+			const activeProfile = authorizedProfile;
 			const requestGeneration = collectorGeneration;
 			const requestSimulationCapabilityId = activeSimulationCapabilityId;
 			const simulationAuthorityIsCurrent = (): boolean => {
@@ -2332,6 +2330,15 @@ export function createNetworkPlugin(
 			const timingUpdates: NetworkTimingUpdate = {};
 			const requestSimulationEpochSignal = simulationEpochController.signal;
 			const executeFetch = (): Promise<Response> => {
+				if (activeProfile.id !== 'none' && !simulationInputInspectable) {
+					return Promise.reject(
+						networkSimulationError(
+							activeProfile.offline
+								? 'Instrumented request blocked by the Offline network profile.'
+								: `The ${activeProfile.name} network profile cannot safely apply to this request. Use a host-vetted request boundary or clear the profile.`,
+						),
+					);
+				}
 				simulationSequence += 1;
 				return runSimulatedFetch(
 					fetchImplementation,
