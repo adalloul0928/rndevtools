@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Refused desktop actions keep read-only diagnostics connected. Authorization read
+  failures also refuse safely; replies remain paced, bounded and rate-limited.
 - Android build-cache entries require resolved target ABIs; provider calls without
   them build normally instead of reusing potentially incompatible host-keyed APKs.
 
