@@ -46,6 +46,7 @@ import {
 	formatDuration,
 	truncateMiddle,
 } from '@/lib/format';
+import { useCompactGrid } from '@/lib/use-compact-grid';
 import {
 	type NetworkTargetBadge,
 	type NetworkTargetFilter,
@@ -351,8 +352,9 @@ export function NetworkPanel() {
 	const segmentCounts = useMemo(() => networkSegmentCounts(entries), [entries]);
 	const selected =
 		filtered.find((entry) => entry.id === selectedId) ?? filtered[0] ?? null;
-	const columns = useMemo<DataGridColumn<NetworkEntry>[]>(
-		() => [
+	const { gridPaneRef, compact } = useCompactGrid();
+	const columns = useMemo<DataGridColumn<NetworkEntry>[]>(() => {
+		const all: DataGridColumn<NetworkEntry>[] = [
 			{
 				id: 'method',
 				header: 'Method',
@@ -363,7 +365,7 @@ export function NetworkPanel() {
 			{
 				id: 'request',
 				header: 'Request',
-				minWidth: 340,
+				minWidth: compact ? 160 : 340,
 				cell: (entry) => {
 					const target = targetFor(entry);
 					return (
@@ -392,7 +394,7 @@ export function NetworkPanel() {
 			{
 				id: 'duration',
 				header: 'Duration',
-				width: 150,
+				width: compact ? 90 : 150,
 				cell: (entry) => {
 					const tone = durationTone(entry);
 					return (
@@ -432,9 +434,11 @@ export function NetworkPanel() {
 					</span>
 				),
 			},
-		],
-		[badgeFor, targetFor]
-	);
+		];
+		return compact
+			? all.filter((column) => column.id !== 'at' && column.id !== 'size')
+			: all;
+	}, [badgeFor, targetFor, compact]);
 
 	const selectedTarget = selected ? targetFor(selected) : undefined;
 	const selectedBackend = selectedTarget
@@ -660,7 +664,7 @@ export function NetworkPanel() {
 			</PanelNotice>
 
 			<div className="split-panel">
-				<div className="min-w-0 overflow-hidden">
+				<div className="min-w-0 overflow-hidden" ref={gridPaneRef}>
 					{filtered.length === 0 ? (
 						<EmptyPanel
 							icon={<Radio className="h-5 w-5" />}

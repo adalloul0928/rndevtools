@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Offline now blocks instrumented requests with untrusted init dictionaries
+  without inspecting them. Other profiles report unsupported request boundaries
+  instead of silently bypassing the selected conditions.
+
 - Preserve app writes made during asynchronous Zustand patch validation.
   A stale or rejected edit no longer restores an old state before its own
   mutation has started. Validators must not mutate the store.
@@ -272,6 +276,8 @@
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 
+- Fit Network, Storage, and React Query grids to narrow panes. Secondary
+  columns hide while their values remain available in the detail pane.
 - Show the selected Simulator state in the sidebar dot; a shutdown device no
   longer appears green just because the helper is available.
 - Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
