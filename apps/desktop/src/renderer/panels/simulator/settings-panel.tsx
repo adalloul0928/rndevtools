@@ -35,6 +35,7 @@ import {
 	ReadinessRow,
 	type ReadinessStatus,
 } from '@/components/ui';
+import { UpdateControl } from '@/components/update-control';
 import { setAppearancePreference, useAppearance } from '@/lib/appearance';
 import { openSetup, setChecklistHidden, useOnboarding } from '@/lib/onboarding';
 import {
@@ -322,6 +323,7 @@ export function SettingsPanel() {
 					</section>
 
 					<AppearanceSurface />
+					<UpdateControl settings />
 
 					<GetStartedSurface />
 

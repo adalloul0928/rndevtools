@@ -9,10 +9,12 @@ import type { SimulatorBridge } from '../shared/simulator-protocol';
 import type { SimulatorStreamBridge } from '../shared/simulator-stream-protocol';
 import type { SlimmingBridge } from '../shared/slimming-protocol';
 import type { SupabaseBridge } from '../shared/supabase-protocol';
+import type { UpdateBridge } from '../shared/update-protocol';
 
 declare global {
 	interface Window {
 		rnDevtools?: DesktopBridge &
+			UpdateBridge &
 			AppearanceBridge &
 			SimulatorBridge &
 			SlimmingBridge &

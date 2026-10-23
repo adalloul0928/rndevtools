@@ -28,6 +28,7 @@ import { PanelErrorBoundary } from '@/components/error-boundary';
 import { GetStartedCard, useGetStarted } from '@/components/get-started';
 import { SetupFlow } from '@/components/setup-flow';
 import { ActionNotice, Chip } from '@/components/status-ui';
+import { UpdateControl } from '@/components/update-control';
 import {
 	type ActionNoticeRuntime,
 	type ActionNoticeSource,
@@ -713,6 +714,7 @@ function Titlebar({
 							</NativeSelect>
 						)}
 						<AppearanceToggle />
+						<UpdateControl />
 					</div>
 				</div>
 			</div>

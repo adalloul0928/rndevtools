@@ -77,6 +77,7 @@ import { BuildInsightsService } from './build-insights-service';
 import { BuildInsightsStore } from './build-insights-store';
 import { desktopActionConfirmationCopy } from './desktop-action-confirmation';
 import { DesktopSettingsStore } from './desktop-settings-store';
+import { createDesktopUpdater } from './desktop-updater';
 import { createLaneIpcHandlers } from './lane-ipc';
 import { LaneService } from './lane-service';
 import { LaneStore } from './lane-store';
@@ -139,6 +140,8 @@ import {
 	createSupabaseStatePublisher,
 	supabaseInterestKey,
 } from './supabase-ipc';
+import { createUpdateIpcHandlers } from './update-ipc';
+import type { UpdateService } from './update-service';
 
 installProcessErrorHandlers({
 	logPath: () =>
@@ -183,6 +186,7 @@ const windows = new Set<BrowserWindow>();
 const confirmationStore = new ActionConfirmationStore();
 let brokerStopped = false;
 let shutdownStarted = false;
+let updateService: UpdateService | undefined;
 let simulatorService: SimulatorService | undefined;
 let slimmingService: SlimmingService | undefined;
 let recipeService: RecipeService | undefined;
@@ -1415,6 +1419,18 @@ if (!app.requestSingleInstanceLock()) {
 	void app
 		.whenReady()
 		.then(async () => {
+			updateService = createDesktopUpdater((state) =>
+				broadcast(IPC_CHANNELS.updateStateChanged, state)
+			);
+			const updateHandlers = createUpdateIpcHandlers(
+				updateService,
+				assertTrustedRenderer
+			);
+			ipcMain.handle(IPC_CHANNELS.getUpdateState, updateHandlers.getState);
+			ipcMain.handle(
+				IPC_CHANNELS.runUpdateOperation,
+				updateHandlers.runOperation
+			);
 			nativeTheme.on('updated', updateWindowChrome);
 			if (
 				!trustedDevelopmentRendererUrl(
@@ -1696,6 +1712,7 @@ if (!app.requestSingleInstanceLock()) {
 			await agentCliService.start();
 			if (shutdownStarted) return;
 			createWindow();
+			updateService.start();
 
 			app.on('activate', () => {
 				if (!shutdownStarted && BrowserWindow.getAllWindows().length === 0) {
@@ -1721,6 +1738,7 @@ app.on('before-quit', (event) => {
 	event.preventDefault();
 	if (shutdownStarted) return;
 	shutdownStarted = true;
+	updateService?.stop();
 	supabaseStatePublisher.dispose();
 	// Running recipes cancel first: their teardown still needs the Simulator,
 	// slimming, and broker services, which stop once it has finished.
@@ -1744,6 +1762,14 @@ app.on('before-quit', (event) => {
 		];
 	}).finally(() => {
 		brokerStopped = true;
+		try {
+			if (updateService?.installOnQuit()) return;
+		} catch {
+			dialog.showErrorBox(
+				'Update could not restart',
+				'Quit and reopen RN Devtools to finish installing the update.'
+			);
+		}
 		app.quit();
 	});
 });

@@ -121,6 +121,10 @@ pnpm --filter @rndevtools/desktop make
 
 `package` creates an unpacked, locally runnable app in `apps/desktop/release`. `make` creates the configured platform artifacts: DMG and ZIP on macOS, NSIS on Windows, or AppImage and DEB on Linux. Distribution releases still require the normal platform signing and notarization credentials.
 
+Public Apple silicon releases check GitHub for a newer stable release after startup and every six hours. **Update available** appears in the title bar; click it to download, then **Restart to update** after the checksum and macOS code signature pass verification. Restart waits for the normal service shutdown. A downloaded, verified update also installs on the next normal launch. Settings includes a manual update check.
+
+The tag release workflow builds a signed, notarized DMG plus the update ZIP, blockmap and `latest-mac.yml`, then attaches them to a draft GitHub release. Publish that release to make it discoverable. Increment the package version for every release; commits on `main` and unpublished drafts do not update installed apps. Source builds and local development packages do not check or install updates. Versions shipped before the updater was added need one manual installation of an updater-enabled release.
+
 The app icon source is [`build/icon.svg`](build/icon.svg). After editing it, regenerate
 the committed PNG and macOS ICNS assets on a Mac:
 

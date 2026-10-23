@@ -142,6 +142,13 @@ import {
 	supabaseOperationSchema,
 	supabaseStateSchema,
 } from '../shared/supabase-protocol';
+import {
+	type UpdateBridge,
+	type UpdateOperation,
+	type UpdateState,
+	updateOperationSchema,
+	updateStateSchema,
+} from '../shared/update-protocol';
 
 type StateParseResult<T> =
 	| { success: true; data: T }
@@ -211,6 +218,7 @@ function subscribeToState<T>(
 }
 
 const bridge: DesktopBridge &
+	UpdateBridge &
 	AppearanceBridge &
 	SimulatorBridge &
 	SlimmingBridge &
@@ -242,6 +250,24 @@ const bridge: DesktopBridge &
 		appearancePreferenceSchema.parse(
 			await ipcRenderer.invoke(IPC_CHANNELS.getAppearance)
 		) as AppearancePreference,
+	getUpdateState: async () =>
+		updateStateSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.getUpdateState)
+		),
+	runUpdateOperation: async (operation: UpdateOperation) =>
+		updateStateSchema.parse(
+			await ipcRenderer.invoke(
+				IPC_CHANNELS.runUpdateOperation,
+				updateOperationSchema.parse(operation)
+			)
+		),
+	subscribeUpdateState: (listener: (state: UpdateState) => void) =>
+		subscribeToState(
+			IPC_CHANNELS.updateStateChanged,
+			'Update state',
+			(value) => updateStateSchema.safeParse(value),
+			listener
+		),
 	setAppearance: async (preference: AppearancePreference) => {
 		const validated = appearancePreferenceSchema.parse(preference);
 		return appearancePreferenceSchema.parse(

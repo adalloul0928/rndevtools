@@ -288,6 +288,18 @@ select {
 	gap: 10px;
 }
 
+.titlebar-update {
+	flex-shrink: 0;
+	min-height: 28px;
+	height: 28px;
+	padding-inline: 9px;
+	gap: 6px;
+	border: 1px solid var(--brand-border);
+	background: var(--brand-soft);
+	color: var(--brand-text);
+	font-size: 11px;
+}
+
 /* Identity yields first; the toggle and the readouts keep their widths. */
 .titlebar-lead {
 	flex: 0 1 auto;
