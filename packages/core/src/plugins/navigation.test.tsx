@@ -255,6 +255,50 @@ describe('createNavigationPlugin', () => {
 		).toEqual(['requested', 'committed', 'focused']);
 		expect(navigation.getTransitions().at(-1)?.durationMs).toBe(15);
 	});
+	it('keeps record-only committed navigation successful without focus observations', () => {
+		let at = 0;
+		const navigation = createNavigationPlugin({ now: () => at });
+		navigation.record('/first');
+		at = 31_000;
+		navigation.record('/second');
+		expect(
+			navigation.getTransitions().some((entry) => entry.phase === 'failed'),
+		).toBe(false);
+		expect(
+			navigation
+				.getTransitions()
+				.filter((entry) => entry.route === '/first')
+				.map((entry) => entry.phase),
+		).toEqual(['requested', 'committed']);
+		const pending = navigation.beginTransition('/never-committed');
+		at += 31_000;
+		navigation.record('/third');
+		expect(navigation.getTransitions()).toContainEqual(
+			expect.objectContaining({ transitionId: pending, phase: 'failed' }),
+		);
+	});
+
+	it('evicts committed focus observations without reporting a failed navigation', () => {
+		const navigation = createNavigationPlugin({ maxEvents: 2 });
+		navigation.record('/first');
+		navigation.record('/second');
+		navigation.beginTransition('/third');
+		expect(
+			navigation.getTransitions().some((entry) => entry.phase === 'failed'),
+		).toBe(false);
+	});
+
+	it('passes the original navigation target to the host while redacting diagnostics', async () => {
+		const onNavigate = jest.fn();
+		const navigation = createNavigationPlugin({ onNavigate });
+		const route = '/profile/person@example.com?token=example-token';
+		await navigation.navigate(route);
+		expect(onNavigate).toHaveBeenCalledWith(route);
+		const captured = JSON.stringify(navigation.getTransitions());
+		expect(captured).not.toContain('person@example.com');
+		expect(captured).not.toContain('example-token');
+	});
+
 	it('fails rejected navigation and does not invoke context accessors', async () => {
 		const getter = jest.fn(() => 'desktop');
 		const context = {} as NavigationTransitionContext;

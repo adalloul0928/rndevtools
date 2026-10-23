@@ -299,3 +299,7 @@ sidebar Simulator dot follows the selected device state.
 
 The README screenshots use the connected demo device and synthetic Simulator
 and Supabase fixtures. They do not depict this machine's Simulator inventory.
+
+Recipe teardown runs only for targets whose steps started. Cancellation while
+queued for a Simulator lease, or a failed preflight, does not run cleanup on
+that untouched target. Cleanup after an attempted step still runs on failure.

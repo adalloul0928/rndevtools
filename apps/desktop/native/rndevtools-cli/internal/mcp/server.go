@@ -578,11 +578,11 @@ func Tools() []Tool {
 			Title:       meta.title,
 			Description: meta.description,
 			InputSchema: schema,
-			// No tool is destructive; destructiveHint is stated anyway because MCP
-			// reads an absent one as true.
+			// A tool with mutations can include a destructive operation. Keep the
+			// conservative MCP default unless every operation is read-only.
 			Annotations: map[string]any{
 				"readOnlyHint":    meta.readOnly,
-				"destructiveHint": false,
+				"destructiveHint": !meta.readOnly,
 				"idempotentHint":  meta.readOnly,
 				"openWorldHint":   false,
 			},

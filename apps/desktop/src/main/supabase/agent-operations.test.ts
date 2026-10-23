@@ -491,7 +491,7 @@ describe('supabase down, ls, status, env, log', () => {
 });
 
 describe('supabase reset and destroy', () => {
-	it('resets at once for the sole live holder on the stack branch', async () => {
+	it('requests confirmation even for the sole live holder on the stack branch', async () => {
 		const { h, repo, stackId } = await setup();
 		await agent(h, up(repo));
 		const reset = await agent(h, {
@@ -502,12 +502,18 @@ describe('supabase reset and destroy', () => {
 		expect(reset).toMatchObject({
 			operation: 'reset',
 			stackId,
-			status: 'complete',
+			status: 'requested',
 			seed: true,
 		});
-		expect(h.cli.callsOf('db reset')[0]?.argv).toEqual(
-			expect.arrayContaining(['--local', '--workdir', repo])
-		);
+		expect(h.cli.count('db reset')).toBe(0);
+		expect(h.engine.getState().requests).toEqual([
+			expect.objectContaining({
+				kind: 'reset',
+				status: 'pending',
+				stackId,
+				seed: true,
+			}),
+		]);
 	});
 
 	it('files a request when another session holds the stack', async () => {

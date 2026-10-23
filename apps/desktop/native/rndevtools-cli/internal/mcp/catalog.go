@@ -120,7 +120,7 @@ var toolMeta = map[protocol.Command]meta{
 			"\"status\" shows services; \"env\" returns the URLs and the publishable and anon keys (never secret keys " +
 			"or the database URL; never write keys into .env files). \"reset\" drops the data and re-runs migrations " +
 			"and seed (seed false skips it); \"log\" reads service logs; \"destroy\" only asks the user to delete a " +
-			"database, and resetting a stack another session holds becomes a request too. Run database commands " +
+			"database; every reset also requires user confirmation, including for a sole holder. Run database commands " +
 			"with the worktree's own CLI and --local (migration up --local, db reset --local, gen types typescript " +
 			"--local), and while RN Devtools manages the worktree never run supabase start, stop, stack, or local " +
 			"commands by hand. If this tool answers supabase_disabled, supabase_unsupported, or cli_unverified, RN " +

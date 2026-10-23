@@ -511,7 +511,9 @@ up a few seconds later); only `env`
 returns URLs and the publishable and anon keys, and no result ever carries a
 secret key, the service-role key, or the database URL. `destroy` never deletes
 anything: it files a request the user settles in RN Devtools, as does a
-`reset` of a stack another session holds.
+`reset`, including when the caller is the sole holder. Approval goes through
+the desktop confirmation dialog. Mutating MCP tools advertise
+`destructiveHint: true`; read-only tools advertise `false`.
 
 Socket deadlines sit past the desktop's own budgets, so a slow call still ends
 in the desktop's typed answer rather than a CLI timeout: `up` waits
