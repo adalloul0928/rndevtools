@@ -327,6 +327,10 @@
 
 ### Desktop app
 
+- Package release verification and packing run without publishing credentials.
+  A separate runner publishes checked tarballs with lifecycle scripts disabled
+  and npm trusted publishing; long-lived npm tokens are no longer used.
+
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
