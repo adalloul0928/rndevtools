@@ -195,12 +195,11 @@ export type SupabaseStoreLoad<T> =
 	| Readonly<{ status: 'ok'; data: T }>
 	| Readonly<{
 			status: 'quarantined';
-			/** Where the bad file went; undefined when it could not be moved. */
-			movedTo: string | undefined;
+			movedTo: string;
 			reason: 'not-a-file' | 'too-large' | 'unreadable' | 'json' | 'schema';
 	  }>;
 
-/** Reads, JSON-parses and schema-checks a store file, quarantining failures. */
+/** Quarantine malformed data; preserve unreadable files and reject failed recovery. */
 export async function loadSupabaseStoreFile<T>(
 	file: string,
 	options: Readonly<{
@@ -211,6 +210,11 @@ export async function loadSupabaseStoreFile<T>(
 ): Promise<SupabaseStoreLoad<T>> {
 	const read = await readSupabaseStoreFile(file, options.maxBytes);
 	if (read.status === 'missing') return { status: 'missing' };
+	if (read.status === 'invalid' && read.reason === 'unreadable') {
+		throw new Error(
+			`Supabase state file ${path.basename(file)} could not be read.`
+		);
+	}
 	let reason: 'not-a-file' | 'too-large' | 'unreadable' | 'json' | 'schema';
 	if (read.status === 'invalid') {
 		reason = read.reason;
@@ -230,6 +234,11 @@ export async function loadSupabaseStoreFile<T>(
 		}
 	}
 	const movedTo = await quarantineSupabaseStoreFile(file, options.now);
+	if (movedTo === undefined) {
+		throw new Error(
+			`Supabase state file ${path.basename(file)} could not be quarantined.`
+		);
+	}
 	return { status: 'quarantined', movedTo, reason };
 }
 
@@ -238,7 +247,7 @@ export class SupabaseStoreQueue {
 	#tail: Promise<unknown> = Promise.resolve();
 
 	run<T>(task: () => Promise<T>): Promise<T> {
-		const next = this.#tail.catch(() => undefined).then(task);
+		const next = this.#tail.then(task);
 		this.#tail = next.catch(() => undefined);
 		return next;
 	}

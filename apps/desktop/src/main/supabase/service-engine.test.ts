@@ -218,6 +218,20 @@ async function needsRecreateStack(h: EngineHarness, worktree: string) {
 }
 
 describe('SupabaseEngine while off', () => {
+	it('fails startup before probing when persisted ownership cannot be read', async () => {
+		const h = await createEngineHarness({ enabled: true, start: false });
+		const load = vi
+			.spyOn(h.engine.stackStore, 'load')
+			.mockRejectedValueOnce(new Error('Unreadable ownership'));
+		try {
+			await expect(h.engine.start()).rejects.toThrow('Unreadable ownership');
+			expect(h.processCalls()).toBe(0);
+			await expect(h.engine.start()).resolves.toBeUndefined();
+		} finally {
+			load.mockRestore();
+		}
+	});
+
 	it('passes the validated binary identity to reads and lifecycle spawns', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');

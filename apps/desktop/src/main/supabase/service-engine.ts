@@ -1044,6 +1044,8 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			await this.#clearStaleStarting();
 		} catch (error) {
 			this.log(`Supabase state could not be loaded: ${errorName(error)}`);
+			this.#started = false;
+			throw error;
 		}
 		this.#unsubscribes.push(
 			this.policyStore.subscribe(() => this.markDirty()),
