@@ -2267,7 +2267,15 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		job: SupabaseEngineJob | undefined,
 		options: Readonly<{ notRunning?: 'pass' | 'fail' }> = {}
 	): Promise<SupabaseStepResult> {
-		const checked = await this.verifyExposure(stackId);
+		let checked: Awaited<ReturnType<SupabaseEngine['verifyExposure']>>;
+		try {
+			checked = await this.verifyExposure(stackId);
+		} catch (error) {
+			// A discovery implementation can throw as well as return unavailable.
+			// Either leaves exposure unverified and must take the same stop path.
+			this.log(`Supabase exposure discovery failed: ${errorName(error)}`);
+			checked = 'unknown';
+		}
 		if (checked === 'loopback') return { ok: true };
 		if (checked === 'not-running' && options.notRunning === 'pass') {
 			return { ok: true };
@@ -3507,6 +3515,13 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				}
 			} catch (error) {
 				// A job that never ended would hold a turn-off up for good.
+				outcome = {
+					status: 'failed',
+					error: supabaseDesktopError(
+						'unavailable',
+						'The adopted operation could not be verified. Review the stack before using it.'
+					),
+				};
 				this.log(
 					`Supabase could not settle an adopted job: ${errorName(error)}`
 				);
@@ -3540,12 +3555,12 @@ export class SupabaseEngine implements SupabaseServiceApi {
 			if (status === 'complete') {
 				this.jobStore.markStep(jobId, 'verify', 'current');
 			}
-			// Whether the stack came up decides what is noted about it.
-			await this.#readOwners();
-			await this.#recordAdopted(stackId, status);
+			// Verify before persistence: a failed record write must never bypass
+			// the exposure check. Verification refreshes the owner list itself.
 			const exposed = await this.enforceExposure(stackId, undefined, {
 				notRunning: 'pass',
 			});
+			await this.#recordAdopted(stackId, status);
 			if (status === 'complete') {
 				this.jobStore.markStep(
 					jobId,

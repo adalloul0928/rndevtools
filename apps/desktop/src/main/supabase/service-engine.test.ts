@@ -3687,7 +3687,7 @@ describe('SupabaseEngine adoption', () => {
 		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
 	});
 
-	it('ends an adopted job even when settling its stack fails', async () => {
+	it('fails an adopted job and stops its stack when exposure discovery throws', async () => {
 		const h = await createEngineHarness({ enabled: true, start: false });
 		const repo = await h.repository('repo');
 		const stackId = await h.identity(repo);
@@ -3702,7 +3702,9 @@ describe('SupabaseEngine adoption', () => {
 		h.alivePids.delete(previous.pid);
 		await h.advance(2_000);
 		// A job left running would keep a turn-off waiting for starts for good.
-		expect(h.engine.job(previous.jobId)?.status).toBe('complete');
+		expect(h.engine.job(previous.jobId)?.status).toBe('failed');
+		expect(h.cli.count('stack stop')).toBe(1);
+		expect(h.cli.stacks.get(stackId)?.running).toBe(false);
 		expect(h.logs.join('\n')).toContain('could not settle an adopted job');
 		expect(h.engine.stackStore.record(stackId)?.flags.starting).toBeUndefined();
 	});
