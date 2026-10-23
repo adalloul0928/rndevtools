@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Recognize Expo fetch cancellation wrappers and preserved abort causes without
+  inspecting untrusted request inputs or relabeling unrelated failures.
 - **Breaking:** query simulation modes now register `{ apply, release }` instead
   of returning cleanup after applying. Failed applies are undone immediately;
   failed cleanup stays available for an explicit retry. See the core README's
@@ -287,6 +289,8 @@
 
 - Every agent-requested Supabase reset requires operator confirmation, even for
   a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
+- Cancelled recipes leave queued Simulators untouched. Teardown runs only after
+  a target starts its steps and is never repeated after a persistence failure.
 
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.

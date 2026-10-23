@@ -4025,6 +4025,59 @@ describe('network presentation model', () => {
 		}
 	});
 
+	it.each([
+		'fetch failed: The operation was aborted.',
+		'fetch failed: Fetch request has been canceled',
+		'fetch failed: cancelled',
+	])(
+		'classifies the Expo cancellation wrapper %s without inspecting init',
+		async (message) => {
+			const diagnostics = createNetworkPluginBase();
+			const dispose = diagnostics.plugin.install?.();
+			const cancelled = new Error(message);
+			const transport = jest
+				.fn()
+				.mockRejectedValue(cancelled) as unknown as typeof fetch;
+			const init = new Proxy(
+				{},
+				{
+					get: () => {
+						throw new Error('Do not inspect init');
+					},
+				},
+			);
+			await expect(
+				diagnostics.instrumentFetch(transport)(
+					'https://example.com/cancel',
+					init,
+				),
+			).rejects.toBe(cancelled);
+			await flushCapture();
+			expect(diagnostics.getEvents()[0]?.state).toBe('aborted');
+			dispose?.();
+		},
+	);
+
+	it('uses a safely captured abort reason preserved in a fetch error cause', async () => {
+		const diagnostics = createNetworkPlugin();
+		const dispose = diagnostics.plugin.install?.();
+		const controller = new AbortController();
+		const reason = { cancelled: true };
+		controller.abort(reason);
+		const cancelled = new Error('fetch failed', { cause: reason });
+		const transport = jest
+			.fn()
+			.mockRejectedValue(cancelled) as unknown as typeof fetch;
+		await expect(
+			diagnostics.instrumentFetch(transport)('https://example.com/cancel', {
+				signal: controller.signal,
+			}),
+		).rejects.toBe(cancelled);
+		await flushCapture();
+		expect(diagnostics.getEvents()[0]?.state).toBe('aborted');
+		dispose?.();
+	});
+
 	it('does not relabel an earlier transport failure when the caller aborts later', async () => {
 		const diagnostics = createNetworkPlugin();
 		const dispose = diagnostics.plugin.install?.();
