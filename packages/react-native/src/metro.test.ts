@@ -17,6 +17,7 @@ type Fs = {
 	realpathSync: (p: string) => string;
 	statSync: (p: string) => { isFile: () => boolean };
 	symlinkSync: (target: string, p: string) => void;
+	unlinkSync: (p: string) => void;
 	writeFileSync: (p: string, data: string) => void;
 };
 type Path = {
@@ -234,7 +235,7 @@ describe('withDevtoolsPruning', () => {
 				resolveWith(config.resolver.resolveRequest, '../lib/devtools/host'),
 			).toBe(stub);
 		} finally {
-			fs.rmSync(linked, { force: true });
+			fs.unlinkSync(linked);
 		}
 	});
 

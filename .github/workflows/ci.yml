@@ -44,6 +44,8 @@ jobs:
       # build does (production, minified, Hermes bytecode) with no app
       # variable set, because a release build must be pruned without being
       # told to, then fails if any devtools marker survives in the bytecode.
+      # It then exports an unpruned Android bundle and fails unless the
+      # verifier fails on it, so a verifier that finds nothing cannot pass.
       - name: Example release bundle
         run: pnpm --dir examples/expo-demo verify:bundle
 
@@ -93,23 +95,71 @@ jobs:
   desktop:
     name: Desktop
     runs-on: macos-latest
-    timeout-minutes: 30
-    env:
-      HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+    timeout-minutes: 20
     steps:
-      # The renderer imports HeroUI Pro, a licensed library. Without a token
-      # the install still succeeds but the package is not hydrated, so
-      # typecheck and build fail on a missing module. Secrets are unavailable
-      # to job-level `if`, and to pull requests from forks, so detect the token
-      # here and skip the Electron gate with a notice instead of failing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # Nothing in this job needs the HeroUI Pro license: the main process,
+      # preload and shared code never import it, and Biome, knip and the
+      # script tests read sources without resolving it. Install scripts stay
+      # off, as in the Packages job, so a fork pull request runs no dependency
+      # code either, and pnpm's side-effects cache stays off so a restored
+      # store never hands this job hydrated licensed files. The renderer,
+      # which does import the licensed package, is checked by the Desktop
+      # renderer job below.
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts --config.side-effects-cache=false
+      - name: Lint
+        run: pnpm --filter @rndevtools/desktop lint
+      - name: Typecheck main, preload and shared
+        run: pnpm --filter @rndevtools/desktop typecheck:node
+      # Unused devDependencies are left to the Desktop renderer job. `motion`
+      # and `tailwind-variants` are peers of HeroUI Pro that only its hydrated
+      # manifest declares, so without the license knip reports them as unused,
+      # and with it an ignoreDependencies entry becomes a configuration hint,
+      # which this repository treats as an error.
+      - name: Unused exports and import cycles
+        run: |
+          pnpm --filter @rndevtools/desktop check:unused --exclude devDependencies
+          pnpm --filter @rndevtools/desktop check:cycles
+      - name: Test main, preload and shared
+        run: pnpm --filter @rndevtools/desktop test:run:node
+      # Plain `node --test` suites for the bundled-notice generator, the macOS
+      # release preflight, the native host version and the SimSlim provenance
+      # check. The first three had never run in CI. The Native helpers job
+      # also runs the provenance suite and the real version drift check; the
+      # suite is cheap, so native:check:packaging is kept whole.
+      - name: Script tests
+        run: |
+          pnpm --filter @rndevtools/desktop licenses:check
+          pnpm --filter @rndevtools/desktop release:check
+          pnpm --filter @rndevtools/desktop native:check:packaging
+
+  desktop-renderer:
+    name: Desktop renderer
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      # Licensed renderer checks run only when a token is available. The
+      # token-free Desktop job above still runs on every pull request.
       - name: Detect HeroUI Pro license
         id: license
+        env:
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
         run: |
           if [ -n "${HEROUI_AUTH_TOKEN}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Desktop gate skipped::HEROUI_AUTH_TOKEN is not available to this run, so the Electron app was not built. A maintainer must run this job for changes under apps/desktop."
+            echo "::notice title=Desktop renderer gate skipped::HEROUI_AUTH_TOKEN is unavailable. Renderer typecheck, renderer tests, unused-devDependency checks and the Electron build did not run. Run the full desktop quality gate locally before merging changes under apps/desktop."
+            echo "### Desktop renderer checks skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo 'No HeroUI Pro token is available. The token-free Desktop checks still run; a maintainer must run `pnpm --filter @rndevtools/desktop quality` locally before merging desktop changes.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.license.outputs.available == 'true'
@@ -122,9 +172,19 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      # The HeroUI Pro install script hydrates the licensed package. pnpm's
+      # side-effects cache would copy that result into the store, which
+      # setup-node saves to the Actions cache, and a pull request from a fork
+      # can restore the default branch's caches. Keeping the cache off leaves
+      # only the public stub in the store.
       - name: Install
         if: steps.license.outputs.available == 'true'
-        run: pnpm install --frozen-lockfile
+        env:
+          HEROUI_AUTH_TOKEN: ${{ secrets.HEROUI_AUTH_TOKEN }}
+        run: pnpm install --frozen-lockfile --config.side-effects-cache=false
+      # The whole gate, not only the renderer typecheck, renderer tests and
+      # build that need the license: `quality` is the one command AGENTS.md
+      # and the release workflow name, so running it keeps CI equal to it.
       - name: Desktop quality
         if: steps.license.outputs.available == 'true'
         run: pnpm --filter @rndevtools/desktop quality
