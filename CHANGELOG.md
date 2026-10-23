@@ -6,6 +6,8 @@
 
 - A replacement desktop client stops the earlier owner of its device ID, including
   across Fast Refresh. Broker-replaced clients stop reconnecting.
+- Committed navigation stays successful when a host supplies no focus updates.
+  Navigation callbacks receive the original route while captured diagnostics stay redacted.
 
 - Desktop discovery backs off failed candidate sweeps from 2.5 to 30 seconds,
   including socket-construction failures, and resets after a connection opens.
@@ -263,6 +265,9 @@
   nested or passed as the attributes, no longer drops the event. The plugin
   reads a String object as its text, and only the fields of an event, error
   and source location that it uses, where it read every descriptor.
+- Reinstalled console capture leaves forwarded wrappers from old subscriptions
+  passive, so another logger wrapping the method cannot duplicate capture.
+
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
@@ -292,6 +297,7 @@
   `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
+
 
 - SimSlim verification serializes absent observed-process evidence as empty arrays,
   including preparation and failure responses, so desktop validation accepts it.
@@ -338,12 +344,18 @@
   `@rndevtools/core/desktop-protocol`. It used to give up after 8 seconds (30
   for restores and refetches) while the device client allowed 45, so a long
   scenario was reported as unacknowledged while the device finished it.
+- The packaged renderer allows local blob video, matching development playback
+  without allowing remote media sources.
+
 - Playwright end-to-end harness and per-panel specs against the demo device.
 - The device snapshot schema reads its text, number and item bounds from
   `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
   holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
   of a snapshot past its bound, then requires the schema to reject the
   snapshot as it stands and accept it fitted. No bound changed.
+- The agent hook only redirects Simulator mutations and Metro starts while
+  the desktop is reachable; unrelated shell commands never run a reachability probe.
+
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
   checks that the process owns the connection, and it follows the process's
@@ -364,6 +376,9 @@
   had just shut down, and one that finished after an apply replaced the status
   the apply recorded, so disabling slimming soon afterwards could skip the
   restore.
+- Uncaught main-process exceptions and unhandled rejections write a private,
+  bounded, redacted diagnostic log before exiting with a failure status.
+
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
@@ -393,3 +408,6 @@
   start is no longer stopped as it ends. A start that RN Devtools adopts after
   a restart is still checked for 127.0.0.1 only when its record cannot be
   saved, and its job then fails with that error instead of passing as verified.
+
+- Desktop settings writes require a successful load, preserving unreadable settings
+  until they can be recovered and loaded again.

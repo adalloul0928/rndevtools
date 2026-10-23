@@ -177,7 +177,7 @@ func runHook(config Config) int {
 	switch event {
 	case "pre-tool-use", "claude-pre-tool-use":
 		// Claude Code and Codex send the same payload and read the same verdict.
-		decision := setup.EvaluateClaudePreToolUse(config.Stdin)
+		decision := setup.EvaluateClaudePreToolUse(config.Stdin, config.SocketPath)
 		if decision.Block {
 			fmt.Fprintln(config.Stderr, decision.Reason)
 			return 2
@@ -205,7 +205,7 @@ Entry points for the agent hooks that setup installs. Each reads the agent's
 JSON payload on stdin.
 
   pre-tool-use   Exit 2 (block, reason on stderr) when a Bash command drives a
-                 Simulator around RN Devtools: simctl boot/shutdown/openurl/
+                 Simulator while RN Devtools is reachable: simctl boot/shutdown/openurl/
                  install/launch/io and friends, or a hand-started Metro.
                  While local Supabase is turned on in RN Devtools (steering.json
                  in the agent socket directory says so), it also blocks

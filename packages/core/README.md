@@ -424,6 +424,13 @@ checks the recovery bounds, and copies only the supported fields before any
 rollback capture or mutation. Adapter-owned objects cannot change a saved
 checkpoint after preflight.
 
+## Navigation observations
+
+`record()` confirms a committed navigation. `updateStack()` can add focus
+evidence, but a missing focus observation never turns a commit into a failure.
+Only requests that never commit time out. `navigate()` passes the original
+route to the host callback; routes stored in diagnostic history stay redacted.
+
 ## Fetch cancellations
 
 Expo fetch cancellation wrappers are recorded as aborted when they carry a known
