@@ -223,7 +223,6 @@ export type SupabaseStateInputs = Readonly<{
 	log?: ((line: string) => void) | undefined;
 }>;
 
-// ---------------------------------------------------------------------------
 // Small helpers
 
 /** `~/code/app` for a path under the home directory. */
@@ -339,7 +338,6 @@ function pinnedKeyLabel(key: string): string {
 	return plain(label, 64) || 'a service';
 }
 
-// ---------------------------------------------------------------------------
 // One stack
 
 type Found = Extract<SupabaseProjectDetection, { status: 'found' }>;
@@ -1075,7 +1073,6 @@ function buildStack(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // The whole state
 
 /**

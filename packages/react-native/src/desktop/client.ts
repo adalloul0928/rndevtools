@@ -30,7 +30,6 @@ export {
 } from './projection';
 export { simulatorUdidFromPath } from './simulator-identity';
 
-/** A bounded diagnostic line published alongside each snapshot. */
 export type DesktopDiagnostic = {
 	id: string;
 	at: number;
@@ -39,46 +38,29 @@ export type DesktopDiagnostic = {
 	message: string;
 };
 
-/**
- * Everything the client needs from the host app. The client owns discovery,
- * framing, pacing, replay protection, and admission control, and runs only the
- * actions the device advertises; the host owns what its own state looks like
- * and what an action is allowed to do. Keeping that boundary explicit is what
- * makes this client reusable across apps.
- */
+/** The host projects app state and executes actions; the client owns transport and admission. */
 export type DesktopClientHost = {
-	/** Projects the host's registered diagnostics into a snapshot payload. */
 	captureTools: (
 		diagnostics: readonly DesktopDiagnostic[],
 	) => DesktopDeviceToolsSnapshot;
 	/**
-	 * Optional cheap revision of every value captureTools projects. Advance this
-	 * nonnegative safe integer whenever that data changes. Unchanged revisions
-	 * skip capture and serialization; absent, invalid or failed reads keep polling.
+	 * Advance this nonnegative safe integer whenever captureTools data changes.
+	 * Unchanged revisions skip capture; absent, invalid or failed reads keep polling.
 	 */
 	getToolsRevision?: () => number;
-	/** Identifies this device and build to the desktop. */
 	createDeviceInfo: () => DesktopDeviceInfoSnapshot;
 	/**
-	 * Applies one desktop-issued action. Rejecting throws. `signal` aborts when
-	 * the client stops waiting for the action. With `subscribeToAuthorization`
-	 * it also aborts when internal tools authorization is revoked or changes
-	 * owner while the action runs. A host holding an on-device prompt should
-	 * dismiss it and reject when the signal aborts, and a host that can stop
-	 * and roll back the work should.
+	 * Reject on failure. Honor signal by dismissing prompts and cancelling work.
+	 * It aborts on timeout or disconnect, and on revocation when authorization is subscribed.
 	 */
 	runAction: (
 		action: DesktopDeviceAction,
 		context: Readonly<{ signal: AbortSignal }>,
 	) => Promise<void>;
-	/** Current authorization. The client refuses actions while disabled. */
 	getAuthorization: () => DevtoolsAuthorization;
 	/**
-	 * Notifies the client when `getAuthorization()` may have changed, and
-	 * returns the unsubscribe. With it, the client aborts an action the moment
-	 * its grant is revoked or its owner changes; without it, the change is only
-	 * detected once the action settles. The authorization mirror's is
-	 * `subscribeToDevtoolsAuthorization`.
+	 * Subscribe for immediate revocation; otherwise it is detected when the action settles.
+	 * Return an unsubscribe callback. The mirror provides subscribeToDevtoolsAuthorization.
 	 */
 	subscribeToAuthorization?: (listener: () => void) => () => void;
 };
@@ -141,21 +123,14 @@ type ActionReplayLookup =
 	| { kind: 'replay'; result: ActionResultMessage }
 	| { kind: 'conflict' };
 
-/** The host action in flight, and why the client aborted it, if it did. */
 type ActiveAction = {
 	readonly controller: AbortController;
-	/** The owner the action was admitted for. */
 	readonly ownerId: string | null;
-	/** Set before the abort for a revocation; stop and disconnect leave it. */
+	/** Only revocation sets this reason; disconnect and stop leave it unchanged. */
 	revoked: boolean;
 };
 
-/**
- * The length and hash of an action's JSON. Retaining only this keeps the
- * replay cache small however large the payloads were. A collision could only
- * turn a conflict into a replay of the stored result, which never runs the
- * action.
- */
+/** Store hashes instead of payloads. Collisions can replay a result but cannot rerun an action. */
 function actionFingerprint(action: DesktopDeviceAction): string {
 	const serialized = JSON.stringify(action);
 	return `${serialized.length}:${desktopProjectionId('action', serialized)}`;
@@ -258,11 +233,6 @@ export class DesktopActionAdmissionController {
 	}
 }
 
-/**
- * The UTF-8 byte length of `text`, or undefined when it exceeds `maxBytes`.
- * A string's UTF-16 length is a lower bound on its UTF-8 bytes, so text that
- * is already longer than the limit is refused without walking it.
- */
 function utf8ByteLengthWithin(
 	text: string,
 	maxBytes: number,
@@ -272,11 +242,6 @@ function utf8ByteLengthWithin(
 	return bytes > maxBytes ? undefined : bytes;
 }
 
-/**
- * How long the host gets for `action`: the limit its command is allowed, or the
- * host's ceiling when that is shorter. The desktop waits this long plus a short
- * grace for the result.
- */
 function actionDeadlineMs(
 	action: DesktopDeviceAction,
 	ceilingMs: number | undefined,
@@ -285,7 +250,6 @@ function actionDeadlineMs(
 	return ceilingMs === undefined ? limit : Math.min(limit, ceilingMs);
 }
 
-/** Meters one connection's outgoing frames and their UTF-8 bytes. */
 class DesktopFrameBudget {
 	readonly #sent: { at: number; bytes: number }[] = [];
 	#bytes = 0;
@@ -305,7 +269,6 @@ class DesktopFrameBudget {
 		return true;
 	}
 
-	/** Milliseconds until the oldest spent frame leaves the window. */
 	retryDelayMs(): number {
 		const oldest = this.#sent[0];
 		return oldest
@@ -330,11 +293,9 @@ class DesktopFrameBudget {
 	}
 }
 
-/** What one open connection still has to send, in priority order. */
 type DesktopOutbox = {
 	readonly target: WebSocket;
 	readonly budget: DesktopFrameBudget;
-	/** Serialized action results. The broker waits on each, so they only wait. */
 	readonly results: string[];
 	/** Snapshots coalesce: the next one sent carries the latest state. */
 	snapshotDue: boolean;
@@ -371,11 +332,7 @@ function socketUrl(host: string, port: number): string {
 	return `ws://${displayHost}:${port}/device`;
 }
 
-/**
- * React Native's WebSocket takes connection options as a non-standard third
- * argument, `{ headers }`, which the DOM declaration of the global stops
- * short of. Only the shape the client passes is declared here.
- */
+/** React Native accepts { headers } as a third WebSocket argument absent from DOM types. */
 type ReactNativeWebSocketConstructor = new (
 	url: string,
 	protocols?: string | readonly string[] | null,
@@ -383,17 +340,8 @@ type ReactNativeWebSocketConstructor = new (
 ) => WebSocket;
 
 /**
- * Connection options for one broker candidate, or undefined for the default.
- *
- * Without an origin header, React Native's Android transport derives one from
- * the socket URL. For the emulator's host alias that is `http://10.0.2.2:<port>`,
- * which the broker refuses with 403 while it has no token, because it admits
- * only loopback origins. The connection reaches the broker from the host's own
- * loopback, so the header names that instead. This applies only to the plain
- * `ws:` alias candidates the client discovered itself on Android, which are
- * the ones it dials without a token. The other candidates keep the default: the
- * loopback ones already derive a loopback origin, and an explicit URL carries a
- * token, which the broker checks instead of the origin.
+ * Android derives a non-loopback Origin for 10.0.2.2, which a tokenless broker refuses.
+ * Override only discovered ws: emulator aliases; explicit URLs retain token authentication.
  */
 function brokerSocketOptions(
 	url: string,
@@ -543,13 +491,7 @@ export function desktopBrokerCandidates({
 	);
 }
 
-/**
- * Internal tools are also enabled for `preview`, but a preview build runs on
- * testers' devices where no broker exists and `hostUri` is undefined, so
- * discovery would sweep every loopback candidate for the whole session. Keeping
- * the client on development builds also confines the unauthenticated loopback
- * socket to machines the developer controls.
- */
+/** Keep unauthenticated discovery on development machines, away from preview users. */
 export function shouldStartDesktopClient(
 	options: Readonly<{ isDevelopmentBuild: boolean }>,
 ): boolean {
@@ -565,18 +507,10 @@ export type DesktopClientHandle = {
 };
 
 export type DesktopClientOptions = {
-	/** Host adapter supplying snapshots, identity, and action execution. */
 	host: DesktopClientHost;
 	/** Explicit broker URLs. Defaults to the discovered loopback candidates. */
 	candidates?: readonly string[];
-	/**
-	 * A ceiling, in milliseconds, on how long any one host action may run
-	 * before the client tells the desktop it timed out, aborts the action's
-	 * signal, and moves on to the next queued action. Each command's own limit
-	 * is `desktopActionTimeoutMs`, and the desktop waits that long plus a short
-	 * grace for the answer. This can only shorten the limit. Defaults to no
-	 * ceiling.
-	 */
+	/** Optional timeout ceiling in milliseconds; may only shorten desktopActionTimeoutMs. */
 	actionTimeoutMs?: number;
 };
 
@@ -688,7 +622,6 @@ export function startDesktopClient(
 		}
 	};
 
-	/** Whether the host still grants internal tools to `ownerId`. */
 	const isAuthorizedOwner = (ownerId: string | null): boolean => {
 		try {
 			const authorization = host.getAuthorization();
@@ -699,11 +632,7 @@ export function startDesktopClient(
 		}
 	};
 
-	/**
-	 * Aborts the active action once its grant no longer holds. Only the abort
-	 * happens here: `handleAction` answers the desktop, so an action gets one
-	 * result however the change was noticed.
-	 */
+	/** Abort here; handleAction sends the single result. */
 	const onAuthorizationChange = () => {
 		const current = activeAction;
 		if (!active || !current || current.revoked) return;
@@ -729,7 +658,6 @@ export function startDesktopClient(
 		}
 	};
 
-	/** Sends one frame now if the connection's frame budget has room for it. */
 	const sendWithinBudget = (message: unknown, target: WebSocket): boolean => {
 		const current = outbox;
 		if (current?.target !== target) return false;
@@ -835,11 +763,6 @@ export function startDesktopClient(
 		}
 	};
 
-	/**
-	 * Sends what fits the connection's frame budget: queued action results
-	 * first, then the coalesced snapshot. Whatever is left waits until the
-	 * oldest spent frame leaves the window.
-	 */
 	const flushOutbox = () => {
 		const current = outbox;
 		if (!current) return;
@@ -905,7 +828,6 @@ export function startDesktopClient(
 		flushOutbox();
 	};
 
-	/** Runs one host action, giving up after its deadline. */
 	const runHostAction = async (
 		action: DesktopDeviceAction,
 		expectedOwnerId: string | null,
@@ -1094,11 +1016,7 @@ export function startDesktopClient(
 			}
 		};
 
-		/**
-		 * Answers an action this device will not run, then closes the connection
-		 * as a policy violation. The answer skips the frame budget: the
-		 * connection ends with it, so going over can only end it a frame sooner.
-		 */
+		/** The final refusal bypasses pacing because the connection closes immediately. */
 		const refuse = (actionId: string, error: string, closeReason: string) => {
 			sendSerialized(
 				JSON.stringify({ type: 'action-result', actionId, ok: false, error }),
@@ -1107,7 +1025,6 @@ export function startDesktopClient(
 			closeConnection(1008, closeReason);
 		};
 
-		/** Moves on to the next candidate after this one failed to open. */
 		const scheduleNextCandidate = () => {
 			candidateIndex = (currentCandidateIndex + 1) % brokerCandidates.length;
 			if (candidateIndex === 0) {

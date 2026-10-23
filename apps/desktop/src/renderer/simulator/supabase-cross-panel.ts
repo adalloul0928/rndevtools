@@ -116,7 +116,6 @@ export function portOf(url: string | undefined): number | undefined {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Lane backend: status words, reasons and notes
 
 type LaneBackendReason = NonNullable<LaneBackendSummary['reason']>;
@@ -208,7 +207,6 @@ export function laneBackendReasonText(
 		: LANE_BACKEND_REASON_TEXT[summary.reason];
 }
 
-// ---------------------------------------------------------------------------
 // Lane backend: the lane detail's Backend section
 
 type LaneBackendHolder = Readonly<{
@@ -422,7 +420,6 @@ export function laneStopBackend(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Lanes start form: worktree suffixes and the Backend select
 
 /** Main's home-relative label for a path, `~/code/app`, when it sits under /Users. */
@@ -632,7 +629,6 @@ export function laneStartPendingMessage(
 		: 'Booting the Simulator and starting Metro…';
 }
 
-// ---------------------------------------------------------------------------
 // Fleet
 
 export type LaneBackendBrief = Readonly<{
@@ -663,7 +659,6 @@ export function laneBackendBrief(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Agents view
 
 type SessionRef = Readonly<{

@@ -28,7 +28,6 @@ import type { ClassifiedSupabaseError } from './cli-errors';
  * pure helpers that keep both sides of a seam in step.
  */
 
-// ---------------------------------------------------------------------------
 // Who is asking
 
 /**
@@ -72,7 +71,6 @@ export type SupabaseAgentContext = Readonly<{
 	sessionCwd?: string | undefined;
 }>;
 
-// ---------------------------------------------------------------------------
 // Native confirmation
 
 /**
@@ -162,7 +160,6 @@ export function supabaseConfirmationOutcome(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Injected Electron capabilities
 
 /**
@@ -217,7 +214,6 @@ export type SupabaseClipboardPort = Readonly<{
 	readText: () => Promise<string>;
 }>;
 
-// ---------------------------------------------------------------------------
 // What the service needs from lanes and agents
 
 export type SupabaseMetroRestartReason =
@@ -270,7 +266,6 @@ export type SupabaseHolderKey = Readonly<{
 	directory?: string | undefined;
 }>;
 
-// ---------------------------------------------------------------------------
 // Lanes ↔ Supabase
 
 export type LaneBackendEnsureInput = Readonly<{
@@ -308,7 +303,6 @@ export type LaneBackendEnsureResult = Readonly<{
 /** The default in-lane wait, re-exported for the lane service. */
 export const LANE_BACKEND_DEFAULT_WAIT_MS = SUPABASE_LANE_WAIT_MS;
 
-// ---------------------------------------------------------------------------
 // Steering (the Go PreToolUse hook)
 
 export type SteeringRoot = Readonly<{
@@ -375,7 +369,6 @@ export function supabaseSteeringFile(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // The service
 
 export type SupabaseReleaseResult = Readonly<{
@@ -480,7 +473,6 @@ export type CreateSupabaseService = (
 	deps: SupabaseServiceDeps
 ) => SupabaseServiceApi;
 
-// ---------------------------------------------------------------------------
 // Errors for the renderer
 
 function clamp(value: string, max: number): string {

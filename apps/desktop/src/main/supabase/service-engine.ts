@@ -791,7 +791,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		this.#discovery = this.#buildDiscovery(this.#discoveryHome);
 	}
 
-	// -------------------------------------------------------------------------
 	// Basics
 
 	/** The Supabase home the CLI and discovery use. */
@@ -904,7 +903,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
-	// -------------------------------------------------------------------------
 	// State publication
 
 	markDirty(): void {
@@ -1023,7 +1021,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		});
 	}
 
-	// -------------------------------------------------------------------------
 	// Start and stop of the service
 
 	async start(): Promise<void> {
@@ -1244,7 +1241,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
-	// -------------------------------------------------------------------------
 	// Interest
 
 	setInterest(senderKey: string, interest: SupabaseInterest): void {
@@ -1289,7 +1285,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		this.#schedule('measure', MEMORY_INTERVAL_MS, () => this.#measureTick());
 	}
 
-	// -------------------------------------------------------------------------
 	// The cheap tier
 
 	async #cheapTick(options: Readonly<{ boot?: boolean }> = {}): Promise<void> {
@@ -1436,7 +1431,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		this.#memoryPressure = await this.#memoryProbe();
 	}
 
-	// -------------------------------------------------------------------------
 	// Repositories and worktree facts
 
 	allFacts(): readonly SupabaseWorktreeFacts[] {
@@ -1732,7 +1726,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		).length;
 	}
 
-	// -------------------------------------------------------------------------
 	// CLI selection and execution
 
 	/** The worktree's own CLI when it may manage stacks. */
@@ -2024,7 +2017,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		});
 	}
 
-	// -------------------------------------------------------------------------
 	// Inventory, status, exposure, measurements
 
 	/**
@@ -2414,7 +2406,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 				: undefined;
 	}
 
-	// -------------------------------------------------------------------------
 	// Lanes
 
 	attachLane(
@@ -2658,7 +2649,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		return result;
 	}
 
-	// -------------------------------------------------------------------------
 	// Holds and automatic stops
 
 	isLive(stackId: string): boolean {
@@ -2938,7 +2928,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		});
 	}
 
-	// -------------------------------------------------------------------------
 	// Drift, follow, hardening, steering
 
 	async #planDrift(): Promise<void> {
@@ -3303,7 +3292,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		await this.steeringWriter.write(this.steering());
 	}
 
-	// -------------------------------------------------------------------------
 	// Jobs
 
 	/**
@@ -3728,7 +3716,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
-	// -------------------------------------------------------------------------
 	// Lifecycle steps (run inside a job and the stack's lock)
 
 	/** A stack's exclusions: the policy's, minus Studio when the operator enabled it. */
@@ -4526,7 +4513,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		return stopped;
 	}
 
-	// -------------------------------------------------------------------------
 	// Ensure (lane up, agent up, UI Start, follow)
 
 	/**
@@ -5291,7 +5277,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
-	// -------------------------------------------------------------------------
 	// Clipboard
 
 	/**
@@ -5323,7 +5308,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		}
 	}
 
-	// -------------------------------------------------------------------------
 	// Turning off
 
 	/** Progress of a turn-off that stops managed stacks, for the state. */
@@ -5366,7 +5350,6 @@ export class SupabaseEngine implements SupabaseServiceApi {
 		this.markDirty();
 	}
 
-	// -------------------------------------------------------------------------
 	// The API, through the handler modules
 
 	runOperation(

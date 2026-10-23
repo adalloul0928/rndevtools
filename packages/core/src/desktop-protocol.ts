@@ -1459,9 +1459,7 @@ export function parseDesktopActionEnvelope(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Fitting a snapshot to the desktop schema
-// ---------------------------------------------------------------------------
 
 // The rules below mirror the desktop's snapshot schema field by field, and the
 // tables above are where the two share their bounds. A rule is built once,

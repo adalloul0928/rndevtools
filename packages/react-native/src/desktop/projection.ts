@@ -65,11 +65,7 @@ export function projectDesktopHeaders(
 	return projected;
 }
 
-/**
- * Desktop snapshots expose only a query family, never raw key parameters.
- * Query keys routinely contain account IDs, search strings, and record IDs;
- * the session-local query ID remains available for targeted actions.
- */
+/** Expose only query families; raw key parameters can identify users or records. */
 export function projectDesktopQueryKey(
 	segments: readonly string[],
 	fallback: 'query' | 'mutation',

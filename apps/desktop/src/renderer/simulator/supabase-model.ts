@@ -53,7 +53,6 @@ import {
  * node-tested. Nothing here holds a secret: keys appear by name only.
  */
 
-// ---------------------------------------------------------------------------
 // Vocabulary
 
 export type SupabaseView = 'stacks' | 'repositories' | 'requests' | 'settings';
@@ -127,7 +126,6 @@ export function supabaseActiveJob(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Tab state, header meta and metrics
 
 export type SupabaseTabState =
@@ -328,7 +326,6 @@ export function supabaseMetrics(
 	];
 }
 
-// ---------------------------------------------------------------------------
 // Notices
 
 /** The tab shows at most this many ranked notices before the +N toggle. */
@@ -383,7 +380,6 @@ export function supabaseAttentionByStack(
 	return ranks;
 }
 
-// ---------------------------------------------------------------------------
 // Stack rows
 
 type SupabaseRowGroup =
@@ -789,7 +785,6 @@ export function supabaseSelectionAfterRemoval(
 	return current[0]?.id ?? null;
 }
 
-// ---------------------------------------------------------------------------
 // Detail: heading, sections and the action row
 
 /** The detail heading: eyebrow, branch, worktree and id, and the origin word. */
@@ -1023,7 +1018,6 @@ export function supabaseDetailActions(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // Bulk selection
 
 export type SupabaseBulkAction = Readonly<{
@@ -1140,7 +1134,6 @@ export function supabaseBulkEligibility(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Who holds this, and created by
 
 export type SupabaseOpenTarget =
@@ -1407,7 +1400,6 @@ export function supabaseHolderChain(
 	return { links, others };
 }
 
-// ---------------------------------------------------------------------------
 // Cross-panel joins
 
 /** The stack a lane is attached to, for the Lanes and Fleet chips. */
@@ -1462,7 +1454,6 @@ export function supabaseBackendsForSession(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // Repositories
 
 export type SupabaseRepositoryRow = Readonly<{
@@ -1650,7 +1641,6 @@ export function supabaseRepositoryWorktrees(
 	});
 }
 
-// ---------------------------------------------------------------------------
 // Agent requests
 
 export type SupabaseRequestCard = Readonly<{
@@ -1829,7 +1819,6 @@ export function buildSupabaseRequestCards(
 		});
 }
 
-// ---------------------------------------------------------------------------
 // Clean up
 
 type SupabasePruneGroupId = SupabasePruneSummary['groups'][number]['id'];
@@ -2065,7 +2054,6 @@ export function supabaseCleanUpOperation(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Job steps
 
 type SupabaseStepStatus =
@@ -2184,7 +2172,6 @@ export function supabaseStepList(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Logs
 
 export type SupabaseLogLine = Readonly<{
@@ -2303,7 +2290,6 @@ export function supabaseLogView(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Database
 
 type MigrationStatus = 'applied' | 'pending' | 'out-of-order' | 'missing-local';
@@ -2439,7 +2425,6 @@ export function supabaseDatabaseView(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Connect
 
 /**
@@ -2518,7 +2503,6 @@ export function supabaseConnectView(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Clock cadence
 
 /**
@@ -2570,7 +2554,6 @@ export function supabaseStackDeadlines(
 	].filter((deadline): deadline is number => deadline !== undefined);
 }
 
-// ---------------------------------------------------------------------------
 // Detail controls
 
 /** How a control confirms; see {@link supabaseConfirmationKind}. */
@@ -3320,7 +3303,6 @@ export function supabaseInlineConfirmCopy(
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Overview, facts and services
 
 /** `Running · database healthy · 5 services asleep (start on first request)`. */
@@ -3555,7 +3537,6 @@ export function supabaseServicesView(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Log reads
 
 /** A log read's window: the newest 200 lines, or a time span. */
@@ -3703,7 +3684,6 @@ export function mergeSupabaseLogs(
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Activity, counts and the requests summary
 
 type SupabaseActivityRow = Readonly<{

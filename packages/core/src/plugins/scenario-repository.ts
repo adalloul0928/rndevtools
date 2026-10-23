@@ -19,10 +19,7 @@ export type ScenarioRepositorySnapshot = Readonly<{
 	bundled: readonly ScenarioDefinition[];
 	user: readonly ScenarioDefinition[];
 	all: readonly ScenarioDefinition[];
-	/**
-	 * Why the stored document could not be loaded. While set, `user` holds
-	 * what was loaded before, and every write is refused.
-	 */
+	/** Writes are blocked while the stored document cannot be loaded. */
 	loadError?: string;
 }>;
 
@@ -137,11 +134,7 @@ export class ScenarioRepository {
 	readonly #limits: ScenarioDefinitionLimits;
 	readonly #definitionTokens = new Map<string, string>();
 	#serial: Promise<void> = Promise.resolve();
-	/**
-	 * Settles once the first load attempt has finished, whether or not the
-	 * stored document could be read, and never rejects. `getLoadError()` says
-	 * why a load failed; `reload()` tries again.
-	 */
+	/** Never rejects; inspect getLoadError() or retry with reload(). */
 	readonly ready: Promise<void>;
 
 	constructor(options: ScenarioRepositoryOptions = {}) {
@@ -281,11 +274,7 @@ export class ScenarioRepository {
 		return freezeScenarioDefinition(parseScenarioJson(value, this.#limits));
 	}
 
-	/**
-	 * Reads the stored document again, behind any queued write. Resolves once
-	 * the stored scenarios are loaded and the load error is cleared, and
-	 * rejects with that error when the document still cannot be loaded.
-	 */
+	/** Retry after queued writes; reject if the stored document still cannot load. */
 	reload(): Promise<void> {
 		return this.#enqueue(async () => {
 			await this.#hydrate();
@@ -294,13 +283,7 @@ export class ScenarioRepository {
 		});
 	}
 
-	/**
-	 * Deletes the stored document on purpose, clears the load error and empties
-	 * the user scenarios; bundled scenarios are untouched. It rejects, and
-	 * deletes nothing, once the scenarios have loaded after all, so a
-	 * confirmation given while they could not be loaded cannot destroy them
-	 * after a retry worked.
-	 */
+	/** Discard unreadable user data only; reject if a retry already recovered it. */
 	discardStoredData(): Promise<void> {
 		return this.#enqueue(async () => {
 			const storage = this.#storage;

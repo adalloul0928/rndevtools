@@ -56,7 +56,6 @@ export function supabaseRepositoryId(realRoot: string): string {
 	return `repo-${createHash('sha256').update(realRoot, 'utf8').digest('hex').slice(0, 12)}`;
 }
 
-// ---------------------------------------------------------------------------
 // Worktree mode
 
 /**
@@ -146,7 +145,6 @@ export function supabaseWorktreeMode(
 	return { value: 'managed' };
 }
 
-// ---------------------------------------------------------------------------
 // Gathering facts
 
 /** Everything known about one worktree (and app directory) of a repository. */
@@ -478,7 +476,6 @@ export function supabaseFactsForLane(
 	);
 }
 
-// ---------------------------------------------------------------------------
 // Summaries
 
 type RepositoryCheck = SupabaseRepositorySummary['checks'][number];
