@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Floating controls and windows stay inside horizontal safe areas after rotation;
+  the Android sheet respects side and bottom insets in landscape.
 - Android Back returns from a tool panel to the tool list before closing the sheet.
   iOS icon navigation buttons expose their supplied accessibility labels.
 - Validate and detach device hello fields before connecting, redacting display text
