@@ -4,6 +4,8 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Android on-device chrome and panels follow system light/dark appearance changes,
+  including text, surfaces, controls and status tones. iOS retains native colors.
 - Floating controls and windows stay inside horizontal safe areas after rotation;
   the Android sheet respects side and bottom insets in landscape.
 - Android Back returns from a tool panel to the tool list before closing the sheet.
