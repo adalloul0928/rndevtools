@@ -1,8 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { connect } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentCliCommand } from '../shared/agent-cli-protocol';
+import type {
+	AgentCliCommand,
+	AgentCliResponse,
+	AgentUnverifiedCause,
+} from '../shared/agent-cli-protocol';
 import type { AgentOperation, AgentState } from '../shared/agent-protocol';
 import { createDemoDevice } from '../shared/demo-data';
 import {
@@ -48,6 +53,7 @@ import {
 import {
 	AgentCliError,
 	type AgentCliHandlerContext,
+	AgentCliService,
 } from './agent-cli-service';
 import {
 	type AgentCommandRouterDependencies,
@@ -228,11 +234,21 @@ const context: AgentCliHandlerContext = {
 	identity: { status: 'anonymous' },
 };
 
-/** A request the desktop verified as coming from `agent`'s own process. */
+/**
+ * A request the desktop verified as coming from `agent`'s own process. The
+ * desktop verifies only a Claude Code session it discovered with a process
+ * under which the sender runs, and the id an MCP server makes up for itself
+ * (`mcp-*`) is never one, so a fixture that claimed it verified would claim
+ * what cannot happen. Other kinds are allowed here only so the router's access
+ * rules can be exercised between two holders of different kinds.
+ */
 function from(
 	agent: { kind: 'claude' | 'codex' | 'other'; sessionId: string },
 	overrides: Partial<AgentCliHandlerContext> = {}
 ): AgentCliHandlerContext {
+	if (agent.sessionId.startsWith('mcp-')) {
+		throw new Error(`${agent.sessionId} is a shared MCP id: never verified.`);
+	}
 	return {
 		...context,
 		agent,
@@ -241,16 +257,50 @@ function from(
 	};
 }
 
-/** A request that names a session the desktop could not verify. */
+/** A request that names a session the desktop could not verify, for `cause`. */
 function unverified(
+	cause: AgentUnverifiedCause = 'no-session',
 	overrides: Partial<AgentCliHandlerContext> = {}
 ): AgentCliHandlerContext {
 	return {
 		...context,
-		identity: { status: 'unverified', reason: 'The sender was not proven.' },
+		identity: {
+			status: 'unverified',
+			cause,
+			reason: `The sender was not proven (${cause}).`,
+		},
 		...overrides,
 	};
 }
+
+/**
+ * What the router answers a claim the desktop could not verify, by cause:
+ * whether to retry, and what to do. The message is the identifier's reason,
+ * passed through.
+ */
+const UNVERIFIED_REFUSALS = [
+	{
+		cause: 'no-proof',
+		retryable: true,
+		recovery:
+			'Retry; if it keeps failing, update the tool with "rndevtools setup" and run it from inside the agent session.',
+	},
+	{ cause: 'no-process-table', retryable: true, recovery: 'Retry.' },
+	{
+		cause: 'no-session',
+		retryable: false,
+		recovery:
+			'Ask the user to act in RN Devtools. A request that names no session may use free Simulators (for the CLI, run it without CODEX_THREAD_ID and RNDEVTOOLS_AGENT_SESSION_ID set).',
+	},
+] as const satisfies readonly {
+	cause: AgentUnverifiedCause;
+	retryable: boolean;
+	recovery: string;
+}[];
+
+/** What a request that names no session is told by a command that needs one. */
+const NO_AGENT_SESSION_RECOVERY =
+	'This command needs a running Claude Code session; Codex and other agents cannot hold devices yet.';
 
 /** The demo session, advertising the connected-app waits or not. */
 function desktopStateWithWaits(advertised = true): DesktopState {
@@ -1277,8 +1327,8 @@ describe('agent command router', () => {
 					: {}),
 			});
 		}
-		// Without a verified session, no requester rides along. The router has
-		// already held such a request to free devices, which is all it reaches.
+		// A request that names no session carries no requester. The router has
+		// already held it to free devices, which is all it reaches.
 		await expect(
 			handler({ kind: 'slimming', operation: 'undo', udids: [UDID] }, context)
 		).rejects.toMatchObject({ code: 'action_rejected' });
@@ -2192,24 +2242,28 @@ describe('agent command router', () => {
 			]);
 		});
 
-		it('release --all matches a shared MCP identity’s lanes and claims only by sessionCwd', async () => {
+		it('release --all also drops the lanes and claims an older desktop recorded for a shared MCP id, but only where the session worked', async () => {
 			const { dependencies } = fixture();
 			const { port, operations } = agentsPort();
-			const thread = { kind: 'codex' as const, sessionId: 'thread-1' };
+			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
+			// What an older desktop recorded for an MCP server that named no
+			// session. Nothing verifies such an id now, so no request holds as it
+			// and the directory is all that ties these to the session that worked
+			// there.
 			const shared = {
-				kind: 'codex' as const,
-				sessionId: 'mcp-codex-mcp-client',
+				kind: 'claude' as const,
+				sessionId: 'mcp-claude-code',
 			};
 			const inside = releaseLane(1, '/Users/dev/app-a', shared);
 			const elsewhere = releaseLane(2, '/Users/dev/app-b', shared);
 			const otherKind = releaseLane(3, '/Users/dev/app-a', {
-				kind: 'claude',
-				sessionId: 'mcp-claude-code',
-			});
-			const own = releaseLane(4, '/Users/dev/app-c', thread);
-			const otherThread = releaseLane(5, '/Users/dev/app-a', {
 				kind: 'codex',
-				sessionId: 'thread-2',
+				sessionId: 'mcp-codex-mcp-client',
+			});
+			const own = releaseLane(4, '/Users/dev/app-c', me);
+			const otherSession = releaseLane(5, '/Users/dev/app-a', {
+				kind: 'claude',
+				sessionId: 'claude-2',
 			});
 			const bareUdid = 'AAAAAAAA-0000-4000-8000-000000000006';
 			const ownUdid = 'AAAAAAAA-0000-4000-8000-000000000007';
@@ -2218,14 +2272,14 @@ describe('agent command router', () => {
 				{ simulatorUdid: inside.simulatorUdid, ...shared, claimedAt: now },
 				// No lane, so no directory to match: left to the hold clock.
 				{ simulatorUdid: bareUdid, ...shared, claimedAt: now },
-				{ simulatorUdid: ownUdid, ...thread, claimedAt: now }
+				{ simulatorUdid: ownUdid, ...me, claimedAt: now }
 			);
 			const { port: lanes } = releaseLanes([
 				inside,
 				elsewhere,
 				otherKind,
 				own,
-				otherThread,
+				otherSession,
 			]);
 			const handler = createAgentCommandRouter({
 				...dependencies,
@@ -2233,7 +2287,7 @@ describe('agent command router', () => {
 				lanes,
 			});
 
-			// The session-end hook reports the thread's own id and where it worked.
+			// The session-end hook reports the session's own id and where it worked.
 			await expect(
 				handler(
 					{
@@ -2241,10 +2295,10 @@ describe('agent command router', () => {
 						all: true,
 						sessionCwd: '/Users/dev/app-a/src/../src/',
 					},
-					from(thread)
+					from(me)
 				)
 			).resolves.toEqual({
-				you: thread,
+				you: me,
 				stoppedLanes: [inside.id, own.id],
 				pendingLanes: [],
 				releasedClaims: [inside.simulatorUdid, ownUdid],
@@ -2256,44 +2310,31 @@ describe('agent command router', () => {
 					simulatorUdid: inside.simulatorUdid,
 					agent: shared,
 				},
-				{ kind: 'agent.release', simulatorUdid: ownUdid, agent: thread },
+				{ kind: 'agent.release', simulatorUdid: ownUdid, agent: me },
 			]);
-
-			// Over MCP the id itself says nothing about which session is asking.
-			const unscoped = (await handler(
-				{ kind: 'release', all: true },
-				from(shared)
-			)) as Record<string, unknown>;
-			expect(unscoped).toMatchObject({
-				stoppedLanes: [],
-				pendingLanes: [],
-				releasedClaims: [],
-				errors: [],
-			});
-			expect(unscoped.next).toMatch(/sessionCwd/);
-			expect(unscoped.next).toMatch(/lane --operation down/);
 
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app-b' },
-					from(shared)
+					from(me)
 				)
 			).resolves.toMatchObject({ stoppedLanes: [elsewhere.id] });
 			expect(lanes.getState().lanes.map((lane) => lane.id)).toEqual([
 				otherKind.id,
-				otherThread.id,
+				otherSession.id,
 			]);
 			expect(
 				port.getState().claims.map((claim) => claim.simulatorUdid)
 			).toEqual([bareUdid]);
 		});
 
-		it('release --all from a monorepo checkout root releases the shared identity’s app lanes in it', async () => {
+		it('release --all from a monorepo checkout root releases the shared id’s app lanes in it', async () => {
 			const { dependencies } = fixture();
 			const { port } = agentsPort();
+			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
 			const shared = {
-				kind: 'codex' as const,
-				sessionId: 'mcp-codex-mcp-client',
+				kind: 'claude' as const,
+				sessionId: 'mcp-claude-code',
 			};
 			const app: Lane = {
 				...releaseLane(1, '/Users/dev/repo', shared),
@@ -2313,7 +2354,7 @@ describe('agent command router', () => {
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/repo' },
-					from(shared)
+					from(me)
 				)
 			).resolves.toMatchObject({
 				stoppedLanes: [app.id],
@@ -2322,13 +2363,16 @@ describe('agent command router', () => {
 			});
 		});
 
-		it('release --all from inside one app of a checkout leaves the shared identity’s other app lanes running', async () => {
+		it('release --all from inside one app of a checkout leaves the shared id’s other app lanes running', async () => {
 			const { dependencies } = fixture();
 			const { port, operations } = agentsPort();
-			const thread = { kind: 'codex' as const, sessionId: 'thread-mobile' };
+			const mobileSession = {
+				kind: 'claude' as const,
+				sessionId: 'claude-mobile',
+			};
 			const shared = {
-				kind: 'codex' as const,
-				sessionId: 'mcp-codex-mcp-client',
+				kind: 'claude' as const,
+				sessionId: 'mcp-claude-code',
 			};
 			const mobile: Lane = {
 				...releaseLane(1, '/Users/dev/mono', shared),
@@ -2351,11 +2395,14 @@ describe('agent command router', () => {
 				lanes,
 			});
 			const endIn = (sessionCwd: string) =>
-				handler({ kind: 'release', all: true, sessionCwd }, from(thread));
+				handler(
+					{ kind: 'release', all: true, sessionCwd },
+					from(mobileSession)
+				);
 
 			// The mobile session's end leaves the admin session's lane alone.
 			await expect(endIn('/Users/dev/mono/apps/mobile/src')).resolves.toEqual({
-				you: thread,
+				you: mobileSession,
 				stoppedLanes: [mobile.id],
 				pendingLanes: [],
 				releasedClaims: [mobile.simulatorUdid],
@@ -2442,7 +2489,7 @@ describe('agent command router', () => {
 			).resolves.toMatchObject({ you: session });
 		});
 
-		it('gives a claim the desktop could not verify no claim, release, or release --all, and a request that claims nothing the same no_agent_session as ever', async () => {
+		it('gives a claim the desktop could not verify no claim, release, or release --all, and tells it what can change that', async () => {
 			const { dependencies } = fixture();
 			const { port, operations } = agentsPort();
 			const handler = createAgentCommandRouter({
@@ -2454,19 +2501,28 @@ describe('agent command router', () => {
 				{ kind: 'release', udid: UDID },
 				{ kind: 'release', all: true },
 			] as const) {
-				await expect(handler(command, unverified())).rejects.toMatchObject({
-					code: 'agent_identity_unverified',
-					retryable: false,
-					recovery: expect.stringContaining('Update the rndevtools CLI'),
-				});
+				for (const { cause, retryable, recovery } of UNVERIFIED_REFUSALS) {
+					await expect(
+						handler(command, unverified(cause))
+					).rejects.toMatchObject({
+						code: 'agent_identity_unverified',
+						message: `The sender was not proven (${cause}).`,
+						retryable,
+						recovery,
+					});
+				}
+				// A request that claims nothing is told what a command that holds
+				// devices needs, which is a Claude Code session and no other.
 				await expect(handler(command, context)).rejects.toMatchObject({
 					code: 'no_agent_session',
+					retryable: false,
+					recovery: NO_AGENT_SESSION_RECOVERY,
 				});
 			}
 			expect(operations).toEqual([]);
 		});
 
-		it('refuses a session-end release after the session can no longer be verified', async () => {
+		it('refuses a session-end release once the session can no longer be placed, and leaves its claim to the hold clock', async () => {
 			const { dependencies } = fixture();
 			const { port, operations } = agentsPort();
 			const me = { kind: 'claude' as const, sessionId: 'claude-1' };
@@ -2477,20 +2533,28 @@ describe('agent command router', () => {
 				...dependencies,
 				agents: port,
 			});
-			const byClaim = {
+			// A hook that arrives long after its session left the registry: the
+			// desktop remembers a session for a minute, and this is later.
+			const lateHook = {
 				...context,
 				identity: {
 					status: 'unverified',
+					cause: 'no-session',
 					reason: 'Session is no longer discoverable.',
 				},
 			} satisfies AgentCliHandlerContext;
 			await expect(
 				handler(
 					{ kind: 'release', all: true, sessionCwd: '/Users/dev/app' },
-					byClaim
+					lateHook
 				)
-			).rejects.toMatchObject({ code: 'agent_identity_unverified' });
+			).rejects.toMatchObject({
+				code: 'agent_identity_unverified',
+				message: 'Session is no longer discoverable.',
+				retryable: false,
+			});
 			expect(operations).toEqual([]);
+			expect(port.getState().claims).toHaveLength(1);
 		});
 	});
 
@@ -2835,11 +2899,11 @@ describe('agent command router', () => {
 		expect(inputs).toHaveLength(1);
 	});
 
-	it('records the verified agent on lane up and launch, so a Codex MCP caller holds its own lane', async () => {
+	it('records the verified session on lane up and launch, so the session holds its own lane', async () => {
 		const { dependencies } = fixture();
-		const shared = {
-			kind: 'codex' as const,
-			sessionId: 'mcp-codex-mcp-client',
+		const session = {
+			kind: 'claude' as const,
+			sessionId: 'claude-session-1',
 		};
 		const laneId = 'lane-11111111-2222-4333-8444-555555555555';
 		let current: Lane[] = [];
@@ -2916,39 +2980,39 @@ describe('agent command router', () => {
 				elapsedMilliseconds: 1,
 			}),
 		});
-		const asCodex = from(shared);
+		const asSession = from(session);
 
 		await handler(
 			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
-			asCodex
+			asSession
 		);
-		expect(operations[0]).toMatchObject({ kind: 'lane.start', agent: shared });
-		expect(current[0]?.agent).toMatchObject(shared);
-		await handler({ kind: 'lane', operation: 'launch', laneId }, asCodex);
-		expect(operations[1]).toMatchObject({ kind: 'lane.launch', agent: shared });
+		expect(operations[0]).toMatchObject({ kind: 'lane.start', agent: session });
+		expect(current[0]?.agent).toMatchObject(session);
+		await handler({ kind: 'lane', operation: 'launch', laneId }, asSession);
+		expect(operations[1]).toMatchObject({
+			kind: 'lane.launch',
+			agent: session,
+		});
 		await expect(
 			handler(
 				{
 					kind: 'input',
 					input: { kind: 'button', udid: UDID, button: 'home' },
 				},
-				asCodex
+				asSession
 			)
 		).resolves.toMatchObject({ kind: 'button' });
+		const other = { kind: 'claude' as const, sessionId: 'claude-session-2' };
 		await expect(
-			handler(
-				{ kind: 'lane', operation: 'launch', laneId },
-				from({ kind: 'claude', sessionId: 'claude-1' })
-			)
+			handler({ kind: 'lane', operation: 'launch', laneId }, from(other))
 		).rejects.toMatchObject({ code: 'device_held' });
-		await handler({ kind: 'lane', operation: 'down', laneId }, asCodex);
+		await handler({ kind: 'lane', operation: 'down', laneId }, asSession);
 
 		// The lane's holder is the connection's verified identity, whoever the
 		// request says it is: a lane command takes no agent of its own.
-		const thread = from({ kind: 'codex', sessionId: 'thread-1' });
 		await handler(
 			{ kind: 'lane', operation: 'up', worktreePath: '/Users/dev/app' },
-			thread
+			from(other)
 		);
 		expect(operations.map((operation) => operation.kind)).toEqual([
 			'lane.start',
@@ -2956,9 +3020,7 @@ describe('agent command router', () => {
 			'lane.stop',
 			'lane.start',
 		]);
-		expect(operations[3]).toMatchObject({
-			agent: { kind: 'codex', sessionId: 'thread-1' },
-		});
+		expect(operations[3]).toMatchObject({ agent: other });
 	});
 
 	it('lets lane up omit the udid: the lane service picks a device, and a parked request comes back with next steps', async () => {
@@ -3338,10 +3400,6 @@ describe('agent command router', () => {
 		const STACK_ID = SUPABASE_DEMO_IDS.featCheckout;
 		const WORKTREE = '/Users/dev/example-app-wt/feat-checkout';
 		const claude = { kind: 'claude' as const, sessionId: 'claude-1' };
-		const sharedCodex = {
-			kind: 'codex' as const,
-			sessionId: 'mcp-codex-mcp-client',
-		};
 		const STACK: SupabaseAgentStack = {
 			id: STACK_ID,
 			status: 'ready',
@@ -3621,16 +3679,20 @@ describe('agent command router', () => {
 				},
 			]);
 
-			// A shared MCP identity is matched by worktree, so it carries no
-			// session directory even while one of its sessions is discovered.
+			// A verified session that discovery has not listed (it started since the
+			// last poll) is still the holder; its directory is just not known yet.
+			const unlisted = {
+				kind: 'claude' as const,
+				sessionId: 'claude-unlisted',
+			};
 			await handler(
 				{ kind: 'supabase', operation: 'down', worktreePath: WORKTREE },
-				from(sharedCodex)
+				from(unlisted)
 			);
 			expect(calls[3]?.context).toEqual({
 				requestId: context.requestId,
-				synthetic: true,
-				holder: sharedCodex,
+				synthetic: false,
+				holder: unlisted,
 			});
 			// No session on the request: an anonymous caller, which has no holder.
 			await expect(
@@ -3651,16 +3713,19 @@ describe('agent command router', () => {
 			});
 			// These act for a holder, and a claim that is not proven is nobody's.
 			for (const operation of ['up', 'down', 'reset', 'destroy'] as const) {
-				await expect(
-					handler(
-						{ kind: 'supabase', operation, worktreePath: WORKTREE },
-						unverified()
-					)
-				).rejects.toMatchObject({
-					code: 'agent_identity_unverified',
-					retryable: false,
-					recovery: expect.stringContaining('Update the rndevtools CLI'),
-				});
+				for (const { cause, retryable, recovery } of UNVERIFIED_REFUSALS) {
+					await expect(
+						handler(
+							{ kind: 'supabase', operation, worktreePath: WORKTREE },
+							unverified(cause)
+						)
+					).rejects.toMatchObject({
+						code: 'agent_identity_unverified',
+						message: `The sender was not proven (${cause}).`,
+						retryable,
+						recovery,
+					});
+				}
 			}
 			expect(calls).toEqual([]);
 
@@ -3988,24 +4053,6 @@ describe('agent command router', () => {
 			]);
 			expect(failed.errors.join(' ')).not.toContain('sb_secret_');
 			expect(releases[1]).toEqual({ holder: claude });
-
-			// A shared MCP identity without its directory releases nothing.
-			const unscoped = (await handler(
-				{ kind: 'release', all: true },
-				from(sharedCodex)
-			)) as { releasedStacks: string[]; next?: string };
-			expect(unscoped.releasedStacks).toEqual([]);
-			expect(unscoped.next).toMatch(/sessionCwd/);
-			expect(unscoped.next).toMatch(/supabase --operation down/);
-			expect(releases).toHaveLength(2);
-			await handler(
-				{ kind: 'release', all: true, sessionCwd: WORKTREE },
-				from(sharedCodex)
-			);
-			expect(releases[2]).toEqual({
-				holder: sharedCodex,
-				sessionCwd: WORKTREE,
-			});
 		});
 
 		it('release --all answers within 2 s while the stack release still runs', async () => {
@@ -4380,12 +4427,17 @@ describe('agent command router', () => {
 				{ kind: 'release', udid: UDID },
 				{ kind: 'release', all: true },
 			] as const) {
-				await expect(handler(command, unverified())).rejects.toMatchObject({
-					code: 'agent_identity_unverified',
-					retryable: false,
-					message: 'The sender was not proven.',
-					recovery: expect.stringContaining('Update the rndevtools CLI'),
-				});
+				// Whatever the cause, and each cause says what to do about it.
+				for (const { cause, retryable, recovery } of UNVERIFIED_REFUSALS) {
+					await expect(
+						handler(command, unverified(cause))
+					).rejects.toMatchObject({
+						code: 'agent_identity_unverified',
+						message: `The sender was not proven (${cause}).`,
+						retryable,
+						recovery,
+					});
+				}
 			}
 			expect(world.operations).toEqual([]);
 			expect(world.inputs).toEqual([]);
@@ -4535,6 +4587,229 @@ describe('agent command router', () => {
 			expect(world.operations[0]).toMatchObject({
 				kind: 'lane.start',
 				agent: { kind: 'codex', sessionId: 'stranger' },
+			});
+		});
+
+		describe('from a request over the socket to the real identifier', () => {
+			const live = { kind: 'claude' as const, sessionId: 'claude-live' };
+			const neighbour = { kind: 'claude' as const, sessionId: 'claude-next' };
+			const thread = { kind: 'codex' as const, sessionId: 'codex-thread' };
+
+			/**
+			 * Claude Code (pid 100) runs the live session and has an MCP server
+			 * (111) and a hook shell (112) under it. Another session runs as 200,
+			 * and 301 is a terminal that belongs to none.
+			 */
+			const processTable = [
+				{ pid: 1, ppid: 0 },
+				{ pid: 100, ppid: 1 },
+				{ pid: 110, ppid: 100 },
+				{ pid: 111, ppid: 110 },
+				{ pid: 112, ppid: 100 },
+				{ pid: 200, ppid: 1 },
+				{ pid: 300, ppid: 1 },
+				{ pid: 301, ppid: 300 },
+			];
+
+			async function identityDesk() {
+				const root = await mkdtemp(path.join(os.tmpdir(), 'rdt-id-'));
+				let sessions: AgentState['sessions'] = [
+					{ ...live, title: 'live', cwd: '/Users/dev/app', pid: 100 },
+					{ ...neighbour, title: 'next', cwd: '/Users/dev/other', pid: 200 },
+					{ ...thread, title: 'thread' },
+				];
+				let table: typeof processTable | Error = processTable;
+				const agents = new AgentService({
+					directory: path.join(root, 'agents'),
+					lanes: () => [],
+					discover: async () => ({ sessions, claude: 'ok', codex: 'ok' }),
+					processTable: async () => {
+						if (table instanceof Error) throw table;
+						return table;
+					},
+					pollIntervalMs: 60_000,
+					now: () => now,
+				});
+				await agents.start();
+				const { dependencies } = fixture();
+				const socketPath = path.join(root, 'sock', 'rndevtools.sock');
+				const service = new AgentCliService({
+					socketPath,
+					platform: 'darwin',
+					// The socket proof is lsof's, and agent-peer.test.ts owns it.
+					verifyPeer: async () => true,
+					identify: (input) => agents.identify(input),
+					handler: createAgentCommandRouter({ ...dependencies, agents }),
+				});
+				await service.start();
+				return {
+					agents,
+					setSessions: (value: AgentState['sessions']) => {
+						sessions = value;
+					},
+					setTable: (value: typeof table) => {
+						table = value;
+					},
+					/** One request as the Go CLI sends it, answered as it gets it. */
+					send: (
+						command: Record<string, unknown>,
+						extra: { agent?: Holder; pid?: number }
+					) =>
+						new Promise<AgentCliResponse>((resolve, reject) => {
+							const socket = connect(socketPath);
+							const chunks: Buffer[] = [];
+							socket.once('error', reject);
+							socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+							socket.once('end', () =>
+								resolve(
+									JSON.parse(
+										Buffer.concat(chunks).toString('utf8')
+									) as AgentCliResponse
+								)
+							);
+							socket.once('connect', () =>
+								socket.end(
+									`${JSON.stringify({
+										protocol: 'rndevtools/1',
+										id: 'cli-identity',
+										command,
+										...(extra.agent ? { agent: extra.agent } : {}),
+										...(extra.pid ? { peer: { pid: extra.pid } } : {}),
+									})}\n`
+								)
+							);
+						}),
+					close: async () => {
+						await service.stop();
+						await agents.stop();
+						await rm(root, { recursive: true, force: true });
+					},
+				};
+			}
+
+			it('serves an MCP server that predates a /clear as the session it runs under, reads and holds alike', async () => {
+				const { agents, send, close } = await identityDesk();
+				try {
+					// The id the session had before the /clear, and the shared id an MCP
+					// server makes up when it has no session variable at all.
+					for (const claimed of [
+						{ kind: 'claude' as const, sessionId: 'claude-before-clear' },
+						{ kind: 'claude' as const, sessionId: 'mcp-claude-code' },
+					]) {
+						for (const command of [
+							{ kind: 'agents' },
+							{ kind: 'simulators', includeUnavailable: false },
+						]) {
+							expect(
+								await send(command, { agent: claimed, pid: 111 })
+							).toMatchObject({ ok: true });
+						}
+						await expect(
+							send({ kind: 'claim', udid: UDID }, { agent: claimed, pid: 111 })
+						).resolves.toMatchObject({ ok: true, result: { you: live } });
+						expect(agents.getState().claims).toMatchObject([live]);
+						await send(
+							{ kind: 'release', udid: UDID },
+							{ agent: live, pid: 111 }
+						);
+					}
+				} finally {
+					await close();
+				}
+			});
+
+			it('tells each other caller what went wrong and what to do', async () => {
+				const { send, setTable, close } = await identityDesk();
+				try {
+					// A Codex thread, which shares one process, can read: only holding
+					// and driving a device need a session the desktop can place.
+					expect(
+						await send({ kind: 'agents' }, { agent: thread, pid: 301 })
+					).toMatchObject({ ok: true });
+
+					// A live session that the sending process does not run under is
+					// refused outright, even for a read.
+					const mismatch = {
+						code: 'agent_identity_mismatch',
+						message:
+							'The request names a session other than the one the sending process runs under.',
+						retryable: false,
+						recovery:
+							'Run the tool from inside your own agent session; an MCP server that predates a /clear is fixed by reconnecting it.',
+					};
+					for (const command of [
+						{ kind: 'agents' },
+						{ kind: 'claim', udid: UDID },
+					]) {
+						expect(
+							await send(command, { agent: neighbour, pid: 111 })
+						).toHaveProperty('error', mismatch);
+					}
+
+					// The same thread cannot hold, and is told that nothing it can do from
+					// the request changes that.
+					const claim = { kind: 'claim', udid: UDID };
+					expect(await send(claim, { agent: thread, pid: 301 })).toHaveProperty(
+						'error',
+						{
+							code: 'agent_identity_unverified',
+							message:
+								'This caller cannot be tied to a running Claude Code session, so it cannot hold or drive Simulators. Reads still work.',
+							retryable: false,
+							recovery:
+								'Ask the user to act in RN Devtools. A request that names no session may use free Simulators (for the CLI, run it without CODEX_THREAD_ID and RNDEVTOOLS_AGENT_SESSION_ID set).',
+						}
+					);
+
+					// A CLI that names no process, or a process list that cannot be read:
+					// a failed check, which a retry can pass.
+					expect(await send(claim, { agent: live })).toHaveProperty('error', {
+						code: 'agent_identity_unverified',
+						message:
+							'RN Devtools could not confirm which process sent the request (an older rndevtools command-line tool does not name its process, or the check timed out).',
+						retryable: true,
+						recovery:
+							'Retry; if it keeps failing, update the tool with "rndevtools setup" and run it from inside the agent session.',
+					});
+					setTable(new Error('ps is not available'));
+					expect(await send(claim, { agent: live, pid: 111 })).toHaveProperty(
+						'error',
+						{
+							code: 'agent_identity_unverified',
+							message:
+								'RN Devtools could not read the process list to find the session.',
+							retryable: true,
+							recovery: 'Retry.',
+						}
+					);
+				} finally {
+					await close();
+				}
+			});
+
+			it('releases a session’s claim from its session-end hook after Claude Code deleted its registry file', async () => {
+				const { agents, send, setSessions, close } = await identityDesk();
+				try {
+					await send({ kind: 'claim', udid: UDID }, { agent: live, pid: 111 });
+					expect(agents.getState().claims).toHaveLength(1);
+					// Claude Code deletes the file, then runs the hook; the desktop's poll
+					// in between finds the session gone.
+					setSessions([]);
+					await agents.refresh();
+					expect(agents.getState().sessions).toEqual([]);
+					await expect(
+						send(
+							{ kind: 'release', all: true, sessionCwd: '/Users/dev/app' },
+							{ agent: live, pid: 112 }
+						)
+					).resolves.toMatchObject({
+						ok: true,
+						result: { you: live, releasedClaims: [UDID] },
+					});
+					expect(agents.getState().claims).toEqual([]);
+				} finally {
+					await close();
+				}
 			});
 		});
 	});

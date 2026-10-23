@@ -12,6 +12,7 @@ import {
 	type AgentCliRequest,
 	type AgentCliResponse,
 	type AgentIdentityResolution,
+	type AgentUnverifiedCause,
 	agentCliRequestSchema,
 	RNDEVTOOLS_AGENT_CLI_PROTOCOL,
 } from '../shared/agent-cli-protocol';
@@ -98,6 +99,7 @@ const identifyNothing: AgentIdentifier = async ({ claimed }) =>
 	claimed
 		? {
 				status: 'unverified',
+				cause: 'no-session',
 				reason:
 					'This desktop does not map requests to agent sessions, so the session named cannot be verified.',
 			}
@@ -132,6 +134,55 @@ export class AgentCliError extends Error {
 		this.retryable = retryable;
 		this.recovery = recovery;
 	}
+}
+
+/**
+ * What an agent can do when RN Devtools could not verify the session its
+ * request names, by cause. The reason from the identifier says what happened;
+ * this says what can change it, and that differs: a failed check can pass on a
+ * retry, while a caller that runs under no Claude Code session never becomes
+ * verified, so it is told what it can still do.
+ */
+const UNVERIFIED_RECOVERY: Readonly<Record<AgentUnverifiedCause, string>> = {
+	'no-proof':
+		'Retry; if it keeps failing, update the tool with "rndevtools setup" and run it from inside the agent session.',
+	'no-process-table': 'Retry.',
+	'no-session':
+		'Ask the user to act in RN Devtools. A request that names no session may use free Simulators (for the CLI, run it without CODEX_THREAD_ID and RNDEVTOOLS_AGENT_SESSION_ID set).',
+};
+
+const MISMATCH_RECOVERY =
+	'Run the tool from inside your own agent session; an MCP server that predates a /clear is fixed by reconnecting it.';
+
+/**
+ * The refusal for a request whose claimed session the desktop will not
+ * accept: a claim it could not verify, or one that names a live session the
+ * sending process does not run under. The service refuses a mismatch before
+ * any handler runs; the router refuses an unverified claim wherever the work
+ * would hold or drive a device, and leaves the reads open.
+ */
+export function identityRefusal(
+	identity: Extract<
+		AgentIdentityResolution,
+		{ status: 'unverified' | 'mismatch' }
+	>
+): AgentCliError {
+	if (identity.status === 'mismatch') {
+		return new AgentCliError({
+			code: 'agent_identity_mismatch',
+			message: identity.reason,
+			retryable: false,
+			recovery: MISMATCH_RECOVERY,
+		});
+	}
+	return new AgentCliError({
+		code: 'agent_identity_unverified',
+		message: identity.reason,
+		// A check that failed can pass the next time. A caller outside every
+		// session does not become one by asking again.
+		retryable: identity.cause !== 'no-session',
+		recovery: UNVERIFIED_RECOVERY[identity.cause],
+	});
 }
 
 function safeErrorBody(error: unknown): AgentCliErrorBody {
@@ -541,15 +592,7 @@ export class AgentCliService {
 		}, this.#livenessProbeMs);
 		try {
 			const identity = await this.#resolveIdentity(socket, request);
-			if (identity.status === 'mismatch') {
-				throw new AgentCliError({
-					code: 'agent_identity_mismatch',
-					message: identity.reason,
-					retryable: false,
-					recovery:
-						'Run the rndevtools CLI from inside your own agent session, with its own session variables; a request cannot act for another session.',
-				});
-			}
+			if (identity.status === 'mismatch') throw identityRefusal(identity);
 			const result = await this.#handler(request.command, {
 				requestId: request.id,
 				signal: controller.signal,

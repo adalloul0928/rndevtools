@@ -6,7 +6,7 @@ import type { AgentSession } from '../shared/agent-protocol';
 import { DEVICE_HOLD_GRACE_MS } from '../shared/device-hold';
 import type { Lane } from '../shared/lane-protocol';
 import type { ProcessTableEntry } from './agent-peer';
-import { AgentService } from './agent-service';
+import { AgentService, RECENT_SESSION_MS } from './agent-service';
 import { type CodexDatabase, discoverAgentSessions } from './agent-sessions';
 import type { MetroLaunchInput, MetroSupervisorPort } from './lane-metro';
 import { LaneService, type LaneSimulatorPort } from './lane-service';
@@ -327,8 +327,8 @@ describe('AgentService', () => {
 		expect(
 			service.access('AAAAAAAA-0000-4000-8000-00000000000F', claude).allowed
 		).toBe(true);
-		// A request with no verified identity is nobody's: it gets the free
-		// device and neither the operator's lane nor the claimed one.
+		// A request that names no session is nobody's: it gets the free device
+		// and neither the operator's lane nor the claimed one.
 		expect(service.access(A, 'anonymous').allowed).toBe(false);
 		expect(service.access(B, 'anonymous').allowed).toBe(false);
 		expect(
@@ -510,6 +510,8 @@ describe('AgentService holds through the lane reconcile', () => {
 	const OTHER_APP = '/Users/dev/app-onboarding';
 	const LANE_A = 'lane-11111111-2222-4333-8444-555555555555';
 	const LANE_B = 'lane-22222222-2222-4333-8444-555555555555';
+	// The holder an older desktop recorded for every Codex session that called
+	// over MCP. No request verifies as it now, but its holds persist.
 	const synthetic = {
 		kind: 'codex' as const,
 		sessionId: 'mcp-codex-mcp-client',
@@ -715,7 +717,8 @@ describe('AgentService holds through the lane reconcile', () => {
 		await tick();
 		expect(laneIds()).toEqual([LANE_A]);
 		expect(metro.stopped).toEqual([]);
-		// The same thread may drive the device over the CLI, and reads as attached.
+		// The hold lets a thread of the holder's kind that works inside the lane
+		// through, and the thread reads as attached.
 		expect(
 			agents.access(A, { kind: 'codex', sessionId: 'thread-1' }).allowed
 		).toBe(true);
@@ -839,6 +842,23 @@ describe('AgentService.identify', () => {
 	const CLAUDE_A_PID = 100;
 	const CLAUDE_B_PID = 200;
 
+	// What identify says when it will not take a claim at its word, by cause.
+	const NO_PROOF =
+		'RN Devtools could not confirm which process sent the request (an older rndevtools command-line tool does not name its process, or the check timed out).';
+	const NO_PROCESS_TABLE =
+		'RN Devtools could not read the process list to find the session.';
+	const NO_SESSION =
+		'This caller cannot be tied to a running Claude Code session, so it cannot hold or drive Simulators. Reads still work.';
+	const OTHER_SESSION =
+		'The request names a session other than the one the sending process runs under.';
+	const NOT_UNDER_SESSION =
+		'The request names a running session, but the sending process does not run under it.';
+	const noSession = {
+		status: 'unverified',
+		cause: 'no-session',
+		reason: NO_SESSION,
+	} as const;
+
 	function entry(pid: number, ppid: number) {
 		return { pid, ppid } satisfies ProcessTableEntry;
 	}
@@ -866,6 +886,7 @@ describe('AgentService.identify', () => {
 
 	let root: string;
 	let service: AgentService;
+	let clock: number;
 	let discovered: AgentSession[];
 	let table: readonly ProcessTableEntry[] | Error;
 	let discoveries: number;
@@ -886,6 +907,7 @@ describe('AgentService.identify', () => {
 
 	beforeEach(async () => {
 		root = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-agent-identify-'));
+		clock = now;
 		discoveries = 0;
 		table = baseTable;
 		discovered = [
@@ -905,7 +927,7 @@ describe('AgentService.identify', () => {
 				return table;
 			},
 			pollIntervalMs: 60_000,
-			now: () => now,
+			now: () => clock,
 		});
 		await service.start();
 		discoveries = 0;
@@ -925,19 +947,22 @@ describe('AgentService.identify', () => {
 		expect(discoveries).toBe(0);
 	});
 
-	it('leaves a claim unverified when the sender was not proven, or cannot be traced', async () => {
-		const unproven = await service.identify({ claimed: claudeA });
-		expect(unproven).toMatchObject({ status: 'unverified' });
-		table = new Error('ps is not available');
-		const untraceable = await service.identify({
-			claimed: claudeA,
-			peerPid: 111,
+	it('leaves a claim unverified, and says why, when the sender was not proven or cannot be traced', async () => {
+		await expect(service.identify({ claimed: claudeA })).resolves.toEqual({
+			status: 'unverified',
+			cause: 'no-proof',
+			reason: NO_PROOF,
 		});
-		expect(untraceable).toMatchObject({ status: 'unverified' });
-		expect(untraceable).toHaveProperty(
-			'reason',
-			expect.stringContaining('process table')
-		);
+		table = new Error('ps is not available');
+		await expect(
+			service.identify({ claimed: claudeA, peerPid: 111 })
+		).resolves.toEqual({
+			status: 'unverified',
+			cause: 'no-process-table',
+			reason: NO_PROCESS_TABLE,
+		});
+		// There was no process to place, so the sessions were not looked at again.
+		expect(discoveries).toBe(0);
 	});
 
 	it('verifies a process under a session that claims exactly that session', async () => {
@@ -955,23 +980,44 @@ describe('AgentService.identify', () => {
 		expect(discoveries).toBe(0);
 	});
 
-	it('refuses a process under one session that claims another live session', async () => {
-		const result = await service.identify({ claimed: claudeB, peerPid: 111 });
-		expect(result).toMatchObject({ status: 'mismatch' });
-		expect(result).toHaveProperty(
-			'reason',
-			expect.stringMatching(/claude session claude-b.*another claude session/)
-		);
-		// Nor may it pass for a Codex thread or an agent no one discovered.
+	it('refuses a process under one session that claims another live session, with a process of its own or without', async () => {
+		await expect(
+			service.identify({ claimed: claudeB, peerPid: 111 })
+		).resolves.toEqual({ status: 'mismatch', reason: OTHER_SESSION });
+		// A Codex thread has no process, but it is as live as claude B: a thread
+		// id that leaked into a Claude tree does not make the sender its own.
 		await expect(
 			service.identify({ claimed: codexT, peerPid: 111 })
-		).resolves.toMatchObject({ status: 'mismatch' });
-		await expect(
-			service.identify({
-				claimed: { kind: 'other', sessionId: 'mcp-some-client' },
-				peerPid: 111,
-			})
-		).resolves.toMatchObject({ status: 'mismatch' });
+		).resolves.toEqual({ status: 'mismatch', reason: OTHER_SESSION });
+	});
+
+	it('takes the session a process runs under when its claim names no live session', async () => {
+		// The id a /clear replaced (an MCP server keeps the one it started with),
+		// the shared id an MCP server makes up when it has no session variable,
+		// another agent's variable that leaked into a Claude tree, and a Codex
+		// thread that is no longer active: no live session has any of them.
+		const claims = [
+			{ kind: 'claude', sessionId: 'claude-a-before-clear' },
+			{ kind: 'claude', sessionId: 'mcp-claude-code' },
+			{ kind: 'other', sessionId: 'mcp-some-client' },
+			{ kind: 'other', sessionId: 'id-from-another-tool' },
+			{ kind: 'codex', sessionId: 'codex-thread-gone' },
+		] as const;
+		for (const claimed of claims) {
+			// The claim disagrees with the session the sender is under, so the
+			// sessions are discovered afresh before it is read as ignorable.
+			discoveries = 0;
+			for (const pid of [111, 110, CLAUDE_A_PID]) {
+				await expect(
+					service.identify({ claimed, peerPid: pid })
+				).resolves.toEqual({
+					status: 'verified',
+					agent: claudeA,
+					basis: 'process',
+				});
+			}
+			expect(discoveries).toBe(3);
+		}
 	});
 
 	it('takes the session nearest the sender when sessions nest', async () => {
@@ -985,7 +1031,7 @@ describe('AgentService.identify', () => {
 		).resolves.toMatchObject({ status: 'verified', basis: 'process' });
 		await expect(
 			service.identify({ claimed: claudeA, peerPid: 211 })
-		).resolves.toMatchObject({ status: 'mismatch' });
+		).resolves.toEqual({ status: 'mismatch', reason: OTHER_SESSION });
 	});
 
 	it('does not verify an undiscovered tree from its claimed session id', async () => {
@@ -998,20 +1044,17 @@ describe('AgentService.identify', () => {
 		] as const) {
 			await expect(
 				service.identify({ claimed, peerPid: pid })
-			).resolves.toMatchObject({ status: 'unverified' });
+			).resolves.toEqual(noSession);
 		}
 	});
 
 	it('refuses an undiscovered tree that claims a live session with a process', async () => {
-		const result = await service.identify({ claimed: claudeB, peerPid: 301 });
-		expect(result).toMatchObject({ status: 'mismatch' });
-		expect(result).toHaveProperty(
-			'reason',
-			expect.stringMatching(/claude session claude-b.*does not run under it/)
-		);
+		await expect(
+			service.identify({ claimed: claudeB, peerPid: 301 })
+		).resolves.toEqual({ status: 'mismatch', reason: NOT_UNDER_SESSION });
 		await expect(
 			service.identify({ claimed: claudeA, peerPid: 500 })
-		).resolves.toMatchObject({ status: 'mismatch' });
+		).resolves.toEqual({ status: 'mismatch', reason: NOT_UNDER_SESSION });
 	});
 
 	it('refuses to verify a Codex thread that shares a process with other threads', async () => {
@@ -1020,8 +1063,30 @@ describe('AgentService.identify', () => {
 		for (const pid of [401, 301, 500]) {
 			await expect(
 				service.identify({ claimed: codexT, peerPid: pid })
-			).resolves.toMatchObject({ status: 'unverified' });
+			).resolves.toEqual(noSession);
 		}
+	});
+
+	it('does not let a registry entry for pid 1 vouch for the processes launchd adopted', async () => {
+		// launchd is the ancestor of every orphaned process, so an entry that
+		// names it would verify any of them.
+		const init = { kind: 'claude', sessionId: 'claude-init' } as const;
+		discovered = [live('claude', init.sessionId, 1), ...discovered];
+		await service.refresh();
+		// Process 500 is a shell whose parent exited: launchd's now.
+		await expect(
+			service.identify({ claimed: init, peerPid: 500 })
+		).resolves.toEqual({ status: 'mismatch', reason: NOT_UNDER_SESSION });
+		// A process under claude A is not launchd's session either.
+		await expect(
+			service.identify({ claimed: init, peerPid: 111 })
+		).resolves.toEqual({ status: 'mismatch', reason: OTHER_SESSION });
+		// And once the entry is gone it is not remembered for the minute after.
+		discovered = discovered.filter((session) => session.pid !== 1);
+		await service.refresh();
+		await expect(
+			service.identify({ claimed: init, peerPid: 500 })
+		).resolves.toEqual(noSession);
 	});
 
 	it('discovers sessions once more for a session the last poll had not seen', async () => {
@@ -1044,8 +1109,9 @@ describe('AgentService.identify', () => {
 		expect(discoveries).toBe(1);
 	});
 
-	it('discovers sessions again before a claim the list cannot confirm counts against the sender', async () => {
-		// Claude A took a new id (a /clear, say) since the last poll.
+	it('follows a session that took a new id, and does not read the id it dropped as another session', async () => {
+		// Claude A took a new id (a /clear, say) since the last poll. Its process
+		// is the same, and so are the MCP servers under it.
 		const renamed = { kind: 'claude', sessionId: 'claude-a-cleared' } as const;
 		discovered = [
 			live('claude', renamed.sessionId, CLAUDE_A_PID),
@@ -1059,19 +1125,173 @@ describe('AgentService.identify', () => {
 			basis: 'process',
 		});
 		expect(discoveries).toBe(1);
-		// The id it dropped is no one's now, and the sender is still under A.
-		await expect(
-			service.identify({ claimed: claudeA, peerPid: 111 })
-		).resolves.toMatchObject({ status: 'mismatch' });
+		// The id it dropped is no live session's now, and an MCP server that began
+		// before the /clear still claims it. That is not a mismatch, however many
+		// times the sessions are discovered again: the sender is under the renamed
+		// session, which is the one discovery lists for this process, not the id
+		// remembered beside it for the minute after.
+		for (const call of [1, 2]) {
+			await expect(
+				service.identify({ claimed: claudeA, peerPid: 111 })
+			).resolves.toEqual({
+				status: 'verified',
+				agent: renamed,
+				basis: 'process',
+			});
+			expect(discoveries).toBe(1 + call);
+		}
 	});
 
 	it('walks a process table with a cycle without hanging', async () => {
 		table = [entry(700, 701), entry(701, 700)];
 		const claimed = { kind: 'other', sessionId: 'looping-tool' } as const;
-		await expect(
-			service.identify({ claimed, peerPid: 700 })
-		).resolves.toMatchObject({
-			status: 'unverified',
+		await expect(service.identify({ claimed, peerPid: 700 })).resolves.toEqual(
+			noSession
+		);
+	});
+
+	describe('when Claude Code has deleted the registry file of a session that is still running', () => {
+		// Claude Code deletes ~/.claude/sessions/<pid>.json before it runs the
+		// SessionEnd hook on a normal exit, and its process outlives the hook.
+		const sessionEnd = () =>
+			service.identify({ claimed: claudeA, peerPid: 111 });
+
+		it('still verifies the hook by its process for a minute after discovery last listed the session', async () => {
+			discovered = [];
+			await service.refresh();
+			clock = now + 5_000;
+			expect(service.getState().sessions).toEqual([]);
+			discoveries = 0;
+			for (const pid of [111, 110, CLAUDE_A_PID]) {
+				await expect(
+					service.identify({ claimed: claudeA, peerPid: pid })
+				).resolves.toEqual({
+					status: 'verified',
+					agent: claudeA,
+					basis: 'process',
+				});
+			}
+			// The remembered session agreed with the claim: nothing to look again.
+			expect(discoveries).toBe(0);
+
+			// It was last listed at `now`: a minute on, still remembered, and one
+			// millisecond later it is not.
+			clock = now + RECENT_SESSION_MS;
+			await expect(sessionEnd()).resolves.toMatchObject({
+				status: 'verified',
+			});
+			clock = now + RECENT_SESSION_MS + 1;
+			await expect(sessionEnd()).resolves.toEqual(noSession);
+		});
+
+		it('counts the minute from when discovery last listed the session, not from the polls since', async () => {
+			// Listed at `now`; the polls that follow find it gone.
+			discovered = [live('claude', claudeB.sessionId, CLAUDE_B_PID)];
+			for (const after of [10_000, 40_000]) {
+				clock = now + after;
+				await service.refresh();
+			}
+			await expect(sessionEnd()).resolves.toMatchObject({
+				status: 'verified',
+			});
+			// A poll 20 s ago would have kept it a while longer, had it counted.
+			clock = now + RECENT_SESSION_MS + 1;
+			await expect(sessionEnd()).resolves.toEqual(noSession);
+		});
+
+		it('remembers a session for the placing of a process and for nothing else', async () => {
+			await service.runOperation({
+				kind: 'agent.claim',
+				simulatorUdid: A,
+				agent: claudeA,
+			});
+			discovered = [live('claude', claudeB.sessionId, CLAUDE_B_PID)];
+			await service.refresh();
+			clock = now + 5_000;
+			await expect(sessionEnd()).resolves.toMatchObject({
+				status: 'verified',
+			});
+
+			// It is not listed, and what it holds is abandoned: the minute it is
+			// remembered for does not keep it alive.
+			const state = service.getState();
+			expect(state.sessions.map((session) => session.sessionId)).toEqual([
+				claudeB.sessionId,
+			]);
+			expect(state.holds[A]).toMatchObject({
+				holder: claudeA,
+				holderLive: false,
+			});
+			expect(service.holderLiveness(claudeA).live).toBe(false);
+			expect(state.byDevice[A]?.[0]).toMatchObject({ live: false });
+
+			// Nor is it a live session to be mismatched with: a process under no
+			// session that names it is unverified, and a process under another
+			// session has the claim ignored.
+			await expect(
+				service.identify({ claimed: claudeA, peerPid: 301 })
+			).resolves.toEqual(noSession);
+			await expect(
+				service.identify({ claimed: claudeA, peerPid: 211 })
+			).resolves.toEqual({
+				status: 'verified',
+				agent: claudeB,
+				basis: 'process',
+			});
+		});
+
+		it('verifies the hook of a real registry once its file is deleted', async () => {
+			const home = await mkdtemp(path.join(os.tmpdir(), 'rndevtools-hook-'));
+			try {
+				const sessions = path.join(home, '.claude', 'sessions');
+				await mkdir(sessions, { recursive: true });
+				const file = path.join(sessions, `${CLAUDE_A_PID}.json`);
+				await writeFile(
+					file,
+					JSON.stringify({
+						pid: CLAUDE_A_PID,
+						sessionId: claudeA.sessionId,
+						cwd: '/Users/dev/app',
+					})
+				);
+				const real = new AgentService({
+					directory: path.join(root, 'real'),
+					lanes: () => [],
+					discover: () =>
+						discoverAgentSessions({
+							homeDirectory: home,
+							codexHome: path.join(home, '.codex'),
+							isProcessRunning: () => true,
+							now: () => clock,
+							openCodexDatabase: () => undefined,
+						}),
+					processTable: async () => baseTable,
+					pollIntervalMs: 60_000,
+					now: () => clock,
+				});
+				await real.start();
+				try {
+					await expect(
+						real.identify({ claimed: claudeA, peerPid: 111 })
+					).resolves.toMatchObject({ status: 'verified' });
+					await rm(file);
+					// The poll that follows finds the file gone.
+					await real.refresh();
+					clock = now + 5_000;
+					expect(real.getState().sessions).toEqual([]);
+					await expect(
+						real.identify({ claimed: claudeA, peerPid: 111 })
+					).resolves.toEqual({
+						status: 'verified',
+						agent: claudeA,
+						basis: 'process',
+					});
+				} finally {
+					await real.stop();
+				}
+			} finally {
+				await rm(home, { recursive: true, force: true });
+			}
 		});
 	});
 });
