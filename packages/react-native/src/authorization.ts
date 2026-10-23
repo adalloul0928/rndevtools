@@ -10,16 +10,11 @@ type OwnerSource = Readonly<{
 
 type OwnerBoundary = {
 	readonly source: OwnerSource;
-	/** False when the source could not be subscribed to. */
 	observable: boolean;
 	cleanup: (() => void) | undefined;
 };
 
-/**
- * Names this module in its errors. A release bundle keeps string literals but
- * drops comments and import paths, so `rndevtools-verify-bundle` looks for
- * this one, and it stays in use so a minifier cannot drop it.
- */
+/** Production-bundle marker; keep it in an observable error so minifiers retain it. */
 const AUTHORIZATION_MODULE = '@rndevtools/react-native/authorization';
 
 const DISABLED_AUTHORIZATION: DevtoolsAuthorization = Object.freeze({
@@ -45,7 +40,6 @@ function publish(next: DevtoolsAuthorization): void {
 	}
 }
 
-/** Whether a grant to `ownerId` belongs to the boundary's live owner. */
 function isLiveOwner(boundary: OwnerBoundary, ownerId: string | null): boolean {
 	// A source that cannot report owner changes could never revoke this grant.
 	if (!boundary.observable) return false;
@@ -66,12 +60,7 @@ function reconcileOwnerBoundary(boundary: OwnerBoundary): void {
 	}
 }
 
-/**
- * Grants or revokes privileged tools. While an owner source is bound, a grant
- * only applies when `ownerId` is that source's live owner, so a grant computed
- * for a user who has since signed out is ignored rather than re-enabling tools
- * for whoever signed in next. A missing authorization revokes, then throws.
- */
+/** Only the bound source's live owner may receive a grant. Missing authorization revokes, then throws. */
 export function setDevtoolsAuthorization(next: DevtoolsAuthorization): void {
 	if (next == null) {
 		// A grant that failed to compute must not leave an earlier one in force.
@@ -113,11 +102,8 @@ export function subscribeToDevtoolsAuthorization(
 }
 
 /**
- * Binds the authorization mirror to its live authentication owner. A source
- * change can only revoke synchronously; React may explicitly re-grant the new
- * owner after recomputing all visibility policy. A source whose `subscribe`
- * throws revokes the mirror and keeps refusing grants until a working source
- * is bound, because nothing could revoke them when its owner changes.
+ * Owner changes revoke synchronously; the host must explicitly re-grant.
+ * Failed subscriptions block grants until a working source is bound.
  */
 export function bindDevtoolsAuthorizationOwnerSource(
 	source: OwnerSource,

@@ -5,19 +5,8 @@ import {
 } from './simulator-command-runner';
 
 /**
- * Who is at the other end of an agent socket connection.
- *
- * The CLI names its own pid in every request. A pid is cheap to assert, so
- * the desktop proves that it owns the connection before trusting it. macOS
- * lsof lists every Unix socket of a process with the socket's kernel address
- * (its `d` field) and, for a connected socket, the address of its peer (the
- * `n` field, as `->0x…`). One lsof call over the desktop and the named pid
- * therefore shows the accepted socket's address and whether some socket of
- * that pid points at it. Anything else (no lsof, a slow one, output that
- * does not match) proves nothing: the check never fails open.
- *
- * A proven pid is then mapped to the Claude Code session that spawned it
- * through its ancestry: the process table from ps, walked parent by parent.
+ * Prove the claimed PID owns the accepted socket by matching lsof peer addresses.
+ * Missing or ambiguous evidence never establishes identity.
  */
 
 const LSOF = '/usr/sbin/lsof';
@@ -26,7 +15,6 @@ const LSOF_TIMEOUT_MS = 5_000;
 const LSOF_MAX_OUTPUT_BYTES = 1024 * 1024;
 const PS_TIMEOUT_MS = 5_000;
 const PS_MAX_OUTPUT_BYTES = 1024 * 1024;
-/** Hops up the process tree: more than any shell nesting reaches. */
 const MAX_ANCESTRY_HOPS = 64;
 
 export type UnixSocketRecord = {
@@ -38,14 +26,7 @@ export type UnixSocketRecord = {
 	name: string;
 };
 
-/**
- * Parses `lsof -F pfdn` output over Unix sockets into one record per socket.
- * Each field is on its own line: `p` starts a process, `f` a file, and `d`
- * and `n` belong to the `f` before them. A file that lacks a numeric
- * descriptor, an address or a name yields no record, and a line of any other
- * shape is ignored: a record exists only where every part is there, and the
- * proof needs a positive match on records, so garbage proves nothing.
- */
+/** Accept only complete lsof p/f/d/n socket records. */
 export function parseUnixSocketRecords(stdout: string): UnixSocketRecord[] {
 	const records: UnixSocketRecord[] = [];
 	let pid: number | undefined;
@@ -92,12 +73,7 @@ export function parseUnixSocketRecords(stdout: string): UnixSocketRecord[] {
 	return records;
 }
 
-/**
- * Whether, by `records`, `peerPid` holds the other end of the desktop's
- * descriptor `fd`: the desktop's socket has an address, and a socket of the
- * peer names exactly that address as its peer. The desktop never connects to
- * itself, so its own pid is no peer.
- */
+/** The peer socket must point to the accepted desktop socket; self-connections are refused. */
 export function peerHoldsConnection(
 	records: readonly UnixSocketRecord[],
 	{ selfPid, fd, peerPid }: { selfPid: number; fd: number; peerPid: number }
@@ -113,7 +89,6 @@ export function peerHoldsConnection(
 	);
 }
 
-/** lsof's Unix sockets of `pids`, or undefined when lsof could not say. */
 async function lsofUnixSockets(
 	pids: readonly number[]
 ): Promise<string | undefined> {
@@ -156,11 +131,7 @@ async function lsofUnixSockets(
 	}
 }
 
-/**
- * Whether `peerPid` owns the client end of `socket`, a connection the
- * desktop (`selfPid`) accepted. Proven through lsof, see above; a socket
- * whose descriptor Node does not expose cannot be proven.
- */
+/** A socket without an exposed descriptor cannot be proven. */
 export async function peerOwnsConnection(
 	socket: Socket,
 	peerPid: number,
@@ -169,7 +140,6 @@ export async function peerOwnsConnection(
 		lsof = lsofUnixSockets,
 	}: {
 		selfPid?: number;
-		/** Runs lsof over these pids; tests inject its output. */
 		lsof?: (pids: readonly number[]) => Promise<string | undefined>;
 	} = {}
 ): Promise<boolean> {
@@ -199,7 +169,6 @@ export type ProcessTableEntry = {
 	startedAt?: string;
 };
 
-/** Reads the live process table; the agent service's injectable reader. */
 export type ProcessTableReader = () => Promise<readonly ProcessTableEntry[]>;
 
 export function parseProcessTable(stdout: string): ProcessTableEntry[] {
@@ -231,12 +200,7 @@ export async function readProcessTable(): Promise<ProcessTableEntry[]> {
 	return parseProcessTable(result.stdout);
 }
 
-/**
- * `pid` and its ancestors, nearest first, as far as the table knows them:
- * at most MAX_ANCESTRY_HOPS of them, never through a cycle, and never pid 0.
- * A pid the table does not hold is still its own ancestry, so a process that
- * exited since the table was read can still be matched by itself.
- */
+/** Keep the sender even if it has exited; bound ancestors and stop at cycles. */
 export function processAncestry(
 	table: readonly ProcessTableEntry[],
 	pid: number

@@ -43,7 +43,6 @@ const MAX_TITLE_BYTES = 4 * 1024;
 const ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-/** The ASCII identifier alphabet and byte limit persisted source records accept. */
 export function isRestoreSourceId(value: unknown): value is string {
 	return (
 		typeof value === 'string' &&
@@ -325,11 +324,7 @@ export class RestorePointRepository {
 	readonly #maxTotalBytes: number;
 	#serial: Promise<void> = Promise.resolve();
 	#nextId = 1;
-	/**
-	 * Settles once the first load attempt has finished, whether or not the
-	 * stored document could be read, and never rejects. `getLoadError()` says
-	 * why a load failed; `reload()` tries again.
-	 */
+	/** Never rejects; inspect getLoadError() or retry with reload(). */
 	readonly ready: Promise<void>;
 
 	constructor(options: RestorePointRepositoryOptions) {
@@ -374,7 +369,7 @@ export class RestorePointRepository {
 	readonly subscribeToLoadError = (listener: () => void): (() => void) =>
 		this.#loadErrorStore.subscribe(listener);
 
-	/** Why the stored document could not be loaded; every write is refused while set. */
+	/** Writes are blocked while the stored document cannot be loaded. */
 	readonly getLoadError = (): string | undefined =>
 		this.#loadErrorStore.getSnapshot();
 
@@ -495,11 +490,7 @@ export class RestorePointRepository {
 		return imported;
 	}
 
-	/**
-	 * Reads the stored document again, behind any queued write. Resolves once
-	 * the stored restore points are loaded and the load error is cleared, and
-	 * rejects with that error when the document still cannot be loaded.
-	 */
+	/** Retry after queued writes; reject if the stored document still cannot load. */
 	reload(): Promise<void> {
 		return this.#enqueue(async () => {
 			await this.#hydrate();
@@ -508,13 +499,7 @@ export class RestorePointRepository {
 		});
 	}
 
-	/**
-	 * Deletes the stored document on purpose, clears the load error and empties
-	 * the repository. This is the only way to write again while a load error
-	 * stands without first loading the stored data. It rejects, and deletes
-	 * nothing, once the points have loaded after all, so a confirmation given
-	 * while they could not be loaded cannot destroy them after a retry worked.
-	 */
+	/** Discard unreadable data only; reject if a retry already recovered it. */
 	discardStoredData(): Promise<void> {
 		return this.#enqueue(async () => {
 			const storage = this.#storage;
