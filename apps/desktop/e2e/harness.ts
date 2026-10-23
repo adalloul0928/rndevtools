@@ -238,6 +238,19 @@ export class DesktopHarness {
 	}
 
 	async close(): Promise<void> {
-		await this.app.close();
+		// Keep the main-process inspector connected while the app's asynchronous
+		// before-quit cleanup runs. Playwright's close() disconnects it as soon
+		// as the first, prevented app.quit() returns.
+		const closed = this.app.waitForEvent('close', { timeout: 120_000 });
+		try {
+			await this.app.evaluate(({ app }) => {
+				setImmediate(() => app.quit());
+			});
+			await closed;
+		} catch (error) {
+			this.app.process().kill('SIGKILL');
+			await closed.catch(() => undefined);
+			throw error;
+		}
 	}
 }
