@@ -41,7 +41,7 @@ import {
 	discoverAgentSessions,
 	type SessionDiscoveryResult,
 } from './agent-sessions';
-import { writeFileAtomic } from './private-files';
+import { isMissing, writeFileAtomic } from './private-files';
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 // SessionEnd runs after Claude Code removes its registry file.
@@ -99,55 +99,60 @@ const storedClaimsSchema = z.strictObject({
 	claims: z.array(agentClaimSchema).max(MAX_CLAIMS),
 });
 
-/**
- * Claims survive a desktop restart because the agent that made one is
- * usually still running. Touches are in memory only: they expire in half an
- * hour, and after a restart every live session will touch again soon enough.
- */
 class AgentClaimStore {
 	readonly #file: string;
 	#claims: AgentClaim[] = [];
 	#writeQueue: Promise<void> = Promise.resolve();
+	#loaded = false;
 
 	constructor(directory: string) {
 		this.#file = path.join(directory, 'claims.json');
 	}
 
 	async start(): Promise<void> {
+		this.#loaded = false;
 		await mkdir(path.dirname(this.#file), { recursive: true, mode: 0o700 });
 		try {
 			const parsed = storedClaimsSchema.safeParse(
 				JSON.parse(await readFile(this.#file, 'utf8'))
 			);
-			if (parsed.success) {
-				this.#claims = parsed.data.claims;
-			} else {
-				await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`).catch(
-					() => undefined
-				);
-			}
-		} catch {
-			// No claims yet.
+			if (parsed.success) this.#claims = parsed.data.claims;
+			else await this.#quarantine();
+		} catch (error) {
+			if (error instanceof SyntaxError) await this.#quarantine();
+			else if (!isMissing(error)) throw error;
 		}
+		this.#loaded = true;
 	}
 
 	claims(): readonly AgentClaim[] {
 		return this.#claims;
 	}
 
-	/**
-	 * Replaces the claims at once and persists them. Writes queue up, each
-	 * through its own temporary file, so overlapping claims, releases, and
-	 * expiries reach the disk in order and never fail each other's rename.
-	 */
-	async set(claims: readonly AgentClaim[]): Promise<void> {
-		this.#claims = [...claims];
-		const snapshot = `${JSON.stringify({ version: 1, claims: this.#claims }, null, '\t')}\n`;
-		const write = this.#writeQueue.then(() =>
-			writeFileAtomic(this.#file, snapshot, 'claims')
-		);
+	async #quarantine(): Promise<void> {
+		await rename(this.#file, `${this.#file}.corrupt-${Date.now()}`);
+	}
+
+	update(
+		operation: (
+			claims: readonly AgentClaim[]
+		) => readonly AgentClaim[] | undefined
+	): Promise<void> {
+		const write = this.#writeQueue.then(async () => {
+			if (!this.#loaded)
+				throw new Error('Agent claims must load successfully before writing.');
+			const next = operation(this.#claims);
+			if (!next) return;
+			const validated = storedClaimsSchema.parse({ version: 1, claims: next });
+			await writeFileAtomic(
+				this.#file,
+				`${JSON.stringify(validated, null, '\t')}\n`,
+				'claims'
+			);
+			this.#claims = validated.claims;
+		});
 		this.#writeQueue = write.catch(() => undefined);
-		await write;
+		return write;
 	}
 }
 
@@ -197,6 +202,8 @@ export class AgentService {
 	readonly #pollIntervalMs: number;
 	readonly #listeners = new Set<AgentListener>();
 	readonly #touches = new Map<string, AgentTouch>();
+	// Reserve devices until their claim writes settle.
+	readonly #pendingClaims = new Set<AgentClaim>();
 	/**
 	 * Abandonment clocks by `holderClockKey`: when each holder that a lane, a
 	 * claim, or another resource names was first noticed missing. In memory
@@ -277,7 +284,7 @@ export class AgentService {
 	holds(): Map<string, DeviceHold> {
 		return resolveDeviceHolds({
 			lanes: this.#lanes(),
-			claims: this.#store.claims(),
+			claims: [...this.#store.claims(), ...this.#pendingClaims],
 			...this.#livenessInputs(),
 		});
 	}
@@ -494,47 +501,49 @@ export class AgentService {
 					...(operation.note ? { note: operation.note } : {}),
 					claimedAt: this.#now(),
 				};
-				const claims = this.#store.claims();
-				const existing = claims.findIndex(
-					(candidate) =>
-						candidate.simulatorUdid === udid &&
-						agentSessionKey(candidate) === agentSessionKey(operation.agent)
-				);
-				if (existing === -1 && claims.length >= MAX_CLAIMS) {
-					throw new Error(`The ${MAX_CLAIMS}-claim limit is reached.`);
+				this.#pendingClaims.add(claim);
+				try {
+					await this.#store.update((claims) => {
+						const existing = claims.findIndex(
+							(candidate) =>
+								candidate.simulatorUdid === udid &&
+								agentSessionKey(candidate) === agentSessionKey(operation.agent)
+						);
+						if (existing === -1 && claims.length >= MAX_CLAIMS) {
+							throw new Error(`The ${MAX_CLAIMS}-claim limit is reached.`);
+						}
+						// Preserve order: the first claimant holds the device.
+						return existing === -1
+							? [...claims, claim]
+							: claims.map((candidate, index) =>
+									index === existing ? claim : candidate
+								);
+					});
+				} finally {
+					this.#pendingClaims.delete(claim);
 				}
-				// A re-claim (to change the note, say) replaces the claim where it
-				// stands: a device's first claim is its hold, and refreshing that
-				// claim must not hand the device to a later claimant.
-				await this.#store.set(
-					existing === -1
-						? [...claims, claim]
-						: claims.map((candidate, index) =>
-								index === existing ? claim : candidate
-							)
-				);
 				this.touch(operation.agent, udid);
 				return this.getState();
 			}
 			case 'agent.release': {
 				const udid = operation.simulatorUdid.toUpperCase();
 				const agent = operation.agent;
-				const remaining = this.#store
-					.claims()
-					.filter(
+				await this.#store.update((claims) => {
+					const remaining = claims.filter(
 						(claim) =>
 							claim.simulatorUdid !== udid ||
 							(agent !== undefined &&
 								agentSessionKey(claim) !== agentSessionKey(agent))
 					);
-				if (remaining.length === this.#store.claims().length) {
-					throw new Error(
-						agent
-							? `${agent.kind} ${agent.sessionId} holds no claim on ${udid}.`
-							: `No claim exists on ${udid}.`
-					);
-				}
-				await this.#store.set(remaining);
+					if (remaining.length === claims.length) {
+						throw new Error(
+							agent
+								? `${agent.kind} ${agent.sessionId} holds no claim on ${udid}.`
+								: `No claim exists on ${udid}.`
+						);
+					}
+					return remaining;
+				});
 				this.#touch();
 				return this.getState();
 			}
@@ -658,20 +667,18 @@ export class AgentService {
 		}
 	}
 
-	/** Drops claims whose holder has been gone for the hold grace period. */
 	async #expireAbandonedClaims(): Promise<void> {
-		const inputs = this.#livenessInputs();
-		const claims = this.#store.claims();
-		const kept: AgentClaim[] = claims.filter((claim) => {
-			const liveness = resolveHolderLiveness(
-				{ kind: claim.kind, sessionId: claim.sessionId },
-				inputs
-			);
-			// A claim is a hold; it expires on the same clock as every other hold
-			// so a device never stays claimed after its lane would have released.
-			return liveness.live || inputs.now < liveness.releaseAt;
+		await this.#store.update((claims) => {
+			const inputs = this.#livenessInputs();
+			const kept = claims.filter((claim) => {
+				const liveness = resolveHolderLiveness(
+					{ kind: claim.kind, sessionId: claim.sessionId },
+					inputs
+				);
+				return liveness.live || inputs.now < liveness.releaseAt;
+			});
+			return kept.length === claims.length ? undefined : kept;
 		});
-		if (kept.length !== claims.length) await this.#store.set(kept);
 	}
 
 	#pruneTouches(): void {
