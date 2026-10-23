@@ -11,12 +11,12 @@ import {
 import { useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	ConfirmAction,
 	EmptyPanel,
 	InlineCode,
 	PanelHeader,
 	SectionCard,
-	StatusPill,
 } from '@/components/ui';
 import { formatRelativeTime } from '@/lib/format';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
@@ -484,9 +484,9 @@ export function ScenariosPanel() {
 									title="Latest transaction"
 									icon={<History className="h-3.5 w-3.5" />}
 									actions={
-										<StatusPill tone={receiptTone(latestReceipt.status)}>
+										<Chip tone={receiptTone(latestReceipt.status)}>
 											{latestReceipt.status}
-										</StatusPill>
+										</Chip>
 									}
 								>
 									<p className="m-0 text-xs text-(--text-3)">

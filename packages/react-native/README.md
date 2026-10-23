@@ -439,3 +439,7 @@ a failed/invalid revision read, retain the once-per-second capture fallback.
 `startDesktopClient` validates `createDeviceInfo()` before opening a socket. Invalid
 identifiers, capabilities, numeric fields or accessors throw a value-free error.
 Supported fields are detached, display text is redacted, and extra fields are omitted.
+
+An action refused because internal tools are unauthorized leaves diagnostics
+connected. Authorization-read failures refuse safely too. Reply pacing, queue
+bounds and action admission limits still close abusive connections.

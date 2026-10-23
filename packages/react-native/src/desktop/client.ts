@@ -956,8 +956,7 @@ export function startDesktopClient(
 		expectedOwnerId: string | null,
 	) => {
 		if (!active || socket !== target || target.readyState !== 1) return;
-		const authorization = host.getAuthorization();
-		if (!authorization.enabled || authorization.ownerId !== expectedOwnerId) {
+		if (!isAuthorizedOwner(expectedOwnerId)) {
 			queueResult(
 				{
 					type: 'action-result',
@@ -1199,6 +1198,8 @@ export function startDesktopClient(
 		};
 
 		nextSocket.onmessage = (event) => {
+			if (!active || socket !== nextSocket || nextSocket.readyState !== 1)
+				return;
 			if (typeof event.data !== 'string') return;
 			if (
 				utf8ByteLengthWithin(event.data, MAX_INCOMING_MESSAGE_BYTES) ===
@@ -1251,15 +1252,6 @@ export function startDesktopClient(
 				);
 				return;
 			}
-			const authorization = host.getAuthorization();
-			if (!authorization.enabled) {
-				refuse(
-					action.actionId,
-					'Internal tools are not authorized.',
-					'internal tools authorization required',
-				);
-				return;
-			}
 			const admission = actionAdmission.admit();
 			if (!admission.accepted) {
 				const queueFull = admission.reason === 'queue-full';
@@ -1276,6 +1268,35 @@ export function startDesktopClient(
 						? 'Desktop action queue is full; retry later.'
 						: 'Desktop action rate limit exceeded; retry later.',
 					'desktop action admission limit exceeded',
+				);
+				return;
+			}
+			let authorization: DevtoolsAuthorization;
+			try {
+				authorization = host.getAuthorization();
+			} catch {
+				authorization = { enabled: false, ownerId: null };
+			}
+			if (!authorization.enabled) {
+				admission.release();
+				// A normal refusal must not interrupt read-only diagnostics. It
+				// shares frame pacing and has a bounded queue even under a flood.
+				if ((outbox?.results.length ?? 0) >= MAX_PENDING_DESKTOP_ACTIONS) {
+					refuse(
+						action.actionId,
+						'Too many pending action results; retry later.',
+						'desktop action result queue full',
+					);
+					return;
+				}
+				queueResult(
+					{
+						type: 'action-result',
+						actionId: action.actionId,
+						ok: false,
+						error: 'Internal tools are not authorized.',
+					},
+					nextSocket,
 				);
 				return;
 			}

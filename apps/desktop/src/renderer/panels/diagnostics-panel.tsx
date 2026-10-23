@@ -12,6 +12,7 @@ import {
 import { type ReactNode, useMemo, useState } from 'react';
 import { SupabaseChip } from '@/components/supabase-ui';
 import {
+	Chip,
 	CopyButton,
 	EmptyPanel,
 	InlineCode,
@@ -19,7 +20,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { type AppTraffic, useAppTraffic } from '@/lib/app-traffic';
@@ -105,7 +105,7 @@ export function DiagnosticsPanel() {
 				title="Diagnostics"
 				description="Desktop broker health, device transport, runtime versions, privacy guarantees, and internal diagnostic events in one place."
 				meta={
-					<StatusPill
+					<Chip
 						dot
 						tone={
 							broker?.status === 'listening'
@@ -116,7 +116,7 @@ export function DiagnosticsPanel() {
 						}
 					>
 						{broker?.status ?? 'starting'}
-					</StatusPill>
+					</Chip>
 				}
 			/>
 			<Toolbar>
@@ -293,9 +293,7 @@ export function DiagnosticsPanel() {
 								<span className="font-mono text-xs text-(--text-3)">
 									{formatClock(entry.at)}
 								</span>
-								<StatusPill tone={levelTone(entry.level)}>
-									{entry.level}
-								</StatusPill>
+								<Chip tone={levelTone(entry.level)}>{entry.level}</Chip>
 								<InlineCode className="truncate">{entry.scope}</InlineCode>
 								<span className="text-xs leading-4 text-(--foreground)">
 									{entry.message}

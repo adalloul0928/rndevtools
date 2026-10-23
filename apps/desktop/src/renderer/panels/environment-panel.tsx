@@ -8,12 +8,12 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
+	Chip,
 	EmptyPanel,
 	InlineCode,
 	PanelHeader,
 	PanelNotice,
 	SearchControl,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { type AppTraffic, useAppTraffic } from '@/lib/app-traffic';
@@ -238,9 +238,9 @@ export function EnvironmentPanel() {
 													{entry.valueText}
 												</InlineCode>
 											</div>
-											<StatusPill tone={validationTone(entry.status)}>
+											<Chip tone={validationTone(entry.status)}>
 												{statusLabel(entry.status)}
-											</StatusPill>
+											</Chip>
 										</div>
 									))}
 								</Card.Content>
@@ -328,7 +328,7 @@ function LocalSupabaseChecks({
 								<p className="m-0 text-(--text-3)">{check.note}</p>
 							) : null}
 						</div>
-						<StatusPill tone={check.tone}>{check.status}</StatusPill>
+						<Chip tone={check.tone}>{check.status}</Chip>
 					</div>
 				))
 			)}

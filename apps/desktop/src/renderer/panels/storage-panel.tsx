@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import {
 	Badge,
+	Chip,
 	CodePreview,
 	ConfirmAction,
 	DetailPlaceholder,
@@ -30,7 +31,6 @@ import {
 	PanelNotice,
 	SearchControl,
 	SectionCard,
-	StatusPill,
 	Toolbar,
 } from '@/components/ui';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
@@ -152,9 +152,9 @@ export function StoragePanel() {
 				header: 'Type',
 				width: 92,
 				cell: (entry) => (
-					<StatusPill tone={entry.sensitive ? 'warning' : 'default'}>
+					<Chip tone={entry.sensitive ? 'warning' : 'default'}>
 						{entry.valueType}
-					</StatusPill>
+					</Chip>
 				),
 			},
 			{
@@ -275,9 +275,9 @@ export function StoragePanel() {
 										{selected.key}
 									</h2>
 								</div>
-								<StatusPill tone={selected.sensitive ? 'warning' : 'default'}>
+								<Chip tone={selected.sensitive ? 'warning' : 'default'}>
 									{selected.valueType}
-								</StatusPill>
+								</Chip>
 							</div>
 							<dl className="mb-4">
 								<KeyValue
@@ -393,7 +393,7 @@ export function StoragePanel() {
 													key={event.id}
 												>
 													<div className="flex items-center justify-between text-xs">
-														<StatusPill tone="info">{event.kind}</StatusPill>
+														<Chip tone="info">{event.kind}</Chip>
 														<span className="font-mono text-(--text-3)">
 															{formatRelativeTime(event.at)}
 														</span>

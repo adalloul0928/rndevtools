@@ -1044,7 +1044,7 @@ describe('laneBackendChip (status model E)', () => {
 			'success',
 		],
 		[summary('ready'), 'db ready', 'success'],
-		[summary('starting'), 'db starting', 'warning'],
+		[summary('starting'), 'db starting', 'info'],
 		[summary('stopped'), 'db stopped', 'warning'],
 		[summary('stale'), 'db stale', 'warning'],
 		[summary('shadowed'), 'db shadowed', 'warning'],
