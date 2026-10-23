@@ -651,38 +651,56 @@ describe('createZustandPlugin', () => {
 		]);
 	});
 
-	it('rolls back a validator that changes state before rejecting a patch', async () => {
-		let state = { count: 0 };
-		const diagnostics = createZustandPlugin({
-			stores: [
-				{
-					id: 'counter',
-					title: 'Counter',
-					getInspectableState: () => state,
-					subscribe: () => () => {},
-					validatePatch: (patch) => {
-						if ((patch as { count?: number }).count === 3) {
-							state = { count: 99 };
-							throw new Error('validator rejected after a side effect');
-						}
-						return patch;
+	it.each([false, true])(
+		'preserves app writes while validation is pending (reject=%s)',
+		async (reject) => {
+			let state = { count: 0 };
+			let release = () => {};
+			let started = () => {};
+			const pending = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const entered = new Promise<void>((resolve) => {
+				started = resolve;
+			});
+			const applyPatch = jest.fn((patch: unknown) => {
+				state = { ...state, ...(patch as typeof state) };
+			});
+			const diagnostics = createZustandPlugin({
+				stores: [
+					{
+						id: 'counter',
+						title: 'Counter',
+						getInspectableState: () => state,
+						subscribe: () => () => {},
+						validatePatch: async (patch) => {
+							if ((patch as { count?: number }).count === 3) {
+								started();
+								await pending;
+								if (reject) throw new Error('validation rejected');
+							}
+							return patch;
+						},
+						applyPatch,
+						restorable: true,
 					},
-					applyPatch: (patch) => {
-						state = { ...state, ...(patch as typeof state) };
-					},
-					restorable: true,
-				},
-			],
-		});
-
-		await expect(
-			diagnostics.applyPatch('counter', { count: 3 }),
-		).rejects.toThrow('prior state was restored');
-		expect(state).toEqual({ count: 0 });
-		expect(diagnostics.getMutationReceipts()).toEqual([
-			expect.objectContaining({ status: 'rolled-back' }),
-		]);
-	});
+				],
+			});
+			const operation = diagnostics.applyPatch('counter', { count: 3 });
+			const rejected = expect(operation).rejects.toThrow(
+				reject ? 'validation rejected' : 'store changed',
+			);
+			await entered;
+			state = { count: 99 };
+			release();
+			await rejected;
+			expect(state).toEqual({ count: 99 });
+			expect(applyPatch).not.toHaveBeenCalled();
+			expect(diagnostics.getMutationReceipts()).toEqual([
+				expect.objectContaining({ status: 'failed' }),
+			]);
+		},
+	);
 
 	it('resets and jumps only through the restorable adapter', async () => {
 		let state = { count: 1 };

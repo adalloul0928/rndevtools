@@ -4,6 +4,9 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Preserve app writes made during asynchronous Zustand patch validation.
+  A stale or rejected edit no longer restores an old state before its own
+  mutation has started. Validators must not mutate the store.
 - Network capture labels uninspected request methods `UNKNOWN` and unread or
   opaque response statuses with a neutral dash instead of inventing GET / OK.
 - Align odd-offset UTF-16 bytecode before decoding to avoid a Linux Node 24.21
