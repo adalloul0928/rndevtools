@@ -511,6 +511,8 @@ func emptyVerification(desired []string) simulator.Verification {
 		MissingDisabledServiceIDs:       []string{},
 		UnexpectedDisabledServiceIDs:    []string{},
 		RegisteredDisabledLaunchdJobIDs: []string{},
+		CheckedObservedProcessNames:     []string{},
+		PresentObservedProcessNames:     []string{},
 	}
 }
 
@@ -533,6 +535,12 @@ func verificationEvidence(err error, verification simulator.Verification) simula
 	}
 	if verification.RegisteredDisabledLaunchdJobIDs == nil {
 		verification.RegisteredDisabledLaunchdJobIDs = []string{}
+	}
+	if verification.CheckedObservedProcessNames == nil {
+		verification.CheckedObservedProcessNames = []string{}
+	}
+	if verification.PresentObservedProcessNames == nil {
+		verification.PresentObservedProcessNames = []string{}
 	}
 	return verification
 }
