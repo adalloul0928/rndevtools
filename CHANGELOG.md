@@ -323,6 +323,8 @@
 
 ### Desktop app
 
+- Shared 32px segmented controls and tabs support arrow, Home and End navigation
+  in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 

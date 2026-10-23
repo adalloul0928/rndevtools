@@ -8911,3 +8911,61 @@ button.supabase-prune-row:hover {
 	text-transform: none;
 	letter-spacing: normal;
 }
+
+/* Shared 32px keyboard-operable selection controls. */
+.segmented-control,
+.ui-tabs {
+	display: inline-flex;
+	min-width: 0;
+	max-width: 100%;
+	height: 32px;
+	flex: 0 0 auto;
+	align-items: stretch;
+	gap: 2px;
+	overflow-x: auto;
+	border: 1px solid var(--border);
+	border-radius: var(--field-radius);
+	background: var(--bg-sunken);
+}
+.segmented-button,
+.ui-tab {
+	display: inline-flex;
+	min-width: 28px;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	font: 500 var(--font-size-control) var(--font-sans);
+	white-space: nowrap;
+	color: var(--muted);
+	cursor: pointer;
+}
+.segmented-button[aria-pressed='true'],
+.ui-tab[aria-selected='true'] {
+	background: color-mix(in oklab, var(--foreground) 8%, transparent);
+	color: var(--foreground);
+}
+.segmented-button:hover:not(:disabled),
+.ui-tab:hover:not(:disabled) {
+	background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+.segmented-button:focus-visible,
+.ui-tab:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
+}
+.segmented-button:disabled,
+.ui-tab:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.ui-tabs {
+	width: 100%;
+	flex: 0 0 32px;
+	border-width: 0 0 1px;
+	border-radius: 0;
+	background: transparent;
+}
