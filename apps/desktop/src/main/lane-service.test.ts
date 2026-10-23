@@ -3440,6 +3440,50 @@ describe('LaneService', () => {
 	});
 
 	describe('a start that fails after Metro spawned', () => {
+		it('reports unverified Metro cleanup with the PID and port', async () => {
+			worktrees.identity = {
+				scheme: 'my_app',
+				bundleIdentifier: 'com.example.app',
+			};
+			metro.stop = async () => {
+				throw new Error('lsof unavailable password=private-value');
+			};
+			const receipt = await service.runOperation({
+				actionId: 'cleanup-failed',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(receipt.completed).toBe(false);
+			expect(receipt.error).toMatch(/Metro cleanup.*PID 1001, port 8100/);
+			expect(receipt.error).toContain('lsof unavailable');
+			expect(receipt.error).not.toContain('private-value');
+		});
+
+		it('retains the recorded Metro until failed-start cleanup is verified', async () => {
+			const upsert = store.upsert.bind(store);
+			vi.spyOn(store, 'upsert').mockImplementation(async (lane) => {
+				await upsert(lane);
+				throw new Error('Persistence acknowledgement failed');
+			});
+			metro.stop = async () => {
+				throw new Error('ps unavailable');
+			};
+			const receipt = await service.runOperation({
+				actionId: 'cleanup-recorded',
+				kind: 'lane.start',
+				worktreePath: WORKTREE,
+				simulatorUdid: UDID,
+				environment: 'development',
+				launch: false,
+			});
+			expect(receipt.completed).toBe(false);
+			expect(store.lanes()).toHaveLength(1);
+			expect(store.lanes()[0]?.metroPid).toBe(1001);
+		});
+
 		it('stops that Metro, so a retry does not leak another one', async () => {
 			// Not a scheme app.json yields any more, but the lane record refuses it.
 			worktrees.identity = {

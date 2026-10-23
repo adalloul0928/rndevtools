@@ -1009,7 +1009,13 @@ export class LaneService {
 			// Nor does its Metro have anyone to serve; left running it would
 			// keep the port, and every retry would leave another.
 			if (metroPid !== undefined) {
-				await this.#discardMetro(id, metroPid, target);
+				try {
+					await this.#discardMetro(id, metroPid, target);
+				} catch (cleanupError) {
+					throw new Error(
+						`Metro cleanup incomplete (PID ${metroPid}, port ${target.port}): ${safeErrorText(cleanupError)}. Original lane failure: ${safeErrorText(error)}`
+					);
+				}
 			}
 			throw error;
 		}
@@ -1047,12 +1053,11 @@ export class LaneService {
 		metroPid: number,
 		lane: Pick<Lane, 'worktreePath' | 'appPath' | 'port'>
 	): Promise<void> {
+		// Keep a recorded process recoverable until PID-verified cleanup succeeds.
+		await this.#metro.stop(metroPid, lane.port, laneAppDirectory(lane));
 		if (this.#store.get(laneId)) {
-			await this.#store.remove(laneId).catch(() => undefined);
+			await this.#store.remove(laneId);
 		}
-		await this.#metro
-			.stop(metroPid, lane.port, laneAppDirectory(lane))
-			.catch(() => undefined);
 	}
 
 	/**

@@ -327,6 +327,9 @@
 
 ### Desktop app
 
+- Failed lane starts report unverified Metro cleanup with its PID and port,
+  retaining an existing record until the verified stop succeeds.
+
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
 - Local ad-hoc macOS packages launch without team-based library validation;
