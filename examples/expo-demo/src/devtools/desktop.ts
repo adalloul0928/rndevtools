@@ -5,7 +5,10 @@ import {
 } from '@rndevtools/core/desktop-protocol';
 // The narrow entry points keep this headless module off the root barrel, which
 // also loads the camera provider and the image overlay.
-import { getDevtoolsAuthorization } from '@rndevtools/react-native/authorization';
+import {
+	getDevtoolsAuthorization,
+	subscribeToDevtoolsAuthorization,
+} from '@rndevtools/react-native/authorization';
 import {
 	type DesktopClientHandle,
 	shouldStartDesktopClient,
@@ -68,6 +71,7 @@ export function connectToDesktop(): DesktopClientHandle | undefined {
 				throw new Error(`Unsupported action: ${action.tool}.${action.command}`);
 			},
 			getAuthorization: getDevtoolsAuthorization,
+			subscribeToAuthorization: subscribeToDevtoolsAuthorization,
 		},
 	});
 }
