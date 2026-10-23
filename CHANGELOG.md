@@ -333,6 +333,9 @@
 
 - Shared 32px segmented controls and tabs support arrow, Home and End navigation
   in Network, Query, Simulator layout and appearance settings.
+- Desktop dev and build verify the licensed HeroUI Pro payload against reviewed
+  content hashes, including additions, removals, metadata changes and symlinks.
+
 - Local ad-hoc macOS packages launch without team-based library validation;
   Developer ID release signing keeps hardened runtime and its existing gates.
 
@@ -342,6 +345,9 @@
 
 - Share status chips and dots across panels: starting work is blue, exposed backends
   are red, and Connected App status labels use sentence-case typography.
+- Packaging rejects native manifests for another app version or architecture.
+  Release capability probes inspect the signed in-app host executable.
+
 - Recheck Supabase CLI identity, permissions and canonical path immediately before
   every execution, including version probes. A changed installation must be refreshed.
 
