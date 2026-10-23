@@ -54,8 +54,11 @@ func CleanupGrace(operation protocol.Operation) time.Duration {
 		protocol.OperationPreviewProfile,
 		protocol.OperationVerifyProfile,
 		protocol.OperationDoctor:
-		// Inspection of a Shutdown target temporarily boots it and restores the
-		// original state using an independent cleanup context.
+		// Previewing, verifying, or diagnosing a Shutdown target temporarily
+		// boots it and restores the original state using an independent cleanup
+		// context. simulator_status never boots, so it leaves no such cleanup
+		// behind; it keeps this group's grace, a ceiling that costs nothing when
+		// there is nothing to wait for.
 		return simslim.BootTimeout
 	case protocol.OperationPrepareMutation:
 		return simslim.BootTimeout

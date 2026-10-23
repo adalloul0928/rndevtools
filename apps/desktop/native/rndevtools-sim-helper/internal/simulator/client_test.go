@@ -1,7 +1,9 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adalloul0928/rndevtools-sim-helper/internal/catalog"
 	"github.com/mobai-app/simslim"
 )
 
@@ -170,10 +173,55 @@ func TestStatusTemporarilyBootsShutdownTargetAndRestoresOriginalState(t *testing
 	if !slices.Equal(status.ManagedDisabledServiceIDs, []string{"com.apple.apsd"}) {
 		t.Fatalf("managed state was not inspected: %#v", status)
 	}
+	if status.MatchingProfileIDs == nil {
+		t.Fatalf("matching profiles must be an empty array, not null: %#v", status)
+	}
 	bootIndex := slices.IndexFunc(commands, func(command string) bool { return strings.Contains(command, "simctl boot ") })
 	shutdownIndex := slices.IndexFunc(commands, func(command string) bool { return strings.Contains(command, "simctl shutdown ") })
 	if bootIndex < 0 || shutdownIndex <= bootIndex {
 		t.Fatalf("temporary boot was not restored in order: %#v", commands)
+	}
+}
+
+func TestProbeStatusInspectsBootedTargetsInPlaceAndNeverBoots(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		state   string
+		managed []string
+	}{
+		{name: "shut-down target is reported uninspected", state: "Shutdown", managed: []string{}},
+		{name: "booted target is read in place", state: "Booted", managed: []string{"com.apple.apsd"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &Client{
+				runner: runnerFunc(func(_ context.Context, _ time.Duration, executable string, args ...string) (commandResult, error) {
+					switch {
+					case executable == xcrunExecutable && slices.Equal(args, []string{"simctl", "list", "devices", "available", "--json"}):
+						return commandResult{stdout: []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"udid":"` + testUDID + `","name":"iPhone","state":"` + testCase.state + `","isAvailable":true,"deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-16"}]}}`)}, nil
+					case testCase.state == "Booted" && executable == xcrunExecutable && slices.Equal(args, []string{"simctl", "spawn", testUDID, "launchctl", "print-disabled", "system"}):
+						return commandResult{stdout: []byte(`"com.apple.apsd" => true`)}, nil
+					default:
+						t.Fatalf("status probe ran %s %#v against a %s Simulator", executable, args, testCase.state)
+						return commandResult{}, errors.New("unexpected")
+					}
+				}),
+			}
+			status, err := client.ProbeStatus(context.Background(), testUDID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Device.State != testCase.state || !slices.Equal(status.ManagedDisabledServiceIDs, testCase.managed) ||
+				status.ManagedDisabledCount != len(testCase.managed) || status.ManagedServiceCount != len(catalog.ManagedServiceIDs()) {
+				t.Fatalf("unexpected probe result for a %s Simulator: %#v", testCase.state, status)
+			}
+			encoded, err := json.Marshal(status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(encoded, []byte("null")) {
+				t.Fatalf("probe must encode empty arrays, not null: %s", encoded)
+			}
+		})
 	}
 }
 

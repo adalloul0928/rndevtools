@@ -4,6 +4,10 @@
 
 ### `@rndevtools/core`, `@rndevtools/react-native`
 
+- Redact common credential aliases, Unicode-escaped JSON keys, provider/cloud
+  tokens, and complete or truncated private-key blocks in diagnostic capture.
+  Runtime token patterns now share one source with the public-content check.
+
 - **Breaking:** the image overlay no longer reads
   `EXPO_PUBLIC_IMAGE_OVERLAY_ORIGIN` or `EXPO_PUBLIC_SUPABASE_URL`. Pass the
   hosts it may download from to `configureImageOverlay({ allowedRemoteHosts })`
@@ -218,6 +222,30 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- The desktop client fits every snapshot to every size and range bound the
+  desktop validates before it sends it, with the new `fitDesktopSnapshot` of
+  `@rndevtools/core/desktop-protocol`. It used to trim only the top-level
+  lists of `RNDEVTOOLS_SNAPSHOT_LIMITS`, so a nested list (10 of its 30 limits
+  are nested, such as a component's `sourceFiles`), a text or a number over
+  its bound made the broker close the socket and the device reconnect in a
+  loop. Core keeps up to 10,000 performance samples where the desktop takes
+  1,500, and does not cap a scenario's warnings where it takes 100. A
+  top-level list over its cap keeps its last rows, and a list inside a row
+  keeps its newest rows if it is chronological and its first if it is
+  ordered. A text is cut without splitting a surrogate pair, a number is
+  clamped into its range, and a map keeps its first fields. A query
+  simulation's active entry, a camera fixture, a scenario variable default or
+  a persona identifier that disagrees with the rest, which the schema would
+  reject, is dropped or reset. The identity history keeps the sessions that
+  started latest, whichever end of the list a host puts them at, and a cut of
+  performance samples raises `droppedSampleCount` by the samples removed, so
+  the performance panel says that samples were dropped. A value of the wrong
+  shape, such as an empty identifier, is still left to the schema. One text
+  over its limit no longer keeps a snapshot from being sent. The client's
+  warning names the first six changes and counts the rest. The bounds the schema applies beyond
+  `RNDEVTOOLS_SNAPSHOT_LIMITS` are exported as
+  `RNDEVTOOLS_SNAPSHOT_EXTRA_LIMITS`, `RNDEVTOOLS_SNAPSHOT_TEXT_LIMITS` and
+  `RNDEVTOOLS_SNAPSHOT_NUMBER_LIMITS`.
 
 ### Desktop app
 
@@ -234,6 +262,11 @@
   for restores and refetches) while the device client allowed 45, so a long
   scenario was reported as unacknowledged while the device finished it.
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- The device snapshot schema reads its text, number and item bounds from
+  `@rndevtools/core/desktop-protocol` instead of repeating them, and a test
+  holds it to the client's `fitDesktopSnapshot`: it pushes every bounded field
+  of a snapshot past its bound, then requires the schema to reject the
+  snapshot as it stands and accept it fitted. No bound changed.
 - Agent requests over the local socket now prove which process sent them. The
   CLI, its MCP server and its session-end hook send their own pid, the desktop
   checks that the process owns the connection, and it follows the process's
@@ -247,6 +280,13 @@
   hold. Unverifiable claims (`agent_identity_unverified`), including shared-process
   Codex threads, synthetic MCP identities and ended sessions, cannot perform
   ownership-changing operations. Lane commands no longer accept an `agent` field.
+- Background SimSlim status checks now take a Simulator's lease and skip one
+  with a running job, never boot a shut-down Simulator (it shows as not
+  inspected, not as clean), and update each Simulator's status on its own. A
+  check could previously restart a Simulator that an apply, an erase or a lane
+  had just shut down, and one that finished after an apply replaced the status
+  the apply recorded, so disabling slimming soon afterwards could skip the
+  restore.
 - CI checks the desktop app on every pull request, forks included. A job that
   needs no HeroUI Pro license runs Biome, the main, preload and shared
   typecheck and tests, knip without its unused-devDependency check, and the
