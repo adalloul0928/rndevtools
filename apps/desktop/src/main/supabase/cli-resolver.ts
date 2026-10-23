@@ -605,6 +605,12 @@ export class SupabaseCliResolver {
 		try {
 			const result = await this.#runner.run({
 				binaryPath,
+				expectedBinary: {
+					dev: stats.dev,
+					ino: stats.ino,
+					size: stats.size,
+					mtimeMs: stats.mtimeMs,
+				},
 				argv: buildSupabaseArgv(null, operation),
 				readOnly: true,
 				cwd: this.#probeCwd,
