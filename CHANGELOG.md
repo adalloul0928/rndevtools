@@ -221,6 +221,8 @@
 
 ### Desktop app
 
+- Command deadlines settle even when an exited child's descendants retain its output pipes or a killed child never reports close.
+
 - Restyled every panel and the shell to a Vercel/Supabase-inspired system:
   one brand accent for active/positive states, blue reserved for information,
   hairline borders, dense typography.
