@@ -46,6 +46,11 @@
   app's container, so a host can report `simulatorUdid` and the desktop can
   link the session to its Simulator and lane. It returns `undefined` outside
   an iOS Simulator.
+- The desktop client connects from an Android emulator. React Native's Android
+  transport sent `Origin: http://10.0.2.2:<port>` to the emulator's host alias,
+  and the broker refuses a non-loopback origin without a token, so every
+  emulator was refused with a 403. The client now names `http://127.0.0.1:<port>`
+  as the origin when it dials that alias.
 - The desktop client runs only the actions the device advertises, addressed to
   its own `deviceId`. It paces its frames under the broker's limit, trims a
   collection over the desktop's row limit to its newest rows, and backs off
@@ -219,6 +224,14 @@
   hairline borders, dense typography.
 - Disabled actions now explain why (missing device capability, invalid input).
 - Playwright end-to-end harness and per-panel specs against the demo device.
+- CI checks the desktop app on every pull request, forks included. A job that
+  needs no HeroUI Pro license runs Biome, the main, preload and shared
+  typecheck and tests, knip without its unused-devDependency check, and the
+  script tests. The job that runs the full `quality` gate with HeroUI Pro
+  (renderer typecheck and tests, the unused-devDependency check and the build)
+  runs when `HEROUI_AUTH_TOKEN` is available and otherwise reports the
+  missing verification in a notice and job summary. Desktop changes must
+  pass the full local quality gate before merging when it skips.
 - A local Supabase stack whose first start is still running when RN Devtools
   quits is now recorded before the CLI is spawned. When the restarted app
   adopts that start, it checks that the stack listens on 127.0.0.1 only and

@@ -104,6 +104,9 @@ const MAX_BROKER_URL_LENGTH = 8 * 1024;
 const MAX_BROKER_CANDIDATES = 100;
 const MAX_BROKER_TOKEN_LENGTH = 512;
 const MIN_REMOTE_BROKER_TOKEN_LENGTH = 16;
+// The host machine's loopback as seen from inside an Android emulator.
+// `desktopBrokerCandidates` decides when it is safe to dial.
+const ANDROID_EMULATOR_HOST_ALIAS = '10.0.2.2';
 const MAX_PENDING_DESKTOP_ACTIONS = 16;
 const MAX_DESKTOP_ACTIONS_PER_WINDOW = 60;
 const DESKTOP_ACTION_RATE_WINDOW_MS = 10_000;
@@ -372,8 +375,67 @@ function socketUrl(host: string, port: number): string {
 	return `ws://${displayHost}:${port}/device`;
 }
 
+/**
+ * React Native's WebSocket takes connection options as a non-standard third
+ * argument, `{ headers }`, which the DOM declaration of the global stops
+ * short of. Only the shape the client passes is declared here.
+ */
+type ReactNativeWebSocketConstructor = new (
+	url: string,
+	protocols?: string | readonly string[] | null,
+	options?: { headers?: Readonly<Record<string, string>> },
+) => WebSocket;
+
+/**
+ * Connection options for one broker candidate, or undefined for the default.
+ *
+ * Without an origin header, React Native's Android transport derives one from
+ * the socket URL. For the emulator's host alias that is `http://10.0.2.2:<port>`,
+ * which the broker refuses with 403 while it has no token, because it admits
+ * only loopback origins. The connection reaches the broker from the host's own
+ * loopback, so the header names that instead. This applies only to the plain
+ * `ws:` alias candidates the client discovered itself on Android, which are
+ * the ones it dials without a token. The other candidates keep the default: the
+ * loopback ones already derive a loopback origin, and an explicit URL carries a
+ * token, which the broker checks instead of the origin.
+ */
+function brokerSocketOptions(
+	url: string,
+	allowAndroidEmulatorAlias: boolean,
+): { headers: { origin: string } } | undefined {
+	if (!allowAndroidEmulatorAlias) return undefined;
+	try {
+		const parsed = new URL(url);
+		if (
+			parsed.protocol !== 'ws:' ||
+			parsed.hostname !== ANDROID_EMULATOR_HOST_ALIAS
+		) {
+			return undefined;
+		}
+		const port = parsed.port ? `:${parsed.port}` : '';
+		return { headers: { origin: `http://127.0.0.1${port}` } };
+	} catch {
+		return undefined;
+	}
+}
+
+function openBrokerSocket(
+	url: string,
+	allowAndroidEmulatorAlias: boolean,
+): WebSocket {
+	const options = brokerSocketOptions(url, allowAndroidEmulatorAlias);
+	if (!options) return new WebSocket(url);
+	return new (WebSocket as unknown as ReactNativeWebSocketConstructor)(
+		url,
+		undefined,
+		options,
+	);
+}
+
 function isLocalBrokerHost(hostname: string): boolean {
-	return hostname === '10.0.2.2' || isLoopbackBrokerHost(hostname);
+	return (
+		hostname === ANDROID_EMULATOR_HOST_ALIAS || isLoopbackBrokerHost(hostname)
+	);
 }
 
 function isLoopbackBrokerHost(hostname: string): boolean {
@@ -397,7 +459,7 @@ function normalizeExplicitUrl(
 		if (url.username || url.password || url.hash) return undefined;
 		const isLoopback = isLoopbackBrokerHost(url.hostname);
 		const isTrustedEmulatorAlias =
-			allowAndroidEmulatorAlias && url.hostname === '10.0.2.2';
+			allowAndroidEmulatorAlias && url.hostname === ANDROID_EMULATOR_HOST_ALIAS;
 		if (url.protocol === 'ws:' && !isLoopback && !isTrustedEmulatorAlias) {
 			return undefined;
 		}
@@ -463,7 +525,9 @@ export function desktopBrokerCandidates({
 		// physical phone it is an ordinary routable RFC1918 address, so sweeping it
 		// would offer a full unauthenticated diagnostic snapshot to whatever
 		// machine happens to hold it on the developer's network.
-		platform === 'android' && isEmulator ? '10.0.2.2' : undefined,
+		platform === 'android' && isEmulator
+			? ANDROID_EMULATOR_HOST_ALIAS
+			: undefined,
 		'127.0.0.1',
 		'localhost',
 	].filter(
@@ -949,7 +1013,7 @@ export function startDesktopClient(
 		const urlLabel = socketDiagnosticLabel(url);
 		let nextSocket: WebSocket;
 		try {
-			nextSocket = new WebSocket(url);
+			nextSocket = openBrokerSocket(url, allowAndroidEmulatorAlias);
 		} catch (error) {
 			record(
 				'warn',

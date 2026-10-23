@@ -96,7 +96,7 @@ development build, outside tests, and unless
 development-build flag (the Expo demo passes `__DEV__`), so preview and
 production builds never dial the broker.
 
-The broker listens on `ws://127.0.0.1:47931/device` by default. Expo simulators discover loopback and the Expo development host automatically. If that port is occupied, both sides try the next nine ports.
+The broker listens on `ws://127.0.0.1:47931/device` by default. Expo simulators discover loopback and the Expo development host automatically, and an Android emulator also dials its host alias, `10.0.2.2`, naming a loopback origin because the broker admits only loopback origins while it has no token. If that port is occupied, both sides try the next nine ports.
 
 Useful commands:
 

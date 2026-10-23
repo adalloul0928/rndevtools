@@ -723,6 +723,25 @@ describe('DesktopBroker', () => {
 		localPreview.close(1000, 'local preview accepted');
 	});
 
+	it('refuses the Android emulator host alias as an origin and admits the loopback origin the client presents instead', async () => {
+		const broker = new DesktopBroker({
+			port: 40_000 + Math.floor(Math.random() * 20_000),
+		});
+		brokers.push(broker);
+		await broker.start();
+		const { port } = broker.getState().broker;
+		const url = `ws://127.0.0.1:${port}/device`;
+		// Without an origin header, React Native's Android transport derives
+		// this one from the emulator's socket URL, `ws://10.0.2.2:<port>`.
+		await expect(openSocket(url, `http://10.0.2.2:${port}`)).rejects.toThrow(
+			'Unexpected server response: 403'
+		);
+		// The emulator's connection reaches the broker from the host's loopback,
+		// which is the origin the desktop client names in its place.
+		const emulator = await openSocket(url, `http://127.0.0.1:${port}`);
+		emulator.close(1000, 'emulator origin accepted');
+	});
+
 	it('accepts a fresh sequence when the same app session reconnects', async () => {
 		const port = 40_000 + Math.floor(Math.random() * 20_000);
 		const broker = new DesktopBroker({ port, includeDemoDevice: false });
