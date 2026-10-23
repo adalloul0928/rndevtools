@@ -271,6 +271,9 @@
 - `createConsoleMethodSource` prints, but does not capture, a log made while
   one of its listeners is handling a log, instead of recursing until the
   stack overflows.
+- Debug camera fixtures honor the image picker's string, array, and legacy enum
+  media selections for both image and video flows.
+
 - Hosts can provide `getToolsRevision` to skip unchanged desktop snapshot capture
   and serialization while retaining heartbeats and client diagnostic updates.
 
