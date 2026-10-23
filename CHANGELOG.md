@@ -276,6 +276,9 @@
 
 ### Desktop app
 
+- Recreate rechecks the selected Supabase branch after acquiring its lock and
+  before each start attempt; a checkout cannot redirect a queued recreation.
+
 - Fit Network, Storage, and React Query grids to narrow panes. Secondary
   columns hide while their values remain available in the detail pane.
 - Show the selected Simulator state in the sidebar dot; a shutdown device no

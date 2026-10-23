@@ -879,6 +879,9 @@ async function recreate(
 					engine.lockStack(view.id, async () => {
 						const off = engine.calledOff();
 						if (off) return off;
+						const moved = await engine.stillOnBranch(view);
+						if (moved)
+							return { status: 'failed', error: engine.errorView(moved) };
 						job.begin();
 						if (engine.isLive(view.id)) {
 							const stopped = await engine.stopStep(view.id, job, {
@@ -900,6 +903,7 @@ async function recreate(
 								mode: 'create',
 								exclusions: engine.exclusionsFor(undefined),
 								createdBy: { via: 'desktop' },
+								precondition: () => engine.stillOnBranch(view),
 							},
 							job
 						);
