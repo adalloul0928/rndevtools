@@ -91,7 +91,12 @@ fetch implementations returned by `instrumentFetch` (or the separately opted-in
 global fetch layer). They do not intercept native SDK sockets, WebSockets, or
 traffic from other applications. Upload shaping is available only when the
 request body size is synchronously knowable; download shaping requires a valid
-`Content-Length`. Disabling the collector always resets the active profile.
+`Content-Length`. Disabling the collector always resets the active profile. Offline blocks every instrumented
+request, including requests with an untrusted `init`, without inspecting it.
+Other profiles reject requests they cannot shape safely instead of silently
+using the real network. For host-vetted inputs, opt into `trustedRequest` (or
+`canonicalizeRequest` when the fetch accepts an owned `Request`); otherwise
+clear the profile to send the original request unchanged.
 
 Profile mutations return versioned action-policy receipts, and hosts can supply
 a dynamic capability from the runtime registry. Active conditions bind to the
@@ -408,3 +413,11 @@ offline: {
 When restoring a previous value, capture it in `apply` before changing it and
 keep it in the adapter's closure for `release`. Construction never runs either
 callback. Callback-only operations are rejected before they can mutate state.
+
+## Scenario adapter recovery
+
+Scenario adapters return a nonempty preflight summary, boolean safety flags,
+and at most 100 nonempty warnings. The engine trims summary/warning text,
+checks the recovery bounds, and copies only the supported fields before any
+rollback capture or mutation. Adapter-owned objects cannot change a saved
+checkpoint after preflight.

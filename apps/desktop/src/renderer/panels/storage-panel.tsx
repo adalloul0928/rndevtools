@@ -34,6 +34,7 @@ import {
 	Toolbar,
 } from '@/components/ui';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
+import { useCompactGrid } from '@/lib/use-compact-grid';
 import { useDesktopRuntime } from '@/state/desktop-runtime';
 import type { StorageEntry } from '../../shared/protocol';
 
@@ -112,12 +113,13 @@ export function StoragePanel() {
 		if (adapter !== 'all' && !adapters.includes(adapter)) setAdapter('all');
 	}, [adapter, adapters]);
 
-	const columns = useMemo<DataGridColumn<StorageEntry>[]>(
-		() => [
+	const { gridPaneRef, compact } = useCompactGrid();
+	const columns = useMemo<DataGridColumn<StorageEntry>[]>(() => {
+		const all: DataGridColumn<StorageEntry>[] = [
 			{
 				id: 'key',
 				header: 'Key',
-				minWidth: 340,
+				minWidth: compact ? 140 : 340,
 				isRowHeader: true,
 				cell: (entry) => (
 					<div className="min-w-0 py-0.5">
@@ -133,7 +135,7 @@ export function StoragePanel() {
 			{
 				id: 'value',
 				header: 'Value',
-				minWidth: 280,
+				minWidth: compact ? 140 : 280,
 				cell: (entry) =>
 					entry.sensitive ? (
 						<span className="flex items-center gap-1.5 text-xs text-(--text-3)">
@@ -166,9 +168,11 @@ export function StoragePanel() {
 					</span>
 				),
 			},
-		],
-		[]
-	);
+		];
+		return compact
+			? all.filter((column) => column.id !== 'size' && column.id !== 'type')
+			: all;
+	}, [compact]);
 
 	function onSelectionChange(selection: DataGridSelection): void {
 		const key = selection === 'all' ? filtered[0]?.id : [...selection][0];
@@ -236,7 +240,7 @@ export function StoragePanel() {
 				</PanelNotice>
 			) : null}
 			<div className="split-panel">
-				<div className="min-w-0 overflow-hidden">
+				<div className="min-w-0 overflow-hidden" ref={gridPaneRef}>
 					{filtered.length === 0 ? (
 						<EmptyPanel
 							icon={<Database className="h-5 w-5" />}
