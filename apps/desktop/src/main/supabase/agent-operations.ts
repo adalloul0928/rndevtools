@@ -23,10 +23,7 @@ import {
 	supabaseBranchLabel,
 } from '../../shared/supabase-protocol';
 import { AgentCliError } from '../agent-cli-service';
-import { parseSupabaseDbReset } from './cli-contract';
-import { SUPABASE_BRANCH_MOVED_TITLE } from './cli-errors';
 import { hasSupabaseControlCharacters, supabaseWithin } from './engine-support';
-import { initialSupabaseJobSteps } from './job-store';
 import type { SupabaseWorktreeFacts } from './repositories';
 import type {
 	SupabaseEngine,
@@ -47,11 +44,10 @@ import type { SupabaseStoredHold } from './stack-store';
  * URLs or keys, except `env`, which returns the public values only. Errors
  * are AgentCliError with a code from SUPABASE_AGENT_ERROR_CODES and the
  * recovery that names the next call. Destroy always becomes a request for
- * the user; a reset runs only for the stack's sole live holder.
+ * the user, as does every reset, including for the sole live holder.
  */
 
 const REQUEST_TTL_MS = 30 * 60_000;
-const RESET_WAIT_MS = 45_000;
 const METRO_RESTART_WAIT_MS = 5_000;
 const MAX_LOG_RECORDS = 5_000;
 
@@ -708,8 +704,7 @@ async function fileRequest(
 async function reset(
 	engine: SupabaseEngine,
 	operation: Extract<SupabaseAgentOperation, { operation: 'reset' }>,
-	context: SupabaseAgentContext,
-	signal: AbortSignal
+	context: SupabaseAgentContext
 ): Promise<SupabaseAgentResult> {
 	const resolved = await resolveTarget(engine, operation.target);
 	const view = engine.view(resolved.stackId);
@@ -736,141 +731,17 @@ async function reset(
 			runner
 		);
 	}
-	const holder = context.holder;
-	const record = view.record;
-	const holds =
-		record && holder
-			? engine.holdsIgnoring(record, {
-					holder,
-					...(context.sessionCwd ? { sessionCwd: context.sessionCwd } : {}),
-				})
-			: undefined;
-	const callerHolds =
-		holder !== undefined &&
-		view.summary.holds.some(
-			(hold) =>
-				hold.live &&
-				hold.holder !== 'operator' &&
-				hold.agent?.kind === holder.kind &&
-				hold.agent.sessionId === holder.sessionId
-		);
-	const othersLive =
-		view.summary.pinned ||
-		(holds?.holds ?? []).some(
-			(hold) =>
-				hold.live &&
-				!(
-					hold.holder !== 'operator' &&
-					holder &&
-					hold.agent?.kind === holder.kind &&
-					hold.agent.sessionId === holder.sessionId
-				)
-		) ||
-		(holds?.cwdKeepers.length ?? 0) > 0;
-	if (!callerHolds || othersLive) {
-		const request = await fileRequest(engine, 'reset', view, context, {
-			seed: operation.seed,
-			...(operation.note === undefined ? {} : { note: operation.note }),
-		});
-		return {
-			operation: 'reset',
-			stackId: view.id,
-			status: 'requested',
-			seed: operation.seed,
-			requestId: request.id,
-			next: 'Someone else uses this stack, so the user decides. RN Devtools shows the request in its Supabase tab; call supabase with operation status later to see the outcome.',
-		};
-	}
-	const facts = view.facts;
-	const projectRoot =
-		facts?.detection?.status === 'found'
-			? facts.detection.projectRoot
-			: undefined;
-	if (!projectRoot) {
-		throw agentError(
-			'not_found',
-			'The stack has no project RN Devtools tracks.'
-		);
-	}
-	const { jobId, done } = await engine.startJob(
-		{
-			kind: 'reset',
-			stackIds: [view.id],
-			requestedBy: holder
-				? {
-						kind: 'agent',
-						agent: { kind: holder.kind, sessionId: holder.sessionId },
-					}
-				: { kind: 'operator' },
-			cancellable: false,
-			steps: initialSupabaseJobSteps('reset', {
-				migrationTotal: facts?.migrationCount ?? 0,
-				seed: operation.seed,
-			}),
-		},
-		(job) =>
-			engine.lockStack(view.id, async () => {
-				const off = engine.calledOff();
-				if (off) return off;
-				job.begin();
-				const result = await engine.databaseStep(
-					view,
-					job,
-					{
-						kind: 'db.reset',
-						workdir: projectRoot,
-						...(operation.seed ? {} : { noSeed: true }),
-					},
-					(json) => {
-						const parsed = parseSupabaseDbReset(json);
-						if (parsed.target !== 'local') {
-							throw new Error('The reset reported a non-local target.');
-						}
-						return parsed;
-					},
-					'reset'
-				);
-				await engine.readStatus(view.id);
-				return result.ok
-					? { status: 'complete' }
-					: { status: 'failed', error: result.error };
-			})
-	);
-	const outcome = await supabaseWithin(
-		engine.timers,
-		done,
-		RESET_WAIT_MS,
-		signal
-	);
-	if (outcome && outcome.status !== 'complete') {
-		// The worktree switched branches while the reset waited its turn.
-		if (outcome.error?.title === SUPABASE_BRANCH_MOVED_TITLE) {
-			throw agentError('branch_moved', outcome.error.message, runner);
-		}
-		// Or the feature was turned off, and the reset was called off.
-		if (outcome.error?.code === 'feature_off') {
-			throw agentError(
-				'supabase_disabled',
-				'Local Supabase is off in RN Devtools, so it is not managing this worktree.'
-			);
-		}
-		throw agentError(
-			'supabase_failed',
-			outcome.error?.message ?? 'The reset failed.',
-			runner,
-			outcome.error?.recovery
-		);
-	}
+	const request = await fileRequest(engine, 'reset', view, context, {
+		seed: operation.seed,
+		...(operation.note === undefined ? {} : { note: operation.note }),
+	});
 	return {
 		operation: 'reset',
 		stackId: view.id,
-		status: outcome ? 'complete' : 'running',
+		status: 'requested',
 		seed: operation.seed,
-		...(outcome ? {} : { jobId }),
-		next: outcome
-			? 'The database was reset to its migrations' +
-				(operation.seed ? ' and seed.' : '.')
-			: `The reset is still running. Call wait with condition job and job id ${jobId}.`,
+		requestId: request.id,
+		next: 'Reset deletes database contents and requires user confirmation, even when you are its only holder. RN Devtools shows the request in its Supabase tab; call supabase with operation status later to see the outcome.',
 	};
 }
 
@@ -954,7 +825,7 @@ async function destroy(
 		requestId: request.id,
 		status: 'pending',
 		expiresAt: request.expiresAt,
-		next: `The user decides in RN Devtools › Supabase (the request expires in 30 min). To start fresh without waiting, call supabase with operation reset instead.`,
+		next: `The user decides in RN Devtools › Supabase (the request expires in 30 min). To preserve the stack while clearing its data, request operation reset instead; that also requires confirmation.`,
 	};
 }
 
@@ -1011,7 +882,7 @@ export async function runSupabaseAgentOperation(
 		case 'env':
 			return env(engine, operation);
 		case 'reset':
-			return reset(engine, operation, context, signal);
+			return reset(engine, operation, context);
 		case 'log':
 			return log(engine, operation);
 		case 'destroy':

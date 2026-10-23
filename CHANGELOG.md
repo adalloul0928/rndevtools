@@ -278,6 +278,9 @@
 
 ### Desktop app
 
+- Every agent-requested Supabase reset requires operator confirmation, even for
+  a sole holder. Mutating MCP tools conservatively advertise destructive behavior.
+
 - Recreate rechecks the selected Supabase branch after acquiring its lock and
   before each start attempt; a checkout cannot redirect a queued recreation.
 
